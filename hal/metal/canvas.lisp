@@ -215,6 +215,11 @@
     (metal-native-object surface-texture))
    'luv.metal::value))
 
+(luv.objective-c:define-objective-c-message metal-drawable-texture-width
+    ("width" :uint64))
+(luv.objective-c:define-objective-c-message metal-drawable-texture-height
+    ("height" :uint64))
+
 (zdefun (call-with-metal-canvas-frame :zone :canvas/frame) (context function)
   (ensure-metal-canvas-state context :frame :configured)
   (luv.objective-c:with-autorelease-pool ()
@@ -247,6 +252,13 @@
             (unwind-protect
                  (let ((native-texture
                          (luv.metal:drawable-texture drawable)))
+                   ;; A fullscreen transition can leave an old-size drawable
+                   ;; in the layer's pool after SDL reports the new window size.
+                   ;; Attachments and viewport must follow the acquired texture,
+                   ;; rather than describing it using the requested layer extent.
+                   (setf (canvas-extent context)
+                         (list (metal-drawable-texture-width native-texture)
+                               (metal-drawable-texture-height native-texture)))
                    (setf texture
                          (make-instance
                           'metal-gpu-texture

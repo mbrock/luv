@@ -589,3 +589,28 @@ keyboard."
   (when sync-camera-p
     (sync-camera-to-player camera player))
   player)
+
+(defun step-creative-player (player world camera intent seconds
+                             &key (sync-camera-p t))
+  "Fly along the view ray, with Space rising and Control descending.
+Retain collision checks so returning to walking never embeds the player."
+  (multiple-value-bind (right up forward) (camera-basis camera)
+    (declare (ignore up))
+    (let* ((along (movement-intent-axis intent :forward :backward))
+           (across (movement-intent-axis intent :right :left))
+           (vertical (movement-intent-axis intent :up :down))
+           (x (+ (* along (vec3-x forward)) (* across (vec3-x right))))
+           (y (+ (* along (vec3-y forward)) vertical))
+           (z (+ (* along (vec3-z forward)) (* across (vec3-z right))))
+           (length (max 1d0 (sqrt (+ (* x x) (* y y) (* z z)))))
+           (speed (* (player-walk-speed player)
+                     (if (movement-intent-sprinting-p intent) 2d0 1d0))))
+      (setf (player-grounded-p player) nil
+            (player-velocity-x player) (/ (* speed x) length)
+            (player-velocity-y player) (/ (* speed y) length)
+            (player-velocity-z player) (/ (* speed z) length))
+      (move-body-axis player world :x (* seconds (player-velocity-x player)))
+      (move-body-axis player world :y (* seconds (player-velocity-y player)))
+      (move-body-axis player world :z (* seconds (player-velocity-z player)))))
+  (when sync-camera-p (sync-camera-to-player camera player))
+  player)

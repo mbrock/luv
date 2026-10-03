@@ -227,6 +227,12 @@ definition."
    :face-tiles '(:all :terminal)
    :categories '(:building :luminous) :display-color '(0.13 0.31 0.34)
    :surface-emission 0.16)
+  (*legacy-urbit-block* :urbit
+   "Inert legacy material retained so existing worlds round-trip after the
+Urbit application was retired.  It is absent from the building palette."
+   :face-tiles '(:all :terminal)
+   :categories '(:building :luminous) :display-color '(0.07 0.07 0.09)
+   :placeable-p nil :surface-emission 0.22)
   (*gravel-block* :gravel
    :face-tiles '(:all :gravel)
    :categories '(:natural) :display-color '(0.46 0.44 0.40))

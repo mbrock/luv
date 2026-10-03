@@ -31,7 +31,9 @@
    (make-rgb-color 0.40 0.46 0.48)))
 
 (defun hotbar-visible-state-for (frame)
-  (luvcraft:luvcraft-session-selected-block (hotbar-session frame)))
+  (let ((session (hotbar-session frame)))
+    (list (luvcraft:luvcraft-session-selected-block session)
+          (luvcraft:luvcraft-session-creative-p session))))
 
 ;;;; Geometry
 ;;;;
@@ -126,6 +128,20 @@
                 :align-x :center :align-y :center :text-size 12
                 :ink (apply #'make-rgb-color ink))))
 
+(defun hotbar-creative-button-at-p (u v)
+  (and (<= 12 (* u +hotbar-width+) 146)
+       (<= 76 (* v +hotbar-height+) 98)))
+
+(defun draw-hotbar-creative-button (pane medium session)
+  (let ((active (luvcraft:luvcraft-session-creative-p session)))
+    (draw-analytic-rounded-rectangle*
+     medium 12 76 146 98 :radius 7
+     :ink (if active (make-rgb-color 0.12 0.31 0.25)
+              (make-rgb-color 0.055 0.065 0.08)))
+    (draw-text* pane (if active "Creative ON · F6" "Creative · F6") 79 87
+                :align-x :center :align-y :center :text-size 12
+                :ink (make-rgb-color 0.93 0.96 0.94))))
+
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
@@ -136,6 +152,7 @@
             (luvcraft:luvcraft-session-inventory session))))
     (with-sheet-medium (medium pane)
       (draw-hotbar-shell pane medium)
+      (draw-hotbar-creative-button pane medium session)
       (let ((count (max 1 (length blocks))))
         (loop for block in blocks
               for index from 0
@@ -247,8 +264,13 @@
                              (luvcraft:luvcraft-session-inventory session)))))
         ;; HOTBAR-SLOT-AT reads the same geometry the painter does, so a click
         ;; in the gap between two slots chooses neither rather than guessing.
-        (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
-          (luvcraft:select-luvcraft-block session (1+ slot)))
+        (cond
+          ((hotbar-creative-button-at-p (first uv) (second uv))
+           (luvcraft:toggle-luvcraft-creative-mode session))
+          ((<= +hotbar-slot-top+ (* (second uv) +hotbar-height+)
+               (+ +hotbar-slot-top+ +hotbar-slot-height+))
+           (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
+             (luvcraft:select-luvcraft-block session (1+ slot)))))
         (repaint-hotbar frame)))
     t))
 

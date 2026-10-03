@@ -294,3 +294,19 @@
                          :test #'string=)
                  "the legend follows the table rather than a written-down list"))
       (clim:remove-keystroke-from-command-table table '(#\y) :errorp nil))))
+
+(define-test creative-mode-has-a-command-and-held-vertical-controls
+  (let ((session (make-instance 'luvcraft:luvcraft-session)))
+    (true (equal '(luvcraft.clim::com-toggle-creative-mode)
+                 (luvcraft-key-command session (key-press :f6))))
+    (true (equal '(luvcraft.clim::com-descend)
+                 (luvcraft-key-command session (key-press :control-left))))
+    (true (equal '(com-stop-walking :up)
+                 (luvcraft-key-command
+                  session (make-instance 'luv:canvas-key-release-event
+                                         :timestamp 0 :key-name :space))))))
+
+(define-test creative-button-hitbox-is-separate-from-material-slots
+  (true (mcluv::hotbar-creative-button-at-p (/ 79d0 612) (/ 87d0 104)))
+  (false (mcluv::hotbar-creative-button-at-p (/ 79d0 612) (/ 30d0 104)))
+  (false (mcluv::hotbar-creative-button-at-p (/ 300d0 612) (/ 87d0 104))))

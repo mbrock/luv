@@ -169,6 +169,75 @@
      vertices :crosshair-vertices +block-world-crosshair-vertex-count+
      (luvcraft.shaders:block-world-crosshair-vertex-specification))))
 
+(defconstant +luvcraft-target-vertex-count+ 48)
+
+(defun luvcraft-target-face-corners (hit)
+  "LUFT's face marker: the hit cell's face toward its adjacent empty cell."
+  (let ((cell (block-ray-hit-coordinate hit))
+        (adjacent (block-ray-hit-adjacent-coordinate hit)))
+    (when adjacent
+      (let* ((base (list (world-coordinate-x cell) (world-coordinate-y cell)
+                         (world-coordinate-z cell)))
+             (normal (mapcar #'-
+                             (list (world-coordinate-x adjacent)
+                                   (world-coordinate-y adjacent)
+                                   (world-coordinate-z adjacent)) base))
+             (axis (position-if-not #'zerop normal))
+             (others (remove axis '(0 1 2))))
+        (loop for (u v) in '((0 0) (1 0) (1 1) (0 1))
+              collect (let ((point (copy-list base)))
+                        (incf (nth axis point)
+                              (if (plusp (nth axis normal)) 1.002d0 -0.002d0))
+                        (incf (nth (first others) point) u)
+                        (incf (nth (second others) point) v)
+                        (apply #'make-vec3 point)))))))
+
+(defun make-luvcraft-target-vertices (session width height)
+  "Project the aimed face into constant-pixel dark and light edge strips."
+  (let* ((hit (unless (luvcraft-session-modal-focus session)
+                (luvcraft-session-target session)))
+         (corners (and hit (luvcraft-target-face-corners hit)))
+         (camera (luvcraft-session-camera session))
+         (eye (camera-position camera))
+         (focal (/ (tan (/ (camera-field-of-view camera) 2d0))))
+         (vertices (make-array 0 :element-type 'single-float
+                                :adjustable t :fill-pointer 0)))
+    (when corners
+      (multiple-value-bind (right up forward) (camera-basis camera)
+        (labels ((project (point)
+                   (let* ((delta (make-vec3 (- (vec3-x point) (vec3-x eye))
+                                            (- (vec3-y point) (vec3-y eye))
+                                            (- (vec3-z point) (vec3-z eye))))
+                          (z (vec3-dot delta forward)))
+                     (when (> z +luvcraft-camera-near-distance+)
+                       (list (* (/ height 2d0) focal (/ (vec3-dot delta right) z))
+                             (* (- (/ height 2d0)) focal (/ (vec3-dot delta up) z))))))
+                 (vertex (point ink)
+                   (dolist (value (append (list (/ (* 2d0 (first point)) width)
+                                                (/ (* 2d0 (second point)) height)
+                                                0d0) ink))
+                     (vector-push-extend (coerce value 'single-float) vertices)))
+                 (edge (a b radius ink)
+                   (let* ((dx (- (first b) (first a)))
+                          (dy (- (second b) (second a)))
+                          (length (max 0.001d0 (sqrt (+ (* dx dx) (* dy dy)))))
+                          (nx (* radius (/ (- dy) length)))
+                          (ny (* radius (/ dx length)))
+                          (a1 (list (+ (first a) nx) (+ (second a) ny)))
+                          (a2 (list (- (first a) nx) (- (second a) ny)))
+                          (b1 (list (+ (first b) nx) (+ (second b) ny)))
+                          (b2 (list (- (first b) nx) (- (second b) ny))))
+                     (dolist (point (list a1 b1 b2 a1 b2 a2))
+                       (vertex point ink)))))
+          (let ((points (mapcar #'project corners)))
+            (when (every #'identity points)
+              (loop for (radius ink) in '((2d0 (0.025 0.03 0.035))
+                                          (0.85d0 (1.0 0.90 0.55)))
+                    do (loop for a in points
+                             for b in (append (rest points) (list (first points)))
+                             do (edge a b radius ink))))))))
+    vertices))
+
 (defun make-luvcraft-cursor-vertices (width height x y)
   "Make the quad the cursor shader draws its arrow inside, tip at screen X,Y.
 
@@ -932,7 +1001,8 @@ native-density HUD and the complete surface copy."
                                 (luvcraft-session-device session)
                                 (make-buffer-descriptor
                                  :label "block world frame crosshair vertices"
-                                 :size (* 4 (length data)) :usage '(:vertex)))))
+                                 :size (* 4 6 (+ +block-world-crosshair-vertex-count+
+                                                  +luvcraft-target-vertex-count+)) :usage '(:vertex)))))
                          (write-buffer new data)
                          new))
                      cursor-vertex-buffer
@@ -1257,6 +1327,9 @@ completes."
          (body-vertices (player-body-vertices session))
          (body-vertex-count
            (/ (length body-vertices) +block-mesh-floats-per-vertex+))
+         (target-vertices
+           (make-luvcraft-target-vertices session (first extent) (second extent)))
+         (target-vertex-count (/ (length target-vertices) 6))
          (physics-body-count (luvcraft-physics-body-count session))
          (physics-shadow-vertex-count
            (luvcraft-physics-shadow-vertex-count session)))
@@ -1337,6 +1410,10 @@ completes."
        (luvcraft-post-uniform-data
         session (first extent) (second extent)
         (first presentation-extent) (second presentation-extent)))
+      (when (plusp target-vertex-count)
+        (write-buffer (luvcraft-frame-crosshair-vertex-buffer frame)
+                      target-vertices
+                      :offset (* 4 6 +block-world-crosshair-vertex-count+)))
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-frame-particle-vertex-buffer frame)
@@ -1506,6 +1583,8 @@ completes."
           (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
           (set-vertex-buffer
            pass 0 (luvcraft-frame-crosshair-vertex-buffer frame))
+          (when (plusp target-vertex-count)
+            (draw pass target-vertex-count 1 +block-world-crosshair-vertex-count+))
           (draw pass +block-world-crosshair-vertex-count+))
         (end-pass pass))
       (prepare-texture encoder (luvcraft-session-color-texture session)
@@ -1723,13 +1802,20 @@ completes."
                          (unless (luvcraft-session-focus-camera-active-p session)
                            (sync-camera-to-player
                             (luvcraft-session-camera session) player)))
-                       (step-block-world-player
-                        player (luvcraft-session-world session)
-                        (luvcraft-session-camera session) intent
-                        +player-physics-step+
-                        :jump-p (movement-intent-jump-requested-p intent)
-                        :sync-camera-p
-                        (not (luvcraft-session-focus-camera-active-p session))))
+                       (if (luvcraft-session-creative-p session)
+                           (step-creative-player
+                            player (luvcraft-session-world session)
+                            (luvcraft-session-camera session) intent
+                            +player-physics-step+
+                            :sync-camera-p
+                            (not (luvcraft-session-focus-camera-active-p session)))
+                           (step-block-world-player
+                            player (luvcraft-session-world session)
+                            (luvcraft-session-camera session) intent
+                            +player-physics-step+
+                            :jump-p (movement-intent-jump-requested-p intent)
+                            :sync-camera-p
+                            (not (luvcraft-session-focus-camera-active-p session)))))
                    (setf (movement-intent-jump-requested-p intent) nil)
                    (decf (luvcraft-session-physics-accumulator session)
                          +player-physics-step+)))))

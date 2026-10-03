@@ -75,6 +75,7 @@
                   "The world point the shadow texel lattice pivots about;
 SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    (player :initarg :player :initform nil :reader luvcraft-session-player)
+   (creative-p :initform nil :accessor luvcraft-session-creative-p)
    (residency-radius :initarg :residency-radius :initform 6
                      :accessor luvcraft-session-residency-radius)
    (residency-center :initform nil
@@ -1044,6 +1045,19 @@ that path may run inside a frame whose command stream still borrows OVERLAY."
        (luvcraft-session-world session)
        (camera-position camera)
        forward #'block-solid-p :max-distance max-distance))))
+
+(defun toggle-luvcraft-creative-mode (session)
+  "Toggle collision-aware free flight; the building palette stays unlimited."
+  (let ((player (luvcraft-session-player session)))
+    (when player
+      (cancel-body-movement player "creative mode changed")
+      (setf (player-velocity-x player) 0d0
+            (player-velocity-y player) 0d0
+            (player-velocity-z player) 0d0
+            (player-grounded-p player) nil)))
+  (clear-movement-intent (luvcraft-session-movement-intent session))
+  (setf (luvcraft-session-creative-p session)
+        (not (luvcraft-session-creative-p session))))
 
 (defun update-luvcraft-session-title (session)
   (let* ((blocks (block-inventory-quickbar-blocks

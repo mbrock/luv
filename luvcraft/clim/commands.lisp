@@ -4,6 +4,12 @@
 ;;; inline behind an EQ test on a key name, now carrying its own name, its own
 ;;; human label, and its own keystroke as data in a table.
 
+(define-command (com-toggle-creative-mode :command-table luvcraft-world
+                                          :name "Toggle Creative Mode"
+                                          :keystroke (:f6))
+    ()
+  (luvcraft:toggle-luvcraft-creative-mode (luvcraft-command-session)))
+
 (define-command (com-toggle-inventory :command-table luvcraft-world
                                       :name "Toggle Inventory"
                                       :keystroke (#\i))
@@ -250,6 +256,9 @@
          (player (luvcraft:luvcraft-session-player session)))
     (when player
       (luvcraft:cancel-body-movement player "cancelled by manual player input"))
+    (when (luvcraft:luvcraft-session-creative-p session)
+      (setf (luvcraft:movement-urging-p
+             (luvcraft:luvcraft-session-movement-intent session) :up) t))
     (setf (luvcraft:movement-intent-jump-requested-p
            (luvcraft:luvcraft-session-movement-intent session))
           t)))
@@ -275,7 +284,7 @@ other key.")
   ;; Definition reloads change the live tables too, so clear both layouts
   ;; before installing the currently configured one.
   (dolist (key '(:w :s :a :d #\, #\o #\a #\e
-                 :shift-left :shift-right))
+                 :shift-left :shift-right :control-left :control-right))
     (dolist (table '(luvcraft-movement luvcraft-movement-release))
       (remove-keystroke-from-command-table table (list key :any) :errorp nil)))
   (loop for (key direction) in *walk-keys*
@@ -291,7 +300,25 @@ other key.")
               'luvcraft-movement-release (list key :any) :function
               (walk-item 'com-stop-walking) :errorp nil))))
 
+(define-command (com-descend :command-table luvcraft-movement
+                             :name "Descend in Creative Mode")
+    ()
+  (let ((session (luvcraft-command-session)))
+    (when (luvcraft:luvcraft-session-creative-p session)
+      (setf (luvcraft:movement-urging-p
+             (luvcraft:luvcraft-session-movement-intent session) :down) t))))
+
 (add-walk-keystrokes)
+(dolist (key '(:control-left :control-right))
+  (add-keystroke-to-command-table
+   'luvcraft-movement (list key :any)
+   :command '(com-descend) :errorp nil)
+  (add-keystroke-to-command-table
+   'luvcraft-movement-release (list key :any)
+   :command '(com-stop-walking :down) :errorp nil))
+(add-keystroke-to-command-table
+ 'luvcraft-movement-release '(:space :any)
+ :command '(com-stop-walking :up) :errorp nil)
 
 ;;; Looking.
 ;;;

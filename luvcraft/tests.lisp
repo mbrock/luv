@@ -3109,3 +3109,53 @@
       (true (eq status :edited))
       (true (= (world-coordinate-x coordinate) 2))
       (true (eq (world-block-at world 2 1 1) luvcraft::*dirt-block*)))))
+
+(define-test creative-flight-hovers-rises-and-retains-collision
+  (let* ((world (make-block-world :chunk-width 8 :chunk-height 8 :chunk-depth 8))
+         (camera (make-instance 'fly-camera :yaw 0d0 :pitch 0d0))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 1.5d0 2d0 1.5d0)))
+         (intent (make-movement-intent))
+         (session (make-instance 'luvcraft-session :player player :camera camera)))
+    (ensure-world-chunk world 0 0 0)
+    (true (toggle-luvcraft-creative-mode session))
+    (luvcraft::step-creative-player player world camera intent 0.1d0)
+    (true (= 2d0 (player-y player)))
+    (setf (movement-urging-p intent :up) t)
+    (luvcraft::step-creative-player player world camera intent 0.1d0)
+    (true (> (player-y player) 2d0))
+    (clear-movement-intent intent)
+    (setf (world-block-at world 3 2 1) luvcraft::*stone-block*
+          (world-block-at world 3 3 1) luvcraft::*stone-block*
+          (movement-urging-p intent :right) t)
+    (dotimes (i 120)
+      (luvcraft::step-creative-player player world camera intent (/ 1d0 120d0)))
+    (true (<= (player-x player) 2.700001d0))
+    (false (toggle-luvcraft-creative-mode session))
+    (true (zerop (player-velocity-y player)))
+    (true (movement-intent-still-p (luvcraft-session-movement-intent session)))))
+
+(define-test target-marker-follows-the-edit-ray-and-clears-on-focus
+  (let* ((world (make-block-world :chunk-width 8 :chunk-height 8 :chunk-depth 8))
+         (camera (make-instance 'fly-camera :position (make-vec3 2.5d0 2.5d0 1.5d0)
+                                :yaw 0d0 :pitch 0d0))
+         (session (make-instance 'luvcraft-session :world world :camera camera)))
+    (ensure-world-chunk world 0 0 0)
+    (setf (world-block-at world 2 2 4) luvcraft::*stone-block*)
+    (let ((hit (luvcraft-session-target session)))
+      (true hit)
+      (true (every (lambda (corner) (< (abs (- (vec3-z corner) 3.998d0)) 1d-6))
+                   (luvcraft::luvcraft-target-face-corners hit))))
+    (true (= (* 6 luvcraft::+luvcraft-target-vertex-count+)
+             (length (luvcraft::make-luvcraft-target-vertices session 800 600))))
+    (setf (luvcraft-session-modal-focus session) :test-focus)
+    (true (zerop (length (luvcraft::make-luvcraft-target-vertices session 800 600))))
+    (setf (luvcraft-session-modal-focus session) nil
+          (world-block-at world 2 2 4) nil)
+    (true (zerop (length (luvcraft::make-luvcraft-target-vertices session 800 600))))))
+
+(define-test retired-urbit-material-round-trips-without-entering-the-palette
+  (let ((block (restore-block-save-description :block '(:name :urbit))))
+    (true (eq :urbit (block-kind-name block)))
+    (false (member block (placeable-block-kinds)))
+    (true (equal '(:block :name :urbit) (block-save-description block)))))

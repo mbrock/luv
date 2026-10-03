@@ -257,6 +257,8 @@
            #:critter-ride-critter
            #:critter-sway
            #:luvcraft-focus-carries-player-p
+           #:luvcraft-session-creative-p
+           #:toggle-luvcraft-creative-mode
            #:luvcraft-session-targeted-critter
            #:urge-critter
            #:critter-half-width

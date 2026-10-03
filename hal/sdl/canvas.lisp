@@ -676,11 +676,10 @@ is finally created."
       (call-sdl-canvas-window-operation
        canvas :fullscreen
        (lambda (window)
-         (prog1 (sdl3:set-window-fullscreen window enabled)
-           ;; The new extent arrives as an ordinary resize event; letting SDL
-           ;; settle here keeps CANVAS-SIZE honest for a caller that looks
-           ;; immediately after toggling.
-           (sdl3:sync-window window)))))
+         ;; macOS fullscreen is an asynchronous Space transition. Waiting for
+         ;; it on the SDL/Cocoa drawing thread stalls frames and native events.
+         ;; Resize and enter/leave events publish the settled state instead.
+         (sdl3:set-window-fullscreen window enabled))))
     (setf (canvas-fullscreen-p canvas) enabled))
   canvas)
 
