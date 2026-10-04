@@ -86,29 +86,36 @@
      :quantity quantities:presented-color :unit :one)))
 
 (define-shader-function paper-grade (color)
-  "Keep cool shade and warm paper luminous after highlight compression."
+  "Keep cool shade and warm paper luminous after highlight compression.
+
+The grade works on a square-root (roughly perceptual) encoding of the
+display-linear colour: an S-curve applied to linear values would crush every
+shadow, while here it deepens the darks a little and lifts the lights evenly,
+which is what makes a printed illustration read as solid."
   (let* ((color
            (representation
             (interpret color :quantity quantities:presented-color
                              :unit :one)))
          (luminance (dot color (vec3 0.2126 0.7152 0.0722)))
-         (temperature (smoothstep 0.30 0.78 luminance))
+         ;; Cool shade, warm light: the two halves of a sunlit page.
+         (temperature (smoothstep 0.06 0.62 luminance))
          (split-tone
-           (mix (vec3 0.93 0.99 1.08) (vec3 1.08 1.01 0.88)
+           (mix (vec3 0.92 0.98 1.09) (vec3 1.06 1.01 0.92)
                 temperature))
          (toned (* color split-tone))
          (toned-luminance (dot toned (vec3 0.2126 0.7152 0.0722)))
          (grey (vec3 toned-luminance toned-luminance toned-luminance))
-         (saturated (+ grey (* (- toned grey) 1.12)))
+         (saturated (max (+ grey (* (- toned grey) 1.10)) (vec3 0.0 0.0 0.0)))
+         (perceptual (sqrt (min saturated (vec3 1.0 1.0 1.0))))
          (curved
-           (* saturated
-              (* saturated
-                 (- (vec3 3.0 3.0 3.0) (* saturated 2.0)))))
-         (contrasted (mix saturated curved 0.14))
+           (* perceptual
+              (* perceptual
+                 (- (vec3 3.0 3.0 3.0) (* perceptual 2.0)))))
+         (contrasted (mix perceptual curved 0.38))
          (black (vec3 0.0 0.0 0.0))
          (white (vec3 1.0 1.0 1.0)))
     (assume-quantity
-     (clamp contrasted black white)
+     (clamp (* contrasted contrasted) black white)
      :quantity quantities:presented-color :unit :one)))
 
 (define-shader-function mesh-view-clip
@@ -317,17 +324,24 @@ that density along the straight ray."
          (cell (floor (- world (* normal 0.25))))
          (facet (- (paper-hash (+ cell (* normal 7.0))) 0.5))
          (fibre (- (paper-noise (* world 1.7)) 0.5))
-         (albedo (* tone (+ 1.0 (* 0.06 facet) (* 0.08 fibre)))))
+         ;; Broad painted patches, a few dozen cells across, drift the tone
+         ;; slightly warmer and lighter or cooler and deeper, the way a
+         ;; hand-coloured hillside never holds one flat green.
+         (patch (- (paper-noise (* world 0.045)) 0.5))
+         (patch-tint (+ (vec3 1.0 1.0 1.0)
+                        (* (vec3 0.22 0.14 -0.06) patch)))
+         (albedo (* (* tone patch-tint)
+                    (+ 1.0 (* 0.06 facet) (* 0.08 fibre)))))
     (* albedo (+ ambient direct))))
 
 (define-shader-function atmospheric-surface
-    (radiance world eye forward divisor character sun fog zenith parameters)
+    (radiance world eye divisor character sun fog zenith parameters)
   "Fade RADIANCE at WORLD into the aerial colour seen from the eye.
 
 An isometric camera's position is not a place anyone stands, so its haze is
-measured from a virtual eye behind the character along the view instead."
-  (let* ((iso-eye (- (swizzle character :xyz) (* (swizzle forward :xyz) 90.0)))
-         (viewer (mix iso-eye (swizzle eye :xyz) divisor))
+measured outward from the character it frames instead: the diorama around
+the figure stays clear and only its far reaches recede."
+  (let* ((viewer (mix (swizzle character :xyz) (swizzle eye :xyz) divisor))
          (delta (- world viewer))
          (distance (sqrt (dot delta delta)))
          (direction (/ delta (max distance 0.001)))
@@ -613,7 +627,7 @@ measured from a virtual eye behind the character along the view instead."
          (final
            (atmospheric-surface
             radiance (representation world-position)
-            (representation camera-position) (representation camera-forward)
+            (representation camera-position)
             (swizzle (representation render-parameters) :z)
             (representation character-parameters)
             sun (representation fog-color-vector)

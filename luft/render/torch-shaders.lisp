@@ -242,7 +242,7 @@
          (final
            (atmospheric-surface
             radiance (representation world-position)
-            (representation camera-position) (representation camera-forward)
+            (representation camera-position)
             (swizzle (representation render-parameters) :z)
             (representation character-parameters)
             sun (representation fog-color-vector)

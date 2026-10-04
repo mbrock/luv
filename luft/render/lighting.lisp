@@ -72,7 +72,7 @@ profile; the shadow slots are authored constants."))
 (defparameter *sky-sun-orbit-tilt* 0.44
   "How far the solar orbit leans out of the vertical plane.")
 
-(defparameter *sky-sunset-azimuth* (make-vec3 0.0 1.0 0.0)
+(defparameter *sky-sunset-azimuth* (make-vec3 -0.515 0.857 0.0)
   "The horizontal direction the sun sets toward; it rises opposite.")
 
 (defvar *sky-elapsed* 0.0
@@ -124,8 +124,8 @@ profile; the shadow slots are authored constants."))
                       '(0.22 0.34 0.62) '(0.25 0.18 0.12) '(0.50 0.66 0.88) 0.44)
    (make-sky-keyframe 15.0 '(0.17 0.38 0.84) '(0.66 0.74 0.88) '(1.95 1.60 1.18)
                       '(0.22 0.33 0.58) '(0.27 0.18 0.11) '(0.60 0.66 0.80) 0.50)
-   (make-sky-keyframe 17.3 '(0.09 0.17 0.45) '(0.62 0.46 0.46) '(2.10 0.95 0.42)
-                      '(0.26 0.25 0.36) '(0.24 0.13 0.09) '(0.62 0.42 0.38) 0.58)
+   (make-sky-keyframe 17.3 '(0.09 0.17 0.45) '(0.76 0.53 0.38) '(2.10 0.95 0.42)
+                      '(0.26 0.25 0.36) '(0.24 0.13 0.09) '(0.68 0.47 0.37) 0.58)
    (make-sky-keyframe 19.0 '(0.030 0.045 0.115) '(0.120 0.105 0.150) '(0.35 0.13 0.06)
                       '(0.100 0.100 0.180) '(0.050 0.035 0.040) '(0.090 0.080 0.115) 0.50)
    (make-sky-keyframe 21.6 '(0.006 0.010 0.032) '(0.020 0.028 0.070) '(0.0 0.0 0.0)
@@ -256,7 +256,7 @@ texel."
 (defparameter *paper-grain* 0.035
   "Strength of the fixed paper fibre texture laid over the graded frame.")
 
-(defparameter *haze-density* 0.0045
+(defparameter *haze-density* 0.007
   "Aerial-perspective extinction per cell of view distance near the ground.")
 
 (defparameter *haze-height* 0.018
