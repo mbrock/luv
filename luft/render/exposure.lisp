@@ -192,7 +192,7 @@ The caller must release source bindings first and stop using CONTROL."))
       (exp average-log))))
 
 (defun adapted-exposure (current average-luminance)
-  (let* ((target (max 0.55f0
+  (let* ((target (max 0.3f0
                       (min 1.9f0
                            (/ 0.16f0 (coerce average-luminance 'single-float)))))
          (rate (if (< target current) 0.10f0 0.04f0)))

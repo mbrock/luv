@@ -232,7 +232,10 @@ upland instead of repeating one periodic profile."
 
 The surface reads altitude and steepness as Luvcraft's alpine relief does:
 slate cliffs, snow over rock on gentle high ground, bare rock above the tree
-line and on steps, sand at the shore, and earth (grass-topped) elsewhere."
+line and on steps, sand at the shore, and earth (grass-topped) elsewhere.
+SOURCE names the world the column belongs to; this rule reads only the
+column itself."
+  (declare (ignore source))
   (let* ((top (1- height))
          (depth (- top z))
          (level (/ height *large-world-relief-height*)))

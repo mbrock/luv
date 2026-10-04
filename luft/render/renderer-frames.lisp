@@ -133,11 +133,24 @@ releases for retry, but those retired bindings must never be served again. #RBNW
 
 (defun renderer-frame-present-bind-group (renderer frame)
   (renderer-frame-component-binding
-   frame (list :present (renderer-composite-view renderer) (renderer-depth-view renderer))
+   frame (list :present (renderer-composite-view renderer) (renderer-depth-view renderer)
+               (renderer-bloom-primary-view renderer)
+               (renderer-bloom-secondary-view renderer))
    (lambda ()
      (make-presentation-binding
       (renderer-finishing renderer) (renderer-device renderer)
       (renderer-composite-view renderer) (renderer-depth-view renderer)
+      (renderer-frame-state-camera-buffer frame)
+      (renderer-bloom-primary-view renderer)
+      (renderer-bloom-secondary-view renderer)))))
+
+(defun renderer-frame-lens-bind-group (renderer frame stage source)
+  "Bind lens STAGE reading SOURCE to FRAME's camera upload."
+  (renderer-frame-component-binding
+   frame (list :lens stage source)
+   (lambda ()
+     (make-lens-binding
+      (renderer-finishing renderer) (renderer-device renderer) stage source
       (renderer-frame-state-camera-buffer frame)))))
 
 (defun draw-resident-opaque-population (terrain pass resident bind-group &key shadow-p)

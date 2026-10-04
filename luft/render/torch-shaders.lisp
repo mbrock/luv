@@ -215,7 +215,7 @@
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 23))
+                  :members #.(scene-uniform-prefix 30))
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
@@ -227,7 +227,8 @@
          (visibility
            (soft-shadow-visibility
             shadow-map shadow-sampler shadow-sample normal sun
-            (representation shadow-control)))
+            (representation shadow-control)
+            shadow-row-x shadow-row-y shadow-row-z))
          (upness (swizzle normal :z))
          (sky-weight (+ 0.5 (* 0.5 upness)))
          (ambient (+ (* ground (- 1.0 sky-weight)) (* sky sky-weight)))
@@ -238,12 +239,16 @@
               (+ (* ambient 0.72)
                  (* sun-color (* visibility facing))
                  local-light)))
-         (camera-delta
-           (representation
-            (- world-position (swizzle camera-position :xyz))))
-         (distance (sqrt (dot camera-delta camera-delta)))
-         (fog (smoothstep 165.0 300.0 distance)))
-    (set-output color-output (vec4 (mix radiance sky fog) 1.0))
+         (final
+           (atmospheric-surface
+            radiance (representation world-position)
+            (representation camera-position)
+            (swizzle (representation render-parameters) :z)
+            (representation character-parameters)
+            sun (representation fog-color-vector)
+            (representation zenith-color-vector)
+            atmosphere-parameters)))
+    (set-output color-output (vec4 final 1.0))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 

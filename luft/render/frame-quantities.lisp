@@ -94,8 +94,30 @@
       (character-direction :vec4
        :components
        ((:xy :quantity quantities:horizontal-direction :unit :one)
-        (:zw :quantity quantities:horizontal-direction :unit :one))))
-    "The quantity-declared 100-float scene environment shared by all stages.")
+        (:zw :quantity quantities:horizontal-direction :unit :one)))
+      ;; The atmosphere: sky-dome colours and the distant haze colour.  Their
+      ;; W lanes carry the day factor, cloudiness, and haze density, which
+      ;; are image-shaping controls rather than radiance.
+      (zenith-color-vector :vec4
+       :components
+       ((:xyz :quantity quantities:scene-radiance :unit :one)))
+      (horizon-color-vector :vec4
+       :components
+       ((:xyz :quantity quantities:scene-radiance :unit :one)))
+      (fog-color-vector :vec4
+       :components
+       ((:xyz :quantity quantities:scene-radiance :unit :one)))
+      ;; Bloom gain, bright threshold, shaft gain, shaft decay.
+      (lens-parameters :vec4)
+      ;; Cloud clock seconds, vignette, paper grain, haze height falloff.
+      (atmosphere-parameters :vec4)
+      ;; The lens chain's texel extent (XY) and the output texel extent (ZW).
+      ;; The renderer, which owns both images, writes this row at upload.
+      (lens-extent :vec4
+       :components
+       ((:xy :quantity quantities:texel-extent :unit :one)
+        (:zw :quantity quantities:texel-extent :unit :one))))
+    "The quantity-declared 124-float scene environment shared by all stages.")
 
   (defun scene-uniform-prefix (count)
     "The first COUNT members of the canonical scene uniform ledger."
@@ -137,18 +159,18 @@
                       (math:make-quantity-projection
                        positions specification)
                       projections))))))
-    (math:make-quantity-layout 100 (nreverse projections))))
+    (math:make-quantity-layout 124 (nreverse projections))))
 
 (defmethod math:value-declaration-for
     ((name (eql 'luft.render::camera-uniform-data)))
   (declare (ignore name))
   (load-time-value
    (math:make-represented-value-declaration
-    :representation-type '(simple-array single-float (100))
+    :representation-type '(simple-array single-float (124))
     :quantity-layout (scene-uniform-product-layout)
     :source-form
     '(luft.render::camera-uniform-data
-      :type (simple-array single-float (100))
+      :type (simple-array single-float (124))
       :product *scene-uniform-members*))))
 
 (defun shader-uniform-product-layout (block)
