@@ -310,6 +310,12 @@ derived work out of motion-event bursts."))
   "Re-read FRAME's groups, controls, and actions outside repaint."
   (setf (metabar-vocabulary frame)
         (capture-metabar-vocabulary (metabar-owner frame)))
+  ;; A live redefinition can add groups or controls; grow to fit them so the
+  ;; actions and status line are never drawn over the last rows.
+  (setf (metabar-logical-height frame)
+        (max (or (metabar-logical-height frame) 0)
+             (metabar-natural-height-for
+              (metabar-owner frame) (metabar-vocabulary frame))))
   (unless (member (metabar-open-group frame)
                   (metabar-vocabulary-groups (metabar-vocabulary frame))
                   :test #'eq)
