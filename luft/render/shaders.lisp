@@ -8,11 +8,7 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *screen-ambient-occlusion-strength* 0.38)
   (defvar *screen-ambient-occlusion-radius* 0.95)
-  (defvar *ambient-pigment-strength* 0.82)
-  ;; Match Luvcraft's scene-linear lens defaults.  LUFT uses the same bright
-  ;; signal and gain while retaining its compact presentation gather.
-  (defvar *highlight-glow-threshold* 1.5)
-  (defvar *highlight-glow-strength* 0.22))
+  (defvar *ambient-pigment-strength* 0.82))
 
 (define-shader-function unpack-terrain-tone (packed)
   "Decode one RGB8 terrain descriptor into scene-linear colour."
@@ -114,20 +110,6 @@
     (assume-quantity
      (clamp contrasted black white)
      :quantity quantities:presented-color :unit :one)))
-
-(define-shader-function highlight-energy (value)
-  "Keep only genuinely luminous scene-linear colour for the paper glow."
-  (let* ((color
-           (assume-quantity (swizzle value :xyz)
-                            :quantity quantities:scene-radiance :unit :one))
-         (luminance (scene-relative-luminance color))
-         (gate
-           (smoothstep
-            (quantity #.*highlight-glow-threshold*
-                      :quantity quantities:scene-luminance :unit :one)
-            (quantity 1.55 :quantity quantities:scene-luminance :unit :one)
-            luminance)))
-    (* color gate)))
 
 (define-shader-function mesh-view-clip
     (point position right up forward projection divisor)
@@ -933,42 +915,14 @@ measured from a virtual eye behind the character along the view instead."
                  (scene-sampler :sampler :binding 1)
                  (scene-depth :depth-texture-2d :binding 2)
                  (camera-state :uniform-block :binding 3
-                  :members #.(scene-uniform-prefix 17))))
+                  :members #.(scene-uniform-prefix 31))
+                 (bloom :texture-2d :binding 4 :sample-transfer :identity)
+                 (shafts :texture-2d :binding 5 :sample-transfer :identity)))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
          (auto-exposure (swizzle sky-color-vector :w))
          (texel
            (representation (swizzle inspection-parameters :zw)))
-         (near (* texel 3.0))
-         (far (* texel 11.0))
-         ;; One low-cost, deliberately broad gather.  Linear sampling and the
-         ;; two rings make luminous paper bleed across an edge without erasing
-         ;; the edge itself or turning the whole frame into fog.
-         (glow
-           (* 0.125
-              (+
-               (highlight-energy
-                (sample scene scene-sampler
-                        (+ uv (vec2 (swizzle near :x) 0.0))))
-               (highlight-energy
-                (sample scene scene-sampler
-                        (+ uv (vec2 (- (swizzle near :x)) 0.0))))
-               (highlight-energy
-                (sample scene scene-sampler
-                        (+ uv (vec2 0.0 (swizzle near :y)))))
-               (highlight-energy
-                (sample scene scene-sampler
-                        (+ uv (vec2 0.0 (- (swizzle near :y))))))
-               (highlight-energy (sample scene scene-sampler (+ uv far)))
-               (highlight-energy (sample scene scene-sampler (- uv far)))
-               (highlight-energy
-                (sample
-                 scene scene-sampler
-                 (+ uv (vec2 (swizzle far :x) (- (swizzle far :y))))))
-               (highlight-energy
-                (sample
-                 scene scene-sampler
-                 (+ uv (vec2 (- (swizzle far :x)) (swizzle far :y))))))))
          ;; Geometry depth carries the subpixel projection jitter consumed by
          ;; MetalFX; presentation UVs do not.  Sample depth at the same current
          ;; geometry location so the AO does not crawl across a resolved edge.
@@ -1146,33 +1100,69 @@ measured from a virtual eye behind the character along the view instead."
                  (swizzle (sample scene scene-sampler
                                   (- uv (vec2 0.0 (swizzle blur-radius :y))))
                           :xyz))))
-         (bloomed
-           (+ (assume-quantity
-               (swizzle pigmented :xyz)
-               :quantity quantities:scene-radiance :unit :one)
-              (* glow #.*highlight-glow-strength*)))
          (glowing
-           (mix bloomed
+           (mix (assume-quantity
+                 (swizzle pigmented :xyz)
+                 :quantity quantities:scene-radiance :unit :one)
                 (assume-quantity blurred
                                  :quantity quantities:scene-radiance
                                  :unit :one)
                 (assume-quantity (if (< divisor 0.5) (* tilt 0.52) 0.0) :unit :one)))
-         ;; MetalFX has already reconstructed GLowing at this point.  Grade
-         ;; it once, with a little exposure headroom for the sunlit grass and
-         ;; the wizard's HDR spell rather than clipping both into parchment.
-         ;; Sky is now HDR scene radiance, so it participates in metering and
-         ;; receives exactly the same exposure and paper grade as geometry.
-         ;; Keep geometry-only AO and tilt-shift out of background pixels.
+         ;; MetalFX has already reconstructed GLOWING at this point.  Sky is
+         ;; HDR scene radiance too, so it participates in metering and gets
+         ;; the same exposure and grade as geometry; only the geometry-only AO
+         ;; and tilt-shift stay out of background pixels.
          (radiance
            (if (< depth 0.9999) glowing
                (assume-quantity
                 (swizzle value :xyz)
                 :quantity quantities:scene-radiance :unit :one)))
+         ;; The lens chain already carries exposed units; the scene does not.
+         (lens
+           (assume-quantity
+            (+ (* (swizzle (sample bloom scene-sampler uv) :xyz)
+                  (swizzle lens-parameters :x))
+               (* (swizzle (sample shafts scene-sampler uv) :xyz)
+                  (swizzle lens-parameters :z)))
+            :quantity quantities:scene-radiance :unit :one))
          (exposed-radiance
-           (interpret (* radiance auto-exposure)
-                      :quantity quantities:scene-radiance :unit :one))
+           (+ (interpret (* radiance auto-exposure)
+                         :quantity quantities:scene-radiance :unit :one)
+              lens))
+         (graded
+           (representation (paper-grade (paper-tonemap exposed-radiance))))
+         ;; A restrained corner falloff; the frame should feel printed, not
+         ;; port-holed.
+         (centered (- uv (vec2 0.5 0.5)))
+         (vignette
+           (- 1.0 (* (swizzle atmosphere-parameters :y)
+                     (smoothstep 0.10 0.75 (dot centered centered)))))
+         ;; Paper: a fixed, screen-locked fibre in two scales.  It multiplies,
+         ;; so it lives in the light tones and vanishes into the darks the way
+         ;; ink on a rough sheet does.  Fixed to the page rather than the world
+         ;; so it reads as the medium, not as a surface texture.
+         (output-texel (representation (swizzle lens-extent :zw)))
+         (pixel (/ uv output-texel))
+         (fibre
+           (+ (* (- (paper-noise (vec3 (* (swizzle pixel :x) 0.55)
+                                       (* (swizzle pixel :y) 0.55) 3.7))
+                    0.5)
+                 0.65)
+              (* (- (paper-noise (vec3 (* (swizzle pixel :x) 0.09)
+                                       (* (swizzle pixel :y) 0.21) 9.1))
+                    0.5)
+                 0.35)))
+         (grain (+ 1.0 (* fibre (* 2.0 (swizzle atmosphere-parameters :z)))))
+         ;; Eight bits cannot hold a sky gradient; interleaved gradient noise
+         ;; at half a step turns the contour into grain too fine to see.
+         (dither-phase
+           (+ (* (swizzle pixel :x) 0.06711056)
+              (* (swizzle pixel :y) 0.00583715)))
+         (dither (* (- (fract (* 52.9829189 (fract dither-phase))) 0.5)
+                    (/ 1.0 255.0)))
          (presented
-           (paper-grade (paper-tonemap exposed-radiance)))
+           (clamp (+ (* graded (* vignette grain)) (vec3 dither dither dither))
+                  (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0)))
          (cross-pixel (abs (/ (* ndc 0.5) texel)))
          (cross-long (max (swizzle cross-pixel :x) (swizzle cross-pixel :y)))
          (cross-short (min (swizzle cross-pixel :x) (swizzle cross-pixel :y)))
@@ -1184,7 +1174,7 @@ measured from a virtual eye behind the character along the view instead."
                               (vec3 0.08 0.08 0.08))
                           (vec3 0.08 0.08 0.08))))
     (set-output color-output
-                (vec4 (mix (representation presented) cross-color crosshair)
+                (vec4 (mix presented cross-color crosshair)
                       1.0))))
 
 (define-live-shader hdr-copy-fragment-specification

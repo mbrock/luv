@@ -20,6 +20,7 @@
   (encode-exposure (renderer-exposure-control renderer) encoder
                    (renderer-exposure-binding renderer)
                    (renderer-frame-index renderer))
+  (encode-renderer-lens renderer frame encoder)
   (encode-renderer-presentation renderer frame encoder surface-texture overlay-encoder)
   (incf (renderer-frame-index renderer))
   renderer)
@@ -31,6 +32,14 @@
     (setf (aref camera-uniform-data 27)
           (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
           (aref camera-uniform-data 31) *vulkan-temporal-history-weight*))
+  ;; The lens-extent row describes images this renderer owns, so it is
+  ;; written here rather than by the viewer that packed the rest.
+  (let ((extent (renderer-extent renderer))
+        (bloom (bloom-extent (renderer-extent renderer))))
+    (setf (aref camera-uniform-data 120) (/ 1.0f0 (first bloom))
+          (aref camera-uniform-data 121) (/ 1.0f0 (second bloom))
+          (aref camera-uniform-data 122) (/ 1.0f0 (first extent))
+          (aref camera-uniform-data 123) (/ 1.0f0 (second extent))))
   (write-buffer (renderer-frame-state-camera-buffer frame) camera-uniform-data)
   (upload-torch-frame (renderer-torches renderer)
                       (renderer-frame-state-flame-effect-buffer frame) effect-time))
@@ -228,6 +237,37 @@
     (end-pass composite-pass))
   (prepare-texture encoder (renderer-composite-texture renderer)
                    :texture-binding))
+
+(defun encode-renderer-lens (renderer frame encoder)
+  "Bright pass, two separable blur pairs, and sun shafts over the composite.
+Each stage is one fullscreen triangle into a reduced image; the bloom ends in
+the primary and the shafts in the secondary for presentation to add back."
+  (let ((primary (renderer-bloom-primary-view renderer))
+        (primary-texture (renderer-bloom-primary-texture renderer))
+        (secondary (renderer-bloom-secondary-view renderer))
+        (secondary-texture (renderer-bloom-secondary-texture renderer))
+        (finishing (renderer-finishing renderer)))
+    (flet ((stage (stage source target target-texture)
+             (let ((pass
+                     (begin-render-pass
+                      encoder
+                      (make-render-pass-descriptor
+                       :label (format nil "luft lens ~(~A~)" stage)
+                       :color-attachments
+                       `((:view ,target :load-op :clear :store-op :store
+                          :clear-value #(0.0 0.0 0.0 1.0)))))))
+               (encode-lens-stage finishing stage pass
+                                  (renderer-frame-lens-bind-group
+                                   renderer frame stage source))
+               (end-pass pass))
+             (prepare-texture encoder target-texture :texture-binding)))
+      (stage :bright (renderer-composite-view renderer) primary primary-texture)
+      ;; Running the separable pair twice convolves the kernel with itself:
+      ;; a glow wide enough to read as light rather than as an outline.
+      (dotimes (iteration 2)
+        (stage :horizontal primary secondary secondary-texture)
+        (stage :vertical secondary primary primary-texture))
+      (stage :shafts primary secondary secondary-texture))))
 
 (defun encode-renderer-presentation
     (renderer frame encoder surface-texture overlay-encoder)

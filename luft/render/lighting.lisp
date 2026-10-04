@@ -263,9 +263,10 @@ texel."
   "Exponential falloff of the haze with world height, per cell.")
 
 (defun atmosphere-uniform-data (light &optional (elapsed 0.0))
-  "Return the five vec4 lanes for the sky dome, haze, and lens chain.
+  "Return the six vec4 lanes for the sky dome, haze, and lens chain.
 
-ELAPSED drifts the cloud decks; it wraps hourly to stay precise."
+ELAPSED drifts the cloud decks; it wraps hourly to stay precise.  The final
+lens-extent row is zero here; the renderer owns those images and fills it."
   (flet ((colour (value fourth)
            (list (aref value 0) (aref value 1) (aref value 2) fourth)))
     (append
@@ -273,7 +274,8 @@ ELAPSED drifts the cloud decks; it wraps hourly to stay precise."
      (colour (light-horizon-color light) (light-cloudiness light))
      (colour (light-fog-color light) *haze-density*)
      (list *bloom-gain* *bloom-threshold* *shaft-gain* *shaft-decay*)
-     (list (mod elapsed 3600.0) *vignette* *paper-grain* *haze-height*))))
+     (list (mod elapsed 3600.0) *vignette* *paper-grain* *haze-height*)
+     (list 0.0 0.0 0.0 0.0))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Realized torch light

@@ -26,6 +26,10 @@
    (history-view :initform nil :reader renderer-target-generation-history-view)
    (composite-texture :initform nil :reader renderer-target-generation-composite-texture)
    (composite-view :initform nil :reader renderer-target-generation-composite-view)
+   (bloom-primary-texture :initform nil :reader renderer-target-generation-bloom-primary-texture)
+   (bloom-primary-view :initform nil :reader renderer-target-generation-bloom-primary-view)
+   (bloom-secondary-texture :initform nil :reader renderer-target-generation-bloom-secondary-texture)
+   (bloom-secondary-view :initform nil :reader renderer-target-generation-bloom-secondary-view)
    (composite-source-bind-group :initform nil :reader renderer-target-generation-composite-source-bind-group)
    (exposure-binding :initform nil :reader renderer-target-generation-exposure-binding)))
 
@@ -102,6 +106,26 @@
 
 (defun renderer-composite-view (renderer)
   (renderer-target-generation-composite-view
+   (renderer-target-generation renderer)))
+
+;;; The lens chain ping-pongs between two reduced images: the bright pass and
+;;; each vertical blur leave the bloom in the primary, and the sun shafts
+;;; finish in the secondary.
+
+(defun renderer-bloom-primary-texture (renderer)
+  (renderer-target-generation-bloom-primary-texture
+   (renderer-target-generation renderer)))
+
+(defun renderer-bloom-primary-view (renderer)
+  (renderer-target-generation-bloom-primary-view
+   (renderer-target-generation renderer)))
+
+(defun renderer-bloom-secondary-texture (renderer)
+  (renderer-target-generation-bloom-secondary-texture
+   (renderer-target-generation renderer)))
+
+(defun renderer-bloom-secondary-view (renderer)
+  (renderer-target-generation-bloom-secondary-view
    (renderer-target-generation renderer)))
 
 (defun renderer-composite-source-bind-group (renderer)
@@ -182,6 +206,10 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                         (and scaler (gpu-temporal-scaler-output-usage scaler))))
           (when shader-p (image :history :rgba16-float extent '(:texture-binding :copy-dst))))
         (image :composite :rgba16-float extent '(:render-attachment :texture-binding))
+        (image :bloom-primary :rgba16-float (bloom-extent extent)
+               '(:render-attachment :texture-binding))
+        (image :bloom-secondary :rgba16-float (bloom-extent extent)
+               '(:render-attachment :texture-binding))
         (setf (slot-value generation 'composite-source-bind-group)
               (own-gpu-object
                generation

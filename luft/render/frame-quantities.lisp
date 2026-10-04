@@ -110,8 +110,14 @@
       ;; Bloom gain, bright threshold, shaft gain, shaft decay.
       (lens-parameters :vec4)
       ;; Cloud clock seconds, vignette, paper grain, haze height falloff.
-      (atmosphere-parameters :vec4))
-    "The quantity-declared 120-float scene environment shared by all stages.")
+      (atmosphere-parameters :vec4)
+      ;; The lens chain's texel extent (XY) and the output texel extent (ZW).
+      ;; The renderer, which owns both images, writes this row at upload.
+      (lens-extent :vec4
+       :components
+       ((:xy :quantity quantities:texel-extent :unit :one)
+        (:zw :quantity quantities:texel-extent :unit :one))))
+    "The quantity-declared 124-float scene environment shared by all stages.")
 
   (defun scene-uniform-prefix (count)
     "The first COUNT members of the canonical scene uniform ledger."
@@ -153,18 +159,18 @@
                       (math:make-quantity-projection
                        positions specification)
                       projections))))))
-    (math:make-quantity-layout 120 (nreverse projections))))
+    (math:make-quantity-layout 124 (nreverse projections))))
 
 (defmethod math:value-declaration-for
     ((name (eql 'luft.render::camera-uniform-data)))
   (declare (ignore name))
   (load-time-value
    (math:make-represented-value-declaration
-    :representation-type '(simple-array single-float (120))
+    :representation-type '(simple-array single-float (124))
     :quantity-layout (scene-uniform-product-layout)
     :source-form
     '(luft.render::camera-uniform-data
-      :type (simple-array single-float (120))
+      :type (simple-array single-float (124))
       :product *scene-uniform-members*))))
 
 (defun shader-uniform-product-layout (block)
