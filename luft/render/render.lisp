@@ -15,6 +15,9 @@
    (sky :initform nil :accessor renderer-sky)
    (player :initform nil :accessor renderer-player)
    (torches :initform nil :accessor renderer-torches)
+   (world-text :initform nil :accessor renderer-world-text)
+   ;; Surfaces' owners publish these; see PUBLISH-RENDERER-WORLD-TEXT.
+   (world-text-batches :initform nil :accessor renderer-world-text-batches)
    (reconstruction :initform nil :accessor renderer-reconstruction)
    (finishing :initform nil :accessor renderer-finishing)
    (exposure-control :initform nil :accessor renderer-exposure-control)
@@ -35,12 +38,13 @@
                         (exposure-factory 'make-automatic-exposure)
                         (sky-factory 'make-sky-drawing)
                         (player-factory 'make-player-drawing)
-                        (torch-factory 'make-framed-torch-drawing))
+                        (torch-factory 'make-framed-torch-drawing)
+                        (world-text-factory 'make-world-text-drawing))
   "Compose the renderer's independently owned subsystems.
 Terrain, lattice, sky, player, and torch factories receive DEVICE, scene
 formats, and sample count. Shadow, reconstruction, and exposure factories
 receive DEVICE; finishing receives DEVICE and COLOR-FORMAT. NIL omits lattice,
-sky, player, or torches. Factories return fresh owners. Refresh preserves all
+sky, player, torches, or world text. Factories return fresh owners. Refresh preserves all
 choices. Resident geometry and resized targets are published independently."
   (unless (and terrain-factory shadow-factory reconstruction-factory finishing-factory exposure-factory)
     (error "Terrain, shadow, reconstruction, finishing, and exposure factories are required."))
@@ -51,7 +55,8 @@ choices. Resident geometry and resized targets are published independently."
            (list :terrain-factory terrain-factory :shadow-factory shadow-factory
                  :lattice-factory lattice-factory :reconstruction-factory reconstruction-factory
                  :finishing-factory finishing-factory :exposure-factory exposure-factory
-                 :sky-factory sky-factory :player-factory player-factory :torch-factory torch-factory)))
+                 :sky-factory sky-factory :player-factory player-factory :torch-factory torch-factory
+                 :world-text-factory world-text-factory)))
         (completed-p nil))
     (unwind-protect
          (labels ((component (factory type &rest arguments)
@@ -79,6 +84,9 @@ choices. Resident geometry and resized targets are published independently."
                    (component player-factory 'scene-drawing device formats *scene-sample-count*)
                    (renderer-torches renderer)
                    (component torch-factory 'torch-drawing device formats *scene-sample-count*)
+                   (renderer-world-text renderer)
+                   (component world-text-factory 'world-text-drawing
+                              device formats *scene-sample-count*)
                    (renderer-exposure-control renderer)
                    (component exposure-factory 'exposure-control device)))
            (multiple-value-bind (data count buffer)

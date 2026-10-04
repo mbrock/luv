@@ -1156,6 +1156,13 @@ before the operation boundary, or it would encode through resources which the
              source production-system (viewer-bevel-width viewer)
              (vec3-x position) (vec3-y position))))))))
 
+(defgeneric advance-viewer-world-text (viewer)
+  (:documentation
+   "Refresh and publish VIEWER's world text surfaces before its frame.")
+  (:method ((viewer t))
+    (declare (ignore viewer))
+    nil))
+
 (zdefun (render-viewer-frame :zone :luft/frame)
     (viewer timestamp)
   (when (viewer-running-p viewer)
@@ -1163,6 +1170,7 @@ before the operation boundary, or it would encode through resources which the
     ;; cohort publication happen here, before this frame borrows the renderer.
     (refresh-application-live-artifacts viewer)
     (advance-viewer-streaming viewer)
+    (advance-viewer-world-text viewer)
     (when-let
         ((workbench (luv.workbench:application-workbench viewer)))
       (luv.workbench:refresh-workbench workbench))
@@ -1360,7 +1368,7 @@ before the operation boundary, or it would encode through resources which the
     ((index 'integer))
   (select-viewer-material (viewer-command-viewer) index))
 
-(loop for key in '(:1 :2 :3 :4 :5 :6 :7) for index from 0
+(loop for key in '(:1 :2 :3 :4 :5 :6 :7 :8) for index from 0
       do (let ((index index))
            (clim:add-keystroke-to-command-table
             'luft-atelier (list key) :function

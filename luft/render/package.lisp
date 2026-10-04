@@ -72,6 +72,10 @@
   (:export #:write-production-spir-v
            #:*production-shader-specifications*
            #:lattice-point-fragment-specification
+           #:world-glyph-vertex-specification
+           #:world-glyph-fragment-specification
+           #:world-panel-vertex-specification
+           #:world-panel-fragment-specification
            #:lattice-point-vertex-specification
            #:player-sdf-fragment-specification
            #:player-sdf-vertex-specification

@@ -73,6 +73,7 @@
                              (:file "materials")
                              (:file "lighting")
                              (:file "shaders")
+                             (:file "world-text-shaders")
                              (:file "gpu-resources")
                              (:file "drawing-program")
                              (:file "render-settings")
@@ -97,6 +98,7 @@
                              (:file "renderer-residency")
                              (:file "renderer-targets")
                              (:file "renderer-frames")
+                             (:file "world-text")
                              (:file "frame")
                              (:file "world")
                              (:file "streaming-state")
@@ -118,10 +120,11 @@
   :author "Mikael Brockman"
   ;; Share Luv's substrate and compositor, not another game's runtime.
   :depends-on ("luft/simulation" "luv/mcclim" "luv/workbench"
-               "luv/lobby/mcclim"
+               "luv/lobby/mcclim" "luv/terminal/canvas"
                "luv/tracy-capture" "luv/application-agent")
   :serial t
   :components ((:file "luft/render/studio")
+               (:file "luft/render/terminal")
                (:file "luft/render/live-artifact")
                (:file "luft/render/workbench")
                (:file "luft/render/tracy-capture")
@@ -162,6 +165,7 @@
                (:file "luft/render/streaming-publication-tests")
                (:file "luft/render/static-scene-tests")
                (:file "luft/render/torch-drawing-tests")
+               (:file "luft/render/world-text-tests")
                (:file "luft/render/renderer-components-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

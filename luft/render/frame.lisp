@@ -110,6 +110,8 @@
        (renderer-torches renderer) pass
        (renderer-frame-torch-body-bind-group renderer frame nil)
        (renderer-flame-instance-count renderer)))
+    ;; Text and panels stand on surfaces the opaque world has already drawn.
+    (encode-renderer-world-text renderer frame pass)
     (when player-p
       (encode-scene-drawing
        (renderer-player renderer) pass

@@ -21,7 +21,11 @@
     torch-body-shadow-vertex-specification
     torch-flame-vertex-specification
     torch-flame-fragment-specification
-    hdr-copy-fragment-specification)
+    hdr-copy-fragment-specification
+    world-panel-vertex-specification
+    world-panel-fragment-specification
+    world-glyph-vertex-specification
+    world-glyph-fragment-specification)
   "Every production LUFT shader specification, in stable emission order.")
 
 (defun write-production-spir-v (&optional (directory #p"build/"))

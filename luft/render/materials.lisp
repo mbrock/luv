@@ -48,6 +48,8 @@
 (defvar *snow-material-placement* nil)
 (defvar *slate-material-placement* nil)
 (defvar *sand-material-placement* nil)
+(defvar *terminal-material* nil)
+(defvar *terminal-material-placement* nil)
 
 (setf *earth-material*
       (ensure-semantic-instance
@@ -122,7 +124,17 @@
       *sand-material-placement*
       (ensure-semantic-instance
        *sand-material-placement* 'material-placement
-       :name :sand :kind *sand-material*))
+       :name :sand :kind *sand-material*)
+      ;; A graphite slab: adjacent terminal cells with one exposed face
+      ;; become a single shell screen (see terminal.lisp).
+      *terminal-material*
+      (ensure-semantic-instance
+       *terminal-material* 'material-kind
+       :name :terminal :base-tone '(0.045 0.055 0.06))
+      *terminal-material-placement*
+      (ensure-semantic-instance
+       *terminal-material-placement* 'material-placement
+       :name :terminal :kind *terminal-material*))
 
 (defun make-scene-material-vocabulary ()
   "Return the authored placement vocabulary shared by one scene's cells."
@@ -134,7 +146,8 @@
                   ;; Appended, so the four older placements keep their codes.
                   *snow-material-placement*
                   *slate-material-placement*
-                  *sand-material-placement*)
+                  *sand-material-placement*
+                  *terminal-material-placement*)
    :limit #xff))
 
 (defun material-kind-oriented-tones (kind)
