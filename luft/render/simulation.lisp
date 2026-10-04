@@ -113,7 +113,10 @@ box and fall through nothing they cannot see."
 (defclass movement-intent (movement-controller)
   ((direction-x :initarg :direction-x :initform 0.0 :accessor intent-direction-x)
    (direction-y :initarg :direction-y :initform 0.0 :accessor intent-direction-y)
-   (jump-requested-p :initform nil :accessor intent-jump-requested-p)))
+   (jump-requested-p :initform nil :accessor intent-jump-requested-p)
+   ;; Only a flying character reads this: +1 rises, -1 sinks.
+   (direction-z :initarg :direction-z :initform 0.0
+                :accessor intent-direction-z)))
 
 (defclass walking-character ()
   ((body :initarg :body :accessor character-body)
@@ -145,7 +148,9 @@ box and fall through nothing they cannot see."
    (jump-speed :initarg :jump-speed :initform 9.0 :type real
                :quantity (:quantity quantities:world-velocity
                           :unit ((quantities:cell 1) (:second -1)))
-               :accessor character-jump-speed))
+               :accessor character-jump-speed)
+   ;; Creative flight: no gravity, vertical intent, collision as ever.
+   (flying-p :initform nil :accessor character-flying-p))
   (:metaclass quantity-class)
   (:documentation
    "Locomotion tuning and semantic animation, composed with a physical body."))
@@ -572,6 +577,33 @@ Called only on fixed simulation ticks. NIL means no steering, not braking."))
   (setf (intent-jump-requested-p (direct-character-intent character)) t)
   character)
 
+(defparameter *flight-speed-factor* 2.0
+  "How much faster a flying character crosses the world than it walks.")
+
+(defparameter *flight-vertical-speed* 7.0
+  "Cells per second a flying character rises or sinks at full urge.")
+
+(defparameter *walking-gravity* -24.0
+  "The gravity a character returns to when it lands from flight.")
+
+(defun set-character-flying (character flying-p)
+  "Take CHARACTER into creative flight or let it fall back to walking."
+  (let ((body (character-body character)))
+    (setf (character-flying-p character) (and flying-p t)
+          (body-gravity body) (if flying-p 0.0 *walking-gravity*)
+          (vec3-z (body-velocity body)) 0.0
+          (body-grounded-p body) nil))
+  (let ((controller (character-controller character)))
+    (when (typep controller 'movement-intent)
+      (setf (intent-direction-z controller) 0.0
+            (intent-jump-requested-p controller) nil)))
+  character)
+
+(defun set-character-vertical-urge (character z)
+  "Urge a flying CHARACTER up (+1), down (-1), or to hold height (0)."
+  (setf (intent-direction-z (direct-character-intent character)) z)
+  character)
+
 (defun refresh-body-support (body solid)
   (let ((position (body-position body)))
     (setf (body-grounded-p body)
@@ -592,6 +624,23 @@ Called only on fixed simulation ticks. NIL means no steering, not braking."))
          (velocity (body-velocity body)))
     (multiple-value-bind (x y jump)
         (controller-desire (character-controller character) character seconds)
+      (when (and x (character-flying-p character))
+        (setf x (* x *flight-speed-factor*)
+              y (* y *flight-speed-factor*)))
+      (when (character-flying-p character)
+        ;; Flight steers height like position: toward the urged speed, with
+        ;; the ground acceleration, and never by jumping.
+        (let* ((controller (character-controller character))
+               (target (* *flight-vertical-speed*
+                          (if (typep controller 'movement-intent)
+                              (intent-direction-z controller)
+                              0.0)))
+               (change (* seconds (character-ground-acceleration character)))
+               (dz (- target (vec3-z velocity))))
+          (incf (vec3-z velocity) (max (- change) (min change dz)))
+          (when (plusp (vec3-z velocity))
+            (setf (body-grounded-p body) nil))
+          (setf jump nil)))
       (when x
         (let* ((dx (- x (vec3-x velocity)))
                (dy (- y (vec3-y velocity)))

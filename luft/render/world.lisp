@@ -227,6 +227,91 @@ upland instead of repeating one periodic profile."
         maximize (abs (- height (large-world-terrain-height
                                  source (+ x dx) (+ y dy))))))
 
+;;; Where a new player stands.  The world's corner is the worst view it has:
+;;; half the horizon is the world's edge.  Like Luvcraft's scenic spawn, walk
+;;; the road inward until a snow-line summit stands within view, and face it.
+
+(defparameter *large-world-spawn-view-distance* 88
+  "How far from the spawn a summit may stand and still count as in view.")
+
+(defvar *large-world-scenic-spawns* (make-hash-table :test #'equal)
+  "Scenic spawns already found, keyed by seed and domain extent.")
+
+(defparameter *large-world-spawn-clearing* 28
+  "Cells around a spawn that must stay near road height, so it opens onto
+a view rather than onto a hillside.")
+
+(defparameter *large-world-spawn-summit-distance* 60
+  "The nearest a spawn's summit may stand, so it does not fill the view.")
+
+(defun large-world-summit-visible-p (source x y eye summit-x summit-y summit)
+  "Whether the ground from X,Y stays below the sight line to a SUMMIT top.
+The line runs from EYE height to two cells under the summit's top, so the
+whole upper peak shows rather than a sliver of it."
+  (let* ((dx (- summit-x x))
+         (dy (- summit-y y))
+         (distance (sqrt (+ (* dx dx) (* dy dy))))
+         (target (- summit 2)))
+    (loop for travel from 4 below (- distance 6) by 3
+          for fraction = (/ travel distance)
+          always (< (large-world-terrain-height
+                     source
+                     (round (+ x (* dx fraction)))
+                     (round (+ y (* dy fraction))))
+                    (+ eye (* (- target eye) fraction))))))
+
+(defun large-world-spawn-view (source x y)
+  "Return the yaw from road cell X,Y toward a summit it can see, or NIL.
+
+The surroundings within *LARGE-WORLD-SPAWN-CLEARING* must be open, and a
+peak above the alpine snow line must stand between *LARGE-WORLD-SPAWN-
+SUMMIT-DISTANCE* and *LARGE-WORLD-SPAWN-VIEW-DISTANCE* in plain sight, so
+the first view is across open land to a peak with sky above it."
+  (let* ((reach *large-world-spawn-view-distance*)
+         (clearing *large-world-spawn-clearing*)
+         (ground (large-world-terrain-height source x y))
+         (eye (+ ground 1.6))
+         (summit-height (* *alpine-snow-line* *large-world-relief-height*))
+         (summits nil))
+    (loop for sx from (- x reach) to (+ x reach) by 4
+          do (loop for sy from (- y reach) to (+ y reach) by 4
+                   for distance = (sqrt (+ (expt (- sx x) 2) (expt (- sy y) 2)))
+                   for height = (large-world-terrain-height source sx sy)
+                   do (cond ((<= distance clearing)
+                             (when (> height (+ ground 4))
+                               (return-from large-world-spawn-view nil)))
+                            ((and (<= *large-world-spawn-summit-distance*
+                                      distance reach)
+                                  (>= height summit-height))
+                             (push (list height sx sy) summits)))))
+    (loop for (height sx sy) in (subseq (sort summits #'> :key #'first)
+                                        0 (min 8 (length summits)))
+          when (large-world-summit-visible-p source x y eye sx sy height)
+            return (coerce (atan (- sy y) (- sx x)) 'single-float))))
+
+(defun large-world-scenic-spawn (source)
+  "Return the road X and Y a player starts at, and the yaw facing a summit.
+
+Candidates run along the road from well inside the corner; the first that
+opens onto a snow-line peak (see LARGE-WORLD-SPAWN-VIEW) wins.  A world too
+small for the search falls back to the road's first cell with yaw 0."
+  (let* ((domain (authored-world-source-domain source))
+         (x-limit (luft:world-domain-x-limit domain))
+         (y-limit (luft:world-domain-y-limit domain))
+         (reach *large-world-spawn-view-distance*)
+         (key (list (authored-world-source-seed source) x-limit y-limit)))
+    (values-list
+     (or (gethash key *large-world-scenic-spawns*)
+         (setf (gethash key *large-world-scenic-spawns*)
+               (or (loop for x from 192 below (- x-limit 192) by 8
+                         for y = (round (large-world-road-centre-y x))
+                         for yaw = (and (< reach y (- y-limit reach))
+                                        (large-world-spawn-view source x y))
+                         when yaw return (list x y yaw))
+                   (list +large-world-spawn-x+
+                         (round (large-world-road-centre-y +large-world-spawn-x+))
+                         0.0)))))))
+
 (defun large-world-column-placement (source x y z height slope)
   "Return the source placement of cell X,Y,Z in a column HEIGHT cells tall.
 

@@ -125,6 +125,7 @@
   :serial t
   :components ((:file "luft/render/studio")
                (:file "luft/render/terminal")
+               (:file "luft/render/persistence")
                (:file "luft/render/live-artifact")
                (:file "luft/render/workbench")
                (:file "luft/render/tracy-capture")
@@ -166,6 +167,7 @@
                (:file "luft/render/static-scene-tests")
                (:file "luft/render/torch-drawing-tests")
                (:file "luft/render/world-text-tests")
+               (:file "luft/render/play-tests")
                (:file "luft/render/renderer-components-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

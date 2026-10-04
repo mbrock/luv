@@ -200,15 +200,27 @@ at the atelier boundary where a person has selected one site."))
   "Make SCENE's player at a supported authored spawn."
   (if (and (typep scene 'streaming-scene)
            (streaming-scene-source scene))
-      (let* ((source (streaming-scene-source scene))
-             (x +large-world-spawn-x+)
-             (y (round (large-world-road-centre-y x)))
-             (z (large-world-terrain-height source x y)))
-        (make-walking-character
-         :position (make-vec3 (+ x 0.5) (+ y 0.5) (coerce z 'single-float))))
+      (multiple-value-bind (x y) (large-world-scenic-spawn
+                                  (streaming-scene-source scene))
+        (let ((z (large-world-terrain-height
+                  (streaming-scene-source scene) x y)))
+          (make-walking-character
+           :position (make-vec3 (+ x 0.5) (+ y 0.5) (coerce z 'single-float)))))
       (make-walking-character
        :position (make-vec3 (+ +sanctuary-origin-x+ 29.5)
                             (+ +sanctuary-origin-y+ 24.5) 14.0))))
+
+(defun face-viewer-spawn-view (viewer)
+  "Turn VIEWER's camera toward the summit its scenic spawn was chosen for."
+  (let ((source (viewer-source viewer)))
+    (when (and (typep source 'streaming-scene)
+               (streaming-scene-source source))
+      (setf (camera-yaw (viewer-camera viewer))
+            (nth-value 2 (large-world-scenic-spawn
+                          (streaming-scene-source source)))
+            ;; A little above level: the peak, and sky over it.
+            (camera-pitch (viewer-camera viewer)) 0.08)))
+  viewer)
 
 (defun reset-viewer-camera (&optional (viewer *viewer*))
   "Return VIEWER to its scene's spawn and following isometric view."
@@ -233,6 +245,7 @@ at the atelier boundary where a person has selected one site."))
             (if (typep (viewer-mode viewer) 'first-person-mode)
                 (progn
                   (setf *projection* :perspective)
+                  (face-viewer-spawn-view viewer)
                   (place-viewer-at-player-eyes viewer))
                 (constrain-viewer-follow-camera viewer)))
           (setf (camera-position camera)
@@ -685,6 +698,14 @@ the selector is the whole of the difference."
               (coerce (/ (first extent)) 'single-float)
               (coerce (/ (second extent)) 'single-float)))))
 
+(declaim (ftype function load-luft-world-description
+                restore-luft-world-player
+                note-viewer-world-pathname
+                persistent-world-source
+                save-viewer-world
+                autosave-viewer-world
+                default-luft-world-pathname))
+
 (declaim (ftype function viewer-surface-view
                 viewer-inspector-p
                 viewer-inspector-mirror
@@ -1103,7 +1124,11 @@ before the operation boundary, or it would encode through resources which the
                         (if (viewer-control-active-p viewer :left) 1 0))))
           (multiple-value-bind (direction-x direction-y)
               (camera-walking-direction camera forward right)
-            (set-character-movement player direction-x direction-y)))))
+            (set-character-movement player direction-x direction-y))
+          (when (character-flying-p player)
+            (set-character-vertical-urge
+             player (- (if (viewer-control-active-p viewer :up) 1.0 0.0)
+                       (if (viewer-control-active-p viewer :down) 1.0 0.0)))))))
     (advance-world-simulation (viewer-simulation viewer) dt)
     (values dt (null last))))
 
@@ -1173,6 +1198,7 @@ before the operation boundary, or it would encode through resources which the
     (refresh-application-live-artifacts viewer)
     (advance-viewer-streaming viewer)
     (advance-viewer-world-text viewer)
+    (autosave-viewer-world viewer)
     (when-let
         ((workbench (luv.workbench:application-workbench viewer)))
       (luv.workbench:refresh-workbench workbench))
@@ -1223,12 +1249,50 @@ before the operation boundary, or it would encode through resources which the
     ()
   (reset-viewer-camera (viewer-command-viewer)))
 
+(defparameter *double-tap-seconds* 0.3
+  "How close two Space presses must be to toggle flight.")
+
+(defvar *viewer-space-press-times* (make-hash-table :test #'eq :weakness :key)
+  "Each viewer's previous Space press, for spotting a double tap.")
+
+(defun viewer-double-tapped-space-p (viewer)
+  "Note a Space press on VIEWER and say whether it completes a double tap.
+A completed pair is spent, so a third quick press starts a new one."
+  (let* ((now (/ (get-internal-real-time)
+                 (float internal-time-units-per-second 1d0)))
+         (previous (gethash viewer *viewer-space-press-times*))
+         (double-p (and previous (< (- now previous) *double-tap-seconds*))))
+    (if double-p
+        (remhash viewer *viewer-space-press-times*)
+        (setf (gethash viewer *viewer-space-press-times*) now))
+    double-p))
+
+(defun toggle-viewer-flight (viewer)
+  "Take VIEWER's player into creative flight, or let it walk again."
+  (when-let ((player (viewer-player viewer)))
+    (set-character-flying player (not (character-flying-p player)))
+    (set-viewer-control viewer :up nil)
+    (set-viewer-control viewer :down nil)
+    (character-flying-p player)))
+
 (clim:define-command (com-jump :command-table luft-atelier
-                                :name "Jump"
+                                :name "Jump, Rise, or Double-Tap to Fly"
                                 :keystroke (:space))
     ()
-  (let ((player (viewer-player (viewer-command-viewer))))
-    (when player (request-character-jump player))))
+  (let* ((viewer (viewer-command-viewer))
+         (player (viewer-player viewer)))
+    (when player
+      (cond ((viewer-double-tapped-space-p viewer)
+             (toggle-viewer-flight viewer))
+            ((character-flying-p player)
+             (set-viewer-control viewer :up t))
+            (t (request-character-jump player))))))
+
+(clim:define-command (com-toggle-flight :command-table luft-atelier
+                                        :name "Toggle Flight"
+                                        :keystroke (:f6))
+    ()
+  (toggle-viewer-flight (viewer-command-viewer)))
 
 (clim:define-command (com-toggle-construction-lines
                       :command-table luft-atelier
@@ -1408,7 +1472,9 @@ before the operation boundary, or it would encode through resources which the
   '((:w :forward) (:up :forward)
     (:s :backward) (:down :backward)
     (:a :left) (:left :left)
-    (:d :right) (:right :right))
+    (:d :right) (:right :right)
+    ;; A flying player sinks while Shift is held; Space rises (COM-JUMP).
+    (:shift-left :down) (:shift-right :down))
   "Physical keys whose press and release urge the active controller.")
 
 (defun install-viewer-movement-commands ()
@@ -1435,6 +1501,15 @@ before the operation boundary, or it would encode through resources which the
   (values))
 
 (install-viewer-movement-commands)
+
+;;; Space presses through COM-JUMP, which may start a rise; its release ends
+;;; one, whether or not the player is flying.
+(clim:add-keystroke-to-command-table
+ 'luft-atelier-release '(:space :any) :function
+ (lambda (gesture numeric-argument)
+   (declare (ignore gesture numeric-argument))
+   (list 'com-stop-moving :up))
+ :errorp nil)
 
 (defgeneric viewer-key-event-tables (event)
   (:documentation "Return the window and atelier tables for key EVENT."))
@@ -1632,12 +1707,15 @@ before the operation boundary, or it would encode through resources which the
                        (finishing-factory 'make-image-finishing)
                        (camera (make-fly-camera :yaw 0.35))
                        (title
-                         "LUFT — click to play · WASD move · Space jump · L/R edit · 1–4 material · F5 camera · Esc release")
+                         "LUFT — click to play · WASD move · Space jump, twice to fly · L/R edit · 1–8 material · Tab terminal · F5 camera · Esc release")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)
                        (frames-per-second 60)
-                       (provider *gpu-provider*))
+                       (provider *gpu-provider*)
+                       (world-pathname (default-luft-world-pathname))
+                     &aux (saved-world
+                           (load-luft-world-description solid world-pathname)))
   "Open the fixed-star LUFT renderer as a McCLIM atelier.
 
 SKY-FACTORY and PLAYER-FACTORY select independently owned scene drawings;
@@ -1653,7 +1731,9 @@ while retaining SOLID as the semantic inspection source. SURFACE-GENERATION,
 when supplied with that mesh, preserves its exact immutable realized-light
 cohort. EXPOSURE-FACTORY receives the device and constructs a fresh exposure
 control. FIXED-EXPOSURE selects a constant control instead, omitting GPU
-measurement entirely for reproducible evidence."
+measurement entirely for reproducible evidence.  When SOLID is the authored
+large world, WORLD-PATHNAME (NIL for none) is where its edits and player are
+loaded from and saved to; see persistence.lisp."
   (check-type solid scene)
   (when fixed-exposure
     (setf fixed-exposure (checked-exposure-value fixed-exposure)))
@@ -1753,7 +1833,13 @@ measurement entirely for reproducible evidence."
            ;; otherwise the legacy sanctuary camera demands the wrong chunks.
            (when (viewer-player viewer)
              (setf *isometric-height* 18.0)
-             (set-viewer-mode viewer (viewer-mode viewer)))
+             (set-viewer-mode viewer (viewer-mode viewer))
+             ;; After the mode, whose own pose this replaces.
+             (face-viewer-spawn-view viewer)
+             (when saved-world
+               (restore-luft-world-player viewer saved-world)))
+           (when (persistent-world-source solid)
+             (note-viewer-world-pathname viewer world-pathname))
            (cond
              (surface-mesh
               (renderer-set-mesh
@@ -2534,6 +2620,10 @@ it makes no claim about which earlier render pass caused a discontinuity."
 
 (defun %perform-viewer-stop (viewer)
   "Release VIEWER after its stop controller granted this caller ownership."
+  ;; The world is written first, while every value it reads is still live.
+  (handler-case (save-viewer-world viewer)
+    (error (condition)
+      (warn "Could not save the LUFT world on stop: ~A" condition)))
   ;; A native request only closed admission.  This sole off-canvas owner waits
   ;; for the active capture to encode and evict its surface view before any
   ;; renderer, canvas, or device release can begin.
