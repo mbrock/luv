@@ -23,6 +23,12 @@
               :accessor light-fog-color
               :documentation "The colour arbitrarily distant land fades into.")
    (day-factor :initarg :day-factor :initform 1.0 :accessor light-day-factor)
+   (moon-direction :initarg :moon-direction
+                   :initform (make-vec3 0.72 -0.43 -0.62)
+                   :accessor light-moon-direction)
+   (night-factor :initarg :night-factor :initform 0.0
+                 :accessor light-night-factor
+                 :documentation "How far into the night the sky is, 0 to 1.")
    (cloudiness :initarg :cloudiness :initform 0.5 :accessor light-cloudiness)
    (shadow-half-extent :initarg :shadow-half-extent
                        :reader light-shadow-half-extent)
@@ -35,8 +41,10 @@
   (:documentation
    "One inspectable environment light, packed into raw per-frame GPU lanes.
 
-The sky clock rewrites its sun and atmosphere slots every frame from the day
-profile; the shadow slots are authored constants."))
+The sky clock rewrites its sun, moon, and atmosphere slots every frame from
+the day profile; the shadow slots are authored constants.  The world is lit
+by one key light at a time -- the sun by day, the moon by night -- and the
+shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
 
 (defvar *light* nil)
 
@@ -161,6 +169,9 @@ profile; the shadow slots are authored constants."))
                 (list fourth)))))
       (let ((sun (sky-sun-direction hour)))
         (setf (light-sun-direction light) sun
+              (light-moon-direction light) (vec3-scale sun -1.0)
+              (light-night-factor light)
+              (coerce (%sky-smoothstep -0.03 -0.26 (vec3-z sun)) 'single-float)
               (light-day-factor light)
               (coerce (%sky-smoothstep -0.06 0.16 (vec3-z sun)) 'single-float)
               (light-sun-color light) (blend #'sky-keyframe-sun)
@@ -181,6 +192,71 @@ profile; the shadow slots are authored constants."))
   "Return *LIGHT* evaluated at the current sky hour."
   (update-light-from-sky *light* *sky-hour*))
 
+;;; ---------------------------------------------------------------------------
+;;; The night
+;;;
+;;; Luvcraft's moon rides opposite the sun and is always full, so it is up for
+;;; exactly the hours the sun is not.  The stars are fixed to the same turning
+;;; sky: the sun's orbit is a rotation about one horizontal celestial pole, and
+;;; the shader turns each view ray back by that rotation before it looks the
+;;; stars up, so the constellations wheel overhead through the night.
+;;;
+;;; The moon also lights the world.  Rather than a second direct term, the key
+;;; light (the sun lanes of the frame uniform, and the shadow map) passes from
+;;; the sun to the moon while both stand at the horizon, where each one's own
+;;; light has faded to nothing; so the handover cannot be seen, and moonlit
+;;; ridges cast moon shadows.  Everything in the sky that is drawn from the sun
+;;; lanes is weighted by the day factor, which is zero by then, except the
+;;; cloud deck's self-shadow: at night the moon lights the clouds' faces.
+
+(defparameter *star-brightness* 1.7
+  "Radiance of a first-magnitude star, above display white.")
+
+(defparameter *moon-radiance* 1.4
+  "Radiance of the full moon's disc, above white so the bloom catches it.")
+
+(defparameter *moon-angular-radius* 0.026
+  "The drawn moon's angular radius in radians: a few times the true one.")
+
+(defparameter *galaxy-strength* 0.35
+  "Strength of the galaxy band behind the stars.")
+
+(defparameter *moonlight-color* #(0.085 0.105 0.165)
+  "Direct radiance of a high full moon: cool, and far dimmer than the sun.")
+
+(defun sky-celestial-pole ()
+  "The horizontal axis the sky turns about, across the sun's orbit."
+  (vec3-normalize (vec3-cross (make-vec3 0.0 0.0 1.0) *sky-sunset-azimuth*)))
+
+(defun sky-rotation-angle (hour)
+  "The sky's turn about its pole at HOUR, in radians; zero at sunrise."
+  (coerce (* 2.0 pi (- (/ hour 24.0) 0.25)) 'single-float))
+
+(defun light-key-sun-p (light)
+  "Whether the sun, rather than the moon, is LIGHT's key light."
+  (> (vec3-z (light-sun-direction light)) -0.06))
+
+(defun light-key-direction (light)
+  "The direction of the body lighting the world: the sun, or the moon."
+  (if (light-key-sun-p light)
+      (light-sun-direction light)
+      (light-moon-direction light)))
+
+(defun light-key-color (light)
+  "The key light's radiance, faded out at the horizon handover."
+  (flet ((scaled (colour amount)
+           (vector (* (aref colour 0) amount) (* (aref colour 1) amount)
+                   (* (aref colour 2) amount) 1.0)))
+    (if (light-key-sun-p light)
+        (scaled (light-sun-color light)
+                (coerce (%sky-smoothstep
+                         -0.06 0.0 (vec3-z (light-sun-direction light)))
+                        'single-float))
+        (scaled *moonlight-color*
+                (coerce (%sky-smoothstep
+                         0.06 0.22 (vec3-z (light-moon-direction light)))
+                        'single-float)))))
+
 (update-light-from-sky *light* *sky-hour*)
 
 (defun light-shadow-rows (light center)
@@ -190,7 +266,7 @@ The first two rows map the square light plane to clip [-1,1].  The third maps
 the signed light depth around CENTER to [0,1].  CENTER is snapped in the light
 plane so camera translation cannot slide a shadow edge by a fraction of a
 texel."
-  (let* ((sun (light-sun-direction light))
+  (let* ((sun (light-key-direction light))
          (forward (vec3-scale sun -1.0))
          (world-up (make-vec3 0.0 0.0 1.0))
          (right (vec3-normalize (vec3-cross world-up forward)))
@@ -218,13 +294,15 @@ texel."
        '(0.0 0.0 0.0 1.0)))))
 
 (defun light-uniform-data (light center &optional (exposure 1.0f0))
-  "Return LIGHT's nine vec4 lanes for the frame uniform ABI."
+  "Return LIGHT's nine vec4 lanes for the frame uniform ABI.
+
+The sun lanes carry the key light: the sun by day and the moon by night."
   (flet ((vec3-lane (value fourth)
            (list (vec3-x value) (vec3-y value)
                  (vec3-z value) fourth)))
     (append
-     (vec3-lane (light-sun-direction light) 0.0)
-     (coerce (light-sun-color light) 'list)
+     (vec3-lane (light-key-direction light) 0.0)
+     (coerce (light-key-color light) 'list)
      (list (aref (light-sky-color light) 0)
            (aref (light-sky-color light) 1)
            (aref (light-sky-color light) 2)
@@ -262,11 +340,13 @@ texel."
 (defparameter *haze-height* 0.018
   "Exponential falloff of the haze with world height, per cell.")
 
-(defun atmosphere-uniform-data (light &optional (elapsed 0.0))
-  "Return the six vec4 lanes for the sky dome, haze, and lens chain.
+(defun atmosphere-uniform-data
+    (light &optional (elapsed 0.0) (hour *sky-hour*))
+  "Return the nine vec4 lanes for the sky dome, haze, lens chain, and night.
 
-ELAPSED drifts the cloud decks; it wraps hourly to stay precise.  The final
-lens-extent row is zero here; the renderer owns those images and fills it."
+ELAPSED drifts the cloud decks and twinkles the stars; it wraps hourly to stay
+precise.  The lens-extent row is zero here; the renderer owns those images and
+fills it.  HOUR turns the star field with the sun and moon."
   (flet ((colour (value fourth)
            (list (aref value 0) (aref value 1) (aref value 2) fourth)))
     (append
@@ -275,7 +355,15 @@ lens-extent row is zero here; the renderer owns those images and fills it."
      (colour (light-fog-color light) *haze-density*)
      (list *bloom-gain* *bloom-threshold* *shaft-gain* *shaft-decay*)
      (list (mod elapsed 3600.0) *vignette* *paper-grain* *haze-height*)
-     (list 0.0 0.0 0.0 0.0))))
+     (list 0.0 0.0 0.0 0.0)
+     (let ((moon (light-moon-direction light)))
+       (list (vec3-x moon) (vec3-y moon) (vec3-z moon)
+             (light-night-factor light)))
+     (let ((pole (sky-celestial-pole)))
+       (list (vec3-x pole) (vec3-y pole) (vec3-z pole)
+             (sky-rotation-angle hour)))
+     (list *star-brightness* *moon-radiance* *moon-angular-radius*
+           *galaxy-strength*))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Realized torch light

@@ -116,8 +116,21 @@
       (lens-extent :vec4
        :components
        ((:xy :quantity quantities:texel-extent :unit :one)
-        (:zw :quantity quantities:texel-extent :unit :one))))
-    "The quantity-declared 124-float scene environment shared by all stages.")
+        (:zw :quantity quantities:texel-extent :unit :one)))
+      ;; The night.  The moon's direction, with the night factor (how far the
+      ;; sun has sunk, which fades the stars in) in W.
+      (moon-vector :vec4
+       :components
+       ((:xyz :quantity quantities:world-direction :unit :one)))
+      ;; The celestial pole the sky turns about, and in W the sky's turn in
+      ;; radians: the stars ride the same rotation as the sun and moon.
+      (celestial-pole-vector :vec4
+       :components
+       ((:xyz :quantity quantities:world-direction :unit :one)))
+      ;; Star brightness, moon disc radiance, moon angular radius, and the
+      ;; galaxy band's strength.
+      (night-parameters :vec4))
+    "The quantity-declared 136-float scene environment shared by all stages.")
 
   (defun scene-uniform-prefix (count)
     "The first COUNT members of the canonical scene uniform ledger."
@@ -159,19 +172,22 @@
                       (math:make-quantity-projection
                        positions specification)
                       projections))))))
-    (math:make-quantity-layout 124 (nreverse projections))))
+    (math:make-quantity-layout (* 4 (length *scene-uniform-members*))
+                               (nreverse projections))))
 
 (defmethod math:value-declaration-for
     ((name (eql 'luft.render::camera-uniform-data)))
   (declare (ignore name))
   (load-time-value
-   (math:make-represented-value-declaration
-    :representation-type '(simple-array single-float (124))
-    :quantity-layout (scene-uniform-product-layout)
-    :source-form
-    '(luft.render::camera-uniform-data
-      :type (simple-array single-float (124))
-      :product *scene-uniform-members*))))
+   (let ((type `(simple-array single-float
+                              (,(* 4 (length *scene-uniform-members*))))))
+     (math:make-represented-value-declaration
+      :representation-type type
+      :quantity-layout (scene-uniform-product-layout)
+      :source-form
+      `(luft.render::camera-uniform-data
+        :type ,type
+        :product *scene-uniform-members*)))))
 
 (defun shader-uniform-product-layout (block)
   "Flatten BLOCK's aligned Vec4 members into its scalar quantity product."

@@ -1181,8 +1181,10 @@ yet crossed with its old owner removed.
 
 In October 2026 four luvcraft features crossed into LUFT in their LUFT form:
 the alpine relief now raises the large world (the same ranges for the same
-seed), the sky, day clock, bloom, and sun shafts light it, those lens and
-haze settings are metabar sliders, and terminal walls run a Ghostty shell in
+seed), the sky, day clock, bloom, and sun shafts light it (and at night the
+stars, galaxy, and full moon, which turn with the clock and moonlight the
+land with moon shadows), those lens, haze, and night settings are metabar
+sliders, and terminal walls run a Ghostty shell in
 Slug glyphs through a renderer world-text component, taken with Tab.  Their
 luvcraft owners stay for now because a child still plays luvcraft; the
 terminal wall is the first candidate for deletion once LUFT is the game he
