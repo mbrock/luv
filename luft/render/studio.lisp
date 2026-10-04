@@ -1276,11 +1276,20 @@ before the operation boundary, or it would encode through resources which the
   (let ((canvas (viewer-canvas (viewer-command-viewer))))
     (set-canvas-fullscreen canvas (not (canvas-fullscreen-p canvas)))))
 
+(defgeneric viewer-use-at-crosshair (viewer)
+  (:documentation
+   "Take up whatever device VIEWER's crosshair rests on; true when one was.")
+  (:method ((viewer t))
+    (declare (ignore viewer))
+    nil))
+
 (clim:define-command (com-rotate-view-clockwise :command-table luft-atelier
-                                                :name "Rotate View Clockwise"
+                                                :name "Use Terminal or Rotate View"
                                                 :keystroke (:tab))
     ()
-  (rotate-viewer-eighth-turn (viewer-command-viewer) 1))
+  (let ((viewer (viewer-command-viewer)))
+    (unless (viewer-use-at-crosshair viewer)
+      (rotate-viewer-eighth-turn viewer 1))))
 
 (clim:define-command (com-rotate-view-counterclockwise
                       :command-table luft-atelier

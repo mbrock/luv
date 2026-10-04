@@ -3,7 +3,7 @@
 ;;; Terminal walls: a shell on a rectangle of terminal cells.
 ;;;
 ;;; Build terminal cells side by side, look at their exposed face, and press
-;;; Tab.  The coplanar terminal cells around the one you look at become one
+;;; Tab (the atelier's Use Terminal or Rotate View).  The coplanar terminal cells around the one you look at become one
 ;;; screen, a bash runs under a PTY, and Ghostty's screen is drawn there in
 ;;; Slug glyphs by the renderer's world-text component.  While the wall has
 ;;; the keyboard every key goes to the shell; Shift-Tab gives it back.
@@ -563,12 +563,9 @@ Return the terminal, or NIL when the crosshair is not on a terminal wall."
               (luv.terminal:send-pty-device-canvas-key-event
                (world-terminal-device focus) event)))
        nil)
-      ;; Tab on a terminal wall takes the keyboard there.
-      ((and (typep event 'canvas-key-press-event)
-            (eq :tab (canvas-key-event-key-name event))
-            (null (canvas-key-event-modifiers event))
-            (not (canvas-key-event-repeat-p event))
-            (typep (viewer-mode viewer) 'first-person-mode)
-            (focus-viewer-terminal viewer))
-       nil)
       (t (call-next-method)))))
+
+(defmethod viewer-use-at-crosshair ((viewer viewer))
+  "Tab on a terminal wall takes the keyboard there."
+  (and (typep (viewer-mode viewer) 'first-person-mode)
+       (focus-viewer-terminal viewer)))
