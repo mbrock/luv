@@ -28,7 +28,7 @@
 
 (defmethod mcluv:metabar-controls-for ((viewer viewer) (group (eql :sky)))
   (declare (ignore viewer group))
-  '(:time-of-day))
+  '(:time-of-day :star-brightness :galaxy-strength :moon-radiance))
 
 (defmethod mcluv:metabar-controls-for ((viewer viewer) (group (eql :lens)))
   (declare (ignore viewer group))
@@ -402,3 +402,15 @@ DISPLAY is a function of the value returning its text."
   :label "haze falloff" :place *haze-height*
   :minimum 0.0 :maximum 0.08 :step 0.002
   :display (metabar-number-label "~,3F"))
+
+(define-viewer-metabar-setting :star-brightness
+  :label "stars" :place *star-brightness*
+  :minimum 0.0 :maximum 6.0 :step 0.1 :display (metabar-number-label "~,1F"))
+
+(define-viewer-metabar-setting :galaxy-strength
+  :label "galaxy" :place *galaxy-strength*
+  :minimum 0.0 :maximum 1.5 :step 0.05 :display (metabar-number-label "~,2F"))
+
+(define-viewer-metabar-setting :moon-radiance
+  :label "moon" :place *moon-radiance*
+  :minimum 0.0 :maximum 8.0 :step 0.1 :display (metabar-number-label "~,1F"))

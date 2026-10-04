@@ -55,8 +55,10 @@
 ;;; own quarter of the compass, one Henyey-Greenstein glow around the sun, a
 ;;; cumulus deck at a fixed world height whose own shadow toward the sun
 ;;; gives it a lit face, and a compact solar disc pushed far past display
-;;; white so the lens chain has something real to bloom.  Below the horizon
-;;; the sky arrives at exactly the aerial colour distant terrain fades into.
+;;; white so the lens chain has something real to bloom.  At night there are
+;;; points for stars, a band for the galaxy, and a full moon opposite the sun,
+;;; all fixed to a sky that turns with the day clock.  Below the horizon the
+;;; sky arrives at exactly the aerial colour distant terrain fades into.
 
 (define-shader-function cloud-fractal-noise (point)
   "Four octaves of paper noise: a cloud deck's shape down to its wisps."
@@ -69,10 +71,131 @@
           (* (paper-noise p3) 0.0625))
        1.067)))
 
+(define-shader-function celestial-ray (ray pole angle)
+  "Turn RAY back through the sky's rotation of ANGLE about the unit POLE.
+
+The result is where RAY points among the fixed stars: the sun's orbit is
+this same rotation, so a star field looked up by the result wheels across
+the sky with the sun and moon instead of staying painted on the dome."
+  (let* ((cosine (cos angle))
+         (sine (sin angle))
+         (pole-cross-ray
+           (- (* (swizzle pole :yzx) (swizzle ray :zxy))
+              (* (swizzle pole :zxy) (swizzle ray :yzx)))))
+    (+ (* ray cosine)
+       (* pole-cross-ray (- sine))
+       (* pole (* (dot pole ray) (- 1.0 cosine))))))
+
+(define-shader-function night-star-light (direction elapsed)
+  "One star per lattice cell of the sky, at a hashed place in its cell.
+
+A star is a point, so each cell hashes to a position, a magnitude, and a
+twinkling phase, and draws a small gaussian there.  Magnitude is a steep
+power of its hash: a few bright stars and a great many faint ones, which is
+the actual distribution overhead.  Luvcraft's star field, unchanged."
+  (let* ((point (* direction 74.0))
+         (cell (floor point))
+         (local (fract point))
+         (place-x (paper-hash (+ cell (vec3 19.7 5.3 11.1))))
+         (place-y (paper-hash (+ cell (vec3 3.1 23.9 7.7))))
+         (place-z (paper-hash (+ cell (vec3 41.3 13.7 29.5))))
+         ;; Keep the star off its cell's boundary so no star is ever cut in
+         ;; half by the next cell's gaussian falling off first.
+         (centre (+ (vec3 0.25 0.25 0.25)
+                    (* (vec3 place-x place-y place-z) 0.5)))
+         (offset (- local centre))
+         (radius (dot offset offset))
+         (magnitude (expt place-z 9.0))
+         (twinkle (+ 0.74 (* 0.26 (sin (+ (* elapsed 2.3)
+                                          (* place-x 43.0))))))
+         (spread (exp (* -230.0 radius))))
+    (* magnitude (* twinkle spread))))
+
+(define-shader-function night-sky-radiance
+    (ray celestial elevation moon celestial-moon night-vector parameters
+     elapsed)
+  "Stars, the galaxy, and the moon along RAY, before clouds cover them.
+
+CELESTIAL and CELESTIAL-MOON are RAY and the moon's direction MOON turned
+back among the fixed stars;
+NIGHT-VECTOR's W says how far the sun has sunk, and PARAMETERS carry star
+brightness, moon radiance, moon angular radius, and galaxy strength."
+  (let* ((night (swizzle night-vector :w))
+         (star-brightness (swizzle parameters :x))
+         (moon-radiance (swizzle parameters :y))
+         (moon-radius (swizzle parameters :z))
+         (galaxy-strength (swizzle parameters :w))
+         ;; The galaxy is a great circle of the sky, so one fixed axis and the
+         ;; ray's distance from its plane is the whole band.  The axis leans
+         ;; toward the celestial pole, so the band arches high over the late
+         ;; evening rather than lying along the horizon haze.
+         (galaxy-axis (vec3 -0.74 -0.09 0.67))
+         (galaxy-distance (dot celestial galaxy-axis))
+         (galaxy-band (exp (* -20.0 (* galaxy-distance galaxy-distance))))
+         (galaxy-structure
+           (+ (* (paper-noise (* celestial 15.0)) 0.58)
+              (* (paper-noise (* celestial 44.0)) 0.42)))
+         (galaxy
+           (* galaxy-band
+              (* (+ 0.10 (* 1.25 galaxy-structure))
+                 ;; A dust lane is the band's own darkness, not an absence of
+                 ;; stars, so it multiplies rather than subtracts.
+                 (- 1.0 (* 0.55 (smoothstep 0.42 0.66
+                                            (paper-noise
+                                             (* celestial 7.0))))))))
+         (star-visibility (* night (smoothstep -0.02 0.14 elevation)))
+         (stars
+           (* (night-star-light celestial elapsed)
+              (* star-brightness
+                 (* star-visibility (+ 1.0 (* 1.6 galaxy-band))))))
+         (starred
+           (+ (* (vec3 0.60 0.66 0.94)
+                 (* galaxy (* star-visibility (* 0.17 galaxy-strength))))
+              (* (vec3 0.92 0.94 1.0) stars)))
+         ;; The moon rides opposite the sun, always full.  Its disc is drawn
+         ;; a few times its true size and far above white for the bloom.
+         (moon-alignment (dot ray moon))
+         (moon-limb (* 0.5 (* moon-radius moon-radius)))
+         (moon-disc
+           (smoothstep (- 1.0 moon-limb) (- 1.0 (* 0.80 moon-limb))
+                       moon-alignment))
+         ;; The ray's offset across the moon's own direction, in units of its
+         ;; radius, is the disc's face, which the maria are painted on.  It
+         ;; is measured among the fixed stars, so the maria keep their places
+         ;; on the disc as the moon crosses the sky.
+         (moon-face
+           (/ (- celestial (* celestial-moon moon-alignment))
+              (max 0.0001 moon-radius)))
+         ;; Broad dark seas with a little finer mottling, cut with a soft
+         ;; threshold so they read as patches on the bright highlands even
+         ;; where the tone curve has compressed the disc toward white.
+         (maria-field
+           (+ (* (paper-noise (+ (* moon-face 1.6) (vec3 13.0 5.0 9.0))) 0.72)
+              (* (paper-noise (+ (* moon-face 4.3) (vec3 2.0 17.0 4.0)))
+                 0.28)))
+         (moon-maria (smoothstep 0.44 0.60 maria-field))
+         (moon-shape
+           (* (- 1.0 (* 0.56 moon-maria))
+              (- 1.0 (* 0.25 (clamp (dot moon-face moon-face) 0.0 1.0)))))
+         (moon-glow
+           (+ (* (expt (max 0.0 moon-alignment) 2400.0) 0.10)
+              (* (expt (max 0.0 moon-alignment) 260.0) 0.035)))
+         (moon-up (smoothstep -0.01 0.01 elevation))
+         (lunar
+           (* (vec3 0.94 0.95 1.0)
+              (* (* moon-up (mix 0.55 1.0 night))
+                 (+ (* moon-disc (* moon-radiance moon-shape))
+                    moon-glow)))))
+    (+ starred lunar)))
+
 (define-shader-function painted-sky-radiance
     (ray eye sun-vector sun-color-vector zenith-vector horizon-vector
-     fog-vector parameters)
-  "Return the HDR sky radiance along RAY before exposure or grading."
+     fog-vector parameters moon-vector pole-vector night-parameters)
+  "Return the HDR sky radiance along RAY before exposure or grading.
+
+The sun lanes carry the key light, which is the moon at night.  Every solar
+term drawn from them is weighted by the day factor, which is zero by then;
+the cloud deck's self-shadow is not, so the moon lights the clouds' faces."
   (let* ((ray (representation ray))
          (eye (swizzle (representation eye) :xyz))
          (sun (normalize (swizzle (representation sun-vector) :xyz)))
@@ -116,6 +239,16 @@
                  (* tight (+ 0.014 (* 0.055 low-sun))))
               (* day-factor (mix 0.70 1.60 haze))))
          (scattered (+ hazed (* halo-tint halo)))
+         ;; --- the night --------------------------------------------------
+         (moon (normalize (swizzle (representation moon-vector) :xyz)))
+         (pole (swizzle (representation pole-vector) :xyz))
+         (sky-turn (swizzle (representation pole-vector) :w))
+         (nightly
+           (+ scattered
+              (night-sky-radiance
+               ray (celestial-ray ray pole sky-turn) elevation moon
+               (celestial-ray moon pole sky-turn)
+               (representation moon-vector) night-parameters elapsed)))
          ;; --- the cloud deck ---------------------------------------------
          ;; A plane at a fixed world height, so the ray meets it farther out
          ;; the closer it runs to level and turning the head never slides it.
@@ -159,7 +292,7 @@
            (* (* (+ cloud-body silver) night-tint) (max day-factor 0.06)))
          (cloud-reach (smoothstep 0.010 0.11 elevation))
          (clouded
-           (mix scattered (mix hazed cloud-color cloud-reach)
+           (mix nightly (mix hazed cloud-color cloud-reach)
                 (* cloud-density 0.94)))
          ;; --- the ground half --------------------------------------------
          (aerial (aerial-perspective-color fog-color ray sun day-factor))
@@ -197,7 +330,7 @@
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))
      :resources ((camera-state :uniform-block :binding 0
-                  :members #.(scene-uniform-prefix 30))))
+                  :members #.(scene-uniform-prefix 34))))
   (let* ((ray (sky-view-ray ndc camera-right camera-up camera-forward
                             camera-projection
                             (swizzle (representation render-parameters) :z)))
@@ -205,7 +338,8 @@
            (painted-sky-radiance
             ray camera-position sun-vector sun-color-vector
             zenith-color-vector horizon-color-vector fog-color-vector
-            atmosphere-parameters)))
+            atmosphere-parameters moon-vector celestial-pole-vector
+            night-parameters)))
     (set-output color-output (vec4 (representation radiance) 1.0))))
 
 (define-live-shader sky-temporal-fragment-specification
@@ -214,7 +348,7 @@
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 0
-                  :members #.(scene-uniform-prefix 30))))
+                  :members #.(scene-uniform-prefix 34))))
   (let* ((divisor (swizzle (representation render-parameters) :z))
          ;; The fullscreen triangle itself cannot move. Reconstruct the ray at
          ;; the same jittered sample location as geometry, as the original
@@ -228,7 +362,8 @@
            (painted-sky-radiance
             ray camera-position sun-vector sun-color-vector
             zenith-color-vector horizon-color-vector fog-color-vector
-            atmosphere-parameters))
+            atmosphere-parameters moon-vector celestial-pole-vector
+            night-parameters))
          (previous-z
            (representation
             (dot ray (swizzle previous-camera-forward :xyz))))
