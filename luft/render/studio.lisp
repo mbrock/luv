@@ -1360,7 +1360,7 @@ before the operation boundary, or it would encode through resources which the
     ((index 'integer))
   (select-viewer-material (viewer-command-viewer) index))
 
-(loop for key in '(:1 :2 :3 :4) for index from 0
+(loop for key in '(:1 :2 :3 :4 :5 :6 :7) for index from 0
       do (let ((index index))
            (clim:add-keystroke-to-command-table
             'luft-atelier (list key) :function

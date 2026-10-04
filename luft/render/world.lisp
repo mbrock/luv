@@ -152,24 +152,54 @@ upland instead of repeating one periodic profile."
 (defun large-world-road-height (x)
   (+ 15 (round (* 0.004d0 x))))
 
+;;; The natural ground is Luvcraft's alpine relief (luvcraft/terrain.lisp),
+;;; read through the same hash and value noise, so seed 121 raises the same
+;;; ranges in both worlds.  A broad mask gathers ridged peaks into ranges
+;;; with open lowland between them; narrow ravines cut through everything.
+;;; What made the older composition flat was not its height but its slope:
+;;; its one ridge rose over 260 cells, so no ground anywhere climbed two
+;;; cells per cell, where the alpine relief has cliffs at walking scale.
+
+(defparameter *large-world-relief-height* 88.0d0
+  "Cells spanned by the alpine relief's unit height.  Lowland sits near 17.")
+
+(defparameter *alpine-snow-line* 0.60d0
+  "Relief fraction above which gentle ground carries snow.")
+
+(defparameter *alpine-tree-line* 0.42d0
+  "Relief fraction above which the surface is bare rock.")
+
+(defparameter *alpine-beach-level* 0.13d0
+  "Relief fraction at or below which the surface is sand.")
+
+(defun alpine-landscape-relief (x y seed)
+  "The alpine surface at X,Y as a fraction of the relief height."
+  (flet ((noise (period salt) (landscape-value-noise x y period seed salt)))
+    (let* ((lowland (+ 0.19d0
+                       (* 0.050d0 (noise 96 0))
+                       (* 0.028d0 (noise 28 1))
+                       (* 0.012d0 (noise 11 2))))
+           (range (landscape-ramp 0.08d0 0.42d0
+                                  (+ (noise 176 3) (* 0.35d0 (noise 72 6)))))
+           (ridge (- 1.0d0 (abs (noise 44 4))))
+           (crag (- 1.0d0 (abs (noise 18 5))))
+           (mountain (* range
+                        (+ 0.10d0 (* 0.42d0 ridge ridge) (* 0.12d0 crag)
+                           (* 0.03d0 (noise 7 8)))))
+           (ravine (* 0.12d0
+                      (landscape-ramp 0.92d0 0.985d0
+                                      (- 1.0d0 (abs (noise 90 7)))))))
+      (- (+ lowland mountain) ravine))))
+
 (defun large-world-terrain-height (source x y)
-  "Deterministic composed terrain under the route, river, pass, and citadel."
+  "Deterministic composed terrain under the route, river, and citadel."
   (let* ((seed (authored-world-source-seed source))
-         (detail (+ (* 3.2d0 (landscape-value-noise x y 97 seed 2))
-                    (* 1.5d0 (landscape-value-noise x y 31 seed 3))))
+         (natural (* *large-world-relief-height*
+                     (alpine-landscape-relief x y seed)))
          (road-y (large-world-road-centre-y x))
          (road-distance (abs (- y road-y)))
          (river-x (large-world-river-centre-x y))
          (river-distance (abs (- x river-x)))
-         (ridge-distance (abs (- x 970.0d0)))
-         (pass-distance (abs (- y (large-world-road-centre-y 970))))
-         (ridge (* 31.0d0
-                   (max 0.0d0 (- 1.0d0 (/ ridge-distance 260.0d0)))
-                   (min 1.0d0 (/ pass-distance 95.0d0))))
-         (highlands (* 9.0d0
-                       (max 0.0d0
-                            (landscape-value-noise x y 311 seed 11))))
-         (natural (+ 17.0d0 detail ridge highlands))
          (river-bed (- natural
                        (* 12.0d0
                           (expt (max 0.0d0
@@ -177,9 +207,8 @@ upland instead of repeating one periodic profile."
                                 2))))
          (road-height (large-world-road-height x))
          ;; Keep the masonry road itself level enough to walk and feather its
-         ;; broad verge into natural terrain. The former seven-cell linear cut
-         ;; produced a narrow stepped trench which looked and played like a
-         ;; river gorge at the default spawn.
+         ;; broad verge into natural terrain. Through a range the verge is a
+         ;; cutting, which is what a road through mountains looks like.
          (road-blend
            (smooth-landscape-reading
             (max 0.0d0 (min 1.0d0 (/ (- 14.0d0 road-distance) 8.0d0)))))
@@ -191,6 +220,39 @@ upland instead of repeating one periodic profile."
     (max 3 (min 92
                 (round (interpolate-landscape-reading
                         routed 23.0d0 citadel-blend))))))
+
+(defun large-world-surface-slope (source x y height)
+  "The largest height step between X,Y's HEIGHT and its four neighbours."
+  (loop for (dx dy) in '((-1 0) (1 0) (0 -1) (0 1))
+        maximize (abs (- height (large-world-terrain-height
+                                 source (+ x dx) (+ y dy))))))
+
+(defun large-world-column-placement (source x y z height slope)
+  "Return the source placement of cell X,Y,Z in a column HEIGHT cells tall.
+
+The surface reads altitude and steepness as Luvcraft's alpine relief does:
+slate cliffs, snow over rock on gentle high ground, bare rock above the tree
+line and on steps, sand at the shore, and earth (grass-topped) elsewhere."
+  (let* ((top (1- height))
+         (depth (- top z))
+         (level (/ height *large-world-relief-height*)))
+    (cond
+      ((and (= depth 0)
+            (<= (abs (- y (large-world-road-centre-y x))) 3.0d0))
+       *sanctuary-material-placement*)
+      ((and (= depth 0)
+            (<= (abs (- x (large-world-river-centre-x y))) 8.0d0))
+       *highland-rock-material-placement*)
+      ((> depth 3) *terrain-material-placement*)
+      ((>= slope 4) *slate-material-placement*)
+      ((and (>= level *alpine-snow-line*) (<= slope 2))
+       (if (= depth 0)
+           *snow-material-placement*
+           *highland-rock-material-placement*))
+      ((or (>= level *alpine-tree-line*) (>= slope 2))
+       *highland-rock-material-placement*)
+      ((<= level *alpine-beach-level*) *sand-material-placement*)
+      (t *terrain-material-placement*))))
 
 (defun large-world-citadel-cell-p (x y z)
   "Whether X/Y/Z is authored limestone in the eastern destination."
@@ -219,23 +281,12 @@ upland instead of repeating one periodic profile."
 (defun large-world-base-placement
     (source x y z &key (height (large-world-terrain-height source x y)))
   "Return the source-owned placement at one cell, or NIL for authored air."
-  (let* ((top (1- height))
-         (road-p (<= (abs (- y (large-world-road-centre-y x))) 3.0d0))
-         (river-p
-           (<= (abs (- x (large-world-river-centre-x y))) 8.0d0)))
-    (cond
-      ((large-world-citadel-cell-p x y z)
-       *sanctuary-material-placement*)
-      ((>= z height) nil)
-      ((and (= z top) road-p) *sanctuary-material-placement*)
-      ((and (= z top) river-p) *highland-rock-material-placement*)
-      ((and (>= z (- top 3))
-            (or (> height 31)
-                (>= (abs (- height
-                            (large-world-terrain-height source (1+ x) y)))
-                    2)))
-       *highland-rock-material-placement*)
-      (t *terrain-material-placement*))))
+  (cond
+    ((large-world-citadel-cell-p x y z) *sanctuary-material-placement*)
+    ((>= z height) nil)
+    (t (large-world-column-placement
+        source x y z height
+        (large-world-surface-slope source x y height)))))
 
 (defun authored-world-edit-at (source cell)
   "Return a sparse edited placement and whether SOURCE owns an edit at CELL."
@@ -264,38 +315,28 @@ upland instead of repeating one periodic profile."
          (y1 (min (+ y0 luft:+chunk-size+)
                   (luft:world-domain-y-limit domain)))
          (vocabulary (make-scene-material-vocabulary))
-         (terrain-offset
-           (domains:identity-vocabulary-offset
-            vocabulary *terrain-material-placement*))
-         (rock-offset
-           (domains:identity-vocabulary-offset
-            vocabulary *highland-rock-material-placement*))
          (limestone-offset
            (domains:identity-vocabulary-offset
             vocabulary *sanctuary-material-placement*))
-         (materials (make-hash-table :test #'eql :size 100000)))
+         (materials (make-hash-table :test #'eql :size 100000))
+         (offsets (make-hash-table :test #'eq))
+         (offset
+           (lambda (placement)
+             (or (gethash placement offsets)
+                 (setf (gethash placement offsets)
+                       (domains:identity-vocabulary-offset
+                        vocabulary placement))))))
     (zone :luft/generate-source-materials
       (loop for x from x0 below x1 do
         (loop for y from y0 below y1 do
           (let* ((height (large-world-terrain-height source x y))
-                 (top (1- height))
-                 (road-p
-                   (<= (abs (- y (large-world-road-centre-y x))) 3.0d0))
-                 (river-p
-                   (<= (abs (- x (large-world-river-centre-x y))) 8.0d0))
-                 (rock-p
-                   (or (> height 31)
-                       (>= (abs (- height
-                                   (large-world-terrain-height source (1+ x) y)))
-                           2))))
+                 (slope (large-world-surface-slope source x y height)))
             (dotimes (z height)
               (setf (gethash
                      (luft:make-site domain x y z luft:+cell-extent+ 1)
                      materials)
-                    (cond ((and (= z top) road-p) limestone-offset)
-                          ((and (= z top) river-p) rock-offset)
-                          ((and rock-p (>= z (- top 3))) rock-offset)
-                          (t terrain-offset))))
+                    (funcall offset (large-world-column-placement
+                                     source x y z height slope))))
             (when (and (<= (abs (- x 1500)) 45)
                        (<= (abs (- y 650)) 45))
               (loop for z from 24 to 47

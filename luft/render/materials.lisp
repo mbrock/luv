@@ -42,6 +42,12 @@
 (defvar *sanctuary-material-placement* nil)
 (defvar *beacon-material-placement* nil)
 (defvar *crystal-material-placement* nil)
+(defvar *snow-material* nil)
+(defvar *slate-material* nil)
+(defvar *sand-material* nil)
+(defvar *snow-material-placement* nil)
+(defvar *slate-material-placement* nil)
+(defvar *sand-material-placement* nil)
 
 (setf *earth-material*
       (ensure-semantic-instance
@@ -88,7 +94,35 @@
       *crystal-material-placement*
       (ensure-semantic-instance
        *crystal-material-placement* 'material-placement
-       :name :aether-crystal :kind *crystal-material*))
+       :name :aether-crystal :kind *crystal-material*)
+      ;; The alpine relief's surfaces: snow lies on gentle ground above the
+      ;; snow line over rock, slate faces the cliffs, sand the lowest shores.
+      *snow-material*
+      (ensure-semantic-instance
+       *snow-material* 'material-kind
+       :name :snow :base-tone '(0.80 0.83 0.86)
+       :top-tone '(0.86 0.89 0.92)
+       :side-tone '(0.62 0.65 0.68))
+      *slate-material*
+      (ensure-semantic-instance
+       *slate-material* 'material-kind
+       :name :slate :base-tone '(0.17 0.19 0.21))
+      *sand-material*
+      (ensure-semantic-instance
+       *sand-material* 'material-kind
+       :name :sand :base-tone '(0.66 0.57 0.36))
+      *snow-material-placement*
+      (ensure-semantic-instance
+       *snow-material-placement* 'material-placement
+       :name :snow :kind *snow-material*)
+      *slate-material-placement*
+      (ensure-semantic-instance
+       *slate-material-placement* 'material-placement
+       :name :slate :kind *slate-material*)
+      *sand-material-placement*
+      (ensure-semantic-instance
+       *sand-material-placement* 'material-placement
+       :name :sand :kind *sand-material*))
 
 (defun make-scene-material-vocabulary ()
   "Return the authored placement vocabulary shared by one scene's cells."
@@ -96,7 +130,11 @@
    :members (list *terrain-material-placement*
                   *highland-rock-material-placement*
                   *sanctuary-material-placement*
-                  *crystal-material-placement*)
+                  *crystal-material-placement*
+                  ;; Appended, so the four older placements keep their codes.
+                  *snow-material-placement*
+                  *slate-material-placement*
+                  *sand-material-placement*)
    :limit #xff))
 
 (defun material-kind-oriented-tones (kind)
