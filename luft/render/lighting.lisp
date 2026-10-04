@@ -9,10 +9,21 @@
 
 (defclass light ()
   ((name :initarg :name :reader light-name)
-   (sun-direction :initarg :sun-direction :reader light-sun-direction)
-   (sun-color :initarg :sun-color :reader light-sun-color)
-   (sky-color :initarg :sky-color :reader light-sky-color)
-   (ground-color :initarg :ground-color :reader light-ground-color)
+   (sun-direction :initarg :sun-direction :accessor light-sun-direction)
+   (sun-color :initarg :sun-color :accessor light-sun-color)
+   (sky-color :initarg :sky-color :accessor light-sky-color
+              :documentation "Ambient radiance arriving from the upper hemisphere.")
+   (ground-color :initarg :ground-color :accessor light-ground-color
+                 :documentation "Ambient radiance bounced up from the ground.")
+   (zenith-color :initarg :zenith-color :initform #(0.16 0.40 0.92)
+                 :accessor light-zenith-color)
+   (horizon-color :initarg :horizon-color :initform #(0.58 0.75 0.96)
+                  :accessor light-horizon-color)
+   (fog-color :initarg :fog-color :initform #(0.46 0.68 0.94)
+              :accessor light-fog-color
+              :documentation "The colour arbitrarily distant land fades into.")
+   (day-factor :initarg :day-factor :initform 1.0 :accessor light-day-factor)
+   (cloudiness :initarg :cloudiness :initform 0.5 :accessor light-cloudiness)
    (shadow-half-extent :initarg :shadow-half-extent
                        :reader light-shadow-half-extent)
    (shadow-depth-radius :initarg :shadow-depth-radius
@@ -22,22 +33,155 @@
    (shadow-filter-radius :initarg :shadow-filter-radius
                          :reader light-shadow-filter-radius))
   (:documentation
-   "One inspectable environment light, packed into raw per-frame GPU lanes."))
+   "One inspectable environment light, packed into raw per-frame GPU lanes.
+
+The sky clock rewrites its sun and atmosphere slots every frame from the day
+profile; the shadow slots are authored constants."))
 
 (defvar *light* nil)
 
 (setf *light*
       (ensure-semantic-instance
        *light* 'light
-       :name :dusk
-       :sun-direction (vec3-normalize (make-vec3 -0.72 0.43 0.22))
-       :sun-color #(1.85 0.82 0.38 0.92)
-       :sky-color #(0.065 0.095 0.23 1.0)
-       :ground-color #(0.23 0.115 0.16 1.0)
+       :name :day
+       :sun-direction (vec3-normalize (make-vec3 -0.72 0.43 0.62))
+       :sun-color #(1.85 1.62 1.30 1.0)
+       :sky-color #(0.30 0.42 0.62 1.0)
+       :ground-color #(0.22 0.17 0.12 1.0)
        :shadow-half-extent 96.0
        :shadow-depth-radius 160.0
-       :shadow-base-bias 0.00075
-       :shadow-filter-radius 5.0))
+       :shadow-base-bias 0.0006
+       :shadow-filter-radius 1.25))
+
+;;; ---------------------------------------------------------------------------
+;;; The day clock
+;;;
+;;; Luft's sky is one continuous environment evaluated once per frame: a clock
+;;; gives the hour, a cyclic keyframe profile gives the colours, and the sun
+;;; moves on a tilted circle so it is never quite overhead.  This is Luvcraft's
+;;; sky model (luvcraft/sky.lisp) restated for Luft's Z-up lattice, with the
+;;; colours re-balanced for paper: a softer, warmer sun and an airy blue
+;;; ambient so that lit and shaded faces stay distinct planes of colour.
+
+(defparameter *sky-hour* 15.5
+  "Time of day in hours, 0 to 24.  Half past three is a warm afternoon.")
+
+(defparameter *sky-minutes-per-day* nil
+  "Real minutes per full day while the clock runs, or NIL for a still sky.")
+
+(defparameter *sky-sun-orbit-tilt* 0.44
+  "How far the solar orbit leans out of the vertical plane.")
+
+(defparameter *sky-sunset-azimuth* (make-vec3 0.0 1.0 0.0)
+  "The horizontal direction the sun sets toward; it rises opposite.")
+
+(defvar *sky-elapsed* 0.0
+  "Real seconds the sky has run; drifts the cloud decks.")
+
+(defun advance-sky-clock (seconds)
+  "Advance *SKY-HOUR* by SECONDS of real time while the clock runs."
+  (setf *sky-elapsed* (mod (+ *sky-elapsed* seconds) 3600.0))
+  (when (and *sky-minutes-per-day* (plusp *sky-minutes-per-day*))
+    (setf *sky-hour*
+          (mod (+ *sky-hour* (/ (* 24.0 seconds)
+                                (* 60.0 *sky-minutes-per-day*)))
+               24.0)))
+  *sky-hour*)
+
+(defun sky-sun-direction (hour)
+  "The unit sun direction at HOUR: rising at six, highest at noon."
+  (let* ((angle (coerce (* 2.0 pi (- (/ hour 24.0) 0.25)) 'single-float))
+         (setting *sky-sunset-azimuth*)
+         ;; The tilt axis is horizontal and across the orbit.
+         (across (vec3-cross (make-vec3 0.0 0.0 1.0) setting))
+         (along (- (cos angle)))
+         (height (sin angle))
+         (tilt *sky-sun-orbit-tilt*))
+    (vec3-normalize
+     (make-vec3 (+ (* along (vec3-x setting)) (* tilt (vec3-x across)))
+                (+ (* along (vec3-y setting)) (* tilt (vec3-y across)))
+                (coerce height 'single-float)))))
+
+(defstruct (sky-keyframe (:constructor make-sky-keyframe
+                             (hour zenith horizon sun sky ground fog
+                              &optional (cloudiness 0.5))))
+  "One hour's atmosphere: dome colours, sun, two ambient lobes, and haze."
+  hour zenith horizon sun sky ground fog cloudiness)
+
+(defparameter *sky-profile*
+  (list
+   ;;                  hour  zenith              horizon             sun
+   ;;                        sky ambient         ground bounce       fog
+   (make-sky-keyframe 0.0  '(0.006 0.010 0.032) '(0.020 0.028 0.070) '(0.0 0.0 0.0)
+                      '(0.050 0.065 0.130) '(0.020 0.020 0.030) '(0.018 0.026 0.062) 0.45)
+   (make-sky-keyframe 5.0  '(0.022 0.034 0.095) '(0.090 0.080 0.130) '(0.42 0.16 0.07)
+                      '(0.090 0.100 0.180) '(0.050 0.040 0.050) '(0.070 0.065 0.100) 0.50)
+   (make-sky-keyframe 6.7  '(0.07 0.19 0.52) '(0.52 0.44 0.52) '(1.75 0.86 0.45)
+                      '(0.26 0.27 0.38) '(0.20 0.13 0.10) '(0.50 0.40 0.40) 0.56)
+   (make-sky-keyframe 9.0  '(0.18 0.40 0.86) '(0.60 0.74 0.92) '(1.80 1.60 1.32)
+                      '(0.22 0.33 0.58) '(0.24 0.17 0.11) '(0.52 0.66 0.86) 0.50)
+   (make-sky-keyframe 12.0 '(0.16 0.38 0.88) '(0.58 0.74 0.94) '(1.85 1.72 1.50)
+                      '(0.22 0.34 0.62) '(0.25 0.18 0.12) '(0.50 0.66 0.88) 0.44)
+   (make-sky-keyframe 15.0 '(0.17 0.38 0.84) '(0.66 0.74 0.88) '(1.95 1.60 1.18)
+                      '(0.22 0.33 0.58) '(0.27 0.18 0.11) '(0.60 0.66 0.80) 0.50)
+   (make-sky-keyframe 17.3 '(0.09 0.17 0.45) '(0.62 0.46 0.46) '(2.10 0.95 0.42)
+                      '(0.26 0.25 0.36) '(0.24 0.13 0.09) '(0.62 0.42 0.38) 0.58)
+   (make-sky-keyframe 19.0 '(0.030 0.045 0.115) '(0.120 0.105 0.150) '(0.35 0.13 0.06)
+                      '(0.100 0.100 0.180) '(0.050 0.035 0.040) '(0.090 0.080 0.115) 0.50)
+   (make-sky-keyframe 21.6 '(0.006 0.010 0.032) '(0.020 0.028 0.070) '(0.0 0.0 0.0)
+                      '(0.050 0.065 0.130) '(0.020 0.020 0.030) '(0.018 0.026 0.062) 0.45))
+  "Cyclic keyframes over the day, sorted by hour.")
+
+(defun sky-keyframes-around (hour)
+  "Return the bracketing keyframes of *SKY-PROFILE* and the progress between."
+  (let* ((keys *sky-profile*)
+         (count (length keys)))
+    (loop for index below count
+          for start = (nth index keys)
+          for end = (nth (mod (1+ index) count) keys)
+          for span = (mod (- (sky-keyframe-hour end) (sky-keyframe-hour start)) 24.0)
+          for offset = (mod (- hour (sky-keyframe-hour start)) 24.0)
+          when (and (plusp span) (< offset span))
+            return (values start end (/ offset span))
+          finally (return (values (first keys) (first keys) 0.0)))))
+
+(defun %sky-smoothstep (edge0 edge1 value)
+  (let ((x (max 0.0 (min 1.0 (/ (- value edge0) (- edge1 edge0))))))
+    (* x x (- 3.0 (* 2.0 x)))))
+
+(defun update-light-from-sky (light hour)
+  "Rewrite LIGHT's sun and atmosphere for HOUR from *SKY-PROFILE*."
+  (multiple-value-bind (start end progress) (sky-keyframes-around hour)
+    (flet ((blend (reader &optional (fourth 1.0))
+             (let ((from (funcall reader start)) (to (funcall reader end)))
+               (concatenate
+                'vector
+                (mapcar (lambda (a b) (coerce (+ a (* (- b a) progress)) 'single-float))
+                        from to)
+                (list fourth)))))
+      (let ((sun (sky-sun-direction hour)))
+        (setf (light-sun-direction light) sun
+              (light-day-factor light)
+              (coerce (%sky-smoothstep -0.06 0.16 (vec3-z sun)) 'single-float)
+              (light-sun-color light) (blend #'sky-keyframe-sun)
+              (light-sky-color light) (blend #'sky-keyframe-sky)
+              (light-ground-color light) (blend #'sky-keyframe-ground)
+              (light-zenith-color light) (blend #'sky-keyframe-zenith)
+              (light-horizon-color light) (blend #'sky-keyframe-horizon)
+              (light-fog-color light) (blend #'sky-keyframe-fog)
+              (light-cloudiness light)
+              (coerce (+ (sky-keyframe-cloudiness start)
+                         (* (- (sky-keyframe-cloudiness end)
+                               (sky-keyframe-cloudiness start))
+                            progress))
+                      'single-float)))))
+  light)
+
+(defun current-light ()
+  "Return *LIGHT* evaluated at the current sky hour."
+  (update-light-from-sky *light* *sky-hour*))
+
+(update-light-from-sky *light* *sky-hour*)
 
 (defun light-shadow-rows (light center)
   "Return a texel-stable orthographic world-to-shadow transform.
@@ -90,6 +234,46 @@ texel."
      (list (/ +shadow-map-size+) (/ +shadow-map-size+)
            (light-shadow-base-bias light)
            (light-shadow-filter-radius light)))))
+
+;;; The lens and atmosphere.  Bloom and shafts run on exposed scene-linear
+;;; light after temporal reconstruction; the grade follows in presentation.
+
+(defparameter *bloom-gain* 0.16
+  "How much of the blurred bright-pass image is added back in exposed light.")
+
+(defparameter *bloom-threshold* 1.1
+  "Exposed luminance at which a pixel starts feeding the bloom chain.")
+
+(defparameter *shaft-gain* 0.28
+  "Strength of the radial sun shafts gathered from the bright image.")
+
+(defparameter *shaft-decay* 0.955
+  "Per-tap attenuation along a sun shaft; nearer one reaches further.")
+
+(defparameter *vignette* 0.22
+  "Corner falloff of the presented frame, as a fraction of full brightness.")
+
+(defparameter *paper-grain* 0.035
+  "Strength of the fixed paper fibre texture laid over the graded frame.")
+
+(defparameter *haze-density* 0.0045
+  "Aerial-perspective extinction per cell of view distance near the ground.")
+
+(defparameter *haze-height* 0.018
+  "Exponential falloff of the haze with world height, per cell.")
+
+(defun atmosphere-uniform-data (light &optional (elapsed 0.0))
+  "Return the five vec4 lanes for the sky dome, haze, and lens chain.
+
+ELAPSED drifts the cloud decks; it wraps hourly to stay precise."
+  (flet ((colour (value fourth)
+           (list (aref value 0) (aref value 1) (aref value 2) fourth)))
+    (append
+     (colour (light-zenith-color light) (light-day-factor light))
+     (colour (light-horizon-color light) (light-cloudiness light))
+     (colour (light-fog-color light) *haze-density*)
+     (list *bloom-gain* *bloom-threshold* *shaft-gain* *shaft-decay*)
+     (list (mod elapsed 3600.0) *vignette* *paper-grain* *haze-height*))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Realized torch light

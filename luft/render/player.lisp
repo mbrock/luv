@@ -1015,7 +1015,8 @@ that he is standing on something."
          (sampled-shadow
            (soft-shadow-visibility shadow-map shadow-sampler
                                    player-shadow-sample normal sun
-                                   (representation shadow-control)))
+                                   (representation shadow-control)
+                                   shadow-row-x shadow-row-y shadow-row-z))
          (direct-visibility
            (mix 1.0 sampled-shadow
                 (smoothstep 0.03 0.18 (max 0.0 facing))))
@@ -1067,7 +1068,8 @@ that he is standing on something."
                    (swizzle deck-clip :z))
              :quantity quantities:shadow-coordinate :unit :one)
             (vec3 0.0 0.0 1.0) sun
-            (representation shadow-control)))
+            (representation shadow-control)
+            shadow-row-x shadow-row-y shadow-row-z))
          (contact
            (* (* (player-contact-shade origin ray center sun deck-height)
                  deck-lit)

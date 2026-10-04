@@ -191,11 +191,39 @@ for completely static geometry."
     (vec4 (dot point row-x) (dot point row-y)
           (dot point row-z) (dot point row-w))))
 
+;;; Shadow filtering.  The sun's orthographic depth map is compared over a
+;;; small grid of hardware-filtered taps.  A constant or slope-scaled bias
+;;; cannot serve a wide filter: a tap one texel toward the sun reads the depth
+;;; of the receiver's own plane a little nearer the light, and a low sun turns
+;;; that into acne stripes and a permanent half-shadow on every slope.  The
+;;; receiver plane is known exactly, so each tap compares against the plane's
+;;; own depth at that tap instead.
+
+(define-shader-function receiver-depth-gradient (normal row-x row-y row-z)
+  "Return d(shadow depth)/d(shadow uv) across the receiver plane of NORMAL.
+
+The light rows are orthogonal, so a displacement in the plane is solved in
+closed form from its two map coordinates."
+  (let* ((rx (swizzle row-x :xyz))
+         (ry (swizzle row-y :xyz))
+         (rz (swizzle row-z :xyz))
+         (along-z (dot normal rz))
+         ;; Lit receivers face the light, so their forward component is
+         ;; negative.  Grazing planes are clamped; their direct light is
+         ;; already vanishing.
+         (safe-z (min along-z (* -0.08 (sqrt (dot rz rz)))))
+         (scale (/ (* -2.0 (dot rz rz)) safe-z))
+         (gradient
+           (vec2 (/ (* scale (dot normal rx)) (dot rx rx))
+                 (/ (* scale (dot normal ry)) (dot ry ry)))))
+    (clamp gradient (vec2 -4.0 -4.0) (vec2 4.0 4.0))))
+
 (define-shader-function soft-shadow-visibility
-    (shadow-map shadow-sampler shadow-sample normal sun shadow-control)
-  "Five comparison-filtered taps forming one restrained paper-soft shadow."
-  ;; Comparison sampling combines a projective coordinate, slope bias, and
-  ;; integer filter radius.  Their interface meanings are checked; the fixed
+    (shadow-map shadow-sampler shadow-sample normal sun shadow-control
+     row-x row-y row-z)
+  "Nine receiver-plane comparison taps forming one paper-soft sun shadow."
+  ;; Comparison sampling combines a projective coordinate, plane bias, and
+  ;; filter radius.  Their interface meanings are checked; the fixed
   ;; comparison-filter program is the explicit representation seam.
   (let* ((shadow-sample (representation shadow-sample))
          (uv (swizzle shadow-sample :xy))
@@ -206,27 +234,130 @@ for completely static geometry."
            (* (step 0.0 u) (step u 1.0)
               (step 0.0 v) (step v 1.0)
               (step 0.0 depth) (step depth 1.0)))
-         (facing (max 0.0 (dot normal sun)))
+         (texel (swizzle shadow-control :xy))
+         (gradient (receiver-depth-gradient normal row-x row-y row-z))
+         ;; The hardware comparison filter spans one more texel than the tap
+         ;; centre; allow the plane that much slack, plus the authored bias.
          (bias (+ (swizzle shadow-control :z)
-                  (* 0.00125 (- 1.0 facing))))
-         (radius (* (swizzle shadow-control :xy)
-                    (swizzle shadow-control :w)))
+                  (* (abs (swizzle gradient :x)) (swizzle texel :x))
+                  (* (abs (swizzle gradient :y)) (swizzle texel :y))))
+         (step-uv (* texel (swizzle shadow-control :w)))
+         (sx (swizzle step-uv :x))
+         (sy (swizzle step-uv :y))
+         (gx (* (swizzle gradient :x) sx))
+         (gy (* (swizzle gradient :y) sy))
+         (reference (- depth bias))
          (visibility
-           (/ (+ (sample-compare shadow-map shadow-sampler uv (- depth bias))
+           (/ (+ (sample-compare shadow-map shadow-sampler uv reference)
                  (sample-compare shadow-map shadow-sampler
-                                 (+ uv (vec2 (swizzle radius :x) 0.0))
-                                 (- depth bias))
+                                 (+ uv (vec2 sx 0.0)) (+ reference gx))
                  (sample-compare shadow-map shadow-sampler
-                                 (- uv (vec2 (swizzle radius :x) 0.0))
-                                 (- depth bias))
+                                 (- uv (vec2 sx 0.0)) (- reference gx))
                  (sample-compare shadow-map shadow-sampler
-                                 (+ uv (vec2 0.0 (swizzle radius :y)))
-                                 (- depth bias))
+                                 (+ uv (vec2 0.0 sy)) (+ reference gy))
                  (sample-compare shadow-map shadow-sampler
-                                 (- uv (vec2 0.0 (swizzle radius :y)))
-                                 (- depth bias)))
-              5.0)))
+                                 (- uv (vec2 0.0 sy)) (- reference gy))
+                 (sample-compare shadow-map shadow-sampler
+                                 (+ uv (vec2 sx sy)) (+ reference (+ gx gy)))
+                 (sample-compare shadow-map shadow-sampler
+                                 (- uv (vec2 sx sy)) (- reference (+ gx gy)))
+                 (sample-compare shadow-map shadow-sampler
+                                 (+ uv (vec2 sx (- sy))) (+ reference (- gx gy)))
+                 (sample-compare shadow-map shadow-sampler
+                                 (- uv (vec2 sx (- sy))) (- reference (- gx gy))))
+              9.0)))
     (mix 1.0 visibility in-bounds)))
+
+;;; The atmosphere shared by sky and ground.  Distant terrain and the sky's
+;;; own lower half must arrive at the same colour, or the edge of the
+;;; resident world draws itself as a line.  Both ask AERIAL-PERSPECTIVE-COLOR.
+
+(define-shader-function henyey-greenstein (cosine asymmetry)
+  "The Henyey-Greenstein phase function for a haze of ASYMMETRY at COSINE."
+  (let* ((squared (* asymmetry asymmetry))
+         (denominator
+           (max 0.0001 (- (+ 1.0 squared) (* 2.0 (* asymmetry cosine))))))
+    (/ (- 1.0 squared) (* 12.566371 (* denominator (sqrt denominator))))))
+
+(define-shader-function aerial-perspective-color
+    (fog-color direction sun day-factor)
+  "The colour something arbitrarily far away takes, seen along DIRECTION.
+
+The day's haze colour, warmed and brightened where the ray runs toward the
+sun through the same Henyey-Greenstein glow the sky's halo is made of: a
+ridge against a low sun glows and one with the sun behind stays cool."
+  (let* ((alignment (dot direction sun))
+         (toward (max 0.0 alignment))
+         (low-sun (* day-factor (- 1.0 (smoothstep 0.02 0.45 (swizzle sun :z)))))
+         (glow (henyey-greenstein alignment 0.66))
+         (warm (mix (vec3 1.08 0.80 0.56) (vec3 1.25 0.56 0.30) low-sun)))
+    (+ (* fog-color (- 1.0 (* 0.18 (* low-sun toward))))
+       (* warm (* day-factor
+                  (+ (* glow 0.07)
+                     (* (+ 0.04 (* 0.22 low-sun)) (* toward toward))))))))
+
+(define-shader-function haze-amount (eye point density falloff)
+  "Fraction of a ray from EYE to POINT lost to height-falling haze.
+
+Density decays exponentially with world height, so valleys fill with air
+and summits stand clear.  The optical depth is the closed-form integral of
+that density along the straight ray."
+  (let* ((delta (- point eye))
+         (distance (sqrt (dot delta delta)))
+         (eye-height (max 0.0 (swizzle eye :z)))
+         (rise (* falloff (swizzle delta :z)))
+         (base (exp (* (- falloff) eye-height)))
+         (integral
+           (if (> (abs rise) 0.001)
+               (/ (- 1.0 (exp (- rise))) rise)
+               (- 1.0 (* 0.5 rise))))
+         (depth (* density (* distance (* base integral)))))
+    (- 1.0 (exp (- depth)))))
+
+;;; Paper surfaces.  Lonely Mountains: Downhill reads as cut card under a
+;;; strong soft sun: each facet one flat, slightly irregular tone; lit faces
+;;; warm, shaded faces taking the sky's blue rather than going grey; and
+;;; distance dissolving into air.  The two functions below are those terms,
+;;; shared by terrain and torch bodies so both sit in the same light.
+
+(define-shader-function paper-surface-radiance
+    (tone normal world visibility sun sun-color sky ground)
+  "Scene radiance of a flat paper facet of TONE under the sun and sky."
+  (let* ((upness (swizzle normal :z))
+         ;; Plain Lambert.  Wrapping it past the terminator would let the
+         ;; shadow map's meaningless back-face samples show as stripes.
+         (direct-shape (max 0.0 (dot normal sun)))
+         (direct (* sun-color (* direct-shape visibility)))
+         (ambient (mix ground sky (+ 0.5 (* 0.5 upness))))
+         ;; One fixed hash per cell and orientation gives each facet its own
+         ;; slightly different cut of the same paper; a broad fibre noise
+         ;; keeps large faces from reading as flat vector fills.
+         (cell (floor (- world (* normal 0.25))))
+         (facet (- (paper-hash (+ cell (* normal 7.0))) 0.5))
+         (fibre (- (paper-noise (* world 1.7)) 0.5))
+         (albedo (* tone (+ 1.0 (* 0.06 facet) (* 0.08 fibre)))))
+    (* albedo (+ ambient direct))))
+
+(define-shader-function atmospheric-surface
+    (radiance world eye forward divisor character sun fog zenith parameters)
+  "Fade RADIANCE at WORLD into the aerial colour seen from the eye.
+
+An isometric camera's position is not a place anyone stands, so its haze is
+measured from a virtual eye behind the character along the view instead."
+  (let* ((iso-eye (- (swizzle character :xyz) (* (swizzle forward :xyz) 90.0)))
+         (viewer (mix iso-eye (swizzle eye :xyz) divisor))
+         (delta (- world viewer))
+         (distance (sqrt (dot delta delta)))
+         (direction (/ delta (max distance 0.001)))
+         (haze (haze-amount viewer world (swizzle fog :w)
+                            (swizzle parameters :w)))
+         ;; The last resident chunks must reach the sky's own ground colour
+         ;; exactly, or the edge of the world draws a line on the horizon.
+         (edge (* divisor (smoothstep 180.0 310.0 distance)))
+         (amount (max haze edge))
+         (air (aerial-perspective-color (swizzle fog :xyz) direction sun
+                                        (swizzle zenith :w))))
+    (mix radiance air amount)))
 
 ;;; A small, rounded traveler for the sanctuary bridge.  The proxy is only a
 ;;; conservative raster bound; every visible contour below comes from this
@@ -481,32 +612,31 @@ for completely static geometry."
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 23))
+                  :members #.(scene-uniform-prefix 30))
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
          (sun (representation (swizzle sun-vector :xyz)))
-         (sun-color (representation (swizzle sun-color-vector :xyz)))
-         (sky (representation (swizzle sky-color-vector :xyz)))
-         (ground (representation (swizzle ground-color-vector :xyz)))
-         (upness (swizzle normal :z))
-         (base material-tone)
-         (facing (max 0.0 (dot normal sun)))
          (visibility
            (soft-shadow-visibility
             shadow-map shadow-sampler shadow-sample normal sun
-            (representation shadow-control)))
-         (sky-weight (+ 0.5 (* 0.5 upness)))
-         (ambient (+ (* ground (- 1.0 sky-weight)) (* sky sky-weight)))
+            (representation shadow-control)
+            shadow-row-x shadow-row-y shadow-row-z))
          (radiance
-           (* base (+ (* ambient 0.72)
-                      (* sun-color (* visibility facing)))))
-         (camera-delta
-           (representation
-            (- world-position (swizzle camera-position :xyz))))
-         (distance (sqrt (dot camera-delta camera-delta)))
-         (fog (smoothstep 165.0 300.0 distance))
-         (final (mix radiance sky fog)))
+           (paper-surface-radiance
+            material-tone normal (representation world-position) visibility
+            sun (representation (swizzle sun-color-vector :xyz))
+            (representation (swizzle sky-color-vector :xyz))
+            (representation (swizzle ground-color-vector :xyz))))
+         (final
+           (atmospheric-surface
+            radiance (representation world-position)
+            (representation camera-position) (representation camera-forward)
+            (swizzle (representation render-parameters) :z)
+            (representation character-parameters)
+            sun (representation fog-color-vector)
+            (representation zenith-color-vector)
+            atmosphere-parameters)))
     (set-output color-output (vec4 final 1.0))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))

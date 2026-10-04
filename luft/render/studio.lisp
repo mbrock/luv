@@ -536,8 +536,9 @@ the selector is the whole of the difference."
                       (aref (frame-view-jitter previous) 1))
                 (coerce inspection-parameters 'list)
                 character
-                (light-uniform-data *light* (frame-view-position view) exposure)
-                previous-character character-direction))))))
+                (light-uniform-data (current-light) (frame-view-position view) exposure)
+                previous-character character-direction
+                (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
@@ -1093,6 +1094,7 @@ before the operation boundary, or it would encode through resources which the
          (camera (viewer-camera viewer)))
     (setf (viewer-last-timestamp viewer) timestamp)
     (advance-camera-response camera dt)
+    (advance-sky-clock dt)
     (when-let ((player (viewer-player viewer)))
       (when (typep (character-controller player) 'movement-intent)
         (let ((forward (- (if (viewer-control-active-p viewer :forward) 1 0)
