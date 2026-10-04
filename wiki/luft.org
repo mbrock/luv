@@ -1179,6 +1179,15 @@ material chooser and geometric placement preview expressed through this same
 frame.  Parameter prompting remains #OL2JZ1, and no luvcraft gameplay path has
 yet crossed with its old owner removed.
 
+In October 2026 four luvcraft features crossed into LUFT in their LUFT form:
+the alpine relief now raises the large world (the same ranges for the same
+seed), the sky, day clock, bloom, and sun shafts light it, those lens and
+haze settings are metabar sliders, and terminal walls run a Ghostty shell in
+Slug glyphs through a renderer world-text component, taken with Tab.  Their
+luvcraft owners stay for now because a child still plays luvcraft; the
+terminal wall is the first candidate for deletion once LUFT is the game he
+starts.
+
 /Done when./ One editing tool uses presentations and a modal command layer,
 and the first luvcraft gameplay feature has crossed with its former application
 path removed rather than maintained in parallel.
