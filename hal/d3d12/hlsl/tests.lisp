@@ -436,3 +436,57 @@ Without DXC, return NIL: the text claims still hold."
                   :resources ((data :storage-buffer :binding 0
                                :element :float :access :write)))
                 '(shader:set-buffer-element data (shader:uint 0.0) 1.0)))))
+
+;;; Integers, booleans, and bits.  #CAI3RP
+
+(shader:define-shader hlsl-integer-bits-probe
+    (:stage :compute
+     :workgroup-size (64 1 1)
+     :inputs ((thread :uvec3 :built-in :global-invocation-id))
+     :resources ((cells :storage-buffer :binding 0 :element :ivec2
+                        :access :read-write)
+                 (words :storage-buffer :binding 1 :element :uint)))
+  (let* ((index (shader:swizzle thread :x))
+         (cell (shader:buffer-element cells index))
+         (word (shader:buffer-element words index))
+         (divisor (shader:ivec2 (shader:int 4) (shader:int -4)))
+         (floored (mod cell divisor))
+         (truncated (rem cell divisor))
+         (near (< (abs cell) (shader:ivec2 (shader:int 3) (shader:int 3))))
+         (far (not near))
+         (both (and near far))
+         (either (or near (shader:bvec2 floored)))
+         (scalar (and (shader:any either) (not (shader:all both)) t))
+         (picked (shader:select either floored truncated))
+         (bits (shader:bit-cast :uint (float (shader:swizzle cell :x))))
+         (packed (logxor (logior (ash word 3) (ash bits -2))
+                         (lognot (logand word (shader:uint 255.0)))))
+         (spread (shader:shift-right picked (shader:uint 1.0)))
+         (signs (signum (- (min floored truncated) (max cell divisor)))))
+    (when scalar
+      (shader:set-buffer-element
+       cells index
+       (+ spread signs
+          (shader:ivec2 (shader:int (shader:shift-left packed index))
+                        (shader:clamp (shader:swizzle cell :y)
+                               (shader:int -8) (shader:int 8))))))))
+
+(define-test integers-and-booleans-lower-to-hlsl-2021
+  (multiple-value-bind (source document) (source-of (hlsl-integer-bits-probe))
+    (true (search "RWStructuredBuffer<int2> cells" source))
+    (true (search "int2 divisor = int2(4, (-4));" source))
+    ;; MOD is floored (its sign follows the divisor), REM is C's %.
+    (true (search "int2 floored = (((cell % divisor) + divisor) % divisor);"
+                  source))
+    (true (search "int2 truncated = (cell % divisor);" source))
+    ;; Vector logic is and()/or() in HLSL 2021; scalar logic stays &&/||.
+    (true (search "bool2 both = and(near, far);" source))
+    (true (search "bool2 either = or(near, bool2(floored));" source))
+    (true (search "bool scalar = ((any(either) && (!all(both))) && true);"
+                  source))
+    (true (search "select(either, floored, truncated)" source))
+    (true (search "asuint(((float)(cell.x)))" source))
+    (true (search "((word << 3u) | (bits >> 2u))" source))
+    (true (search "(~(word & ((uint)(255.0f))))" source))
+    (true (search "((int2)(sign(" source))
+    (compiles document)))

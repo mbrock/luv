@@ -127,6 +127,12 @@
 (defun ensure-shader-type-id (context type)
   (let ((type (find-shader-type type)))
     (or (gethash type (context-type-ids context))
+        (and (shader-boolean-type-p type) (shader-vector-type-p type)
+             ;; One BVEC type serves both declared values and the splatted
+             ;; conditions of vector selects.
+             (setf (gethash type (context-type-ids context))
+                   (ensure-bool-vector-type-id
+                    context (shader-type-component-count type))))
         (let* ((kind (shader-type-opaque-kind type))
                (id (reserve-shader-id context (shader-type-name type))))
           (setf (gethash type (context-type-ids context)) id)
@@ -153,14 +159,17 @@
                     (:float (list id 'type-float
                                   (shader-type-bit-width type)))
                     (:uint (list id 'type-int
-                                 (shader-type-bit-width type) 0))))
+                                 (shader-type-bit-width type) 0))
+                    (:int (list id 'type-int
+                                (shader-type-bit-width type) 1))))
                  (t
                   (list id 'type-vector
                         (ensure-shader-type-id
                          context
                          (ecase (shader-type-scalar-kind type)
                            (:float :float)
-                           (:uint :uint)))
+                           (:uint :uint)
+                           (:int :int)))
                         (shader-type-component-count type)))))
           id))))
 
@@ -358,6 +367,59 @@
           (append-context-form 'constant-declarations context
                                (list id 'constant type-id value))
           id))))
+
+(defun ensure-shader-typed-constant (context type value &optional expression)
+  "Return the constant of scalar or vector TYPE whose every component is
+VALUE: a float, an integer, or T or NIL for booleans."
+  (let* ((type (find-shader-type type))
+         (kind (shader-type-scalar-kind type)))
+    (cond
+      ((shader-vector-type-p type)
+       (let ((key (list :splat (shader-type-name type) value)))
+         (or (gethash key (context-constant-ids context))
+             (let* ((component
+                      (ensure-shader-typed-constant
+                       context (shader-type-scalar-type type) value))
+                    (id (reserve-shader-id
+                         context
+                         (format nil "~A-~A" (shader-type-name type)
+                                 (case value
+                                   ((t) "TRUE")
+                                   ((nil) "FALSE")
+                                   (otherwise value))))))
+               (setf (gethash key (context-constant-ids context)) id)
+               (append-context-form
+                'constant-declarations context
+                (list* id 'constant-composite
+                       (ensure-shader-type-id context type)
+                       (make-list (shader-type-component-count type)
+                                  :initial-element component)))
+               id))))
+      ((eq kind :float) (ensure-shader-constant context value expression))
+      ((eq kind :uint) (ensure-shader-uint-constant context value))
+      (t
+       (let ((key (list kind value)))
+         (or (gethash key (context-constant-ids context))
+             (let* ((id (reserve-shader-id
+                         context
+                         (ecase kind
+                           (:int (format nil "INT-~D" value))
+                           (:bool (if value "TRUE" "FALSE")))))
+                    (instruction
+                      (parse-instruction
+                       (ecase kind
+                         (:int (list id 'constant
+                                     (ensure-shader-type-id context :int)
+                                     value))
+                         (:bool (list id (if value 'constant-true
+                                             'constant-false)
+                                      (ensure-bool-type-id context)))))))
+               (setf (gethash key (context-constant-ids context)) id)
+               (append-context-form 'constant-declarations context
+                                    instruction)
+               (when expression
+                 (associate-shader-instruction context expression instruction))
+               id)))))))
 
 (defun ensure-sampled-image-type-id (context texture-type)
   (let* ((texture-type (find-shader-type texture-type))
@@ -778,19 +840,20 @@ Modules whose expressions use no extended mathematics never acquire one."
   (declare (ignore right-type))
   (ecase (shader-type-scalar-kind left-type)
     (:float 'f-add)
-    (:uint 'i-add)))
+    ((:uint :int) 'i-add)))
 
 (defmethod binary-arithmetic-instruction ((operator (eql '-)) left-type right-type)
   (declare (ignore right-type))
   (ecase (shader-type-scalar-kind left-type)
     (:float 'f-sub)
-    (:uint 'i-sub)))
+    ((:uint :int) 'i-sub)))
 
 (defmethod binary-arithmetic-instruction ((operator (eql '/)) left-type right-type)
   (declare (ignore right-type))
   (ecase (shader-type-scalar-kind left-type)
     (:float 'f-div)
-    (:uint 'u-div)))
+    (:uint 'u-div)
+    (:int 's-div)))
 
 (defmethod binary-arithmetic-instruction ((operator (eql '*)) left-type right-type)
   (if (or (and (shader-vector-type-p left-type)
@@ -800,7 +863,7 @@ Modules whose expressions use no extended mathematics never acquire one."
       'vector-times-scalar
       (ecase (shader-type-scalar-kind left-type)
         (:float 'f-mul)
-        (:uint 'i-mul))))
+        ((:uint :int) 'i-mul))))
 
 (defun emit-binary-arithmetic
     (context expression operator result-type left-id left-type right-id right-type)
@@ -869,20 +932,41 @@ Modules whose expressions use no extended mathematics never acquire one."
 (defmethod lower-shader-call ((operator (eql '-)) context expression)
   (let ((operands (shader-call-operands expression)))
     (if (= (length operands) 1)
-        (if (eq :float (shader-type-scalar-kind
-                        (find-shader-type (shader-expression-type expression))))
-            (emit-value-instruction
-             context expression (shader-expression-type expression) 'f-negate
-             (list (lower-shader-expression context (first operands))))
-            (error 'shader-language-error
-                   :form (shader-expression-source-form expression)
-                   :reason :unsigned-negation))
+        (case (shader-type-scalar-kind
+               (find-shader-type (shader-expression-type expression)))
+          (:float
+           (emit-value-instruction
+            context expression (shader-expression-type expression) 'f-negate
+            (list (lower-shader-expression context (first operands)))))
+          (:int
+           (emit-value-instruction
+            context expression (shader-expression-type expression) 's-negate
+            (list (lower-shader-expression context (first operands)))))
+          (otherwise
+           (error 'shader-language-error
+                  :form (shader-expression-source-form expression)
+                  :reason :unsigned-negation)))
         (lower-chained-arithmetic context expression))))
 
 (defmethod lower-shader-call ((operator (eql 'mod)) context expression)
+  ;; OpSMod is CL:MOD's floored modulus; for unsigned values every remainder
+  ;; agrees.
   (destructuring-bind (left right) (shader-call-operands expression)
     (emit-value-instruction
-     context expression (shader-expression-type expression) 'u-mod
+     context expression (shader-expression-type expression)
+     (if (eq :int (shader-type-scalar-kind (shader-expression-type expression)))
+         's-mod
+         'u-mod)
+     (list (lower-shader-expression context left)
+           (lower-shader-expression context right)))))
+
+(defmethod lower-shader-call ((operator (eql 'rem)) context expression)
+  (destructuring-bind (left right) (shader-call-operands expression)
+    (emit-value-instruction
+     context expression (shader-expression-type expression)
+     (if (eq :int (shader-type-scalar-kind (shader-expression-type expression)))
+         's-rem
+         'u-mod)
      (list (lower-shader-expression context left)
            (lower-shader-expression context right)))))
 
@@ -948,6 +1032,9 @@ Modules whose expressions use no extended mathematics never acquire one."
         (lower-chained-arithmetic context expression))))
 
 (defun comparison-instruction (operator operand-type)
+  ;; Float inequality is unordered, so a NaN differs from everything, as
+  ;; C's != (and so MSL's and HLSL's) says; every other float test is
+  ;; ordered.
   (ecase (shader-type-scalar-kind operand-type)
     (:float
      (ecase operator
@@ -955,20 +1042,34 @@ Modules whose expressions use no extended mathematics never acquire one."
        (<= 'f-ord-less-than-equal)
        (> 'f-ord-greater-than)
        (>= 'f-ord-greater-than-equal)
-       (= 'f-ord-equal)))
+       (= 'f-ord-equal)
+       (/= 'f-unord-not-equal)))
     (:uint
      (ecase operator
        (< 'u-less-than)
        (<= 'u-less-than-equal)
        (> 'u-greater-than)
        (>= 'u-greater-than-equal)
-       (= 'i-equal)))))
+       (= 'i-equal)
+       (/= 'i-not-equal)))
+    (:int
+     (ecase operator
+       (< 's-less-than)
+       (<= 's-less-than-equal)
+       (> 's-greater-than)
+       (>= 's-greater-than-equal)
+       (= 'i-equal)
+       (/= 'i-not-equal)))
+    (:bool
+     (ecase operator
+       (= 'logical-equal)
+       (/= 'logical-not-equal)))))
 
 (defmacro define-comparison-lowering (operator)
   `(defmethod lower-shader-call
        ((operator (eql ',operator)) context expression)
      (emit-value-instruction
-      context expression :bool
+      context expression (shader-expression-type expression)
       (comparison-instruction
        operator (shader-expression-type
                  (first (shader-call-operands expression))))
@@ -981,6 +1082,7 @@ Modules whose expressions use no extended mathematics never acquire one."
 (define-comparison-lowering >)
 (define-comparison-lowering >=)
 (define-comparison-lowering =)
+(define-comparison-lowering /=)
 
 (defmethod lower-shader-call ((operator (eql 'mix)) context expression)
   (destructuring-bind (from to amount) (shader-call-operands expression)
@@ -1117,12 +1219,53 @@ Modules whose expressions use no extended mathematics never acquire one."
                                       'vector-shuffle
                                       (list* value value indices)))))))
 
+(defun emit-shader-conversion (context expression operand target-type)
+  "Convert OPERAND's 32-bit components to TARGET-TYPE's scalar kind.
+Integers and floats convert by value (truncating toward zero), signed and
+unsigned by reinterpretation, booleans to one or zero, and numbers to
+booleans by comparison with zero."
+  (let* ((source-type (shader-expression-type operand))
+         (from (shader-type-scalar-kind source-type))
+         (to (shader-type-scalar-kind target-type))
+         (value (lower-shader-expression context operand)))
+    (cond
+      ((eq from to)
+       (alias-shader-expression context expression operand)
+       value)
+      ((eq from :bool)
+       (emit-value-instruction
+        context expression target-type 'select
+        (list value
+              (ensure-shader-typed-constant
+               context target-type (if (eq to :float) 1.0 1))
+              (ensure-shader-typed-constant
+               context target-type (if (eq to :float) 0.0 0)))))
+      ((eq to :bool)
+       (emit-value-instruction
+        context expression target-type
+        (if (eq from :float) 'f-unord-not-equal 'i-not-equal)
+        (list value
+              (ensure-shader-typed-constant
+               context source-type (if (eq from :float) 0.0 0)))))
+      (t
+       (emit-value-instruction
+        context expression target-type
+        (ecase from
+          (:float (ecase to (:uint 'convert-f-to-u) (:int 'convert-f-to-s)))
+          (:uint (ecase to (:float 'convert-u-to-f) (:int 'bitcast)))
+          (:int (ecase to (:float 'convert-s-to-f) (:uint 'bitcast))))
+        (list value))))))
+
 (defun lower-vector-constructor (context expression)
-  (emit-value-instruction
-   context expression (shader-expression-type expression)
-   'composite-construct
-   (mapcar (lambda (operand) (lower-shader-expression context operand))
-           (shader-call-operands expression))))
+  (if (shader-vector-conversion-p expression)
+      (emit-shader-conversion
+       context expression (first (shader-call-operands expression))
+       (shader-expression-type expression))
+      (emit-value-instruction
+       context expression (shader-expression-type expression)
+       'composite-construct
+       (mapcar (lambda (operand) (lower-shader-expression context operand))
+               (shader-call-operands expression)))))
 
 (defmethod lower-shader-call ((operator (eql 'vec2)) context expression)
   (lower-vector-constructor context expression))
@@ -1142,19 +1285,38 @@ Modules whose expressions use no extended mathematics never acquire one."
 (defmethod lower-shader-call ((operator (eql 'uvec4)) context expression)
   (lower-vector-constructor context expression))
 
+(macrolet ((constructors (&rest operators)
+             `(progn
+                ,@(loop for operator in operators
+                        collect
+                        `(defmethod lower-shader-call
+                             ((operator (eql ',operator)) context expression)
+                           (lower-vector-constructor context expression))))))
+  (constructors ivec2 ivec3 ivec4 bvec2 bvec3 bvec4))
+
 (defmethod lower-shader-call ((operator (eql 'uint)) context expression)
   (let* ((operand (first (shader-call-operands expression)))
-         (type (shader-expression-type operand))
-         (value (lower-shader-expression context operand)))
-    (cond ((shader-uint-type-p type)
-           (alias-shader-expression context expression operand)
-           value)
-          ((shader-unsigned-type-p type)
-           (emit-value-instruction context expression :uint 'u-convert
-                                   (list value)))
+         (type (shader-expression-type operand)))
+    (cond ((member (shader-type-scalar-kind type) '(:int :bool))
+           (emit-shader-conversion context expression operand
+                                   (find-shader-type :uint)))
           (t
-           (emit-value-instruction context expression :uint 'convert-f-to-u
-                                   (list value))))))
+           (let ((value (lower-shader-expression context operand)))
+             (cond ((shader-uint-type-p type)
+                    (alias-shader-expression context expression operand)
+                    value)
+                   ((shader-unsigned-type-p type)
+                    (emit-value-instruction context expression :uint
+                                            'u-convert (list value)))
+                   (t
+                    (emit-value-instruction context expression :uint
+                                            'convert-f-to-u
+                                            (list value)))))))))
+
+(defmethod lower-shader-call ((operator (eql 'int)) context expression)
+  (emit-shader-conversion context expression
+                          (first (shader-call-operands expression))
+                          (find-shader-type :int)))
 
 (defmethod lower-shader-call ((operator (eql 'uint64)) context expression)
   (let* ((operand (first (shader-call-operands expression)))
@@ -1172,23 +1334,43 @@ Modules whose expressions use no extended mathematics never acquire one."
 
 (defmethod lower-shader-call ((operator (eql 'float)) context expression)
   (let* ((operand (first (shader-call-operands expression)))
-         (value (lower-shader-expression context operand)))
-    (if (shader-float-type-p (shader-expression-type operand))
-        (progn (alias-shader-expression context expression operand) value)
-        (emit-value-instruction context expression :float 'convert-u-to-f
-                                (list value)))))
+         (kind (shader-type-scalar-kind (shader-expression-type operand))))
+    (if (member kind '(:int :bool))
+        (emit-shader-conversion context expression operand
+                                (find-shader-type :float))
+        (let ((value (lower-shader-expression context operand)))
+          (if (shader-float-type-p (shader-expression-type operand))
+              (progn (alias-shader-expression context expression operand)
+                     value)
+              (emit-value-instruction context expression :float
+                                      'convert-u-to-f (list value)))))))
+
+(defun kind-extended-instruction (expression float unsigned signed)
+  "The GLSL.std.450 instruction for EXPRESSION's scalar kind."
+  (ecase (shader-type-scalar-kind (shader-expression-type expression))
+    (:float float)
+    (:uint unsigned)
+    (:int signed)))
 
 (defmethod lower-shader-call ((operator (eql 'min)) context expression)
-  (lower-chained-extended-call context expression 'f-min))
+  (lower-chained-extended-call
+   context expression (kind-extended-instruction expression
+                                                 'f-min 'u-min 's-min)))
 
 (defmethod lower-shader-call ((operator (eql 'max)) context expression)
-  (lower-chained-extended-call context expression 'f-max))
+  (lower-chained-extended-call
+   context expression (kind-extended-instruction expression
+                                                 'f-max 'u-max 's-max)))
 
 (defmethod lower-shader-call ((operator (eql 'abs)) context expression)
-  (lower-extended-call context expression 'f-abs))
+  (lower-extended-call
+   context expression (kind-extended-instruction expression
+                                                 'f-abs nil 's-abs)))
 
 (defmethod lower-shader-call ((operator (eql 'signum)) context expression)
-  (lower-extended-call context expression 'f-sign))
+  (lower-extended-call
+   context expression (kind-extended-instruction expression
+                                                 'f-sign nil 's-sign)))
 
 (defmethod lower-shader-call ((operator (eql 'sqrt)) context expression)
   (lower-extended-call context expression 'sqrt))
@@ -1224,7 +1406,133 @@ Modules whose expressions use no extended mathematics never acquire one."
   (lower-extended-call context expression 'pow))
 
 (defmethod lower-shader-call ((operator (eql 'clamp)) context expression)
-  (lower-extended-call context expression 'f-clamp))
+  (lower-extended-call
+   context expression (kind-extended-instruction expression
+                                                 'f-clamp 'u-clamp 's-clamp)))
+
+;;; Booleans and bits.  #CAI3RP
+
+(defun lower-chained-instruction (context expression instruction)
+  "Fold EXPRESSION's operands left to right through INSTRUCTION."
+  (let* ((operands (shader-call-operands expression))
+         (type (shader-expression-type expression))
+         (value (lower-shader-expression context (first operands))))
+    (if (rest operands)
+        (dolist (operand (rest operands) value)
+          (setf value
+                (emit-value-instruction
+                 context expression type instruction
+                 (list value (lower-shader-expression context operand)))))
+        (progn
+          (alias-shader-expression context expression (first operands))
+          value))))
+
+(defun lower-unary-instruction (context expression instruction)
+  (emit-value-instruction
+   context expression (shader-expression-type expression) instruction
+   (list (lower-shader-expression
+          context (first (shader-call-operands expression))))))
+
+(defmethod lower-shader-call ((operator (eql 'and)) context expression)
+  (lower-chained-instruction context expression 'logical-and))
+
+(defmethod lower-shader-call ((operator (eql 'or)) context expression)
+  (lower-chained-instruction context expression 'logical-or))
+
+(defmethod lower-shader-call ((operator (eql 'not)) context expression)
+  (lower-unary-instruction context expression 'logical-not))
+
+(defmethod lower-shader-call
+    ((operator (eql 'luv.shader:any)) context expression)
+  (lower-unary-instruction context expression 'any))
+
+(defmethod lower-shader-call
+    ((operator (eql 'luv.shader:all)) context expression)
+  (lower-unary-instruction context expression 'all))
+
+(defmethod lower-shader-call
+    ((operator (eql 'luv.shader:select)) context expression)
+  ;; The condition's width equals the branches', so no splat is needed.
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'select
+   (mapcar (lambda (operand) (lower-shader-expression context operand))
+           (shader-call-operands expression))))
+
+(defmethod lower-shader-call ((operator (eql 'logand)) context expression)
+  (lower-chained-instruction context expression 'bitwise-and))
+
+(defmethod lower-shader-call ((operator (eql 'logior)) context expression)
+  (lower-chained-instruction context expression 'bitwise-or))
+
+(defmethod lower-shader-call ((operator (eql 'logxor)) context expression)
+  (lower-chained-instruction context expression 'bitwise-xor))
+
+(defmethod lower-shader-call ((operator (eql 'lognot)) context expression)
+  (lower-unary-instruction context expression 'bitwise-not))
+
+(defun right-shift-instruction (type)
+  (if (eq :int (shader-type-scalar-kind type))
+      'shift-right-arithmetic
+      'shift-right-logical))
+
+(defun emit-shift (context expression instruction value count-id count-type)
+  "Shift VALUE by COUNT-ID, splatting a scalar count across a vector value:
+OpShift* wants as many count components as value components."
+  (let* ((type (shader-expression-type expression))
+         (width (shader-type-component-count type))
+         (count
+           (if (and (> width 1)
+                    (= 1 (shader-type-component-count count-type)))
+               (emit-value-instruction
+                context expression
+                (vector-type-for-width
+                 width nil (shader-type-scalar-kind count-type))
+                'composite-construct
+                (make-list width :initial-element count-id))
+               count-id)))
+    (emit-value-instruction context expression type instruction
+                            (list value count))))
+
+(defmethod lower-shader-call ((operator (eql 'ash)) context expression)
+  (let* ((operand (first (shader-call-operands expression)))
+         (count (first (shader-call-parameters expression)))
+         (type (shader-expression-type expression))
+         (value (lower-shader-expression context operand)))
+    (if (zerop count)
+        (progn (alias-shader-expression context expression operand) value)
+        (emit-shift context expression
+                    (if (plusp count)
+                        'shift-left-logical
+                        (right-shift-instruction type))
+                    value (ensure-shader-uint-constant context (abs count))
+                    (find-shader-type :uint)))))
+
+(defun lower-run-time-shift (context expression instruction)
+  (destructuring-bind (value count) (shader-call-operands expression)
+    (emit-shift context expression instruction
+                (lower-shader-expression context value)
+                (lower-shader-expression context count)
+                (shader-expression-type count))))
+
+(defmethod lower-shader-call
+    ((operator (eql 'shift-left)) context expression)
+  (lower-run-time-shift context expression 'shift-left-logical))
+
+(defmethod lower-shader-call
+    ((operator (eql 'shift-right)) context expression)
+  (lower-run-time-shift
+   context expression
+   (right-shift-instruction (shader-expression-type expression))))
+
+(defmethod lower-shader-call ((operator (eql 'bit-cast)) context expression)
+  (let* ((operand (first (shader-call-operands expression)))
+         (value (lower-shader-expression context operand)))
+    (if (shader-type= (shader-expression-type operand)
+                      (shader-expression-type expression))
+        (progn (alias-shader-expression context expression operand) value)
+        (emit-value-instruction
+         context expression (shader-expression-type expression) 'bitcast
+         (list value)))))
 
 (defmethod lower-shader-call ((operator (eql 'smoothstep)) context expression)
   (lower-extended-call context expression 'smooth-step))
@@ -1289,9 +1597,13 @@ Modules whose expressions use no extended mathematics never acquire one."
   (:documentation "Lower EXPRESSION into instructions and return its value id."))
 
 (defmethod lower-shader-expression-value (context (expression shader-literal))
-  (ensure-shader-constant context
-                          (shader-literal-value expression)
-                          expression))
+  (if (shader-float-type-p (shader-expression-type expression))
+      (ensure-shader-constant context
+                              (shader-literal-value expression)
+                              expression)
+      (ensure-shader-typed-constant
+       context (shader-expression-type expression)
+       (shader-literal-value expression) expression)))
 
 (defmethod lower-shader-expression-value (context (expression shader-reference))
   (lower-shader-reference context expression))

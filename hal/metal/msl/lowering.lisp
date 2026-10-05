@@ -237,6 +237,13 @@ A program compiler gives every stage a stable name of its own."))
     (:uvec2 "uint2")
     (:uvec3 "uint3")
     (:uvec4 "uint4")
+    (:int "int")
+    (:ivec2 "int2")
+    (:ivec3 "int3")
+    (:ivec4 "int4")
+    (:bvec2 "bool2")
+    (:bvec3 "bool3")
+    (:bvec4 "bool4")
     (:texture-2d "texture2d<float>")
     (:depth-texture-2d "depth2d<float>")
     (:uint-texture-2d "texture2d<uint>")
@@ -299,10 +306,22 @@ A program compiler gives every stage a stable name of its own."))
   (:documentation
    "Render one shader EXPRESSION and retain a source occurrence for it."))
 
+(defun msl-scalar-literal (type value)
+  "VALUE as an MSL literal of scalar TYPE."
+  (ecase (shader:shader-type-scalar-kind (shader:find-shader-type type))
+    (:float (msl-float-literal value))
+    (:uint (format nil "~Du" value))
+    (:int (cond ((= value (- (expt 2 31))) "(-2147483647 - 1)")
+                ((minusp value) (format nil "(~D)" value))
+                (t (format nil "~D" value))))
+    (:bool (if value "true" "false"))))
+
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-literal))
   (note-msl-occurrence
-   context expression (msl-float-literal (shader:shader-literal-value expression))))
+   context expression
+   (msl-scalar-literal (shader:shader-expression-type expression)
+                       (shader:shader-literal-value expression))))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-reference))
@@ -735,12 +754,116 @@ A program compiler gives every stage a stable name of its own."))
 (define-msl-infix-operator - "-")
 (define-msl-infix-operator * "*")
 (define-msl-infix-operator / "/")
-(define-msl-infix-operator mod "%")
+(define-msl-infix-operator rem "%")
 (define-msl-infix-operator < "<")
 (define-msl-infix-operator <= "<=")
 (define-msl-infix-operator > ">")
 (define-msl-infix-operator >= ">=")
 (define-msl-infix-operator = "==")
+(define-msl-infix-operator /= "!=")
+;; Metal's logical operators also work componentwise on boolean vectors.
+(define-msl-infix-operator and "&&")
+(define-msl-infix-operator or "||")
+(define-msl-infix-operator logand "&")
+(define-msl-infix-operator logior "|")
+(define-msl-infix-operator logxor "^")
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'mod))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  "Unsigned MOD is %; signed MOD is floored, its sign following the divisor."
+  (declare (ignore operator))
+  (if (eq :int (shader:shader-type-scalar-kind
+                (shader:shader-expression-type expression)))
+      (destructuring-bind (left right)
+          (mapcar #'msl-occurrence-text (lower-msl-operands context expression))
+        (note-msl-occurrence
+         context expression
+         (format nil "(((~A % ~A) + ~A) % ~A)" left right right right)))
+      (lower-msl-infix-call context expression "%")))
+
+(defun lower-msl-prefix-call (context expression operator)
+  (note-msl-occurrence
+   context expression
+   (format nil "(~A~A)" operator
+           (msl-occurrence-text
+            (lower-msl-expression
+             context (first (shader:shader-call-operands expression)))))))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'not))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (lower-msl-prefix-call context expression "!"))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'lognot))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (lower-msl-prefix-call context expression "~"))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:select))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  "Metal's select(a, b, c) is c ? b : a, the reverse of the source order."
+  (declare (ignore operator))
+  (destructuring-bind (condition consequent alternative)
+      (mapcar #'msl-occurrence-text (lower-msl-operands context expression))
+    (note-msl-occurrence
+     context expression
+     (format nil "select(~A, ~A, ~A)" alternative consequent condition))))
+
+(defun lower-msl-shift (context expression operator count)
+  (note-msl-occurrence
+   context expression
+   (format nil "(~A ~A ~A)"
+           (msl-occurrence-text
+            (lower-msl-expression
+             context (first (shader:shader-call-operands expression))))
+           operator count)))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'ash))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (let ((count (first (shader:shader-call-parameters expression))))
+    (if (zerop count)
+        (lower-msl-infix-call context expression "")
+        (lower-msl-shift context expression (if (plusp count) "<<" ">>")
+                         (format nil "~Du" (abs count))))))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:shift-left))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (lower-msl-infix-call context expression "<<"))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:shift-right))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  ;; Metal shifts signed values arithmetically and unsigned ones logically.
+  (declare (ignore operator))
+  (lower-msl-infix-call context expression ">>"))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:bit-cast))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (note-msl-occurrence
+   context expression
+   (format nil "as_type<~A>(~A)"
+           (msl-type-name (shader:shader-expression-type expression))
+           (msl-occurrence-text
+            (lower-msl-expression
+             context (first (shader:shader-call-operands expression)))))))
 
 (defmacro define-msl-function-operator (operator name)
   `(defmethod shader:lower-shader-call
@@ -753,7 +876,8 @@ A program compiler gives every stage a stable name of its own."))
 (define-msl-function-operator shader:dot "dot")
 (define-msl-function-operator shader:mix "mix")
 (define-msl-function-operator abs "abs")
-(define-msl-function-operator signum "sign")
+(define-msl-function-operator shader:any "any")
+(define-msl-function-operator shader:all "all")
 (define-msl-function-operator sqrt "sqrt")
 (define-msl-function-operator shader:derivative-x "dfdx")
 (define-msl-function-operator shader:derivative-y "dfdy")
@@ -780,6 +904,23 @@ A program compiler gives every stage a stable name of its own."))
 (define-msl-chained-function-operator min "min")
 (define-msl-chained-function-operator max "max")
 
+(defmethod shader:lower-shader-call
+    ((operator (eql 'signum))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  "Metal's sign is float-only; a signed SIGNUM subtracts two comparisons."
+  (declare (ignore operator))
+  (let ((type (shader:shader-expression-type expression)))
+    (if (eq :int (shader:shader-type-scalar-kind type))
+        (let ((operand (msl-occurrence-text
+                        (first (lower-msl-operands context expression))))
+              (name (msl-type-name type)))
+          (note-msl-occurrence
+           context expression
+           (format nil "(~A(~A > 0) - ~A(~A < 0))"
+                   name operand name operand)))
+        (lower-msl-function-call context expression "sign"))))
+
 (defun lower-msl-vector-constructor (context expression)
   (let ((operands (mapcar #'msl-occurrence-text
                           (lower-msl-operands context expression))))
@@ -804,6 +945,19 @@ A program compiler gives every stage a stable name of its own."))
 (define-msl-vector-constructor shader:uvec2)
 (define-msl-vector-constructor shader:uvec3)
 (define-msl-vector-constructor shader:uvec4)
+(define-msl-vector-constructor shader:ivec2)
+(define-msl-vector-constructor shader:ivec3)
+(define-msl-vector-constructor shader:ivec4)
+(define-msl-vector-constructor shader:bvec2)
+(define-msl-vector-constructor shader:bvec3)
+(define-msl-vector-constructor shader:bvec4)
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:int))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (lower-msl-function-call context expression "int"))
 
 (defmethod shader:lower-shader-call
     ((operator (eql 'shader:uint))

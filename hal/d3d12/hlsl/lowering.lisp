@@ -200,11 +200,14 @@ as BLOCK.MEMBER exactly as it does in MSL."))
     "return" "row_major" "sample" "sampler" "shared" "snorm" "static"
     "string" "struct" "switch" "tbuffer" "technique" "template" "texture"
     "this" "triangle" "triangleadj" "true" "typedef" "uint" "uniform"
-    "unorm" "vector" "vertices" "void" "volatile" "while"
+    "unorm" "vector" "vertices" "void" "volatile" "while" "signed"
+    "unsigned"
     ;; Intrinsics this lowering calls, which a local of the same name would
     ;; shadow.
     "abs" "clamp" "cos" "ddx" "ddy" "dot" "exp" "floor" "frac" "lerp" "log"
     "max" "min" "normalize" "pow" "sign" "sin" "smoothstep" "sqrt" "step"
+    "all" "and" "any" "asfloat" "asint" "asuint" "mul" "or" "select"
+    "transpose"
     ;; Names this lowering itself declares.
     "result" "stage_in")
   "Words a shader name may spell but generated HLSL cannot declare.")
@@ -254,6 +257,13 @@ as BLOCK.MEMBER exactly as it does in MSL."))
     (:uvec2 "uint2")
     (:uvec3 "uint3")
     (:uvec4 "uint4")
+    (:int "int")
+    (:ivec2 "int2")
+    (:ivec3 "int3")
+    (:ivec4 "int4")
+    (:bvec2 "bool2")
+    (:bvec3 "bool3")
+    (:bvec4 "bool4")
     (:texture-2d "Texture2D<float4>")
     (:depth-texture-2d "Texture2D<float>")
     (:uint-texture-2d "Texture2D<uint4>")
@@ -302,11 +312,22 @@ as BLOCK.MEMBER exactly as it does in MSL."))
   (:documentation
    "Render one shader EXPRESSION and retain a source occurrence for it."))
 
+(defun hlsl-scalar-literal (type value)
+  "VALUE as an HLSL literal of scalar TYPE."
+  (ecase (shader:shader-type-scalar-kind (shader:find-shader-type type))
+    (:float (hlsl-float-literal value))
+    (:uint (format nil "~Du" value))
+    (:int (cond ((= value (- (expt 2 31))) "(-2147483647 - 1)")
+                ((minusp value) (format nil "(~D)" value))
+                (t (format nil "~D" value))))
+    (:bool (if value "true" "false"))))
+
 (defmethod lower-hlsl-expression
     ((context hlsl-lowering-context) (expression shader:shader-literal))
   (note-hlsl-occurrence
    context expression
-   (hlsl-float-literal (shader:shader-literal-value expression))))
+   (hlsl-scalar-literal (shader:shader-expression-type expression)
+                        (shader:shader-literal-value expression))))
 
 (defmethod lower-hlsl-expression
     ((context hlsl-lowering-context) (expression shader:shader-reference))
@@ -624,13 +645,15 @@ as BLOCK.MEMBER exactly as it does in MSL."))
                                      (context expression)
                                    (lower-hlsl-function-call
                                     context expression ,name))))))
-  ;; MOD is defined only on unsigned integers, where % is the same
-  ;; remainder in every C-family language.
-  (infix + "+" - "-" * "*" / "/" mod "%"
-         < "<" <= "<=" > ">" >= ">=" = "==")
+  ;; REM is C's truncated %; MOD is % only for unsigned values (below).
+  (infix + "+" - "-" * "*" / "/" rem "%"
+         < "<" <= "<=" > ">" >= ">=" = "==" /= "!="
+         logand "&" logior "|" logxor "^")
   (functions shader:dot "dot"
              shader:mix "lerp"
              abs "abs"
+             shader:any "any"
+             shader:all "all"
              sqrt "sqrt"
              shader:derivative-x "ddx"
              shader:derivative-y "ddy"
@@ -650,7 +673,86 @@ as BLOCK.MEMBER exactly as it does in MSL."))
              shader:vec4 "float4"
              shader:uvec2 "uint2"
              shader:uvec3 "uint3"
-             shader:uvec4 "uint4"))
+             shader:uvec4 "uint4"
+             shader:ivec2 "int2"
+             shader:ivec3 "int3"
+             shader:ivec4 "int4"
+             shader:bvec2 "bool2"
+             shader:bvec3 "bool3"
+             shader:bvec4 "bool4"))
+
+(define-hlsl-operator mod (context expression)
+  ;; Unsigned MOD is %; signed MOD is floored, its sign following the
+  ;; divisor, as CL:MOD.
+  (if (eq :int (shader:shader-type-scalar-kind
+                (shader:shader-expression-type expression)))
+      (destructuring-bind (left right) (lower-hlsl-operands context expression)
+        (note-hlsl-occurrence
+         context expression
+         (format nil "(((~A % ~A) + ~A) % ~A)" left right right right)))
+      (lower-hlsl-infix-call context expression "%")))
+
+;;; HLSL 2021 keeps && and || for scalars, where they short-circuit, and
+;;; spells the componentwise vector forms and() and or().  #CAI3RP
+(macrolet ((logical (operator infix function)
+             `(define-hlsl-operator ,operator (context expression)
+                (if (shader:shader-vector-type-p
+                     (shader:shader-expression-type expression))
+                    (let ((operands (lower-hlsl-operands context expression)))
+                      (note-hlsl-occurrence
+                       context expression
+                       (reduce (lambda (left right)
+                                 (format nil "~A(~A, ~A)" ,function left right))
+                               (rest operands)
+                               :initial-value (first operands))))
+                    (lower-hlsl-infix-call context expression ,infix)))))
+  (logical and "&&" "and")
+  (logical or "||" "or"))
+
+(define-hlsl-operator not (context expression)
+  (note-hlsl-occurrence
+   context expression
+   (format nil "(!~A)" (first (lower-hlsl-operands context expression)))))
+
+(define-hlsl-operator lognot (context expression)
+  (note-hlsl-occurrence
+   context expression
+   (format nil "(~~~A)" (first (lower-hlsl-operands context expression)))))
+
+(define-hlsl-operator shader:select (context expression)
+  ;; HLSL 2021's select(c, t, f) is the source order; ?: is scalar-only.
+  (lower-hlsl-function-call context expression "select"))
+
+(define-hlsl-operator ash (context expression)
+  (let ((count (first (shader:shader-call-parameters expression)))
+        (value (first (lower-hlsl-operands context expression))))
+    (note-hlsl-occurrence
+     context expression
+     (if (zerop count)
+         (format nil "(~A)" value)
+         (format nil "(~A ~A ~Du)" value (if (plusp count) "<<" ">>")
+                 (abs count))))))
+
+(define-hlsl-operator shader:shift-left (context expression)
+  (lower-hlsl-infix-call context expression "<<"))
+
+(define-hlsl-operator shader:shift-right (context expression)
+  ;; Arithmetic for signed values, logical for unsigned ones.
+  (lower-hlsl-infix-call context expression ">>"))
+
+(define-hlsl-operator shader:bit-cast (context expression)
+  (note-hlsl-occurrence
+   context expression
+   (format nil "~A(~A)"
+           (ecase (shader:shader-type-scalar-kind
+                   (shader:shader-expression-type expression))
+             (:float "asfloat")
+             (:uint "asuint")
+             (:int "asint"))
+           (first (lower-hlsl-operands context expression)))))
+
+(define-hlsl-operator shader:int (context expression)
+  (lower-hlsl-cast context expression "int"))
 
 (define-hlsl-operator signum (context expression)
   ;; HLSL's sign returns int; the language's SIGNUM keeps the operand type.
@@ -794,8 +896,9 @@ vec4, which MSL builds as float4(depth).  A scalar cast splats the same way."
 (defun hlsl-flat-p (declaration)
   "Integers never interpolate; Direct3D requires them to say so."
   (or (eq :flat (shader:shader-interface-interpolation declaration))
-      (eq :uint (shader:shader-type-scalar-kind
-                 (shader:shader-declaration-type declaration)))))
+      (member (shader:shader-type-scalar-kind
+               (shader:shader-declaration-type declaration))
+              '(:uint :int))))
 
 (defun hlsl-interface-semantic (stage declaration)
   (let ((direction (shader:shader-interface-direction declaration))

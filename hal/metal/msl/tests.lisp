@@ -572,3 +572,51 @@
     (true (search "const device float4* velocities [[buffer(1)]]" source))
     (true (search "positions[index] = (positions[index] + velocities[lane]);"
                   source))))
+
+;;; Integers, booleans, and bits.  #CAI3RP
+
+(defun metal-compiler-diagnostics (source)
+  "Compile MSL SOURCE with Apple's metal when Xcode is present.  Return NIL
+on success or without the compiler, else its report."
+  (let ((xcrun (if (probe-file "/usr/bin/xcrun")
+                   '("env" "-u" "DEVELOPER_DIR" "-u" "SDKROOT"
+                     "/usr/bin/xcrun" "-sdk" "macosx")
+                   '("xcrun" "-sdk" "macosx"))))
+    (when (ignore-errors
+           (zerop (nth-value 2 (uiop:run-program
+                                (append xcrun '("--find" "metal"))
+                                :ignore-error-status t))))
+      (uiop:with-temporary-file (:pathname metal :type "metal" :keep nil
+                                 :stream stream :direction :output)
+        (write-string source stream)
+        :close-stream
+        (uiop:with-temporary-file (:pathname air :type "air" :keep nil)
+          (multiple-value-bind (output error-output status)
+              (uiop:run-program
+               (append xcrun (list "metal" "-std=metal4.0" "-c"
+                                   (uiop:native-namestring metal)
+                                   "-o" (uiop:native-namestring air)))
+               :output :string :error-output :string :ignore-error-status t)
+            (unless (zerop status)
+              (format nil "~A~A~%~A" output error-output source))))))))
+
+(define-test integers-and-booleans-lower-to-metal
+  (let ((source (msl:msl-document-source
+                 (msl:compile-msl (integer-bits-fragment-probe)))))
+    (true (search "int2 cell [[user(locn1), flat]];" source))
+    (true (search "int2 scaled = int2((stage_in.uv * 64.0f));" source))
+    (true (search "int2 four = int2(4, (-4));" source))
+    ;; MOD is floored (its sign follows the divisor), REM is C's %.
+    (true (search "int2 floored = (((offset % four) + four) % four);" source))
+    (true (search "int2 truncated = (offset % four);" source))
+    ;; Metal's sign is float-only; a signed SIGNUM compares instead.
+    (true (search "(int2((min(floored, truncated)" source))
+    (true (search "uint bits = as_type<uint>(stage_in.uv.x);" source))
+    (true (search "(stage_in.mask >> 4u)" source))
+    (true (search "(~packed)" source))
+    ;; select(a, b, c) is c ? b : a: the source's branches swap places.
+    (true (search "select(stage_in.uv, float2(bounded), near)" source))
+    (true (search "bool inside = (all(near) && (!(halved == 0)));" source))
+    (true (search "|| false)" source))
+    (true (search "all((near == bool2(spread)))" source))
+    (parachute:is eq nil (metal-compiler-diagnostics source))))

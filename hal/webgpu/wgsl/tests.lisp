@@ -165,3 +165,19 @@
              (true (= 404 (first missing)))))
       (uiop:delete-directory-tree directory :validate t
                                             :if-does-not-exist :ignore))))
+
+(define-test integers-and-booleans-lower-to-wgsl
+  ;; #CAI3RP
+  (let ((source (wgsl:wgsl-document-source
+                 (wgsl:compile-wgsl (integer-bits-fragment-probe)))))
+    (true (search "@location(1) @interpolate(flat) cell: vec2<i32>," source))
+    (true (search "vec2<i32>(4i, (-4i))" source))
+    (true (search "let floored: vec2<i32> = (((offset % four) + four) % four);"
+                  source))
+    (true (search "bitcast<u32>(stage_in.uv.x)" source))
+    ;; WGSL shifts by u32 counts, one per component.
+    (true (search "(offset >> vec2<u32>(u32(2i)))" source))
+    (true (search "select(stage_in.uv, vec2<f32>(bounded), near)" source))
+    ;; && and || are scalar in WGSL; the probe's vector logic is in ALL.
+    (true (search "(all(near) && (!(halved == 0i)))" source))
+    (true (search "(any((!near))" source))))

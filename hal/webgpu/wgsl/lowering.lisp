@@ -131,6 +131,13 @@ defaults.  Other source values retain the native folded-literal semantics."))
     (:uvec2 "vec2<u32>")
     (:uvec3 "vec3<u32>")
     (:uvec4 "vec4<u32>")
+    (:int "i32")
+    (:ivec2 "vec2<i32>")
+    (:ivec3 "vec3<i32>")
+    (:ivec4 "vec4<i32>")
+    (:bvec2 "vec2<bool>")
+    (:bvec3 "vec3<bool>")
+    (:bvec4 "vec4<bool>")
     (otherwise
      (error 'shader:shader-language-error
             :form source-form :reason :unsupported-wgsl-type
@@ -196,7 +203,18 @@ defaults.  Other source values retain the native folded-literal semantics."))
      context expression
      (if (and (symbolp source) (wgsl-override-name-p context source))
          (wgsl-override-identifier (ensure-wgsl-override context expression))
-         (wgsl-float-literal (shader:shader-literal-value expression))))))
+         (wgsl-scalar-literal (shader:shader-expression-type expression)
+                              (shader:shader-literal-value expression))))))
+
+(defun wgsl-scalar-literal (type value)
+  "VALUE as a WGSL literal of scalar TYPE."
+  (ecase (shader:shader-type-scalar-kind (shader:find-shader-type type))
+    (:float (wgsl-float-literal value))
+    (:uint (format nil "~Du" value))
+    (:int (cond ((= value (- (expt 2 31))) "i32(-2147483648)")
+                ((minusp value) (format nil "(~Di)" value))
+                (t (format nil "~Di" value))))
+    (:bool (if value "true" "false"))))
 
 (defmethod lower-wgsl-expression
     ((context wgsl-lowering-context) (expression shader:shader-reference))
@@ -488,12 +506,146 @@ defaults.  Other source values retain the native folded-literal semantics."))
 (define-wgsl-infix-operator - "-")
 (define-wgsl-infix-operator * "*")
 (define-wgsl-infix-operator / "/")
-(define-wgsl-infix-operator mod "%")
+(define-wgsl-infix-operator rem "%")
 (define-wgsl-infix-operator < "<")
 (define-wgsl-infix-operator <= "<=")
 (define-wgsl-infix-operator > ">")
 (define-wgsl-infix-operator >= ">=")
 (define-wgsl-infix-operator = "==")
+(define-wgsl-infix-operator /= "!=")
+(define-wgsl-infix-operator logand "&")
+(define-wgsl-infix-operator logior "|")
+(define-wgsl-infix-operator logxor "^")
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'mod))
+     (context wgsl-lowering-context)
+     (expression shader:shader-call))
+  "Unsigned MOD is %; signed MOD is floored, its sign following the divisor."
+  (declare (ignore operator))
+  (if (eq :int (shader:shader-type-scalar-kind
+                (shader:shader-expression-type expression)))
+      (destructuring-bind (left right)
+          (mapcar #'wgsl-occurrence-text (lower-wgsl-operands context expression))
+        (note-wgsl-occurrence
+         context expression
+         (format nil "(((~A % ~A) + ~A) % ~A)" left right right right)))
+      (lower-wgsl-infix-call context expression "%")))
+
+;;; WGSL's && and || are scalar; & and | combine boolean vectors.
+(macrolet ((logical (operator scalar vector)
+             `(defmethod shader:lower-shader-call
+                  ((operator (eql ',operator))
+                   (context wgsl-lowering-context)
+                   (expression shader:shader-call))
+                (declare (ignore operator))
+                (lower-wgsl-infix-call
+                 context expression
+                 (if (shader:shader-vector-type-p
+                      (shader:shader-expression-type expression))
+                     ,vector
+                     ,scalar)))))
+  (logical and "&&" "&")
+  (logical or "||" "|"))
+
+(macrolet ((prefix (operator text)
+             `(defmethod shader:lower-shader-call
+                  ((operator (eql ',operator))
+                   (context wgsl-lowering-context)
+                   (expression shader:shader-call))
+                (declare (ignore operator))
+                (note-wgsl-occurrence
+                 context expression
+                 (format nil "(~A~A)" ,text
+                         (wgsl-occurrence-text
+                          (first (lower-wgsl-operands context expression))))))))
+  (prefix not "!")
+  (prefix lognot "~"))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:select))
+     (context wgsl-lowering-context)
+     (expression shader:shader-call))
+  "WGSL's select(f, t, c) is c ? t : f, the reverse of the source order."
+  (declare (ignore operator))
+  (destructuring-bind (condition consequent alternative)
+      (mapcar #'wgsl-occurrence-text (lower-wgsl-operands context expression))
+    (note-wgsl-occurrence
+     context expression
+     (format nil "select(~A, ~A, ~A)" alternative consequent condition))))
+
+(defun wgsl-shift-count (value-type count-type count)
+  "WGSL shifts by u32 counts, one per value component."
+  (let ((width (shader:shader-type-component-count value-type)))
+    (cond ((and (= width 1) (eq :uint (shader:shader-type-scalar-kind
+                                       count-type)))
+           count)
+          ((= width 1) (format nil "u32(~A)" count))
+          ((and (eq :uint (shader:shader-type-scalar-kind count-type))
+                (= width (shader:shader-type-component-count count-type)))
+           count)
+          ((= 1 (shader:shader-type-component-count count-type))
+           (format nil "vec~D<u32>(~A)" width
+                   (if (eq :uint (shader:shader-type-scalar-kind count-type))
+                       count
+                       (format nil "u32(~A)" count))))
+          (t (format nil "vec~D<u32>(~A)" width count)))))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'ash))
+     (context wgsl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (let ((count (first (shader:shader-call-parameters expression)))
+        (type (shader:shader-expression-type expression))
+        (value (wgsl-occurrence-text
+                (first (lower-wgsl-operands context expression)))))
+    (note-wgsl-occurrence
+     context expression
+     (if (zerop count)
+         (format nil "(~A)" value)
+         (format nil "(~A ~A ~A)" value (if (plusp count) "<<" ">>")
+                 (wgsl-shift-count type (shader:find-shader-type :uint)
+                                   (format nil "~Du" (abs count))))))))
+
+(macrolet ((shift (operator text)
+             `(defmethod shader:lower-shader-call
+                  ((operator (eql ',operator))
+                   (context wgsl-lowering-context)
+                   (expression shader:shader-call))
+                (declare (ignore operator))
+                (destructuring-bind (value count)
+                    (mapcar #'wgsl-occurrence-text
+                            (lower-wgsl-operands context expression))
+                  (note-wgsl-occurrence
+                   context expression
+                   (format nil "(~A ~A ~A)" value ,text
+                           (wgsl-shift-count
+                            (shader:shader-expression-type expression)
+                            (shader:shader-expression-type
+                             (second (shader:shader-call-operands expression)))
+                            count)))))))
+  (shift shader:shift-left "<<")
+  (shift shader:shift-right ">>"))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:bit-cast))
+     (context wgsl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (note-wgsl-occurrence
+   context expression
+   (format nil "bitcast<~A>(~A)"
+           (wgsl-type-name (shader:shader-expression-type expression))
+           (wgsl-occurrence-text
+            (first (lower-wgsl-operands context expression))))))
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:int))
+     (context wgsl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (lower-wgsl-function-call context expression "i32"))
 
 (defmacro define-wgsl-function-operator (operator name)
   `(defmethod shader:lower-shader-call
@@ -506,6 +658,8 @@ defaults.  Other source values retain the native folded-literal semantics."))
 (define-wgsl-function-operator shader:dot "dot")
 (define-wgsl-function-operator shader:mix "mix")
 (define-wgsl-function-operator abs "abs")
+(define-wgsl-function-operator shader:any "any")
+(define-wgsl-function-operator shader:all "all")
 (define-wgsl-function-operator signum "sign")
 (define-wgsl-function-operator sqrt "sqrt")
 (define-wgsl-function-operator shader:derivative-x "dpdx")
@@ -557,6 +711,12 @@ defaults.  Other source values retain the native folded-literal semantics."))
 (define-wgsl-vector-constructor shader:uvec2)
 (define-wgsl-vector-constructor shader:uvec3)
 (define-wgsl-vector-constructor shader:uvec4)
+(define-wgsl-vector-constructor shader:ivec2)
+(define-wgsl-vector-constructor shader:ivec3)
+(define-wgsl-vector-constructor shader:ivec4)
+(define-wgsl-vector-constructor shader:bvec2)
+(define-wgsl-vector-constructor shader:bvec3)
+(define-wgsl-vector-constructor shader:bvec4)
 
 (defmethod shader:lower-shader-call
     ((operator (eql 'shader:uint))

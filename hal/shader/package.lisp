@@ -32,6 +32,12 @@
            #:shader-uint-type-p
            #:shader-unsigned-type-p
            #:shader-vector-type-p
+           #:shader-integer-type-p
+           #:shader-boolean-type-p
+           #:shader-numeric-type-p
+           #:shader-type-scalar-type
+           #:vector-type-for-width
+           #:shader-vector-conversion-p
            #:shader-object-name
            #:shader-object-source-form
            #:shader-variable-declaration
@@ -156,6 +162,19 @@
            #:uvec2
            #:uvec3
            #:uvec4
+           #:int
+           #:ivec2
+           #:ivec3
+           #:ivec4
+           #:bvec2
+           #:bvec3
+           #:bvec4
+           #:select
+           #:any
+           #:all
+           #:shift-left
+           #:shift-right
+           #:bit-cast
            #:vec2
            #:vec3
            #:vec4

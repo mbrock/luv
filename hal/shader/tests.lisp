@@ -2318,7 +2318,7 @@
               :invalid-mix))
     (true (eq (failure-reason '((set-output color (normalize uvalue))))
               :invalid-normalize))
-    (true (eq (failure-reason '((set-output color (min word word))))
+    (true (eq (failure-reason '((set-output color (sqrt word))))
               :invalid-extended-math-type))))
 
 (define-test extended-operations-retain-expression-provenance
@@ -2486,3 +2486,161 @@
     (true (search "ARRAY-STRIDE 16" forms))
     (true (search "NON-WRITABLE" forms))
     (true (= #x07230203 (aref words 0)))))
+;;; Integers, booleans, and bits.  #CAI3RP
+
+(defun spir-v-validation-diagnostics (specification &key (environment "vulkan1.0"))
+  "Validate SPECIFICATION's SPIR-V with spirv-val when it is on PATH.
+Return NIL on success or without the tool, else its report."
+  (when (ignore-errors
+         (zerop (nth-value 2 (uiop:run-program '("spirv-val" "--version")
+                                               :ignore-error-status t))))
+    (uiop:with-temporary-file (:pathname pathname :type "spv" :keep nil)
+      (spv:write-spir-v (spv:assemble-shader-specification specification)
+                        pathname)
+      (multiple-value-bind (output error-output status)
+          (uiop:run-program (list "spirv-val" "--target-env" environment
+                                  (uiop:native-namestring pathname))
+                            :output :string :error-output :string
+                            :ignore-error-status t)
+        (unless (zerop status)
+          (format nil "~A~A" output error-output))))))
+
+(shader:define-shader integer-bits-fragment-probe
+    (:stage :fragment
+     :inputs ((uv :vec2 :location 0)
+              (cell :ivec2 :location 1 :interpolation :flat)
+              (mask :uint :location 2 :interpolation :flat))
+     :outputs ((color :vec4 :location 0)))
+  (let* ((scaled (shader:ivec2 (* uv 64.0)))
+         (offset (+ cell scaled (shader:ivec2 (shader:int -3) (shader:int 5))))
+         (four (shader:ivec2 (shader:int 4) (shader:int -4)))
+         (quotient (/ offset four))
+         (floored (mod offset four))
+         (truncated (rem offset four))
+         (bounded (clamp (abs quotient)
+                         (shader:ivec2 (shader:int 0) (shader:int 0))
+                         (shader:ivec2 (shader:int 7) (shader:int 7))))
+         (direction (signum (- (min floored truncated)
+                               (max floored truncated))))
+         (bits (shader:bit-cast :uint (swizzle uv :x)))
+         (packed (logior (ash (logand bits (uint 255.0)) 8) (ash mask -4)))
+         (flipped (logxor (lognot packed)
+                          (shader:shift-left mask (uint (swizzle bounded :x)))))
+         (halved (shader:shift-right (swizzle offset :x) (uint 1.0)))
+         (spread (shader:shift-right offset (shader:int 2)))
+         (restored (shader:bit-cast :float (logand flipped (uint 1.0e6))))
+         (near (< (abs offset) (shader:ivec2 (shader:int 3) (shader:int 3))))
+         (inside (and (shader:all near) (not (= halved (shader:int 0)))))
+         (either (or (shader:any (not near)) (/= packed mask) nil))
+         (agree (shader:all (= near (shader:bvec2 spread))))
+         (chosen (shader:select near (vec2 bounded) uv))
+         (flag (if (or inside either agree) (float t) (float (= bits mask))))
+         (flip (float (- (swizzle direction :y))))
+         (mixed (float (+ (shader:int (uint halved))
+                          (shader:int (swizzle uv :y))
+                          (shader:int nil)))))
+    (set-output color
+                (vec4 chosen flag
+                      (+ flip mixed restored (float flipped))))))
+
+(defun integer-probe-error-reason (body)
+  (handler-case
+      (progn
+        (shader:parse-shader-specification
+         'integer-probe
+         '(:stage :fragment
+           :inputs ((uv :vec2 :location 0)
+                    (cell :ivec2 :location 1 :interpolation :flat)
+                    (mask :uint :location 2 :interpolation :flat))
+           :outputs ((color :vec4 :location 0)))
+         (list body))
+        nil)
+    (shader:shader-language-error (condition)
+      (shader:shader-language-error-reason condition))))
+
+(define-test integers-and-booleans-are-typed-values
+  (let ((specification (integer-bits-fragment-probe)))
+    (flet ((type-of-binding (name)
+             (shader:shader-type-name
+              (shader:shader-expression-type
+               (shader:shader-binding-expression
+                (binding-named name specification))))))
+      (true (eq :ivec2 (type-of-binding 'scaled)))
+      (true (eq :ivec2 (type-of-binding 'floored)))
+      (true (eq :uint (type-of-binding 'packed)))
+      (true (eq :int (type-of-binding 'halved)))
+      (true (eq :float (type-of-binding 'restored)))
+      (true (eq :bvec2 (type-of-binding 'near)))
+      (true (eq :bool (type-of-binding 'inside)))
+      (true (eq :vec2 (type-of-binding 'chosen)))))
+  ;; T and NIL are boolean literals; (INT n) is a signed literal.
+  (let ((literal (shader::parse-shader-expression '(shader:int -3) nil)))
+    (true (typep literal 'shader:shader-literal))
+    (true (eql -3 (shader:shader-literal-value literal)))
+    (true (eq :int (shader:shader-type-name
+                    (shader:shader-expression-type literal)))))
+  (true (eq :bool (shader:shader-type-name
+                   (shader:shader-expression-type
+                    (shader::parse-shader-expression t nil)))))
+  (macrolet ((rejects (reason body)
+               `(true (eq ,reason (integer-probe-error-reason ',body)))))
+    (rejects :incompatible-arithmetic-types
+             (set-output color (vec4 uv (float (+ (shader:int 1) 1.0)) 1.0)))
+    (rejects :non-numeric-arithmetic
+             (set-output color (vec4 uv (float (* t t)) 1.0)))
+    (rejects :invalid-boolean-operands
+             (set-output color (vec4 uv (float (and t 1.0)) 1.0)))
+    (rejects :invalid-bitwise-operands
+             (set-output color (vec4 uv (float (logand 1.0 2.0)) 1.0)))
+    (rejects :invalid-bitwise-operands
+             (set-output color (vec4 uv (float (logand mask cell)) 1.0)))
+    (rejects :invalid-ash-count
+             (set-output color (vec4 uv (float (ash mask 32)) 1.0)))
+    (rejects :invalid-ash-count
+             (set-output color (vec4 uv (float (ash mask mask)) 1.0)))
+    (rejects :invalid-shift
+             (set-output color
+                         (vec4 uv (float (shader:shift-left mask cell)) 1.0)))
+    (rejects :invalid-select
+             (set-output color (vec4 (shader:select t uv uv) 0.0 1.0)))
+    (rejects :invalid-bit-cast
+             (set-output color (vec4 uv (shader:bit-cast :float cell))))
+    (rejects :invalid-comparison
+             (set-output color (vec4 uv (float (< uv 1.0)) 1.0)))
+    (rejects :invalid-comparison
+             (set-output color (vec4 uv (float (< t nil)) 1.0)))
+    (rejects :literal-out-of-range
+             (set-output color (vec4 uv (float (shader:int 3000000000)) 1.0)))
+    (rejects :invalid-vector-constituent
+             (set-output color (vec4 (vec2 (shader:int 1) 1.0) 0.0 1.0)))
+    (rejects :invalid-extended-math-type
+             (set-output color (vec4 uv (float (abs mask)) 1.0)))
+    (rejects :conditional-condition-type
+             (set-output color (vec4 (if (< uv uv) uv uv) 0.0 1.0)))
+    (rejects :invalid-boolean-reduction
+             (set-output color (vec4 uv (float (shader:any t)) 1.0)))
+    (rejects :invalid-modulus
+             (set-output color (vec4 uv (mod 1.0 2.0) 1.0)))))
+
+(define-test integers-and-booleans-lower-to-validated-spir-v
+  (let* ((specification (integer-bits-fragment-probe))
+         (names (mapcar #'spv:instruction-name
+                        (spv:lower-spir-v (spv:shader-module specification))))
+         (forms (write-to-string
+                 (mapcar #'spv:instruction-form
+                         (spv:lower-spir-v
+                          (spv:shader-module specification))))))
+    (dolist (name '(spv::convert-f-to-s spv::s-div spv::s-mod spv::s-rem
+                    spv::bitcast spv::bitwise-and spv::bitwise-or
+                    spv::bitwise-xor spv::bitwise-not spv::shift-left-logical
+                    spv::shift-right-logical spv::shift-right-arithmetic
+                    spv::s-less-than spv::i-equal spv::i-not-equal
+                    spv::logical-and spv::logical-or spv::logical-not
+                    spv::logical-equal spv::any spv::all spv::select
+                    spv::constant-true spv::constant-false spv::s-negate
+                    spv::convert-s-to-f))
+      (true (find name names)))
+    ;; Signed ordering, magnitude, and sign use the S- forms.
+    (dolist (instruction '("S-CLAMP" "S-ABS" "S-MIN" "S-MAX" "S-SIGN"))
+      (true (search instruction forms)))
+    (parachute:is eq nil (spir-v-validation-diagnostics specification))))

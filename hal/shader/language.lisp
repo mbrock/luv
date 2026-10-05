@@ -93,9 +93,21 @@
                        :sample-result-type sample-result-type
                        :image-depth-p image-depth-p)))
 
+;;; Scalars and vectors: the four scalar kinds are :FLOAT, :UINT, :INT (two's
+;;; complement), and :BOOL.  A boolean has one component so that comparisons
+;;; and SELECT can work componentwise over BVECs, but it is not numeric: it
+;;; has no arithmetic and no host representation (see SHADER-NUMERIC-TYPE-P
+;;; and SHADER-HOST-LAYOUT).
 (register-shader-type :float :component-count 1 :scalar-kind :float
                       :bit-width 32)
-(register-shader-type :bool)
+(register-shader-type :bool :component-count 1 :scalar-kind :bool)
+(register-shader-type :bvec2 :component-count 2 :scalar-kind :bool)
+(register-shader-type :bvec3 :component-count 3 :scalar-kind :bool)
+(register-shader-type :bvec4 :component-count 4 :scalar-kind :bool)
+(register-shader-type :int :component-count 1 :scalar-kind :int :bit-width 32)
+(register-shader-type :ivec2 :component-count 2 :scalar-kind :int :bit-width 32)
+(register-shader-type :ivec3 :component-count 3 :scalar-kind :int :bit-width 32)
+(register-shader-type :ivec4 :component-count 4 :scalar-kind :int :bit-width 32)
 (register-shader-type :vec2 :component-count 2 :scalar-kind :float :bit-width 32)
 (register-shader-type :vec3 :component-count 3 :scalar-kind :float :bit-width 32)
 (register-shader-type :vec4 :component-count 4 :scalar-kind :float :bit-width 32)
@@ -120,6 +132,7 @@
 
 (defun find-shader-type (designator &optional source-form)
   (or (and (typep designator 'shader-type) designator)
+      (gethash designator *shader-types*)
       (and (symbolp designator)
            (loop for type being the hash-values of *shader-types*
                  when (string-equal (symbol-name designator)
@@ -147,6 +160,22 @@
 (defun shader-vector-type-p (type)
   (let ((count (shader-type-component-count (find-shader-type type))))
     (and count (> count 1))))
+
+(defun shader-integer-type-p (type)
+  "Whether TYPE is a 32-bit signed or unsigned integer scalar or vector."
+  (let ((type (find-shader-type type)))
+    (and (member (shader-type-scalar-kind type) '(:int :uint))
+         (eql 32 (shader-type-bit-width type)))))
+
+(defun shader-boolean-type-p (type)
+  "Whether TYPE is BOOL or a BVEC."
+  (eq :bool (shader-type-scalar-kind (find-shader-type type))))
+
+(defun shader-type-scalar-type (type)
+  "The scalar type of TYPE's components."
+  (let ((type (find-shader-type type)))
+    (vector-type-for-width 1 nil (shader-type-scalar-kind type)
+                           (shader-type-bit-width type))))
 
 (defclass shader-named-object (lang:arithmetic-named-object) ())
 
@@ -1234,7 +1263,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
                    :source-form source-form)))
 
 (defun shader-numeric-type-p (type)
-  (not (null (shader-type-component-count type))))
+  "Whether TYPE is a scalar or vector with arithmetic: not opaque, not a
+boolean, not a matrix or structure."
+  (and (shader-type-component-count type)
+       (not (eq :bool (shader-type-scalar-kind type)))))
 
 (defun require-shader-types (predicate operands source-form reason)
   (unless (funcall predicate (mapcar #'shader-expression-type operands))
@@ -1496,27 +1528,37 @@ silent loss of meaning."
                   :form source-form :reason :incompatible-division-types
                   :details (mapcar #'shader-type-name types))))))
 
-(defun infer-scalar-comparison-type (operands source-form)
+(defun infer-comparison-type (operands source-form &key equality-p)
+  "Two operands of one float, signed, or unsigned scalar or vector type (or,
+for equality, boolean) compare componentwise: a scalar comparison is a BOOL,
+a vector comparison a BVEC of the same width.  #CAI3RP"
   (require-shader-types
    (lambda (types)
      (and (= 2 (length types))
-          (= 1 (shader-type-component-count (first types)))
-          (member (shader-type-scalar-kind (first types)) '(:float :uint))
+          (shader-type-component-count (first types))
+          (member (shader-type-scalar-kind (first types))
+                  (if equality-p
+                      '(:float :uint :int :bool)
+                      '(:float :uint :int)))
+          (eql 32 (or (shader-type-bit-width (first types)) 32))
           (shader-type= (first types) (second types))))
-   operands source-form :invalid-scalar-comparison)
-  (find-shader-type :bool))
+   operands source-form :invalid-comparison)
+  (vector-type-for-width
+   (shader-type-component-count (shader-expression-type (first operands)))
+   source-form :bool))
 
-(defmacro define-scalar-comparison-type (operator)
+(defmacro define-comparison-type (operator &optional equality-p)
   `(defmethod infer-shader-call-type
        ((operator (eql ',operator)) operands source-form)
      (declare (ignore operator))
-     (infer-scalar-comparison-type operands source-form)))
+     (infer-comparison-type operands source-form :equality-p ,equality-p)))
 
-(define-scalar-comparison-type <)
-(define-scalar-comparison-type <=)
-(define-scalar-comparison-type >)
-(define-scalar-comparison-type >=)
-(define-scalar-comparison-type =)
+(define-comparison-type <)
+(define-comparison-type <=)
+(define-comparison-type >)
+(define-comparison-type >=)
+(define-comparison-type = t)
+(define-comparison-type /= t)
 
 (defun swizzle-components (designator source-form)
   (let* ((name (string-downcase (symbol-name designator)))
@@ -1534,11 +1576,16 @@ silent loss of meaning."
              :details designator))
     indices))
 
-(defun vector-type-for-width (width source-form &optional (scalar-kind :float))
+(defun vector-type-for-width
+    (width source-form &optional (scalar-kind :float) bit-width)
   (find-shader-type
-   (ecase scalar-kind
-     (:float (ecase width (1 :float) (2 :vec2) (3 :vec3) (4 :vec4)))
-     (:uint (ecase width (1 :uint) (2 :uvec2) (3 :uvec3) (4 :uvec4))))
+   (if (eql bit-width 64)
+       (ecase scalar-kind (:uint (ecase width (1 :uint64))))
+       (ecase scalar-kind
+         (:float (ecase width (1 :float) (2 :vec2) (3 :vec3) (4 :vec4)))
+         (:uint (ecase width (1 :uint) (2 :uvec2) (3 :uvec3) (4 :uvec4)))
+         (:int (ecase width (1 :int) (2 :ivec2) (3 :ivec3) (4 :ivec4)))
+         (:bool (ecase width (1 :bool) (2 :bvec2) (3 :bvec3) (4 :bvec4)))))
    source-form))
 
 (defun vector-constructor-width (operands source-form)
@@ -1586,42 +1633,73 @@ silent loss of meaning."
    (shader-type-sample-result-type
     (shader-expression-type (first operands)))))
 
-(defmethod infer-shader-call-type ((operator (eql 'uint)) operands source-form)
+(defun require-scalar-conversion (operands source-form reason kinds)
   (require-shader-types
    (lambda (types)
      (and (= (length types) 1)
-          (= 1 (shader-type-component-count (first types)))
-          (member (shader-type-scalar-kind (first types)) '(:float :uint))))
-   operands source-form :invalid-uint-conversion)
+          (eql 1 (shader-type-component-count (first types)))
+          (member (shader-type-scalar-kind (first types)) kinds)))
+   operands source-form reason))
+
+;;; Scalar conversions.  Float to integer truncates toward zero, and a value
+;;; out of the target's range is undefined, as in every target; signed and
+;;; unsigned convert by reinterpreting the 32 bits (two's complement); a
+;;; boolean converts to one or zero.  #CAI3RP
+(defmethod infer-shader-call-type ((operator (eql 'uint)) operands source-form)
+  (require-scalar-conversion operands source-form :invalid-uint-conversion
+                             '(:float :uint :int :bool))
   (find-shader-type :uint))
 
 (defmethod infer-shader-call-type
     ((operator (eql 'uint64)) operands source-form)
-  (require-shader-types
-   (lambda (types)
-     (and (= (length types) 1)
-          (= 1 (shader-type-component-count (first types)))
-          (member (shader-type-scalar-kind (first types)) '(:float :uint))))
-   operands source-form :invalid-uint64-conversion)
+  (require-scalar-conversion operands source-form :invalid-uint64-conversion
+                             '(:float :uint))
   (find-shader-type :uint64))
 
 (defmethod infer-shader-call-type ((operator (eql 'float)) operands source-form)
+  (require-scalar-conversion operands source-form :invalid-float-conversion
+                             '(:float :uint :int :bool))
+  (find-shader-type :float))
+
+(defmethod infer-shader-call-type ((operator (eql 'int)) operands source-form)
   (require-shader-types
    (lambda (types)
      (and (= (length types) 1)
-          (= 1 (shader-type-component-count (first types)))
-          (member (shader-type-scalar-kind (first types)) '(:float :uint))))
-   operands source-form :invalid-float-conversion)
-  (find-shader-type :float))
+          (eql 1 (shader-type-component-count (first types)))
+          (member (shader-type-scalar-kind (first types))
+                  '(:float :uint :int :bool))
+          (eql 32 (or (shader-type-bit-width (first types)) 32))))
+   operands source-form :invalid-int-conversion)
+  (find-shader-type :int))
 
-(defmethod infer-shader-call-type ((operator (eql 'mod)) operands source-form)
+(defmethod parse-shader-operator-call ((operator (eql 'int)) form environment)
+  "An integer literal names a signed constant directly; anything else is a
+conversion."
+  (if (and (= (length form) 2) (integerp (second form)))
+      (make-shader-typed-literal (second form) :int form)
+      (call-next-method)))
+
+(defun require-integer-operands (operands source-form reason)
+  "Two operands of one 32-bit integer scalar or vector type."
   (require-shader-types
    (lambda (types)
      (and (= (length types) 2)
-          (every #'shader-unsigned-type-p types)
+          (shader-integer-type-p (first types))
           (shader-type= (first types) (second types))))
-   operands source-form :invalid-unsigned-remainder)
+   operands source-form reason)
   (shader-expression-type (first operands)))
+
+(defmethod infer-shader-call-type ((operator (eql 'mod)) operands source-form)
+  ;; The 64-bit unsigned scalar remainder predates the 32-bit integer family.
+  (if (and (= (length operands) 2)
+           (every (lambda (operand)
+                    (shader-type= (shader-expression-type operand) :uint64))
+                  operands))
+      (find-shader-type :uint64)
+      (require-integer-operands operands source-form :invalid-modulus)))
+
+(defmethod infer-shader-call-type ((operator (eql 'rem)) operands source-form)
+  (require-integer-operands operands source-form :invalid-remainder))
 
 (defmethod infer-shader-call-type
     ((operator (eql 'sample-compare)) operands source-form)
@@ -1651,7 +1729,10 @@ silent loss of meaning."
 ;;; type, and a result of that type.  Each operator states its accepted
 ;;; signature explicitly instead of promising every GLSL overload.
 
-(defun infer-uniform-extended-type (operator operands source-form minimum maximum)
+(defun infer-uniform-extended-type
+    (operator operands source-form minimum maximum &optional (kinds '(:float)))
+  "Check a componentwise operation over one uniform type whose scalar kind
+is among KINDS (32-bit integers only, never the 64-bit unsigned type)."
   (unless (and (<= minimum (length operands))
                (or (null maximum) (<= (length operands) maximum)))
     (error 'shader-language-error
@@ -1659,24 +1740,31 @@ silent loss of meaning."
            :details (list operator (length operands))))
   (let ((type (infer-uniform-arithmetic-type
                operator operands source-form)))
-    (unless (eq :float (shader-type-scalar-kind type))
+    (unless (and (member (shader-type-scalar-kind type) kinds)
+                 (eql 32 (shader-type-bit-width type)))
       (error 'shader-language-error
              :form source-form :reason :invalid-extended-math-type
              :details (shader-type-name type)))
     type))
 
+;;; MIN, MAX, and CLAMP order signed and unsigned integers as well as floats;
+;;; ABS and SIGNUM accept signed integers.
 (defmethod infer-shader-call-type ((operator (eql 'min)) operands source-form)
-  (infer-uniform-extended-type operator operands source-form 2 nil))
+  (infer-uniform-extended-type operator operands source-form 2 nil
+                               '(:float :int :uint)))
 
 (defmethod infer-shader-call-type ((operator (eql 'max)) operands source-form)
-  (infer-uniform-extended-type operator operands source-form 2 nil))
+  (infer-uniform-extended-type operator operands source-form 2 nil
+                               '(:float :int :uint)))
 
 (defmethod infer-shader-call-type ((operator (eql 'abs)) operands source-form)
-  (infer-uniform-extended-type operator operands source-form 1 1))
+  (infer-uniform-extended-type operator operands source-form 1 1
+                               '(:float :int)))
 
 (defmethod infer-shader-call-type
     ((operator (eql 'signum)) operands source-form)
-  (infer-uniform-extended-type operator operands source-form 1 1))
+  (infer-uniform-extended-type operator operands source-form 1 1
+                               '(:float :int)))
 
 (defmethod infer-shader-call-type ((operator (eql 'sqrt)) operands source-form)
   (infer-uniform-extended-type operator operands source-form 1 1))
@@ -1705,7 +1793,8 @@ silent loss of meaning."
   (infer-uniform-extended-type operator operands source-form 2 2))
 
 (defmethod infer-shader-call-type ((operator (eql 'clamp)) operands source-form)
-  (infer-uniform-extended-type operator operands source-form 3 3))
+  (infer-uniform-extended-type operator operands source-form 3 3
+                               '(:float :int :uint)))
 
 (defmethod infer-shader-call-type
     ((operator (eql 'smoothstep)) operands source-form)
@@ -1725,49 +1814,69 @@ silent loss of meaning."
   (shader-expression-type (first operands)))
 
 (defun infer-vector-constructor-type (type-name width operands source-form)
-  (unless (= width (vector-constructor-width operands source-form))
-    (error 'shader-language-error
-           :form source-form :reason :invalid-vector-width :details width))
-  (find-shader-type type-name))
-
-(defmethod infer-shader-call-type ((operator (eql 'vec2)) operands source-form)
-  (infer-vector-constructor-type :vec2 2 operands source-form))
-
-(defmethod infer-shader-call-type ((operator (eql 'vec3)) operands source-form)
-  (infer-vector-constructor-type :vec3 3 operands source-form))
-
-(defmethod infer-shader-call-type ((operator (eql 'vec4)) operands source-form)
-  (infer-vector-constructor-type :vec4 4 operands source-form))
-
-(defmethod infer-shader-call-type ((operator (eql 'uvec2)) operands source-form)
-  (let ((type (infer-vector-constructor-type :uvec2 2 operands source-form)))
-    (unless (every (lambda (operand)
-                     (eq :uint (shader-type-scalar-kind
-                                (shader-expression-type operand))))
-                   operands)
-      (error 'shader-language-error
-             :form source-form :reason :invalid-unsigned-vector-constituent))
+  "A vector constructor either converts one operand of its own width
+componentwise from another scalar kind, or assembles constituents of its own
+scalar kind whose widths sum to WIDTH."
+  (let* ((type (find-shader-type type-name))
+         (kind (shader-type-scalar-kind type)))
+    (if (and (= 1 (length operands))
+             (eql width (shader-type-component-count
+                         (shader-expression-type (first operands))))
+             (> width 1))
+        (unless (member (shader-type-scalar-kind
+                         (shader-expression-type (first operands)))
+                        '(:float :uint :int :bool))
+          (error 'shader-language-error
+                 :form source-form :reason :invalid-vector-conversion
+                 :details (shader-type-name
+                           (shader-expression-type (first operands)))))
+        (progn
+          (unless (= width (vector-constructor-width operands source-form))
+            (error 'shader-language-error
+                   :form source-form :reason :invalid-vector-width
+                   :details width))
+          (unless (every (lambda (operand)
+                           (let ((operand-type
+                                   (shader-expression-type operand)))
+                             (and (eq kind
+                                      (shader-type-scalar-kind operand-type))
+                                  (eql (shader-type-bit-width type)
+                                       (shader-type-bit-width
+                                        operand-type)))))
+                         operands)
+            (error 'shader-language-error
+                   :form source-form
+                   :reason (if (eq kind :uint)
+                               :invalid-unsigned-vector-constituent
+                               :invalid-vector-constituent)
+                   :details (mapcar (lambda (operand)
+                                      (shader-type-name
+                                       (shader-expression-type operand)))
+                                    operands)))))
     type))
 
-(defmethod infer-shader-call-type ((operator (eql 'uvec3)) operands source-form)
-  (let ((type (infer-vector-constructor-type :uvec3 3 operands source-form)))
-    (unless (every (lambda (operand)
-                     (eq :uint (shader-type-scalar-kind
-                                (shader-expression-type operand))))
-                   operands)
-      (error 'shader-language-error
-             :form source-form :reason :invalid-unsigned-vector-constituent))
-    type))
+(defun shader-vector-conversion-p (expression)
+  "Whether a vector constructor call EXPRESSION converts one operand of
+another scalar kind, rather than assembling constituents."
+  (let ((operands (shader-call-operands expression)))
+    (and (= 1 (length operands))
+         (shader-vector-type-p (shader-expression-type (first operands)))
+         (not (eq (shader-type-scalar-kind (shader-expression-type expression))
+                  (shader-type-scalar-kind
+                   (shader-expression-type (first operands))))))))
 
-(defmethod infer-shader-call-type ((operator (eql 'uvec4)) operands source-form)
-  (let ((type (infer-vector-constructor-type :uvec4 4 operands source-form)))
-    (unless (every (lambda (operand)
-                     (eq :uint (shader-type-scalar-kind
-                                (shader-expression-type operand))))
-                   operands)
-      (error 'shader-language-error
-             :form source-form :reason :invalid-unsigned-vector-constituent))
-    type))
+(macrolet ((constructors (&rest specs)
+             `(progn
+                ,@(loop for (operator type width) in specs
+                        collect
+                        `(defmethod infer-shader-call-type
+                             ((operator (eql ',operator)) operands source-form)
+                           (infer-vector-constructor-type
+                            ,type ,width operands source-form))))))
+  (constructors (vec2 :vec2 2) (vec3 :vec3 3) (vec4 :vec4 4)
+                (uvec2 :uvec2 2) (uvec3 :uvec3 3) (uvec4 :uvec4 4)
+                (ivec2 :ivec2 2) (ivec3 :ivec3 3) (ivec4 :ivec4 4)
+                (bvec2 :bvec2 2) (bvec3 :bvec3 3) (bvec4 :bvec4 4)))
 
 ;;; Operators are named by ordinary symbols, treating the shader language as
 ;;; a small compiled subset of Common Lisp plus a vector library.  Where CL
@@ -1841,13 +1950,17 @@ never collides with a standard symbol's function documentation:
 (define-shader-operator derivative-y
   "Return the vertical screen-space derivative of a fragment value.")
 (define-shader-operator uint
-  "Convert one scalar float or unsigned value to a 32-bit unsigned integer.")
+  "Convert one scalar float, integer, or boolean to a 32-bit unsigned integer.")
+(define-shader-operator int
+  "Convert one scalar to a 32-bit signed integer, or name an integer literal.")
 (define-shader-operator uint64
   "Convert one scalar float or unsigned value to a 64-bit unsigned integer.")
 (define-shader-operator float
-  "Convert one scalar float or unsigned value to a 32-bit float.")
+  "Convert one scalar float, integer, or boolean to a 32-bit float.")
 (define-shader-operator mod
-  "Return the unsigned remainder of two scalar integer values.")
+  "The floored integer modulus, whose sign follows the divisor, as CL:MOD.")
+(define-shader-operator rem
+  "The truncated integer remainder, whose sign follows the dividend (C's %).")
 (define-shader-operator mix
   "Linear interpolation from one value toward another by a scalar amount.")
 (define-shader-operator vec2
@@ -1862,6 +1975,18 @@ never collides with a standard symbol's function documentation:
   "Construct a three-component unsigned vector from unsigned constituents.")
 (define-shader-operator uvec4
   "Construct a four-component unsigned vector from unsigned constituents.")
+(define-shader-operator ivec2
+  "Construct a two-component signed vector, or convert a two-vector to one.")
+(define-shader-operator ivec3
+  "Construct a three-component signed vector, or convert a three-vector.")
+(define-shader-operator ivec4
+  "Construct a four-component signed vector, or convert a four-vector.")
+(define-shader-operator bvec2
+  "Construct a two-component boolean vector, or test a two-vector against 0.")
+(define-shader-operator bvec3
+  "Construct a three-component boolean vector, or test a three-vector.")
+(define-shader-operator bvec4
+  "Construct a four-component boolean vector, or test a four-vector.")
 (define-shader-operator swizzle
   "Select and reorder vector components by a designator such as :XYZ or :RGB.")
 (define-shader-operator min
@@ -1890,11 +2015,18 @@ never collides with a standard symbol's function documentation:
   "The componentwise natural exponential of one scalar or vector.")
 (define-shader-operator log
   "The componentwise natural logarithm of one scalar or vector.")
-(define-shader-operator < "Test two scalar floats for ordered less-than.")
-(define-shader-operator <= "Test two scalar floats for ordered less-or-equal.")
-(define-shader-operator > "Test two scalar floats for ordered greater-than.")
-(define-shader-operator >= "Test two scalar floats for ordered greater-or-equal.")
-(define-shader-operator = "Test two scalar floats for ordered equality.")
+(define-shader-operator <
+  "Componentwise less-than of two numbers or vectors: a BOOL or BVEC.")
+(define-shader-operator <=
+  "Componentwise less-or-equal of two numbers or vectors: a BOOL or BVEC.")
+(define-shader-operator >
+  "Componentwise greater-than of two numbers or vectors: a BOOL or BVEC.")
+(define-shader-operator >=
+  "Componentwise greater-or-equal of two numbers or vectors: a BOOL or BVEC.")
+(define-shader-operator =
+  "Componentwise equality of two values of one type: a BOOL or BVEC.")
+(define-shader-operator /=
+  "Componentwise inequality of two values of one type: a BOOL or BVEC.")
 (define-shader-operator clamp
   "Constrain a value between uniformly typed lower and upper bounds.")
 (define-shader-operator smoothstep
@@ -1917,6 +2049,241 @@ never collides with a standard symbol's function documentation:
   "Project a homogeneous map application into its declared sampling product.")
 (define-shader-operator convert-unit
   "Explicitly express a semantic quantity in another compatible unit.")
+;;; Integers, booleans, and bits.  #CAI3RP
+;;;
+;;; Signed integers are two's complement and wrap on overflow in every
+;;; target.  Integer / truncates toward zero, REM is the truncated remainder
+;;; (C's %), and MOD the floored modulus (CL:MOD); division by zero is
+;;; undefined.  Booleans combine with AND, OR, and NOT, and select
+;;; componentwise with SELECT.  Bitwise operators keep Common Lisp's names:
+;;; LOGAND, LOGIOR, LOGXOR, and LOGNOT; ASH shifts by a constant count, left
+;;; when positive and right when negative; SHIFT-LEFT and SHIFT-RIGHT shift
+;;; by a run-time count.  Right shifts are arithmetic for signed values and
+;;; logical for unsigned ones, and every shift is within the operand's 32
+;;; bits: a count of 32 or more is undefined.  BIT-CAST reinterprets 32-bit
+;;; components between float, signed, and unsigned.
+
+(define-shader-operator and
+  "True when every boolean operand is: componentwise over BVECs.")
+(define-shader-operator or
+  "True when some boolean operand is: componentwise over BVECs.")
+(define-shader-operator not
+  "The boolean negation of one BOOL or BVEC, componentwise.")
+(define-shader-operator any
+  "True when some component of one BVEC is true.")
+(define-shader-operator all
+  "True when every component of one BVEC is true.")
+(define-shader-operator select
+  "(SELECT CONDITION THEN ELSE): componentwise choice by a BOOL or BVEC.")
+(define-shader-operator logand
+  "The bitwise and of integer scalars or vectors of one type.")
+(define-shader-operator logior
+  "The bitwise inclusive or of integer scalars or vectors of one type.")
+(define-shader-operator logxor
+  "The bitwise exclusive or of integer scalars or vectors of one type.")
+(define-shader-operator lognot
+  "The bitwise complement of one integer scalar or vector.")
+(define-shader-operator ash
+  "(ASH VALUE COUNT): shift by a constant, left if positive, right if not.")
+(define-shader-operator shift-left
+  "(SHIFT-LEFT VALUE COUNT): shift left by a run-time integer count.")
+(define-shader-operator shift-right
+  "(SHIFT-RIGHT VALUE COUNT): arithmetic for signed values, else logical.")
+(define-shader-operator bit-cast
+  "(BIT-CAST TYPE VALUE): reinterpret VALUE's 32-bit components as TYPE.")
+
+(defun make-shader-typed-literal (value type-name source-form)
+  "A literal of an integer or boolean TYPE-NAME holding VALUE."
+  (let ((type (find-shader-type type-name source-form)))
+    (unless (ecase (shader-type-scalar-kind type)
+              (:int (typep value '(signed-byte 32)))
+              (:uint (typep value '(unsigned-byte 32)))
+              (:bool (member value '(t nil))))
+      (error 'shader-language-error
+             :form source-form :reason :literal-out-of-range
+             :details (list value (shader-type-name type))))
+    (make-instance 'shader-literal
+                   :value value :type type
+                   :quantity-specification nil
+                   :source-form source-form)))
+
+(defun require-boolean-operands (operator operands source-form minimum)
+  (require-shader-types
+   (lambda (types)
+     (and (>= (length types) minimum)
+          (shader-boolean-type-p (first types))
+          (every (lambda (type) (shader-type= type (first types)))
+                 (rest types))))
+   operands source-form :invalid-boolean-operands)
+  (when (and (eq operator 'not) (/= 1 (length operands)))
+    (error 'shader-language-error
+           :form source-form :reason :wrong-operand-count
+           :details (list operator (length operands))))
+  (shader-expression-type (first operands)))
+
+(defmethod infer-shader-call-type ((operator (eql 'and)) operands source-form)
+  (require-boolean-operands operator operands source-form 1))
+
+(defmethod infer-shader-call-type ((operator (eql 'or)) operands source-form)
+  (require-boolean-operands operator operands source-form 1))
+
+(defmethod infer-shader-call-type ((operator (eql 'not)) operands source-form)
+  (require-boolean-operands operator operands source-form 1))
+
+(defun infer-boolean-reduction-type (operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= 1 (length types))
+          (shader-boolean-type-p (first types))
+          (shader-vector-type-p (first types))))
+   operands source-form :invalid-boolean-reduction)
+  (find-shader-type :bool))
+
+(defmethod infer-shader-call-type ((operator (eql 'any)) operands source-form)
+  (infer-boolean-reduction-type operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql 'all)) operands source-form)
+  (infer-boolean-reduction-type operands source-form))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'select)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= 3 (length types))
+          (shader-boolean-type-p (first types))
+          (shader-type= (second types) (third types))
+          (eql (shader-type-component-count (first types))
+               (shader-type-component-count (second types)))))
+   operands source-form :invalid-select)
+  (shader-expression-type (second operands)))
+
+(defun infer-bitwise-type (operator operands source-form minimum maximum)
+  (unless (and (<= minimum (length operands))
+               (or (null maximum) (<= (length operands) maximum)))
+    (error 'shader-language-error
+           :form source-form :reason :wrong-operand-count
+           :details (list operator (length operands))))
+  (require-shader-types
+   (lambda (types)
+     (and (shader-integer-type-p (first types))
+          (every (lambda (type) (shader-type= type (first types)))
+                 (rest types))))
+   operands source-form :invalid-bitwise-operands)
+  (shader-expression-type (first operands)))
+
+(defmethod infer-shader-call-type ((operator (eql 'logand)) operands source-form)
+  (infer-bitwise-type operator operands source-form 2 nil))
+
+(defmethod infer-shader-call-type ((operator (eql 'logior)) operands source-form)
+  (infer-bitwise-type operator operands source-form 2 nil))
+
+(defmethod infer-shader-call-type ((operator (eql 'logxor)) operands source-form)
+  (infer-bitwise-type operator operands source-form 2 nil))
+
+(defmethod infer-shader-call-type ((operator (eql 'lognot)) operands source-form)
+  (infer-bitwise-type operator operands source-form 1 1))
+
+(defun infer-shift-type (operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= 2 (length types))
+          (shader-integer-type-p (first types))
+          (shader-integer-type-p (second types))
+          (member (shader-type-component-count (second types))
+                  (list 1 (shader-type-component-count (first types))))))
+   operands source-form :invalid-shift)
+  (shader-expression-type (first operands)))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'shift-left)) operands source-form)
+  (infer-shift-type operands source-form))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'shift-right)) operands source-form)
+  (infer-shift-type operands source-form))
+
+(defmethod parse-shader-operator-call ((operator (eql 'ash)) form environment)
+  "Parse (ASH VALUE COUNT) with COUNT a constant integer, kept as the call's
+parameter: its sign chooses the direction at compile time."
+  (unless (= (length form) 3)
+    (error 'shader-language-error :form form :reason :ash-arity))
+  (let* ((value (parse-shader-expression (second form) environment))
+         (type (shader-expression-type value))
+         (count (shader-constant-integer-value (third form))))
+    (unless (shader-integer-type-p type)
+      (error 'shader-language-error
+             :form form :reason :invalid-bitwise-operands
+             :details (list (shader-type-name type))))
+    (unless (and count (< (abs count) 32))
+      (error 'shader-language-error
+             :form form :reason :invalid-ash-count :details (third form)))
+    (make-instance 'shader-call
+                   :operator operator :operands (list value)
+                   :parameters (list count) :type type
+                   :quantity-specification nil :quantity-layout nil
+                   :source-form form)))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'bit-cast)) form environment)
+  "Parse (BIT-CAST TYPE VALUE): the same 32-bit components, read as TYPE."
+  (unless (= (length form) 3)
+    (error 'shader-language-error :form form :reason :bit-cast-arity))
+  (let* ((target (find-shader-type (second form) form))
+         (value (parse-shader-expression (third form) environment))
+         (type (shader-expression-type value)))
+    (unless (and (member (shader-type-scalar-kind type) '(:float :int :uint))
+                 (member (shader-type-scalar-kind target) '(:float :int :uint))
+                 (eql 32 (shader-type-bit-width type))
+                 (eql 32 (shader-type-bit-width target))
+                 (eql (shader-type-component-count type)
+                      (shader-type-component-count target)))
+      (error 'shader-language-error
+             :form form :reason :invalid-bit-cast
+             :details (list (shader-type-name type)
+                            (shader-type-name target))))
+    (make-instance 'shader-call
+                   :operator operator :operands (list value)
+                   :parameters (list (shader-type-name target)) :type target
+                   :quantity-specification nil :quantity-layout nil
+                   :source-form form)))
+
+;;; These results are raw representations, like the other conversions: a
+;;; truth value or a bit pattern has no quantity of its own.
+(macrolet ((raw (&rest operators)
+             `(progn
+                ,@(loop for operator in operators
+                        append
+                        `((defmethod infer-shader-call-quantity-specification
+                              ((operator (eql ',operator)) operands source-form)
+                            (declare (ignore operator operands source-form))
+                            nil)
+                          (defmethod infer-shader-call-quantity-layout
+                              ((operator (eql ',operator)) operands source-form)
+                            (declare (ignore operator operands source-form))
+                            nil))))))
+  (raw and or not any all logand logior logxor lognot shift-left shift-right
+       int ivec2 ivec3 ivec4 bvec2 bvec3 bvec4))
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql '/=)) operands source-form)
+  ;; Inequality checks its operands' compatibility exactly as equality does.
+  (infer-shader-call-quantity-specification '= operands source-form))
+
+(defmethod infer-shader-call-quantity-specification
+    ((operator (eql 'select)) operands source-form)
+  (destructuring-bind (condition consequent alternative) operands
+    (declare (ignore condition))
+    (unless (lang:arithmetic-state-compatible-p consequent alternative)
+      (error 'shader-language-error
+             :form source-form :reason :select-branch-quantity-mismatch
+             :details (list (shader-expression-form consequent)
+                            (shader-expression-form alternative))))
+    (shader-expression-quantity-specification consequent)))
+
+(defmethod infer-shader-call-quantity-layout
+    ((operator (eql 'select)) operands source-form)
+  (declare (ignore source-form))
+  (shader-expression-quantity-layout (second operands)))
 
 ;;; Shader functions are typed source composition.  Authors write an ordinary
 ;;; expression body, including lexical LET*, and every call is parsed against
@@ -2596,7 +2963,10 @@ its artifact depends on.")
          references))
 
 (defun parse-shader-expression (form environment)
-  (cond ((realp form)
+  (cond ((member form '(t nil))
+         ;; T and NIL are the boolean constants, as in Common Lisp.
+         (make-shader-typed-literal form :bool form))
+        ((realp form)
          (make-instance 'shader-literal
                         :value (coerce form 'single-float)
                         :type (find-shader-type :float)
@@ -2951,7 +3321,9 @@ NIL leaves the character to the named definition; T is the historical
      (if (and (eq 'uint (shader-call-operator expression))
               (= 1 (length (shader-call-operands expression)))
               (typep (first (shader-call-operands expression))
-                     'shader-literal))
+                     'shader-literal)
+              (realp (shader-literal-value
+                      (first (shader-call-operands expression)))))
          (values (truncate
                   (shader-literal-value
                    (first (shader-call-operands expression))))

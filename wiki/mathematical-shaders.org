@@ -428,6 +428,64 @@ texture-backed workbench inside luvcraft, but the current standalone window
 primarily reports source compilation state.  Refusing unsupported second
 windows is part of keeping the owning McCLIM frame responsive.
 
+* Integers, booleans, and bits are ordinary values
+:PROPERTIES:
+:ID: CAI3RP
+:END:
+
+A native renderer (#LSVW2S) needs the integer and boolean arithmetic the
+first language could do without.  Four scalar kinds now share one vocabulary:
+=:float=, =:uint=, =:int= (two's complement), and =:bool=, each with two-,
+three-, and four-component vectors (=:ivec2=, =:bvec3=, ...).  The operators
+keep Common Lisp's names where Common Lisp has the meaning:
+
+#+begin_src lisp
+(let* ((cell (ivec2 (* uv 64.0)))            ; float to int, toward zero
+       (wrapped (mod cell (ivec2 (int 4) (int -4))))  ; floored, as CL:MOD
+       (tail (rem cell (ivec2 (int 4) (int 4))))      ; truncated, as C's %
+       (bits (bit-cast :uint (swizzle uv :x)))
+       (packed (logior (ash (logand bits (uint 255.0)) 8) (ash mask -4)))
+       (near (< (abs cell) (ivec2 (int 3) (int 3))))  ; a BVEC2
+       (inside (and (all near) (not (= packed mask)))))
+  (select near (vec2 cell) uv))                ; componentwise choice
+#+end_src
+
+- Literals: a bare number is still a float.  =(int 3)= is a signed literal,
+  =t= and =nil= are the booleans, and =(uint 3.0)= stays the conversion it
+  always was.
+- Conversions: =int=, =uint=, and =float= convert one scalar, and a vector
+  constructor given one vector of its own width converts componentwise
+  (=(vec2 cell)=, =(ivec2 uv)=, =(bvec2 cell)= tests against zero).  Float to
+  integer truncates; signed and unsigned reinterpret their 32 bits; a boolean
+  becomes one or zero.
+- Arithmetic: =+=, =-=, =*= wrap; integer =/= truncates toward zero, =rem= is
+  the truncated remainder and =mod= the floored modulus (the sign follows the
+  divisor, exactly =cl:mod=); division by zero is undefined.  =min=, =max=,
+  =clamp= order every kind; =abs= and =signum= take signed integers.  MSL has
+  no integer =sign=, so it subtracts two comparisons.
+- The comparisons (~<~, ~<=~, ~>~, ~>=~, ~=~, and ~/=~) work on any numeric
+  scalar or vector and return a =bool= or a =bvec= of the same width;
+  equality and inequality also compare booleans.  =and=, =or=, =not=, =any=, =all= are the logic, and
+  =(select condition then else)= chooses componentwise.  =if= stays a scalar
+  choice of whole values.
+- Bits: =logand=, =logior=, =logxor=, =lognot=; =(ash value count)= with a
+  constant count, left when positive and right when negative;
+  =shift-left= and =shift-right= with a run-time count.  Right shifts are
+  arithmetic for signed values and logical for unsigned ones; a count of 32
+  or more is undefined.  =(bit-cast :float word)= reinterprets.
+
+The target spellings differ more than the meanings, which is why they are
+pinned by tests and by each target's own compiler: SPIR-V's =OpSMod= is
+already floored, while MSL, HLSL, and WGSL write =((a % b) + b) % b=; Metal's
+=select(f, t, c)= and WGSL's =select(f, t, c)= reverse the source order that
+SPIR-V's =OpSelect= and HLSL 2021's =select(c, t, f)= keep; HLSL 2021 forbids
+=&&= and =||= on vectors and spells them =and()= and =or()=; WGSL shifts only
+by =u32= counts.  =hal/shader/tests.lisp= checks one probe through spirv-val,
+=hal/metal/msl/tests.lisp= through Apple's =metal=, and
+=hal/d3d12/hlsl/tests.lisp= through DXC.  Signed overflow wraps in SPIR-V,
+HLSL, and WGSL; MSL inherits C++'s undefined signed overflow, so a shader
+should not lean on it.
+
 * What this does not decide
 :PROPERTIES:
 :ID: F2Q9WU

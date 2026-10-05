@@ -5,7 +5,8 @@
   (:local-nicknames (#:lang #:luv.arithmetic.language))
   ;; These names are literal SPIR-V instructions rather than Common Lisp or
   ;; shared-shader operators.  They belong to this backend package.
-  (:shadow #:dot #:function #:load #:return #:variable)
+  (:shadow #:dot #:function #:load #:return #:variable #:any #:all
+           #:select)
   (:documentation
    "Literal SPIR-V instructions, modules, and shader lowering.")
   (:export #:spir-v-error
