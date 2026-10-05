@@ -143,6 +143,10 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:metal-backend.org][The native Metal 4 backend]] is the canonical implementation path: the
   SDL/CAMetalLayer frame path, direct MSL lowering, =MTL4Compiler=, argument
   tables, the live luvcraft pipeline, and its remaining backend-local work.
+- [[file:hlsl-and-shaderc.org][HLSL, shader programs, and luv-shaderc]] records the HLSL lowering for
+  DXC, programs linked in Metal's and Direct3D's binding families, and the
+  ahead-of-time compiler that gives a native C++ renderer MSL, HLSL, and
+  reflection from one shader source.
 
 ** The little block world
 :PROPERTIES:

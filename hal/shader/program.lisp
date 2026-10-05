@@ -5,7 +5,7 @@
 ;;; compute -- and linking checks what the stages must agree on before any
 ;;; ahead-of-time compiler writes them out: resource identities in the
 ;;; binding families Metal and Direct3D share (buffers, textures, samplers),
-;;; the inter-stage interface, and which samplers compare depth.
+;;; the inter-stage interface, and which samplers compare depth.  #7A2ONF
 
 (in-package #:luv.shader)
 

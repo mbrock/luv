@@ -5,7 +5,7 @@
 ;;; (SHADER:LINK-SHADER-PROGRAM), checked against the binding contract the
 ;;; renderer's hardware layer expects, lowered to one MSL and one HLSL
 ;;; document per stage, and described twice for the host: as a JSON manifest
-;;; and as a C++ header of uniform structures and a resource table.
+;;; and as a C++ header of uniform structures and a resource table.  #1I6G0R
 
 (in-package #:luv.shaderc)
 

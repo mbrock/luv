@@ -1,0 +1,144 @@
+#+title: HLSL, shader programs, and luv-shaderc
+#+startup: overview
+
+* One shader source for Metal and Direct3D renderers outside Luv
+:PROPERTIES:
+:ID: LSVW2S
+:END:
+
+The mathematical shader language (#S4H8DR) now has a third textual lowering
+and a consumer outside the live image.  =luv/hlsl= lowers the same typed graph
+to HLSL for DXC, and =luv-shaderc= compiles named programs ahead of time into
+MSL, HLSL, and the reflection a native C++ renderer builds its pipelines from.
+The first such renderer is moppe's NHAL: Metal 4 on Apple platforms and
+Direct3D 12 on an Xbox Series in Developer Mode, shader model 6.4 at most.
+
+#+begin_example
+shader source file (DEFINE-SHADER, DEFINE-SHADER-PROGRAM)
+        |
+        | load in LUV.SHADER-USER, LINK-SHADER-PROGRAM
+        v
+shader-program-linkage -- resources in binding families, stage interface
+        |
+        +-- compile-msl  --> NAME.STAGE.metal
+        +-- compile-hlsl --> NAME.STAGE.hlsl   (DXC: vs_6_0 / ps_6_0 / cs_6_0)
+        +-- program-json --> NAME.json
+        `-- program-header -> NAME.hh          (moppe/nhal/reflection.hh)
+#+end_example
+
+#VH2TIP describes the lowering, #7A2ONF the program and its binding families,
+#1I6G0R the compiler and its package, and #4TZZRS what a real-time renderer
+still cannot say in the language.
+
+* The HLSL lowering is a sibling of the MSL one
+:PROPERTIES:
+:ID: VH2TIP
+:END:
+
+[[file:../hal/d3d12/hlsl/lowering.lisp][=hal/d3d12/hlsl/lowering.lisp=]] mirrors the MSL lowering: an
+=hlsl-document= of structures, resource declarations, and one entry point,
+with every rendered expression occurrence retained against its shader
+expression and the same plain-language quantity comments, which now live in
+[[file:../hal/shader/semantics.lisp][=hal/shader/semantics.lisp=]] for both.  The deliberate dialect choices:
+
+- Resources follow the families of #7A2ONF.  A uniform block is a structure
+  inside =cbuffer NameBlock : register(bN)=, so members read =block.member=
+  as in MSL; a read-only storage buffer is a =StructuredBuffer= at =tN,
+  space0=, a read-write one an =RWStructuredBuffer= at =uN=; textures are
+  =Texture2D= at =tN, space1=, so buffer and texture numbers never collide;
+  a sampler is =SamplerState=, or =SamplerComparisonState= when the program
+  compares depth through it.
+- Clip Y is negated at the position output exactly as MSL and WGSL do: the
+  shared camera graph keeps Vulkan's framebuffer orientation, and Direct3D,
+  like Metal, points clip Y up with depth 0..1.  A shader author therefore
+  writes Vulkan-style clip positions for every target.
+- =sample= is =Sample= in pixel shaders and =SampleLevel(..., 0)= elsewhere;
+  =sample-compare= is always =SampleCmpLevelZero=, legal in every stage and in
+  divergent code, and equal to Metal's comparison for single-level shadow
+  maps.  A depth texture is =Texture2D<float>=, widened to the language's vec4
+  by a scalar cast, as MSL's =float4(depth)= does.
+- =mix= is =lerp=, =fract= =frac=, the derivatives =ddx= / =ddy=, and =signum=
+  casts HLSL's integer =sign= back to its operand type.  Conditionals always
+  have a scalar condition, so =?:= means the same under HLSL 2018 and 2021.
+- Integer varyings are =nointerpolation=.  The pixel input structure starts
+  with =SV_Position= and mirrors the vertex outputs location by location,
+  because Direct3D links stages by signature layout, not only by semantic.
+
+=make hlsl-validate= discovers every application vertex and fragment shader
+(98 of them), lowers each, and compiles it with DXC with warnings as errors;
+DXC is in the development shells for this.  The unit claims in
+[[file:../hal/d3d12/hlsl/tests.lisp][=hal/d3d12/hlsl/tests.lisp=]] compile their probes with DXC too.
+
+* Programs link stages in Metal's and Direct3D's binding families
+:PROPERTIES:
+:ID: 7A2ONF
+:END:
+
+=define-shader-program= in [[file:../hal/shader/program.lisp][=hal/shader/program.lisp=]] names the stages one pipeline
+runs: vertex and fragment, vertex alone for a depth pass, or compute.  Its
+values name =define-shader= functions, called when the program is linked, so
+redefining a stage reaches the program.
+
+=link-shader-resources= keys resources by Vulkan's (set, binding).  Metal and
+Direct3D number buffers, textures, and samplers independently, so
+=link-shader-program= keys them by (family, binding) instead: a uniform block
+and a texture may both be binding 0, while a uniform block and a storage
+buffer share Metal's one buffer index space and collide.  It also checks the
+inter-stage interface (type and interpolation at each fragment location),
+dense colour outputs, and which samplers compare depth, rejecting a sampler
+used both ways because HLSL gives the two uses different types.  The MSL and
+HLSL lowerings reject a shared index within one stage as well.
+
+* luv-shaderc writes stages, a manifest, and a C++ header
+:PROPERTIES:
+:ID: 1I6G0R
+:END:
+
+#+begin_example
+nix run github:mbrock/luv#luv-shaderc -- --out DIR [--target msl] [--target hlsl] FILE.lisp...
+#+end_example
+
+[[file:../hal/shaderc/shaderc.lisp][=hal/shaderc/=]] reads each file in =LUV.SHADER-USER= (Common Lisp plus the
+shader language, unless the file says =in-package=), links every program, and
+checks moppe's binding contract (=docs/nhal.md= there): buffer and texture
+bindings below 16, descriptor set 0, the standard sampler set by number (3 is
+the comparison sampler), and no vertex attributes, since vertex stages pull
+from storage buffers.  For a program =NAME= it writes =NAME.STAGE.metal=,
+=NAME.STAGE.hlsl=, =NAME.json=, and =NAME.hh=; every entry point is
+=name_stage= in both languages.  Errors name the file, the failing form's
+line, the program and stage, the language's reason, and the source form, and
+exit nonzero.  [[file:../hal/shaderc/examples/textured-instances.lisp][=examples/textured-instances.lisp=]] pulls vertices and
+instances, samples a texture, and compares a shadow map;
+[[file:../hal/shaderc/examples/particle-advance.lisp][=examples/particle-advance.lisp=]] is a compute program.  The tests compile both
+with Metal, DXC, spirv-val, and the C++ compiler.
+
+The flake's =packages.<system>.luv-shaderc= builds from the shader sources
+alone with an SBCL holding only Closer-MOP, through
+[[file:../scripts/build-luv-shaderc.lisp][=scripts/build-luv-shaderc.lisp=]] (also =make luv-shaderc=).  The image is a
+compressed core whose closure is itself and zstd: about 14 MiB, with no SDL,
+Vulkan, Metal, or McCLIM.
+
+* TODO What a real-time renderer still cannot say
+:PROPERTIES:
+:ID: 4TZZRS
+:END:
+
+Compute stages and read-write storage buffers exist (=:access :read-write=,
+=set-buffer-element=, =:workgroup-size=, =:global-invocation-id=), but a
+renderer of moppe's kind still lacks, roughly in order of need:
+
+- matrices (=float4x4= and products); today projections are rows of vec4 in a
+  uniform block with =dot=, or a projective map (#4XAF9Z);
+- structures, as storage-buffer elements and as values, and vec3 elements;
+- signed integers, bitwise operators other than =ldb=, and integer vectors in
+  comparisons; comparisons are scalar only and there are no boolean
+  operators (=and=, =or=, =not=) or =select= over vectors;
+- uniform members other than vec4 lanes (deliberately, for the layout
+  contract), arrays in uniform blocks, and push or root constants;
+- fragment built-ins (frag coord, front facing, sample index, depth output),
+  =discard=, and blending-relevant outputs beyond colour;
+- texture variety: arrays, cubes, 3D, explicit LOD and gradients, gather,
+  storage textures, and bindless tables;
+- in compute: workgroup-shared memory, barriers, atomics, and the group count
+  in HLSL, which has no system value for it;
+- the vertex =:location= inputs exist but are outside NHAL's contract.

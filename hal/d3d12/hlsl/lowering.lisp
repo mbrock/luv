@@ -13,7 +13,7 @@
 ;;; buffer and texture numbers never collide; and a sampler is sN, a
 ;;; SamplerComparisonState when the program compares depth through it.
 ;;; Vertex, fragment, and compute stages lower; task and mesh stages do not,
-;;; since shader model 6.4 has no mesh shaders.
+;;; since shader model 6.4 has no mesh shaders.  #VH2TIP
 
 (in-package #:luv.hlsl)
 
