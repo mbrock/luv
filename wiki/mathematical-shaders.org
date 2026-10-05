@@ -278,6 +278,43 @@ structured blocks and phi values; MSL realizes it as an ordinary loop.  The
 source object should say what the loop computes, not encode either target's
 control-flow machinery.
 
+* Effects take a place in the statement sequence
+:PROPERTIES:
+:ID: X4ZZ92
+:END:
+
+Expressions are values, so a lowering may name, share, inline, or reorder
+them.  Effects need a time instead.  A stage body is a sequence of
+statements, and =let*= is a statement too: its bindings are computed where it
+stands, after every statement before it, and its own statements follow.
+That is how a compute stage reads workgroup memory after a barrier:
+
+#+begin_src lisp
+(let* ((index (swizzle cell :x)))
+  (set-shared-element tile local (buffer-element input index))
+  (workgroup-barrier)
+  (let* ((neighbour (shared-element tile (mod (+ local one) size))))
+    (set-buffer-element output index neighbour)))
+#+end_src
+
+An effect that returns a value -- the atomics, which return the element as it
+was -- is legal only as the whole value of such a binding, or as a statement
+whose value is dropped.  A subexpression atomic is rejected
+(=:effect-requires-statement-binding=), because the textual lowerings repeat
+and reorder subexpressions freely.  Each backend therefore evaluates each
+effect exactly once, where the source puts it: SPIR-V as one instruction in
+the current block, MSL as a call in one declaration, HLSL as an
+=Interlocked= call with an out parameter just before it.  A nested binding
+that reuses a name gets a fresh one in HLSL and MSL, so it never refers to
+itself.
+
+Some rules need the whole stage: a barrier must not stand under a condition
+that varies per invocation (=:barrier-in-divergent-control-flow=, using the
+same uniformity analysis as mesh output counts), wave operations exist only
+in fragment and compute stages, and =sample-bias= only in fragments, which
+have implicit derivatives.  These live in [[file:../hal/shader/effects.lisp][=hal/shader/effects.lisp=]] beside
+the statements themselves; #UABDNH and #CPIOH5 describe what they lower to.
+
 * DONE Share function application across arithmetic and shader realizations
 :PROPERTIES:
 :ID: YZS04W
@@ -616,8 +653,9 @@ and composition, integer and boolean types, storage buffers, derivative
 operations, and stage-specific validation should arrive only with shaders that
 require them.  The projective-map slice exists because two production shaders
 already supply that requirement; signed integers, booleans, bit operations,
-matrices, and structures (#CAI3RP, #QEHEEE, #V16OXI) arrived because a native
-renderer's shaders (#LSVW2S) need them.
+matrices, and structures (#CAI3RP, #QEHEEE, #V16OXI), texture kinds, and
+compute effects (#X4ZZ92) arrived because a native renderer's shaders
+(#LSVW2S) need them.
 
 The useful constraints for the next experiments are already visible:
 

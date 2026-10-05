@@ -27,8 +27,9 @@ shader-program-linkage -- resources in binding families, stage interface
 #+end_example
 
 #VH2TIP describes the lowering, #7A2ONF the program and its binding families,
-#1I6G0R the compiler and its package, and #4TZZRS what a real-time renderer
-still cannot say in the language.
+#1I6G0R the compiler and its package, #CPIOH5, #54MBHW, and #UABDNH the
+fragment, texture, and compute vocabulary moppe's renderer asked for, and
+#4TZZRS what a real-time renderer still cannot say in the language.
 
 * The HLSL lowering is a sibling of the MSL one
 :PROPERTIES:
@@ -89,6 +90,153 @@ dense colour outputs, and which samplers compare depth, rejecting a sampler
 used both ways because HLSL gives the two uses different types.  The MSL and
 HLSL lowerings reject a shared index within one stage as well.
 
+* Fragment stages see their pixel and may discard it
+:PROPERTIES:
+:ID: CPIOH5
+:END:
+
+A fragment stage may declare four more built-ins and one statement:
+
+#+begin_src lisp
+:inputs ((pixel :vec4 :built-in :frag-coord)
+         (front :bool :built-in :front-facing)
+         (sample :uint :built-in :sample-index))
+:outputs ((color :vec4 :location 0)
+          (depth :float :built-in :frag-depth))
+...
+(when (< (swizzle base :a) 0.5) (discard))
+#+end_src
+
+=:frag-coord= is Vulkan's =FragCoord= and Metal's =[[position]]=: x and y in
+framebuffer pixels from the top-left corner at pixel centres (0.5, 0.5 is the
+first pixel), z the fragment's depth, and w the reciprocal of its clip w.
+Direct3D's =SV_Position= agrees except that its w is the clip w itself, so the
+HLSL lowering reads =float4(p.xyz, 1.0f / p.w)= from the one =SV_Position=
+every pixel input structure already begins with.  The y convention needs no
+correction anywhere: the clip-Y negation of #VH2TIP makes all three put the
+same image in the same framebuffer rows.
+
+=:front-facing= is =SV_IsFrontFace=, =[[front_facing]]=, =FrontFacing=; which
+winding is front is pipeline state.  Vulkan measures winding in its y-down
+framebuffer and Metal and Direct3D as seen with y up, so a host that wants
+one triangle to be front everywhere declares opposite windings on Vulkan.
+=:sample-index= (=SV_SampleIndex=, =[[sample_id]]=, a flat =SampleId= with
+=SampleRateShading=) runs the stage per sample.  =:frag-depth= is =SV_Depth=,
+=[[depth(any)]]=, or =FragDepth= with =DepthReplacing=, in the same 0..1
+(reversed or not) as the depth buffer.  =discard= is =discard;=,
+=discard_fragment()=, and =OpKill=; WGSL gets these too.
+
+* Textures have dimensions; storage textures have formats
+:PROPERTIES:
+:ID: 54MBHW
+:END:
+
+Beside =:texture-2d=, =:depth-texture-2d=, and =:uint-texture-2d= there are
+=:texture-2d-array=, =:depth-texture-2d-array=, =:texture-cube=, and
+=:texture-3d=: =Texture2DArray<…>=, =TextureCube=, =Texture3D= at =tN,
+space1=, and =texture2d_array=, =depth2d_array=, =texturecube=, =texture3d= at
+=[[texture(N)]]=.  Every texture operator takes the texture, then a sampler
+when it samples, then the coordinate (vec2, or vec3 for a cube's direction or
+a volume's UVW); an array's layer, a =:uint=, always follows the coordinate;
+then come the operator's own operands:
+
+| operator | after the coordinate | result |
+|----------+----------------------+--------|
+| =sample= | | the sample |
+| =sample-level= | lod | explicit level |
+| =sample-bias= | bias | fragments only |
+| =sample-grad= | ddx ddy (coordinate type) | explicit gradients |
+| =sample-compare= | depth reference | float, 2D and 2D-array depth |
+| =gather= | | vec4 of the four red texels (uvec4 for uint) |
+| =gather-compare= | depth reference | vec4 of four comparisons |
+| =texel-load= | [level] (=:uint=) | exact texel; no cubes |
+| =texture-size= | (texture [level] only) | uvec2, uvec3 with layers or depth |
+
+In HLSL a layer becomes the last float of the coordinate and =texture-size=
+is =GetDimensions= into temporaries; MSL passes the layer as its own argument
+and wraps level, bias, and gradients in =level()=, =bias()=, and
+=gradient2d/cube/3d()=; SPIR-V appends the layer as a float (or an unsigned
+texel coordinate) and uses =Lod=, =Bias=, and =Grad= image operands,
+=OpImageGather=, =OpImageDrefGather=, and =OpImageQuerySizeLod= (with
+=ImageQuery=).  =gather-compare= needs a comparison sampler, as
+=sample-compare= does.
+
+A storage texture is declared with a format:
+
+#+begin_src lisp
+(heat :read-write-texture-2d :binding 0 :format :r32f)
+...
+(set-texel heat xy (vec4 (+ (swizzle (texel-load heat xy) :x) 1.0) 0.0 0.0 0.0))
+#+end_src
+
+The formats are =:rgba32f=, =:rgba16f=, =:rgba8= (unsigned normalized),
+=:r32f=, and =:r32ui=; texels are vec4 (uvec4 for =:r32ui=), and a
+one-channel format reads (r, 0, 0, 1) and stores the first component.  Storage
+textures are a binding family of their own (#7A2ONF): Metal
+=texture2d<…, access::read_write>= at =[[texture(16 + N)]]=, past the sixteen
+sampled textures; Direct3D =RWTexture2D<…>= at =uN, space1=, apart from the
+read-write buffers' =uN, space0=; SPIR-V a storage image with the declared
+format, so no =StorageImageReadWithoutFormat=.  =texel-load= and
+=set-texel= work in compute and fragment stages.  Reading the four-channel
+formats needs Direct3D's typed UAV loads of additional formats and Metal's
+tier-2 read-write textures, which the Xbox Series and Apple silicon have.
+
+* Compute workgroups share memory, meet at barriers, and count atomically
+:PROPERTIES:
+:ID: UABDNH
+:END:
+
+A compute stage may declare workgroup arrays, 16 KiB in all (Vulkan's
+guaranteed minimum; Direct3D and Metal allow 32):
+
+#+begin_src lisp
+(define-shader reduce-compute
+    (:stage :compute :workgroup-size (64 1 1)
+     :inputs ((cell :uvec3 :built-in :global-invocation-id)
+              (local :uint :built-in :local-invocation-index)
+              (lane :uint :built-in :wave-lane-index))
+     :shared ((partial :float 64))
+     :resources (...))
+  ...)
+#+end_src
+
+=(shared-element partial i)= reads one and =(set-shared-element partial i v)=
+stores one; they are =groupshared=, kernel-scope =threadgroup= variables, and
+=Workgroup= storage.  =(workgroup-barrier)= is
+=GroupMemoryBarrierWithGroupSync=, =threadgroup_barrier(mem_threadgroup)=, and
+=OpControlBarrier= at workgroup scope with workgroup memory semantics;
+=(storage-barrier)= also orders storage buffers and textures
+(=AllMemoryBarrierWithGroupSync=, device and texture memory flags, device
+scope).  Both must stand in workgroup-uniform control flow (#X4ZZ92).
+
+=atomic-add=, =atomic-min=, =atomic-max=, =atomic-and=, =atomic-or=,
+=atomic-xor=, =atomic-exchange= (target index value) and
+=atomic-compare-exchange= (target index comparand value) work on =:uint=
+elements of read-write storage buffers and workgroup arrays, are relaxed, and
+return the element's previous value.  HLSL uses the =Interlocked= functions on
+=RWStructuredBuffer<uint>= elements; SPIR-V =OpAtomic*= at device or
+workgroup scope.  Metal needs an atomic type, so a buffer or workgroup array
+that any atomic touches is =atomic_uint= in that stage and every plain read
+and store of it becomes a relaxed =atomic_load_explicit= or
+=atomic_store_explicit=.  Metal's only compare-exchange is weak; the lowering
+retries exactly its spurious failures so the result means what it means
+elsewhere.
+
+Waves: the built-ins =:wave-lane-index= and =:wave-lane-count=, and
+=wave-active-sum=, =wave-prefix-sum= (exclusive), and =wave-ballot= (a uvec4
+mask) are shader model 6.0's =Wave= intrinsics, MSL's simdgroup attributes,
+=simd_sum=, =simd_prefix_exclusive_sum=, and =simd_ballot=, and SPIR-V 1.3's
+=GroupNonUniform= operations, which raise only the modules that use them to
+Vulkan 1.1.  Their results depend on which lanes are active, so they belong in
+uniform control flow as well, though that is not checked.
+
+[[file:../hal/shaderc/examples/instance-culling.lisp][=examples/instance-culling.lisp=]] is the first program that needs this: one
+invocation per instance tests a bounding sphere against six frustum planes and
+appends visible instance indices through an atomic count kept in the indexed
+indirect-draw argument record, whose five words Direct3D's
+=D3D12_DRAW_INDEXED_ARGUMENTS= and Metal's
+=MTLDrawIndexedPrimitivesIndirectArguments= order the same way.
+
 * luv-shaderc writes stages, a manifest, and a C++ header
 :PROPERTIES:
 :ID: 1I6G0R
@@ -111,8 +259,18 @@ exit nonzero.  [[file:../hal/shaderc/examples/textured-instances.lisp][=examples
 instances, samples a texture, and compares a shadow map;
 [[file:../hal/shaderc/examples/particle-advance.lisp][=examples/particle-advance.lisp=]] is a compute program, and
 [[file:../hal/shaderc/examples/particle-swarm.lisp][=examples/particle-swarm.lisp=]] one over structured particles with a mat4
-uniform.  The tests compile them with Metal, DXC, spirv-val, and the C++
+uniform, and [[file:../hal/shaderc/examples/instance-culling.lisp][=examples/instance-culling.lisp=]] culls instances on the GPU
+(#UABDNH).  The tests compile them with Metal, DXC, spirv-val, and the C++
 compiler.
+
+The resource kinds in the manifest and header are the enumerators of moppe's
+=ResourceKind=, among them =texture_2d_array=, =depth_texture_2d_array=,
+=texture_cube=, =texture_3d=, and =read_write_texture_2d=; a storage texture's
+manifest entry also names its =format=, its family =storage_texture=, and its
+Metal index =[[texture(16 + N)]]=.  A compute program's header carries its
+workgroup size in the =Program= value itself, =.workgroup_size = {64, 1, 1}=.
+[[file:../hal/shaderc/fixtures/moppe/nhal/reflection.hh][=fixtures/moppe/nhal/reflection.hh=]] is a copy of moppe's header for those
+tests; refresh it when moppe's changes.
 
 The flake's =packages.<system>.luv-shaderc= builds from the shader sources
 alone with an SBCL holding only Closer-MOP, through
@@ -128,19 +286,22 @@ Vulkan, Metal, or McCLIM.
 Compute stages and read-write storage buffers exist (=:access :read-write=,
 =set-buffer-element=, =:workgroup-size=, =:global-invocation-id=), and so do
 signed integers, booleans, and bit operations (#CAI3RP), column-major
-matrices, which HLSL represents transposed (#QEHEEE), and structures with
-one host layout, written into the header as asserted C++ structures
-(#V16OXI); but a renderer of moppe's kind still lacks, roughly in order of
-need:
+matrices, which HLSL represents transposed (#QEHEEE), structures with one
+host layout, written into the header as asserted C++ structures (#V16OXI),
+fragment built-ins (#CPIOH5), the texture kinds and storage textures of
+#54MBHW, and workgroup memory, barriers, atomics, and waves (#UABDNH); but a
+renderer of moppe's kind still lacks, roughly in order of need:
 
 - vec3 storage elements and structure fields (deliberately: pad them), and
   fixed-size arrays as values or fields;
 - uniform members other than vec4 lanes and mat4s (deliberately, for the
   layout contract), arrays in uniform blocks, and push or root constants;
-- fragment built-ins (frag coord, front facing, sample index, depth output),
-  =discard=, and blending-relevant outputs beyond colour;
-- texture variety: arrays, cubes, 3D, explicit LOD and gradients, gather,
-  storage textures, and bindless tables;
-- in compute: workgroup-shared memory, barriers, atomics, and the group count
-  in HLSL, which has no system value for it;
+- blending-relevant outputs beyond colour, and per-sample interpolation of
+  ordinary inputs;
+- cube arrays and depth cubes, multisampled textures, texel offsets on
+  gathers and samples, gathers of other channels, and bindless tables;
+- storage textures other than 2D, atomics on storage textures or on signed
+  integers, and loops a barrier can stand in (folds are expressions, so a
+  barrier cannot repeat);
+- the group count in HLSL, which has no system value for it;
 - the vertex =:location= inputs exist but are outside NHAL's contract.
