@@ -264,6 +264,9 @@ as BLOCK.MEMBER exactly as it does in MSL."))
     (:bvec2 "bool2")
     (:bvec3 "bool3")
     (:bvec4 "bool4")
+    (:mat2 "float2x2")
+    (:mat3 "float3x3")
+    (:mat4 "float4x4")
     (:texture-2d "Texture2D<float4>")
     (:depth-texture-2d "Texture2D<float>")
     (:uint-texture-2d "Texture2D<uint4>")
@@ -271,6 +274,14 @@ as BLOCK.MEMBER exactly as it does in MSL."))
      (error 'shader:shader-language-error
             :form source-form :reason :unsupported-hlsl-type
             :details (shader:shader-type-name type)))))
+
+(defun hlsl-field-type-name (type &optional source-form)
+  "TYPE as a field of a cbuffer or structured-buffer structure.  A language
+matrix is stored as its HLSL transpose (see the matrix operators), so its
+columns, consecutive in memory, are the rows of a row_major HLSL matrix."
+  (if (shader:shader-matrix-type-p type)
+      (format nil "row_major ~A" (hlsl-type-name type source-form))
+      (hlsl-type-name type source-form)))
 
 (defun hlsl-float-literal (value)
   (let* ((raw (string-downcase
@@ -646,7 +657,7 @@ as BLOCK.MEMBER exactly as it does in MSL."))
                                    (lower-hlsl-function-call
                                     context expression ,name))))))
   ;; REM is C's truncated %; MOD is % only for unsigned values (below).
-  (infix + "+" - "-" * "*" / "/" rem "%"
+  (infix + "+" - "-" / "/" rem "%"
          < "<" <= "<=" > ">" >= ">=" = "==" /= "!="
          logand "&" logior "|" logxor "^")
   (functions shader:dot "dot"
@@ -753,6 +764,65 @@ as BLOCK.MEMBER exactly as it does in MSL."))
 
 (define-hlsl-operator shader:int (context expression)
   (lower-hlsl-cast context expression "int"))
+
+;;; Matrices.  HLSL indexes a matrix by rows and builds one from rows, while
+;;; the language means columns, so a language matrix M is represented by the
+;;; HLSL matrix M^T (as SPIRV-Cross does): (MAT4 C0 C1 C2 C3) is
+;;; float4x4(C0, C1, C2, C3), (COLUMN M I) is M[I], and the products swap
+;;; their operands into mul: M*v is mul(v, M), v*M is mul(M, v), and A*B is
+;;; mul(B, A).  Buffers declare the matrices row_major, so the columns are
+;;; consecutive sixteen-byte rows exactly as in Metal and on the host.
+;;; #QEHEEE
+
+(define-hlsl-operator shader:mat2 (context expression)
+  (lower-hlsl-function-call context expression "float2x2"))
+
+(define-hlsl-operator shader:mat3 (context expression)
+  (lower-hlsl-function-call context expression "float3x3"))
+
+(define-hlsl-operator shader:mat4 (context expression)
+  (lower-hlsl-function-call context expression "float4x4"))
+
+(define-hlsl-operator shader:transpose (context expression)
+  (lower-hlsl-function-call context expression "transpose"))
+
+(define-hlsl-operator shader:column (context expression)
+  (note-hlsl-occurrence
+   context expression
+   (format nil "~A[~D]" (first (lower-hlsl-operands context expression))
+           (first (shader:shader-call-parameters expression)))))
+
+(define-hlsl-operator * (context expression)
+  (let ((operands (shader:shader-call-operands expression)))
+    (if (notany (lambda (operand)
+                  (shader:shader-matrix-type-p
+                   (shader:shader-expression-type operand)))
+                operands)
+        (lower-hlsl-infix-call context expression "*")
+        (let* ((texts (lower-hlsl-operands context expression))
+               (text (first texts))
+               (type (shader:shader-expression-type (first operands))))
+          (loop for operand in (rest operands)
+                for operand-text in (rest texts)
+                for operand-type = (shader:shader-expression-type operand)
+                do (setf text
+                         (if (and (or (shader:shader-matrix-type-p type)
+                                      (shader:shader-matrix-type-p
+                                       operand-type))
+                                  (not (shader:shader-float-type-p type))
+                                  (not (shader:shader-float-type-p
+                                        operand-type)))
+                             (format nil "mul(~A, ~A)" operand-text text)
+                             (format nil "(~A * ~A)" text operand-text))
+                         type (if (or (shader:shader-matrix-type-p type)
+                                      (shader:shader-matrix-type-p
+                                       operand-type))
+                                  (shader:shader-product-type
+                                   type operand-type)
+                                  (if (shader:shader-vector-type-p type)
+                                      type
+                                      operand-type))))
+          (note-hlsl-occurrence context expression text)))))
 
 (define-hlsl-operator signum (context expression)
   ;; HLSL's sign returns int; the language's SIGNUM keeps the operand type.
@@ -1008,7 +1078,7 @@ links the two stages by register layout as well as by semantic."
          (mapcar (lambda (member)
                    (make-instance
                     'hlsl-field
-                    :type (hlsl-type-name
+                    :type (hlsl-field-type-name
                            (shader:shader-declaration-type member)
                            (shader:shader-object-source-form member))
                     :name (hlsl-identifier (shader:shader-object-name member))
@@ -1021,7 +1091,7 @@ links the two stages by register layout as well as by semantic."
           'hlsl-resource-declaration
           :type (format nil "~:[~;RW~]StructuredBuffer<~A>"
                         writable-p
-                        (hlsl-type-name
+                        (hlsl-field-type-name
                          (shader:shader-storage-buffer-element-type resource)
                          form))
           :name name

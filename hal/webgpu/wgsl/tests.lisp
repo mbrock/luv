@@ -181,3 +181,25 @@
     ;; && and || are scalar in WGSL; the probe's vector logic is in ALL.
     (true (search "(all(near) && (!(halved == 0i)))" source))
     (true (search "(any((!near))" source))))
+
+(define-test matrices-lower-to-wgsl
+  ;; #QEHEEE
+  (let ((source
+          (wgsl:wgsl-document-source
+           (wgsl:compile-wgsl
+            (shader:parse-shader-specification
+             'wgsl-matrix-probe
+             '(:stage :vertex
+               :inputs ((position :vec4 :location 0))
+               :outputs ((clip-position :vec4 :built-in :position))
+               :resources ((frame :uniform-block :binding 0
+                            :members ((view-projection :mat4) (tint :vec4)))))
+             '((set-output clip-position
+                (+ (* view-projection position)
+                   (* position (shader:transpose view-projection))
+                   (shader:column view-projection 3)))))))))
+    (true (search "view_projection: mat4x4<f32>," source))
+    (true (search "(frame.view_projection * stage_in.position)" source))
+    (true (search "(stage_in.position * transpose(frame.view_projection))"
+                  source))
+    (true (search "frame.view_projection[3]" source))))

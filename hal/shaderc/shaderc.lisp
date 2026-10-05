@@ -432,7 +432,12 @@ and (:OBJECT (KEY . VALUE) ...)."
                (type (camel-identifier (shader:shader-object-name declaration))))
           (format stream "  struct ~A {~%" type)
           (dolist (member (shader:shader-uniform-block-members declaration))
-            (format stream "    std::array<float, 4> ~A;~%"
+            ;; A vec4 lane is four floats; a mat4 is its four columns'
+            ;; lanes, column-major: element (row r, column c) is [4c + r].
+            (format stream "    std::array<float, ~D> ~A;~%"
+                    (floor (shader:shader-type-byte-size
+                            (shader:shader-declaration-type member))
+                           4)
                     (snake-identifier (shader:shader-object-name member))))
           (format stream "  };~%  static_assert(sizeof(~A) == ~D);~%~%"
                   type (shader:shader-uniform-block-byte-size declaration))))

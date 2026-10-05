@@ -620,3 +620,18 @@ on success or without the compiler, else its report."
     (true (search "|| false)" source))
     (true (search "all((near == bool2(spread)))" source))
     (parachute:is eq nil (metal-compiler-diagnostics source))))
+
+(define-test matrices-lower-to-metal-column-major-products
+  ;; #QEHEEE
+  (let ((source (msl:msl-document-source
+                 (msl:compile-msl (matrix-vertex-probe)))))
+    (true (search "float4x4 view_projection;" source))
+    (true (search "float4x4 model;" source))
+    (true (search "const device float4x4* bones [[buffer(2)]]" source))
+    (true (search "float4 world = ((frame.model * bone) * corner);" source))
+    (true (search "float4 row = (corner * frame.model);" source))
+    (true (search "float3x3 basis = float3x3(frame.model[0].xyz," source))
+    (true (search "(transpose(basis) * corner.xyz)" source))
+    (true (search "((2.0f * float2x2(" source))
+    (true (search "frame.view_projection[3].w" source))
+    (parachute:is eq nil (metal-compiler-diagnostics source))))

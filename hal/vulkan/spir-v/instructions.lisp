@@ -347,6 +347,19 @@
   (:opcode 142)
   (:result :typed)
   (:operands :id :id))
+;; Matrices: column-major, as the shader language means them.  #QEHEEE
+(define-instruction type-matrix (column-type column-count)
+  (:opcode 24) (:result :id) (:operands :id :literal))
+(define-typed-unary-instructions
+  (transpose 84))
+(define-instruction matrix-times-scalar (matrix scalar)
+  (:opcode 143) (:result :typed) (:operands :id :id))
+(define-instruction vector-times-matrix (vector matrix)
+  (:opcode 144) (:result :typed) (:operands :id :id))
+(define-instruction matrix-times-vector (matrix vector)
+  (:opcode 145) (:result :typed) (:operands :id :id))
+(define-instruction matrix-times-matrix (left right)
+  (:opcode 146) (:result :typed) (:operands :id :id))
 ;; Signed integers, booleans, and bit manipulation.  #CAI3RP
 (define-instruction constant-true () (:opcode 41) (:result :typed))
 (define-instruction constant-false () (:opcode 42) (:result :typed))
@@ -438,6 +451,8 @@
 (define-enumeration selection-control (none 0))
 (define-enumeration decoration
   (block 2)
+  (col-major 5)
+  (matrix-stride 7)
   (array-stride 6)
   (built-in 11)
   (flat 14)

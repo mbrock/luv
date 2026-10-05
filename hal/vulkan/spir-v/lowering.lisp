@@ -154,6 +154,11 @@
                         (if (shader-type-image-depth-p type) 1 0)
                         0 0 1 'unknown))
                  ((eq kind :sampler) (list id 'type-sampler))
+                 ((shader-matrix-type-p type)
+                  (list id 'type-matrix
+                        (ensure-shader-type-id
+                         context (shader-type-column-type type))
+                        (shader-type-column-count type)))
                  ((= (shader-type-component-count type) 1)
                   (ecase (shader-type-scalar-kind type)
                     (:float (list id 'type-float
@@ -272,8 +277,20 @@
            'annotations context
            (list 'member-decorate id
                  (shader-uniform-member-index member)
-                 'offset (shader-uniform-member-offset member))))
+                 'offset (shader-uniform-member-offset member)))
+          (when (shader-matrix-type-p (shader-declaration-type member))
+            (decorate-matrix-member
+             context id (shader-uniform-member-index member))))
         id)))
+
+(defun decorate-matrix-member (context struct-id index)
+  "A matrix in a buffer is column-major with sixteen-byte columns: the
+language's vec4-lane layout, and MSL's and the host's.  #QEHEEE"
+  (append-context-form 'annotations context
+                       (list 'member-decorate struct-id index 'col-major))
+  (append-context-form 'annotations context
+                       (list 'member-decorate struct-id index
+                             'matrix-stride 16)))
 
 (defun ensure-uniform-block-pointer-type-id (context block)
   (let* ((struct-id (ensure-uniform-block-type-id context block))
@@ -309,6 +326,8 @@
                              (list 'decorate id 'block))
         (append-context-form 'annotations context
                              (list 'member-decorate id 0 'offset 0))
+        (when (shader-matrix-type-p (shader-storage-buffer-element-type buffer))
+          (decorate-matrix-member context id 0))
         (unless (shader-storage-buffer-writable-p buffer)
           (append-context-form 'annotations context
                                (list 'member-decorate id 0 'non-writable)))
@@ -926,8 +945,84 @@ Modules whose expressions use no extended mathematics never acquire one."
 (defmethod lower-shader-call ((operator (eql '+)) context expression)
   (lower-chained-arithmetic context expression))
 
+(defun emit-matrix-product (context expression left left-type right right-type)
+  "Emit one product step involving a matrix; return its value and type."
+  (let ((type (shader-product-type left-type right-type)))
+    (values
+     (cond ((and (shader-matrix-type-p left-type)
+                 (shader-matrix-type-p right-type))
+            (emit-value-instruction context expression type
+                                    'matrix-times-matrix (list left right)))
+           ((shader-matrix-type-p left-type)
+            (if (shader-float-type-p right-type)
+                (emit-value-instruction context expression type
+                                        'matrix-times-scalar (list left right))
+                (emit-value-instruction context expression type
+                                        'matrix-times-vector
+                                        (list left right))))
+           ((shader-float-type-p left-type)
+            (emit-value-instruction context expression type
+                                    'matrix-times-scalar (list right left)))
+           (t
+            (emit-value-instruction context expression type
+                                    'vector-times-matrix (list left right))))
+     type)))
+
 (defmethod lower-shader-call ((operator (eql '*)) context expression)
-  (lower-chained-arithmetic context expression))
+  (if (some (lambda (operand)
+              (shader-matrix-type-p (shader-expression-type operand)))
+            (shader-call-operands expression))
+      (let* ((operands (shader-call-operands expression))
+             (value (lower-shader-expression context (first operands)))
+             (value-type (find-shader-type
+                          (shader-expression-type (first operands)))))
+        (dolist (operand (rest operands) value)
+          (let ((operand-value (lower-shader-expression context operand))
+                (operand-type (find-shader-type
+                               (shader-expression-type operand))))
+            (if (or (shader-matrix-type-p value-type)
+                    (shader-matrix-type-p operand-type))
+                (multiple-value-setq (value value-type)
+                  (emit-matrix-product context expression
+                                       value value-type
+                                       operand-value operand-type))
+                (let ((type (if (shader-vector-type-p value-type)
+                                value-type
+                                operand-type)))
+                  (setf value (emit-binary-arithmetic
+                               context expression '* type
+                               value value-type operand-value operand-type)
+                        value-type type))))))
+      (lower-chained-arithmetic context expression)))
+
+(macrolet ((constructors (&rest operators)
+             `(progn
+                ,@(loop for operator in operators
+                        collect
+                        `(defmethod lower-shader-call
+                             ((operator (eql ',operator)) context expression)
+                           (emit-value-instruction
+                            context expression
+                            (shader-expression-type expression)
+                            'composite-construct
+                            (mapcar (lambda (operand)
+                                      (lower-shader-expression context operand))
+                                    (shader-call-operands expression))))))))
+  (constructors mat2 mat3 mat4))
+
+(defmethod lower-shader-call
+    ((operator (eql 'luv.shader:transpose)) context expression)
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'transpose
+   (list (lower-shader-expression
+          context (first (shader-call-operands expression))))))
+
+(defmethod lower-shader-call ((operator (eql 'column)) context expression)
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'composite-extract
+   (list (lower-shader-expression
+          context (first (shader-call-operands expression)))
+         (first (shader-call-parameters expression)))))
 
 (defmethod lower-shader-call ((operator (eql '-)) context expression)
   (let ((operands (shader-call-operands expression)))

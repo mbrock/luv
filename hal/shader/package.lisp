@@ -37,6 +37,11 @@
            #:shader-numeric-type-p
            #:shader-type-scalar-type
            #:vector-type-for-width
+           #:shader-matrix-type-p
+           #:shader-type-column-type
+           #:shader-type-column-count
+           #:shader-type-byte-size
+           #:shader-product-type
            #:shader-vector-conversion-p
            #:shader-object-name
            #:shader-object-source-form
@@ -175,6 +180,11 @@
            #:shift-left
            #:shift-right
            #:bit-cast
+           #:mat2
+           #:mat3
+           #:mat4
+           #:transpose
+           #:column
            #:vec2
            #:vec3
            #:vec4

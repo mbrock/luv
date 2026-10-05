@@ -490,3 +490,122 @@ Without DXC, return NIL: the text claims still hold."
     (true (search "(~(word & ((uint)(255.0f))))" source))
     (true (search "((int2)(sign(" source))
     (compiles document)))
+
+;;; Matrices.  #QEHEEE
+
+(shader:define-shader hlsl-matrix-probe
+    (:stage :compute
+     :workgroup-size (1 1 1)
+     :inputs ((thread :uvec3 :built-in :global-invocation-id))
+     :resources ((frame :uniform-block :binding 0
+                  :members ((a :mat4) (b :mat4) (v :vec4)))
+                 (vectors :storage-buffer :binding 1 :element :vec4
+                          :access :read-write)
+                 (products :storage-buffer :binding 2 :element :mat4
+                           :access :read-write)))
+  (let* ((index (shader:swizzle thread :x))
+         (basis (shader:mat2 (shader:swizzle v :xy) (shader:swizzle v :zw))))
+    (shader:set-buffer-element vectors index (* a v))
+    (shader:set-buffer-element vectors (+ index (shader:uint 1.0)) (* v a))
+    (shader:set-buffer-element vectors (+ index (shader:uint 2.0))
+                               (shader:column a 1))
+    (shader:set-buffer-element
+     vectors (+ index (shader:uint 3.0))
+     (shader:vec4 (* (shader:transpose basis) (shader:swizzle v :xy))
+                  (* (* 2.0 basis) (shader:swizzle v :zw))))
+    (shader:set-buffer-element products index (* a b))))
+
+(defun dxc-spir-v-disassembly (document)
+  "DOCUMENT compiled by DXC's own SPIR-V backend and disassembled, or NIL
+when DXC lacks -spirv or spirv-dis is absent.  DXC maps HLSL's matrices
+onto SPIR-V's column-major ones, so its translation states what our HLSL
+means in the language every other target shares."
+  (let ((dxc (dxc-program)))
+    (when (and dxc
+               (ignore-errors
+                (zerop (nth-value 2 (uiop:run-program
+                                     '("spirv-dis" "--version")
+                                     :ignore-error-status t)))))
+      (uiop:with-temporary-file (:pathname source :type "hlsl" :keep nil)
+        (hlsl:write-hlsl document source)
+        (uiop:with-temporary-file (:pathname binary :type "spv" :keep nil)
+          (multiple-value-bind (output error-output status)
+              (uiop:run-program
+               (list dxc "-spirv" "-HV" "2021"
+                     "-T" (hlsl:hlsl-document-profile document)
+                     "-E" (hlsl:hlsl-entry-point-name
+                           (hlsl:hlsl-document-entry-point document))
+                     "-Fo" (uiop:native-namestring binary)
+                     (uiop:native-namestring source))
+               :output :string :error-output :string :ignore-error-status t)
+            (declare (ignore output error-output))
+            (when (zerop status)
+              (uiop:run-program (list "spirv-dis" "--raw-id"
+                                      (uiop:native-namestring binary))
+                                :output :string))))))))
+
+(defun uniform-member-values (disassembly)
+  "Map each loaded value id in DISASSEMBLY to the frame member index its
+access chain named: (ID . INDEX)."
+  (let ((pointers nil) (values nil) (constants nil))
+    (dolist (line (uiop:split-string disassembly :separator '(#\Newline)))
+      (let ((words (remove "" (uiop:split-string line) :test #'string=)))
+        (cond
+          ((and (>= (length words) 5) (string= (third words) "OpConstant"))
+           (push (cons (first words) (parse-integer (fifth words)
+                                                    :junk-allowed t))
+                 constants))
+          ((and (= (length words) 7)
+                (string= (third words) "OpAccessChain"))
+           ;; %p = OpAccessChain %type %block %zero %member
+           (let ((member (cdr (assoc (seventh words) constants
+                                     :test #'string=))))
+             (when member (push (cons (first words) member) pointers))))
+          ((and (= (length words) 5) (string= (third words) "OpLoad"))
+           (let ((member (cdr (assoc (fifth words) pointers
+                                     :test #'string=))))
+             (when member (push (cons (first words) member) values)))))))
+    values))
+
+(defun matrix-operations (disassembly)
+  "Each matrix product in DISASSEMBLY as (OPCODE LEFT-MEMBER RIGHT-MEMBER)."
+  (let ((members (uniform-member-values disassembly)))
+    (loop for line in (uiop:split-string disassembly :separator '(#\Newline))
+          for words = (remove "" (uiop:split-string line) :test #'string=)
+          when (and (= (length words) 6)
+                    (member (third words)
+                            '("OpMatrixTimesVector" "OpVectorTimesMatrix"
+                              "OpMatrixTimesMatrix")
+                            :test #'string=))
+            collect (list (third words)
+                          (cdr (assoc (fifth words) members :test #'string=))
+                          (cdr (assoc (sixth words) members
+                                      :test #'string=))))))
+
+(define-test matrices-lower-to-hlsl-transposed-into-mul
+  (multiple-value-bind (source document) (source-of (hlsl-matrix-probe))
+    ;; Columns are consecutive in the buffer, so HLSL reads them as the rows
+    ;; of a row_major matrix: the language's M is HLSL's M^T.
+    (true (search "row_major float4x4 a;" source))
+    (true (search "RWStructuredBuffer<row_major float4x4> products" source))
+    (true (search "vectors[index] = mul(frame.v, frame.a);" source))
+    (true (search "= mul(frame.a, frame.v);" source))
+    (true (search "= frame.a[1];" source))
+    (true (search "products[index] = mul(frame.b, frame.a);" source))
+    (true (search "mul(frame.v.xy, transpose(basis))" source))
+    ;; A scalar scales a matrix with *, never mul.
+    (true (search "mul(frame.v.zw, (2.0f * basis))" source))
+    (compiles document)
+    ;; DXC's own SPIR-V translation, which knows HLSL's conventions, must
+    ;; read these as the language means them: a*v, v*a, and a*b of the
+    ;; column-major frame members (0 is a, 1 is b, 2 is v).
+    (let ((disassembly (dxc-spir-v-disassembly document)))
+      (when disassembly
+        (true (search "MatrixStride 16" disassembly))
+        (true (search "ColMajor" disassembly))
+        (is equal '(("OpMatrixTimesVector" 0 2)
+                    ("OpVectorTimesMatrix" 2 0)
+                    ("OpMatrixTimesMatrix" 0 1))
+            (remove-if-not (lambda (operation)
+                             (and (second operation) (third operation)))
+                           (matrix-operations disassembly)))))))

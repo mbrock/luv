@@ -486,6 +486,61 @@ by =u32= counts.  =hal/shader/tests.lisp= checks one probe through spirv-val,
 HLSL, and WGSL; MSL inherits C++'s undefined signed overflow, so a shader
 should not lean on it.
 
+* Matrices are column-major values beside semantic maps
+:PROPERTIES:
+:ID: QEHEEE
+:END:
+
+A projective map (#4XAF9Z) says what a transform means; a renderer still
+needs plain coefficient matrices for bones, instance transforms, and camera
+blocks.  =:mat2=, =:mat3=, and =:mat4= are square float matrices with
+GLSL's and Metal's column-major meaning:
+
+#+begin_src lisp
+(let* ((world (* model bone corner))           ; (model * bone) * corner
+       (row (* corner model))                  ; a row vector times model
+       (basis (mat3 (swizzle (column model 0) :xyz)
+                    (swizzle (column model 1) :xyz)
+                    (swizzle (column model 2) :xyz)))
+       (normal (normalize (* (transpose basis) (swizzle corner :xyz)))))
+  (* view-projection world))
+#+end_src
+
+=(mat4 c0 c1 c2 c3)= builds from columns, =(column m i)= reads one by a
+constant index (an element is a swizzle of a column), =*= multiplies
+matrix by matrix, matrix by column vector, row vector by matrix, and matrix
+by float scalar either way, and =transpose= transposes.  A matrix is not a
+vector: componentwise =+= and =if= reject it (SPIR-V 1.0 cannot select one),
+and it is raw like a buffer element, so a quantity-checked vector must leave
+checking through =representation= before a matrix multiplies it.
+
+A uniform block may hold =:mat4= members beside its =:vec4= lanes: a mat4 is
+four consecutive lanes, its columns, so offsets stay multiples of sixteen
+and the host writes =std::array<float, 16>= column by column (element row
+/r/, column /c/ at index 4/c/ + /r/).  A storage buffer may hold =:mat4=
+elements with a 64-byte stride.  The layout is the same in every target:
+SPIR-V decorates the members =ColMajor= with =MatrixStride 16=; Metal's
+=float4x4= is already that; WGSL's =mat4x4<f32>= too.
+
+HLSL is the exception that needs care.  It indexes and constructs matrices
+by rows and its =mul(a, b)= is the textbook product, so the language's
+matrix /M/ is represented by the HLSL matrix /M/ᵀ, as SPIRV-Cross does:
+=float4x4(c0, c1, c2, c3)= then has the columns as rows, =m[i]= is column
+/i/, /M/ /v/ is =mul(v, M)=, /v/ /M/ is =mul(M, v)=, /A/ /B/ is
+=mul(B, A)=, and a scalar still scales with =*=.  Buffer members are
+declared =row_major=, so the transposed rows are the consecutive columns
+Metal and the host see.  The claim is checked by DXC itself:
+=hal/d3d12/hlsl/tests.lisp= compiles the HLSL a second time through DXC's
+SPIR-V backend, which knows HLSL's conventions, and asserts that it emits
+=OpMatrixTimesVector= of /a/ and /v/ for /a v/, =OpVectorTimesMatrix= for
+/v a/, and =OpMatrixTimesMatrix= of /a/ and /b/ for /a b/, over
+=ColMajor=, =MatrixStride 16= members: the same operations, on the same
+bytes, as the language's own SPIR-V.
+
+The projective-map protocol is unchanged: =project-point= still takes four
+row vectors.  Expressing a map's coefficients as one =:mat4= is a natural
+next step, not yet taken.
+
 * What this does not decide
 :PROPERTIES:
 :ID: F2Q9WU

@@ -244,6 +244,9 @@ A program compiler gives every stage a stable name of its own."))
     (:bvec2 "bool2")
     (:bvec3 "bool3")
     (:bvec4 "bool4")
+    (:mat2 "float2x2")
+    (:mat3 "float3x3")
+    (:mat4 "float4x4")
     (:texture-2d "texture2d<float>")
     (:depth-texture-2d "depth2d<float>")
     (:uint-texture-2d "texture2d<uint>")
@@ -958,6 +961,26 @@ A program compiler gives every stage a stable name of its own."))
      (expression shader:shader-call))
   (declare (ignore operator))
   (lower-msl-function-call context expression "int"))
+
+;;; Matrices are Metal's own: column-major, built from columns, with *
+;;; meaning the linear-algebra product either way round.  #QEHEEE
+(define-msl-vector-constructor shader:mat2)
+(define-msl-vector-constructor shader:mat3)
+(define-msl-vector-constructor shader:mat4)
+(define-msl-function-operator shader:transpose "transpose")
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:column))
+     (context msl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (note-msl-occurrence
+   context expression
+   (format nil "~A[~D]"
+           (msl-occurrence-text
+            (lower-msl-expression
+             context (first (shader:shader-call-operands expression))))
+           (first (shader:shader-call-parameters expression)))))
 
 (defmethod shader:lower-shader-call
     ((operator (eql 'shader:uint))

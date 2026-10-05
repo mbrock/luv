@@ -381,3 +381,90 @@ point DEVELOPER_DIR at a bare SDK; Metal's compiler lives in Xcode's."
                                 directory)))))))))
         (uiop:delete-directory-tree directory :validate t
                                               :if-does-not-exist :ignore)))))
+
+;;; Every output of a program, through every native tool that is present.
+
+(defun native-output-diagnostics (compiled directory)
+  "Compile COMPILED's written MSL, HLSL, and header in DIRECTORY with
+Metal, DXC, and the C++ compiler when present.  Return the failures."
+  (let ((failures nil)
+        (name (shaderc:compiled-program-name compiled))
+        (metal-p (apply #'tool-available-p
+                        (xcrun-command "-sdk" "macosx" "--find" "metal")))
+        (dxc (let ((dxc (or (uiop:getenv "LUV_DXC") "dxc")))
+               (and (tool-available-p dxc "--version") dxc)))
+        (compiler (let ((compiler (or (uiop:getenv "CXX") "c++")))
+                    (and (tool-available-p compiler "--version") compiler))))
+    (flet ((check (command)
+             (let ((failure (run-tool command)))
+               (when failure (push failure failures))))
+           (file (name) (uiop:native-namestring
+                         (merge-pathnames name directory))))
+      (dolist (stage (shaderc:compiled-program-stages compiled))
+        (let ((stage-name (string-downcase
+                           (symbol-name (shaderc:compiled-stage-stage stage)))))
+          (when metal-p
+            (check (xcrun-command
+                    "-sdk" "macosx" "metal" "-std=metal4.0" "-c"
+                    (file (format nil "~A.~A.metal" name stage-name))
+                    "-o" (file (format nil "~A.~A.air" name stage-name)))))
+          (when dxc
+            (check (list dxc "-HV" "2021" "-WX"
+                         "-T" (luv.hlsl:hlsl-profile
+                               (shaderc:compiled-stage-stage stage))
+                         "-E" (shaderc:compiled-stage-entry-point stage)
+                         "-Fo" (file (format nil "~A.~A.dxil" name stage-name))
+                         (file (format nil "~A.~A.hlsl" name stage-name)))))))
+      (when compiler
+        (check (list compiler "-std=c++20" "-fsyntax-only" "-x" "c++"
+                     "-I" (uiop:native-namestring
+                           (merge-pathnames "hal/shaderc/fixtures/" *root*))
+                     (file (format nil "~A.hh" name))))))
+    failures))
+
+(defmacro with-compiled-source ((compiled directory text) &body body)
+  "Compile the shader source TEXT's one program into a fresh DIRECTORY,
+bind COMPILED to it, and run BODY."
+  (let ((source (gensym "SOURCE")) (stream (gensym "STREAM"))
+        (scratch (gensym "SCRATCH")))
+    `(uiop:with-temporary-file (:pathname ,source :type "lisp" :keep nil
+                                :stream ,stream :direction :output)
+       (write-string ,text ,stream)
+       :close-stream
+       (uiop:with-temporary-file (:pathname ,scratch :keep nil)
+         (let ((,directory (uiop:ensure-directory-pathname
+                            (format nil "~A.d"
+                                    (uiop:native-namestring ,scratch)))))
+           (unwind-protect
+                (let ((,compiled
+                        (first (let ((shader:*shader-programs* nil))
+                                 (shaderc:compile-shader-files
+                                  (list ,source) :directory ,directory)))))
+                  ,@body)
+             (uiop:delete-directory-tree ,directory :validate t
+                                                    :if-does-not-exist
+                                                    :ignore)))))))
+
+(define-test uniform-matrices-are-four-column-lanes-in-the-header
+  ;; #QEHEEE
+  (with-compiled-source (compiled directory "(define-shader camera-vertex
+    (:stage :vertex
+     :inputs ((index :uint :built-in :vertex-index))
+     :outputs ((position :vec4 :built-in :position))
+     :resources ((camera :uniform-block :binding 0
+                  :members ((view-projection :mat4) (eye :vec4)))
+                 (corners :storage-buffer :binding 1 :element :vec4)))
+  (set-output position
+              (* view-projection (buffer-element corners index))))
+(define-shader-program camera :vertex camera-vertex)
+")
+    (let ((header (uiop:read-file-string
+                   (merge-pathnames "camera.hh" directory)))
+          (json (uiop:read-file-string
+                 (merge-pathnames "camera.json" directory))))
+      (true (search "std::array<float, 16> view_projection;" header))
+      (true (search "std::array<float, 4> eye;" header))
+      (true (search "static_assert(sizeof(Camera) == 80);" header))
+      (true (search "\"type\": \"mat4\"," json))
+      (true (search "\"offset\": 64" json))
+      (is equal nil (native-output-diagnostics compiled directory)))))

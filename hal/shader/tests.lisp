@@ -2644,3 +2644,118 @@ Return NIL on success or without the tool, else its report."
     (dolist (instruction '("S-CLAMP" "S-ABS" "S-MIN" "S-MAX" "S-SIGN"))
       (true (search instruction forms)))
     (parachute:is eq nil (spir-v-validation-diagnostics specification))))
+
+;;; Matrices.  #QEHEEE
+
+(shader:define-shader matrix-vertex-probe
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (shade :vec4 :location 0))
+     :resources ((frame :uniform-block :binding 0
+                  :members ((view-projection :mat4)
+                            (tint :vec4)
+                            (model :mat4)))
+                 (corners :storage-buffer :binding 1 :element :vec4)
+                 (bones :storage-buffer :binding 2 :element :mat4)))
+  (let* ((corner (shader:buffer-element corners vertex-index))
+         (bone (shader:buffer-element bones (uint 0.0)))
+         (world (* model bone corner))
+         (clip (* view-projection world))
+         (row (* corner model))
+         (basis (shader:mat3 (swizzle (shader:column model 0) :xyz)
+                             (swizzle (shader:column model 1) :xyz)
+                             (swizzle (shader:column model 2) :xyz)))
+         (normal (normalize (* (shader:transpose basis)
+                               (swizzle corner :xyz))))
+         (scaled (* 2.0 (shader:mat2 (vec2 1.0 0.0) (vec2 0.0 1.0)) 0.5))
+         (flat (* scaled (swizzle corner :xy)))
+         (element (swizzle (shader:column view-projection 3) :w)))
+    (set-output clip-position clip)
+    (set-output shade (vec4 (+ normal (swizzle row :xyz) (swizzle tint :xyz))
+                            (+ element (swizzle flat :x))))))
+
+(defun matrix-probe-error-reason (resources body &key inputs)
+  (handler-case
+      (progn
+        (shader:parse-shader-specification
+         'matrix-probe
+         `(:stage :fragment
+           :inputs ,inputs
+           :resources ,resources
+           :outputs ((color :vec4 :location 0)))
+         (list body))
+        nil)
+    (shader:shader-language-error (condition)
+      (shader:shader-language-error-reason condition))))
+
+(define-test matrices-are-column-major-values-in-vec4-lanes
+  (let* ((specification (matrix-vertex-probe))
+         (frame (first (shader:shader-specification-resources specification)))
+         (members (shader:shader-uniform-block-members frame))
+         (bones (third (shader:shader-specification-resources specification))))
+    ;; A mat4 member is four consecutive vec4 lanes, its columns.
+    (true (equal '(0 64 80) (mapcar #'shader:shader-uniform-member-offset
+                                    members)))
+    (true (= 144 (shader:shader-uniform-block-byte-size frame)))
+    (true (= 64 (shader:shader-storage-buffer-element-stride bones)))
+    (flet ((type-of-binding (name)
+             (shader:shader-type-name
+              (shader:shader-expression-type
+               (shader:shader-binding-expression
+                (binding-named name specification))))))
+      (true (eq :vec4 (type-of-binding 'world)))
+      (true (eq :vec4 (type-of-binding 'row)))
+      (true (eq :mat3 (type-of-binding 'basis)))
+      (true (eq :mat2 (type-of-binding 'scaled)))
+      (true (eq :vec2 (type-of-binding 'flat)))))
+  (let ((frame '((frame :uniform-block :binding 0
+                  :members ((m :mat4) (v :vec4))))))
+    (macrolet ((rejects (reason body &rest arguments)
+                 `(true (eq ,reason (matrix-probe-error-reason
+                                     ,@(or arguments '(frame)) ',body)))))
+      (rejects :non-numeric-arithmetic (set-output color (shader:column (+ m m) 0)))
+      (rejects :incompatible-product-types
+               (set-output color (* m (swizzle v :xyz))))
+      (rejects :incompatible-product-types
+               (set-output color (* m (shader:mat3 (swizzle v :xyz)
+                                                   (swizzle v :xyz)
+                                                   (swizzle v :xyz)))))
+      (rejects :invalid-matrix-columns
+               (set-output color (shader:column (shader:mat4 v v v) 0)))
+      (rejects :invalid-column-index (set-output color (shader:column m 4)))
+      (rejects :column-of-non-matrix (set-output color (shader:column v 0)))
+      (rejects :conditional-composite-type
+               (set-output color (shader:column (if (< 0.0 1.0) m m) 0)))
+      (rejects :unsupported-uniform-member-type
+               (set-output color (vec4 1.0 1.0 1.0 1.0))
+               '((frame :uniform-block :binding 0 :members ((m :mat3))))))
+    (true (eq :invalid-storage-buffer-element
+              (matrix-probe-error-reason
+               '((rotations :storage-buffer :binding 1 :element :mat3))
+               '(set-output color (vec4 1.0 1.0 1.0 1.0)))))
+    (true (eq :invalid-interface-type
+              (matrix-probe-error-reason
+               nil '(set-output color (vec4 1.0 1.0 1.0 1.0))
+               :inputs '((m :mat4 :location 0)))))
+    (true (eq :invalid-interface-type
+              (matrix-probe-error-reason
+               nil '(set-output color (vec4 1.0 1.0 1.0 1.0))
+               :inputs '((flag :bool :location 0)))))))
+
+(define-test matrices-lower-to-validated-column-major-spir-v
+  (let* ((specification (matrix-vertex-probe))
+         (instructions (spv:lower-spir-v (spv:shader-module specification)))
+         (names (mapcar #'spv:instruction-name instructions))
+         (forms (write-to-string (mapcar #'spv:instruction-form instructions))))
+    (dolist (name '(spv::type-matrix spv::matrix-times-matrix
+                    spv::matrix-times-vector spv::vector-times-matrix
+                    spv::matrix-times-scalar spv::transpose
+                    spv::composite-extract))
+      (true (find name names)))
+    ;; Matrices in buffers are column-major with sixteen-byte columns.
+    (true (search "COL-MAJOR" forms))
+    (true (search "MATRIX-STRIDE 16" forms))
+    (true (search "OFFSET 80" forms))
+    (true (search "ARRAY-STRIDE 64" forms))
+    (parachute:is eq nil (spir-v-validation-diagnostics specification))))

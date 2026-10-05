@@ -72,7 +72,17 @@
    (image-depth-p
     :initarg :image-depth-p
     :initform nil
-    :reader shader-type-image-depth-p)))
+    :reader shader-type-image-depth-p)
+   (column-type
+    :initarg :column-type
+    :initform nil
+    :reader shader-type-column-type
+    :documentation "A matrix's column vector type, or NIL.")
+   (column-count
+    :initarg :column-count
+    :initform nil
+    :reader shader-type-column-count
+    :documentation "A matrix's number of columns, or NIL.")))
 
 (defmethod print-object ((type shader-type) stream)
   (print-unreadable-object (type stream :type t)
@@ -82,7 +92,7 @@
 
 (defun register-shader-type
     (name &key component-count scalar-kind bit-width opaque-kind
-               sample-result-type image-depth-p)
+               sample-result-type image-depth-p column-type column-count)
   (setf (gethash name *shader-types*)
         (make-instance 'shader-type
                        :name name
@@ -91,7 +101,9 @@
                        :bit-width bit-width
                        :opaque-kind opaque-kind
                        :sample-result-type sample-result-type
-                       :image-depth-p image-depth-p)))
+                       :image-depth-p image-depth-p
+                       :column-type column-type
+                       :column-count column-count)))
 
 ;;; Scalars and vectors: the four scalar kinds are :FLOAT, :UINT, :INT (two's
 ;;; complement), and :BOOL.  A boolean has one component so that comparisons
@@ -116,6 +128,16 @@
 (register-shader-type :uvec2 :component-count 2 :scalar-kind :uint :bit-width 32)
 (register-shader-type :uvec3 :component-count 3 :scalar-kind :uint :bit-width 32)
 (register-shader-type :uvec4 :component-count 4 :scalar-kind :uint :bit-width 32)
+;;; Square float matrices with column-major meaning, as GLSL and MSL: (MAT4
+;;; C0 C1 C2 C3) is built from columns, (* M V) treats V as a column, (* V M)
+;;; as a row, and (COLUMN M I) is column I.  A matrix has no component count:
+;;; it is not a vector, so componentwise arithmetic does not apply.  #QEHEEE
+(register-shader-type :mat2 :scalar-kind :float :bit-width 32
+                      :column-type :vec2 :column-count 2)
+(register-shader-type :mat3 :scalar-kind :float :bit-width 32
+                      :column-type :vec3 :column-count 3)
+(register-shader-type :mat4 :scalar-kind :float :bit-width 32
+                      :column-type :vec4 :column-count 4)
 (register-shader-type :texture-2d
                       :opaque-kind :texture-2d
                       :sample-result-type :vec4)
@@ -147,7 +169,7 @@
 (defun shader-float-type-p (type)
   (let ((type (find-shader-type type)))
     (and (eq (shader-type-scalar-kind type) :float)
-         (= (shader-type-component-count type) 1))))
+         (eql (shader-type-component-count type) 1))))
 
 (defun shader-uint-type-p (type)
   (shader-type= type :uint))
@@ -155,7 +177,23 @@
 (defun shader-unsigned-type-p (type)
   (let ((type (find-shader-type type)))
     (and (eq (shader-type-scalar-kind type) :uint)
-         (= (shader-type-component-count type) 1))))
+         (eql (shader-type-component-count type) 1))))
+
+(defun shader-matrix-type-p (type)
+  "Whether TYPE is a square float matrix."
+  (not (null (shader-type-column-count (find-shader-type type)))))
+
+(defun shader-type-byte-size (type)
+  "The bytes one value of TYPE occupies in a host buffer: components times
+their width for scalars and vectors, columns times sixteen-byte column
+strides for matrices (only MAT4 is host-shareable, see SHADER-HOST-LAYOUT)."
+  (let ((type (find-shader-type type)))
+    (cond ((shader-matrix-type-p type)
+           (* (shader-type-column-count type) 16))
+          ((and (shader-type-component-count type)
+                (shader-type-bit-width type))
+           (* (shader-type-component-count type)
+              (floor (shader-type-bit-width type) 8))))))
 
 (defun shader-vector-type-p (type)
   (let ((count (shader-type-component-count (find-shader-type type))))
@@ -312,9 +350,7 @@ buffer may also be stored to by a compute stage with SET-BUFFER-ELEMENT."))
 
 (defun shader-storage-buffer-element-stride (buffer)
   "Return the byte distance between consecutive elements of BUFFER."
-  (let ((type (shader-storage-buffer-element-type buffer)))
-    (* (shader-type-component-count type)
-       (floor (shader-type-bit-width type) 8))))
+  (shader-type-byte-size (shader-storage-buffer-element-type buffer)))
 
 (defclass shader-task-payload (shader-named-object)
   ((fields
@@ -458,7 +494,9 @@ Hosts allocating a backing buffer should derive their size here rather than
 repeating the lane arithmetic as a literal."
   (let ((members (shader-uniform-block-members block)))
     (if members
-        (+ (shader-uniform-member-offset (car (last members))) 16)
+        (let ((last (car (last members))))
+          (+ (shader-uniform-member-offset last)
+             (shader-type-byte-size (shader-declaration-type last))))
         0)))
 
 (defclass shader-binding
@@ -1491,7 +1529,47 @@ silent loss of meaning."
 (defmethod infer-shader-call-type ((operator (eql '-)) operands source-form)
   (infer-uniform-arithmetic-type operator operands source-form))
 
+(defun shader-product-type (left right)
+  "The type of one matrix product step (* LEFT RIGHT), or NIL: matrix times
+matrix, matrix times column vector, row vector times matrix, and matrix and
+float scalar either way.  Matrices are square, so every vector is a column."
+  (let ((left (find-shader-type left))
+        (right (find-shader-type right)))
+    (cond ((and (shader-matrix-type-p left) (shader-matrix-type-p right))
+           (and (eq left right) left))
+          ((shader-matrix-type-p left)
+           (cond ((shader-float-type-p right) left)
+                 ((shader-type= right (shader-type-column-type left))
+                  (find-shader-type (shader-type-column-type left)))))
+          ((shader-matrix-type-p right)
+           (cond ((shader-float-type-p left) right)
+                 ((shader-type= left (shader-type-column-type right))
+                  (find-shader-type (shader-type-column-type right))))))))
+
+(defun infer-matrix-product-type (operands source-form)
+  "Fold a product that involves a matrix left to right, one step at a time."
+  (let ((types (mapcar #'shader-expression-type operands)))
+    (reduce (lambda (left right)
+              (or (if (or (shader-matrix-type-p left)
+                          (shader-matrix-type-p right))
+                      (shader-product-type left right)
+                      (and (every #'shader-numeric-type-p (list left right))
+                           (eq :float (shader-type-scalar-kind left))
+                           (eq :float (shader-type-scalar-kind right))
+                           (cond ((shader-type= left right) left)
+                                 ((shader-float-type-p left) right)
+                                 ((shader-float-type-p right) left))))
+                  (error 'shader-language-error
+                         :form source-form :reason :incompatible-product-types
+                         :details (mapcar #'shader-type-name types))))
+            (rest types) :initial-value (first types))))
+
 (defmethod infer-shader-call-type ((operator (eql '*)) operands source-form)
+  (when (some (lambda (operand)
+                (shader-matrix-type-p (shader-expression-type operand)))
+              operands)
+    (return-from infer-shader-call-type
+      (infer-matrix-product-type operands source-form)))
   (require-numeric-operands operator operands source-form)
   (let* ((types (mapcar #'shader-expression-type operands))
          (vectors (remove-if-not #'shader-vector-type-p types)))
@@ -2285,6 +2363,82 @@ parameter: its sign chooses the direction at compile time."
   (declare (ignore source-form))
   (shader-expression-quantity-layout (second operands)))
 
+;;; Matrices.  #QEHEEE
+
+(define-shader-operator mat2
+  "Construct a two-by-two matrix from two VEC2 columns.")
+(define-shader-operator mat3
+  "Construct a three-by-three matrix from three VEC3 columns.")
+(define-shader-operator mat4
+  "Construct a four-by-four matrix from four VEC4 columns.")
+(define-shader-operator transpose
+  "The transpose of one square matrix.")
+(define-shader-operator column
+  "(COLUMN MATRIX INDEX): one column of a matrix by a constant index.")
+
+(defun infer-matrix-constructor-type (type-name operands source-form)
+  (let ((type (find-shader-type type-name)))
+    (require-shader-types
+     (lambda (types)
+       (and (= (length types) (shader-type-column-count type))
+            (every (lambda (column)
+                     (shader-type= column (shader-type-column-type type)))
+                   types)))
+     operands source-form :invalid-matrix-columns)
+    type))
+
+(defmethod infer-shader-call-type ((operator (eql 'mat2)) operands source-form)
+  (infer-matrix-constructor-type :mat2 operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql 'mat3)) operands source-form)
+  (infer-matrix-constructor-type :mat3 operands source-form))
+
+(defmethod infer-shader-call-type ((operator (eql 'mat4)) operands source-form)
+  (infer-matrix-constructor-type :mat4 operands source-form))
+
+(defmethod infer-shader-call-type
+    ((operator (eql 'transpose)) operands source-form)
+  (require-shader-types
+   (lambda (types)
+     (and (= 1 (length types)) (shader-matrix-type-p (first types))))
+   operands source-form :invalid-transpose)
+  (shader-expression-type (first operands)))
+
+(defmethod parse-shader-operator-call
+    ((operator (eql 'column)) form environment)
+  "Parse (COLUMN MATRIX INDEX) with INDEX a constant integer, kept as the
+call's parameter."
+  (unless (= (length form) 3)
+    (error 'shader-language-error :form form :reason :column-arity))
+  (let* ((matrix (parse-shader-expression (second form) environment))
+         (type (shader-expression-type matrix))
+         (index (shader-constant-integer-value (third form))))
+    (unless (shader-matrix-type-p type)
+      (error 'shader-language-error
+             :form form :reason :column-of-non-matrix
+             :details (shader-type-name type)))
+    (unless (and index (< -1 index (shader-type-column-count type)))
+      (error 'shader-language-error
+             :form form :reason :invalid-column-index :details (third form)))
+    (make-instance 'shader-call
+                   :operator operator :operands (list matrix)
+                   :parameters (list index)
+                   :type (find-shader-type (shader-type-column-type type))
+                   :quantity-specification nil :quantity-layout nil
+                   :source-form form)))
+
+(macrolet ((raw (&rest operators)
+             `(progn
+                ,@(loop for operator in operators
+                        append
+                        `((defmethod infer-shader-call-quantity-specification
+                              ((operator (eql ',operator)) operands source-form)
+                            (declare (ignore operator operands source-form))
+                            nil))))))
+  ;; Matrices are raw coefficients: a semantic map (#4XAF9Z) says what one
+  ;; means.
+  (raw mat2 mat3 mat4 transpose))
+
 ;;; Shader functions are typed source composition.  Authors write an ordinary
 ;;; expression body, including lexical LET*, and every call is parsed against
 ;;; its actual arguments into an inspectable SHADER-FUNCTION-CALL.  Backends
@@ -2889,6 +3043,12 @@ loop header, so it may not itself fold."
              :form form :reason :conditional-branch-mismatch
              :details (list (shader-expression-form consequent)
                             (shader-expression-form alternative))))
+    ;; SPIR-V 1.0 selects only scalars and vectors; choose a matrix's or a
+    ;; structure's parts instead.
+    (unless (shader-type-component-count (shader-expression-type consequent))
+      (error 'shader-language-error
+             :form form :reason :conditional-composite-type
+             :details (shader-type-name (shader-expression-type consequent))))
     (make-instance
      'shader-conditional
      :condition condition :consequent consequent :alternative alternative
@@ -3412,6 +3572,10 @@ NIL leaves the character to the named definition; T is the historical
              (parse-declaration-quantity-specification
               quantity dimension unit (declared-character affine-p character)
               resolved-type form)))
+      ;; Stages exchange numbers: no booleans, matrices, or opaque values.
+      (unless (shader-numeric-type-p resolved-type)
+        (error 'shader-language-error
+               :form form :reason :invalid-interface-type :details type))
       (make-instance 'shader-interface-variable
                      :name name
                      :type resolved-type
@@ -3451,9 +3615,11 @@ NIL leaves the character to the named definition; T is the historical
       ((shader-symbol= type :storage-buffer)
        (let ((element-type (and element (find-shader-type element form))))
          (unless (and element-type
-                      (shader-type-component-count element-type)
-                      (member (shader-type-component-count element-type)
-                              '(1 2 4)))
+                      (or (and (shader-numeric-type-p element-type)
+                               (member (shader-type-component-count
+                                        element-type)
+                                       '(1 2 4)))
+                          (shader-type= element-type :mat4)))
            (error 'shader-language-error
                   :form form :reason :invalid-storage-buffer-element
                   :details element))
@@ -3478,7 +3644,8 @@ NIL leaves the character to the named definition; T is the historical
            (error 'shader-language-error
                   :form form :reason :empty-uniform-block))
          (setf (shader-uniform-block-members block)
-               (loop for member-form in members
+               (loop with offset = 0
+                     for member-form in members
                      for index from 0
                      collect
                      (destructuring-bind
@@ -3489,10 +3656,13 @@ NIL leaves the character to the named definition; T is the historical
                        (let ((resolved-type
                                (find-shader-type member-type member-form)))
                          ;; This intentionally models the renderer's current
-                         ;; camera ABI: an aggregate of aligned vec4 lanes.
-                         ;; Do not imply general std140 packing until the
-                         ;; language owns that calculation explicitly.
-                         (unless (eq resolved-type (find-shader-type :vec4))
+                         ;; camera ABI: an aggregate of aligned vec4 lanes,
+                         ;; where a mat4 is four consecutive lanes, its
+                         ;; columns.  Do not imply general std140 packing
+                         ;; until the language owns that calculation.
+                         (unless (member resolved-type
+                                         (list (find-shader-type :vec4)
+                                               (find-shader-type :mat4)))
                            (error 'shader-language-error
                                   :form member-form
                                   :reason :unsupported-uniform-member-type
@@ -3510,7 +3680,10 @@ NIL leaves the character to the named definition; T is the historical
                             (parse-declaration-quantity-layout
                              components resolved-type member-form
                              specification)
-                            :block block :index index :offset (* index 16)
+                            :block block :index index
+                            :offset (prog1 offset
+                                      (incf offset (shader-type-byte-size
+                                                    resolved-type)))
                             :source-form member-form))))))
          block))
       (t

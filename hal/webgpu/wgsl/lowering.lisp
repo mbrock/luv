@@ -138,6 +138,9 @@ defaults.  Other source values retain the native folded-literal semantics."))
     (:bvec2 "vec2<bool>")
     (:bvec3 "vec3<bool>")
     (:bvec4 "vec4<bool>")
+    (:mat2 "mat2x2<f32>")
+    (:mat3 "mat3x3<f32>")
+    (:mat4 "mat4x4<f32>")
     (otherwise
      (error 'shader:shader-language-error
             :form source-form :reason :unsupported-wgsl-type
@@ -717,6 +720,23 @@ defaults.  Other source values retain the native folded-literal semantics."))
 (define-wgsl-vector-constructor shader:bvec2)
 (define-wgsl-vector-constructor shader:bvec3)
 (define-wgsl-vector-constructor shader:bvec4)
+;; WGSL's matrices are column-major with the language's products.  #QEHEEE
+(define-wgsl-vector-constructor shader:mat2)
+(define-wgsl-vector-constructor shader:mat3)
+(define-wgsl-vector-constructor shader:mat4)
+(define-wgsl-function-operator shader:transpose "transpose")
+
+(defmethod shader:lower-shader-call
+    ((operator (eql 'shader:column))
+     (context wgsl-lowering-context)
+     (expression shader:shader-call))
+  (declare (ignore operator))
+  (note-wgsl-occurrence
+   context expression
+   (format nil "~A[~D]"
+           (wgsl-occurrence-text
+            (first (lower-wgsl-operands context expression)))
+           (first (shader:shader-call-parameters expression)))))
 
 (defmethod shader:lower-shader-call
     ((operator (eql 'shader:uint))
