@@ -99,7 +99,9 @@
   :serial t
   :components ((:file "hal/shader/package")
                (:file "hal/shader/language")
-               (:file "hal/shader/resources")))
+               (:file "hal/shader/semantics")
+               (:file "hal/shader/resources")
+               (:file "hal/shader/program")))
 
 (defsystem "luv/spir-v"
   :description "Literal SPIR-V modules and lowering for luv's shader language."
@@ -129,6 +131,56 @@
   :serial t
   :components ((:file "hal/webgpu/wgsl/package")
                (:file "hal/webgpu/wgsl/lowering")))
+
+(defsystem "luv/hlsl"
+  :description "Structured HLSL lowering of luv's shader graph for DXC and Direct3D 12."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/shader")
+  :serial t
+  :components ((:file "hal/d3d12/hlsl/package")
+               (:file "hal/d3d12/hlsl/lowering"))
+  :in-order-to ((test-op (test-op "luv/hlsl/test"))))
+
+(defsystem "luv/hlsl/test"
+  :description "Executable claims for the HLSL lowering, checked by DXC when present."
+  :version "0.0.1"
+  :depends-on ("luv/hlsl" "luv/test-support")
+  :components ((:file "hal/d3d12/hlsl/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.hlsl.tests)))
+
+(defsystem "luv/shaderc"
+  :description "Ahead-of-time shader programs: MSL, HLSL, and their reflection."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/msl" "luv/hlsl")
+  :serial t
+  :components ((:file "hal/shaderc/package")
+               (:file "hal/shaderc/shaderc")
+               (:file "hal/shaderc/main")
+               (:static-file "hal/shaderc/examples/textured-instances.lisp"))
+  :in-order-to ((test-op (test-op "luv/shaderc/test"))))
+
+(defsystem "luv/shaderc/program"
+  :description "The luv-shaderc executable."
+  :version "0.0.1"
+  :depends-on ("luv/shaderc")
+  :build-operation "program-op"
+  :build-pathname "build/luv-shaderc"
+  :entry-point "luv.shaderc:main")
+
+(defsystem "luv/shaderc/test"
+  :description "Executable claims for luv-shaderc, checked by Metal and DXC when present."
+  :version "0.0.1"
+  :depends-on ("luv/shaderc" "luv/test-support")
+  :components ((:file "hal/shaderc/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.shaderc.tests)))
 
 (defsystem "luv/objective-c"
   :description "A declared Objective-C foreign object system with opt-in tracing."

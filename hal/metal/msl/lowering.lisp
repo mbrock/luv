@@ -10,7 +10,14 @@
   ((language-version
     :initarg :language-version
     :initform "4.0"
-    :reader msl-target-language-version))
+    :reader msl-target-language-version)
+   (entry-point-name
+    :initarg :entry-point-name
+    :initform nil
+    :reader msl-target-entry-point-name
+    :documentation
+    "The entry function's name, or NIL to name it after the specification.
+A program compiler gives every stage a stable name of its own."))
   (:documentation
    "The Metal language policy selected for one direct shader lowering."))
 
@@ -182,18 +189,34 @@
   (prog1 (msl-context-pending-statements context)
     (setf (msl-context-pending-statements context) nil)))
 
+(defparameter *msl-reserved-words*
+  '("auto" "bool" "break" "case" "char" "class" "const" "constant"
+    "continue" "default" "delete" "device" "do" "double" "else" "enum"
+    "explicit" "extern" "false" "float" "for" "fragment" "goto" "half"
+    "if" "inline" "int" "kernel" "long" "metal" "namespace" "new"
+    "operator" "private" "protected" "public" "ray_data" "register"
+    "return" "sampler" "short" "signed" "sizeof" "static" "struct"
+    "switch" "template" "texture" "this" "thread" "threadgroup" "true"
+    "typedef" "typename" "uint" "union" "unsigned" "using" "vertex"
+    "void" "volatile" "while")
+  "Words a shader name may spell but MSL (C++14) cannot declare.")
+
 (defun msl-identifier (name)
-  (let ((text (string-downcase (string name))))
-    (with-output-to-string (stream)
-      (loop for character across text
-            for firstp = t then nil
-            for emitted = (if (or (alphanumericp character)
-                                  (char= character #\_))
-                              character
-                              #\_)
-            do (when (and firstp (digit-char-p emitted))
-                 (write-char #\_ stream))
-               (write-char emitted stream)))))
+  (let* ((text (string-downcase (string name)))
+         (identifier
+           (with-output-to-string (stream)
+             (loop for character across text
+                   for firstp = t then nil
+                   for emitted = (if (or (alphanumericp character)
+                                         (char= character #\_))
+                                     character
+                                     #\_)
+                   do (when (and firstp (digit-char-p emitted))
+                        (write-char #\_ stream))
+                      (write-char emitted stream)))))
+    (if (member identifier *msl-reserved-words* :test #'string=)
+        (concatenate 'string identifier "_")
+        identifier)))
 
 (defun msl-type-name (type &optional source-form)
   (case (shader:shader-type-name (shader:find-shader-type type source-form))
@@ -245,172 +268,10 @@
             normalized
             (if (or (find #\. normalized) (find #\e normalized)) "" ".0"))))
 
-(defun msl-semantic-words (name)
-  (substitute #\Space #\- (string-downcase (symbol-name name))))
-
-(defun msl-factor-description (factor)
-  (let ((name (msl-semantic-words (car factor)))
-        (power (cdr factor)))
-    (case power
-      (1 name)
-      (2 (format nil "~A squared" name))
-      (3 (format nil "~A cubed" name))
-      (otherwise (format nil "~A to the ~A power" name power)))))
-
-(defun msl-factor-product-description (factors)
-  (format nil "~{~A~^ times ~}" (mapcar #'msl-factor-description factors)))
-
-(defun msl-tensor-description (order)
-  (case order
-    (0 "scalar")
-    (1 "vector")
-    (otherwise (format nil "tensor of order ~D" order))))
-
-(defun msl-character-description (specification)
-  (case (math:quantity-specification-character specification)
-    (:point "point-valued")
-    (:absolute
-     (if (math:quantity-specification-non-negative-p specification)
-         "non-negative absolute"
-         "absolute"))
-    (:difference "difference-valued")))
-
-(defun msl-quantity-predicate (specification)
-  (let* ((kind (math:quantity-specification-kind specification))
-         (unit-factors
-           (math:unit-expression-factors
-            (math:quantity-specification-unit specification)))
-         (dimension-factors
-           (math:dimension-factors
-            (math:quantity-specification-dimension specification))))
-    (with-output-to-string (stream)
-      (format stream "a ~A ~A"
-              (msl-character-description specification)
-              (msl-tensor-description
-               (math:quantity-specification-tensor-order specification)))
-      (when kind
-        (format stream " in the ~A kind" (msl-semantic-words kind)))
-      (cond
-        ((and (null unit-factors) (null dimension-factors))
-         (write-string ", unitless and dimensionless" stream))
-        (t
-         (if unit-factors
-             (format stream ", measured in ~A units"
-                     (msl-factor-product-description unit-factors))
-             (write-string ", unitless" stream))
-         (if dimension-factors
-             (format stream ", with ~A dimension"
-                     (msl-factor-product-description dimension-factors))
-             (write-string ", and dimensionless" stream)))))))
-
-(defun msl-capitalize-sentence (text)
-  (if (plusp (length text))
-      (concatenate 'string
-                   (string (char-upcase (char text 0)))
-                   (subseq text 1))
-      text))
-
-(defun msl-quantity-sentence (specification)
-  (let ((name (math:quantity-specification-name specification)))
-    (format nil "~A is ~A."
-            (if name
-                (msl-capitalize-sentence (msl-semantic-words name))
-                "This value")
-            (msl-quantity-predicate specification))))
-
-(defun msl-lane-name (positions)
-  (coerce (mapcar (lambda (position) (char "xyzw" position)) positions)
-          'string))
-
-(defun msl-layout-sentences (layout &key sampled-p)
-  (let ((occupied nil)
-        (sentences nil))
-    (dolist (projection (math:quantity-layout-projections layout))
-      (let* ((positions (math:quantity-projection-positions projection))
-             (specification
-               (math:quantity-projection-specification projection))
-             (name (math:quantity-specification-name specification))
-             (lanes (msl-lane-name positions)))
-        (setf occupied (nconc (copy-list positions) occupied))
-        (push
-         (format nil "The ~A~A ~A ~A ~A~A."
-                 (if sampled-p "sampled " "")
-                 lanes
-                 (if (= (length positions) 1) "lane" "lanes")
-                 (if (= (length positions) 1) "holds" "hold")
-                 (if name (msl-semantic-words name) "an unnamed quantity")
-                 (format nil " as ~A" (msl-quantity-predicate specification)))
-         sentences)))
-    (let ((uncovered
-            (loop for position below (math:quantity-layout-extent layout)
-                  unless (member position occupied)
-                    collect position)))
-      (when uncovered
-        (push
-         (format nil "The ~A~A ~A ~A no quantity annotation."
-                 (if sampled-p "sampled " "")
-                 (msl-lane-name uncovered)
-                 (if (= (length uncovered) 1) "lane" "lanes")
-                 (if (= (length uncovered) 1) "has" "have"))
-         sentences)))
-    (nreverse sentences)))
-
-(defgeneric msl-origin-quantity-specification (origin)
-  (:documentation "Return the homogeneous quantity carried by ORIGIN."))
-
-(defmethod msl-origin-quantity-specification ((origin t))
-  nil)
-
-(defmethod msl-origin-quantity-specification
-    ((origin shader:shader-variable-declaration))
-  (shader:shader-declaration-quantity-specification origin))
-
-(defmethod msl-origin-quantity-specification ((origin shader:shader-binding))
-  (shader:shader-expression-quantity-specification
-   (shader:shader-binding-expression origin)))
-
-(defmethod msl-origin-quantity-specification
-    ((origin shader:shader-output-assignment))
-  (shader:shader-expression-quantity-specification
-   (shader:shader-assignment-value origin)))
-
-(defmethod msl-origin-quantity-specification ((origin shader:shader-resource))
-  (shader:shader-resource-sample-quantity-specification origin))
-
-(defgeneric msl-origin-quantity-layout (origin)
-  (:documentation "Return the component quantity layout carried by ORIGIN."))
-
-(defmethod msl-origin-quantity-layout ((origin t))
-  nil)
-
-(defmethod msl-origin-quantity-layout
-    ((origin shader:shader-variable-declaration))
-  (shader:shader-declaration-quantity-layout origin))
-
-(defmethod msl-origin-quantity-layout ((origin shader:shader-binding))
-  (shader:shader-expression-quantity-layout
-   (shader:shader-binding-expression origin)))
-
-(defmethod msl-origin-quantity-layout
-    ((origin shader:shader-output-assignment))
-  (shader:shader-expression-quantity-layout
-   (shader:shader-assignment-value origin)))
-
-(defmethod msl-origin-quantity-layout ((origin shader:shader-resource))
-  (shader:shader-resource-sample-quantity-layout origin))
-
-(defun msl-semantic-sentences (origin &key sampled-p unannotated-p)
-  (let ((specification (msl-origin-quantity-specification origin))
-        (layout (msl-origin-quantity-layout origin)))
-    (cond
-      (specification (list (msl-quantity-sentence specification)))
-      (layout (msl-layout-sentences layout :sampled-p sampled-p))
-      (unannotated-p (list "This numeric value has no quantity annotation.")))))
-
 (defun write-msl-semantic-comments
     (origin stream indentation &key sampled-p unannotated-p)
   (dolist (sentence
-           (msl-semantic-sentences
+           (shader:shader-semantic-sentences
             origin :sampled-p sampled-p :unannotated-p unannotated-p))
     (format stream "~A// ~A~%" indentation sentence)))
 
@@ -1660,7 +1521,7 @@
             (make-instance
              'msl-entry-point
              :stage stage :return-type (msl-structure-name output-structure)
-             :name (msl-identifier base-name)
+             :name (msl-entry-point-name-for target specification)
              :parameters
              (append
               (when input-structure
@@ -1706,7 +1567,7 @@
      (make-instance
       'msl-entry-point
       :stage :task :return-type "void"
-      :name (msl-identifier (shader:shader-object-name specification))
+      :name (msl-entry-point-name-for target specification)
       :parameters
       (append
        (remove nil
@@ -1763,7 +1624,7 @@
      (make-instance
       'msl-entry-point
       :stage :mesh :return-type "void"
-      :name (msl-identifier base-name)
+      :name (msl-entry-point-name-for target specification)
       :parameters
       (append
        (list (make-instance 'msl-parameter
@@ -1776,9 +1637,29 @@
       (nconc (lower-msl-bindings context specification)
              (lower-msl-statements context specification))))))
 
+(defun msl-entry-point-name-for (target specification)
+  (or (msl-target-entry-point-name target)
+      (msl-identifier (shader:shader-object-name specification))))
+
+(defun check-msl-binding-collisions (specification)
+  "Metal shares one buffer index space among uniform blocks and storage
+buffers; textures and samplers have their own.  Reject a shared index."
+  (let ((collision
+          (first (shader:shader-family-binding-collisions specification))))
+    (when collision
+      (destructuring-bind (first second) collision
+        (error 'shader:shader-language-error
+               :form (shader:shader-object-source-form second)
+               :reason :msl-binding-collision
+               :details (list (shader:shader-resource-family second)
+                              (shader:shader-resource-binding second)
+                              (shader:shader-object-name first)
+                              (shader:shader-object-name second)))))))
+
 (defmethod shader:lower-shader-specification
     ((target msl-target) (specification shader:shader-specification))
   "Lower the shared shader graph directly to a structured MSL document."
+  (check-msl-binding-collisions specification)
   (let ((context
           (make-instance 'msl-lowering-context
                          :target target :specification specification)))
@@ -1793,8 +1674,17 @@
               :reason :unsupported-msl-stage
               :details (shader:shader-specification-stage specification))))))
 
-(defun compile-msl (specification &optional (target *metal-4-target*))
-  (shader:lower-shader-specification target specification))
+(defun compile-msl
+    (specification &key (target *metal-4-target*) entry-point-name)
+  "Lower SPECIFICATION to an MSL document, naming its entry ENTRY-POINT-NAME
+when given and after the specification otherwise."
+  (shader:lower-shader-specification
+   (if entry-point-name
+       (make-instance 'msl-target
+                      :language-version (msl-target-language-version target)
+                      :entry-point-name entry-point-name)
+       target)
+   specification))
 
 (defun write-msl (document pathname)
   "Write DOCUMENT's deterministic source to PATHNAME and return PATHNAME."

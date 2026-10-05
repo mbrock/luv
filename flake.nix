@@ -405,6 +405,8 @@
             pkgs.qrencode
             pkgs.sdl3
             pkgs.spirv-tools
+            # DXC validates the HLSL lowering, as spirv-tools does SPIR-V.
+            pkgs.directx-shader-compiler
             swashPackage
             pkgs.typst
             pkgs.vulkan-headers
@@ -431,6 +433,8 @@
             pkgs.pkg-config
             pkgs.sdl3
             pkgs.spirv-tools
+            # DXC validates the HLSL lowering, as spirv-tools does SPIR-V.
+            pkgs.directx-shader-compiler
             swashPackage
             pkgs.typst
             pkgs.vulkan-headers

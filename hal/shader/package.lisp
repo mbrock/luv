@@ -255,6 +255,7 @@
            #:shader-bit-field-call
            #:shader-bit-field-size
            #:shader-bit-field-position
+           #:shader-semantic-sentences
            #:shader-expression-uniformity
            #:shader-expression-workgroup-uniform-p
            #:define-shader
@@ -269,4 +270,36 @@
            #:acknowledge-shader-definition-change
            #:release-shader-definition-dependent
            #:parse-shader-specification
-           #:lower-shader-specification))
+           #:lower-shader-specification
+           ;; Programs: stages linked by name in Metal/Direct3D binding
+           ;; families.
+           #:define-shader-program
+           #:shader-program
+           #:shader-program-stages
+           #:shader-program-source-pathname
+           #:*shader-programs*
+           #:make-shader-program
+           #:register-shader-program
+           #:find-shader-program
+           #:shader-program-specification
+           #:shader-resource-kind
+           #:shader-resource-family
+           #:shader-resource-target
+           #:map-shader-specification-expressions
+           #:shader-comparison-samplers
+           #:shader-family-binding-collisions
+           #:shader-program-resource
+           #:shader-program-resource-declaration
+           #:shader-program-resource-kind
+           #:shader-program-resource-family
+           #:shader-program-resource-stages
+           #:shader-program-resource-name
+           #:shader-program-resource-binding
+           #:shader-program-linkage
+           #:shader-program-linkage-program
+           #:shader-program-linkage-specifications
+           #:shader-program-linkage-specification
+           #:shader-program-linkage-resources
+           #:shader-program-linkage-comparison-samplers
+           #:shader-program-linkage-color-outputs
+           #:link-shader-program))

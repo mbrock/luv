@@ -7,6 +7,7 @@
    "Structured Metal Shading Language lowering for luv's shader graph.")
   (:export #:msl-target
            #:msl-target-language-version
+           #:msl-target-entry-point-name
            #:*metal-4-target*
            #:msl-source-occurrence
            #:msl-source-occurrence-expression
