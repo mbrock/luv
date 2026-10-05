@@ -658,3 +658,190 @@ access chain named: (ID . INDEX)."
     (true (search "mul(source.tint, source.transform)" source))
     (true (search "instances[index] = moved;" source))
     (compiles document)))
+
+;;; Textures, fragment built-ins, and compute effects.
+
+(shader:define-shader hlsl-texture-kinds-probe
+    (:stage :fragment
+     :inputs ((uv :vec2 :location 0)
+              (pixel :vec4 :built-in :frag-coord)
+              (front :bool :built-in :front-facing)
+              (sample-number :uint :built-in :sample-index))
+     :outputs ((color :vec4 :location 0)
+               (depth :float :built-in :frag-depth))
+     :resources ((albedo :texture-2d :binding 0)
+                 (cascades :depth-texture-2d-array :binding 1)
+                 (sky :texture-cube :binding 2)
+                 (volume :texture-3d :binding 3)
+                 (layers :texture-2d-array :binding 4)
+                 (heights :depth-texture-2d :binding 5)
+                 (linear-clamp :sampler :binding 0)
+                 (shadow :sampler :binding 3)))
+  (let* ((layer (shader:uint (shader:swizzle pixel :x)))
+         (direction (shader:vec3 uv 1.0))
+         (base (shader:sample albedo linear-clamp uv))
+         (level (shader:sample-level layers linear-clamp uv layer 2.0))
+         (biased (shader:sample-bias albedo linear-clamp uv 0.5))
+         (graded (shader:sample-grad sky linear-clamp direction direction
+                                     direction))
+         (lit (shader:sample-compare cascades shadow uv layer 0.5))
+         (lit-gather (shader:gather-compare cascades shadow uv layer 0.5))
+         (reds (shader:gather albedo linear-clamp uv))
+         (depths (shader:gather heights linear-clamp uv))
+         (fog (shader:sample-level volume linear-clamp direction 0.0))
+         (texel (shader:texel-load volume (shader:uvec3 layer layer layer)
+                                   (shader:uint 1.0)))
+         (array-texel (shader:texel-load layers (shader:uvec2 layer layer)
+                                         layer (shader:uint 0.0)))
+         (size (shader:texture-size cascades))
+         (sky-size (shader:texture-size sky (shader:uint 1.0))))
+    (when (< (shader:swizzle base :a) 0.5)
+      (shader:discard))
+    (shader:set-output
+     color
+     (* (+ base level biased graded lit-gather reds depths fog texel
+           array-texel
+           (shader:vec4 (float (shader:swizzle size :z))
+                        (float (shader:swizzle sky-size :y))
+                        (float sample-number) 0.0))
+        lit (if front 1.0 0.5)))
+    (shader:set-output depth (shader:swizzle pixel :z))))
+
+(define-test texture-kinds-and-fragment-built-ins-lower-to-hlsl
+  (multiple-value-bind (source document)
+      (source-of (hlsl-texture-kinds-probe))
+    (true (search "Texture2DArray<float> cascades : register(t1, space1);"
+                  source))
+    (true (search "TextureCube<float4> sky : register(t2, space1);" source))
+    (true (search "Texture3D<float4> volume : register(t3, space1);" source))
+    (true (search "Texture2DArray<float4> layers : register(t4, space1);"
+                  source))
+    ;; An array's layer is the coordinate's last component.
+    (true (search "layers.SampleLevel(linear_clamp, float3(stage_in.uv, (float)(layer)), 2.0f)"
+                  source))
+    (true (search "albedo.SampleBias(linear_clamp, stage_in.uv, 0.5f)" source))
+    (true (search "sky.SampleGrad(linear_clamp, direction, direction, direction)"
+                  source))
+    (true (search "cascades.SampleCmpLevelZero(shadow, float3(" source))
+    (true (search "cascades.GatherCmp(shadow, float3(" source))
+    (true (search "albedo.GatherRed(linear_clamp, stage_in.uv)" source))
+    (true (search "heights.Gather(linear_clamp, stage_in.uv)" source))
+    (true (search "volume.Load(int4(int3(uint3(layer, layer, layer)), int(((uint)(1.0f)))))"
+                  source))
+    (true (search "layers.Load(int4(int2(uint2(layer, layer)), int(layer), int(((uint)(0.0f)))))"
+                  source))
+    (true (search "cascades.GetDimensions(0u, size_1_width, size_1_height, size_1_layers, size_1_levels);"
+                  source))
+    (true (search "uint3 size = uint3(size_1_width, size_1_height, size_1_layers);"
+                  source))
+    ;; SV_Position's w is the clip w; the language promises its reciprocal.
+    (true (search "float4(stage_in.sv_position.xyz, 1.0f / stage_in.sv_position.w)"
+                  source))
+    (true (search "bool front : SV_IsFrontFace" source))
+    (true (search "uint sample_number : SV_SampleIndex" source))
+    (true (search "float depth : SV_Depth;" source))
+    (true (search "    discard;" source))
+    (compiles document)))
+
+(shader:define-shader hlsl-workgroup-probe
+    (:stage :compute
+     :workgroup-size (64 1 1)
+     :inputs ((cell :uvec3 :built-in :global-invocation-id)
+              (local :uint :built-in :local-invocation-index)
+              (lane :uint :built-in :wave-lane-index)
+              (lanes :uint :built-in :wave-lane-count))
+     :shared ((tile :vec4 64)
+              (counts :uint 4))
+     :resources ((counter :storage-buffer :binding 0 :element :uint
+                          :access :read-write)
+                 (values :storage-buffer :binding 1 :element :vec4
+                         :access :read-write)
+                 (image :read-write-texture-2d :binding 0 :format :rgba16f)
+                 (mask :read-write-texture-2d :binding 1 :format :r32ui)
+                 (heat :read-write-texture-2d :binding 2 :format :r32f)
+                 (paint :read-write-texture-2d :binding 3 :format :rgba8)))
+  (let* ((index (shader:swizzle cell :x))
+         (zero (shader:uint 0.0))
+         (one (shader:uint 1.0))
+         (texel (shader:uvec2 index zero))
+         (loaded (shader:texel-load image texel))
+         (masked (shader:texel-load mask texel))
+         (size (shader:texture-size image)))
+    (shader:set-shared-element tile local loaded)
+    (when (= local zero)
+      (shader:set-shared-element counts zero zero))
+    (shader:workgroup-barrier)
+    (shader:atomic-add counts zero one)
+    (let* ((neighbour (shader:shared-element
+                       tile (mod (+ local one) (shader:uint 64.0))))
+           (slot (shader:atomic-add counter zero one))
+           (low (shader:atomic-min counter one index))
+           (swapped (shader:atomic-exchange counter one index))
+           (compared (shader:atomic-compare-exchange counter one zero index))
+           (sum (shader:wave-active-sum (float index)))
+           (prefix (shader:wave-prefix-sum index))
+           (ballot (shader:wave-ballot (< index (shader:uint 3.0)))))
+      (shader:storage-barrier)
+      (shader:set-buffer-element
+       values slot
+       (+ neighbour
+          (shader:vec4 sum (float (+ prefix lane lanes))
+                       (float (+ (shader:swizzle ballot :x) low swapped))
+                       (float (+ compared (shader:swizzle masked :x)
+                                 (shader:swizzle size :y))))))
+      (shader:set-texel image texel neighbour)
+      (shader:set-texel mask texel (shader:uvec4 slot zero zero zero))
+      (shader:set-texel heat texel (shader:vec4 sum 0.0 0.0 0.0))
+      (shader:set-texel paint texel (shader:texel-load paint texel)))))
+
+(define-test workgroup-memory-atomics-and-waves-lower-to-hlsl
+  (multiple-value-bind (source document) (source-of (hlsl-workgroup-probe))
+    (true (search "groupshared float4 tile[64];" source))
+    (true (search "groupshared uint counts[4];" source))
+    (true (search "RWTexture2D<float4> image : register(u0, space1);" source))
+    (true (search "RWTexture2D<uint> mask : register(u1, space1);" source))
+    (true (search "RWTexture2D<float> heat : register(u2, space1);" source))
+    (true (search "RWTexture2D<unorm float4> paint : register(u3, space1);"
+                  source))
+    ;; One-channel texels widen and narrow around the language's vec4.
+    (true (search "uint4 masked = uint4(mask[texel], 0u, 0u, 1u);" source))
+    (true (search "heat[texel] = (float4(sum, 0.0f, 0.0f, 0.0f)).x;" source))
+    (true (search "image.GetDimensions(size_1_width, size_1_height);" source))
+    (true (search "tile[local] = loaded;" source))
+    (true (search "GroupMemoryBarrierWithGroupSync();" source))
+    (true (search "AllMemoryBarrierWithGroupSync();" source))
+    ;; An atomic statement keeps its effect and drops its value.
+    (true (search "InterlockedAdd(counts[zero], one, atomic_2);" source))
+    (true (search "InterlockedAdd(counter[zero], one, atomic_3);" source))
+    (true (search "uint slot = atomic_3;" source))
+    (true (search "InterlockedMin(counter[one], index, atomic_4);" source))
+    (true (search "InterlockedCompareExchange(counter[one], zero, index, atomic_6);"
+                  source))
+    (true (search "WaveActiveSum(((float)(index)))" source))
+    (true (search "WavePrefixSum(index)" source))
+    (true (search "WaveActiveBallot(" source))
+    (true (search "WaveGetLaneIndex()" source))
+    (true (search "WaveGetLaneCount()" source))
+    ;; Wave built-ins are intrinsics, not entry parameters.
+    (true (search "void hlsl_workgroup_probe(uint3 cell : SV_DispatchThreadID, uint local : SV_GroupIndex)"
+                  source))
+    (compiles document)))
+
+(define-test nested-bindings-sequence-after-effects-without-redeclaring
+  (let* ((specification
+           (shader:parse-shader-specification
+            'hlsl-sequence-probe
+            '(:stage :compute :workgroup-size (1 1 1)
+              :inputs ((cell :uvec3 :built-in :global-invocation-id))
+              :resources ((data :storage-buffer :binding 0 :element :uint
+                           :access :read-write)))
+            '((let* ((index (shader:swizzle cell :x)))
+                (shader:set-buffer-element data index index)
+                (let* ((index (+ index (shader:buffer-element data index))))
+                  (shader:set-buffer-element data index index))))))
+         (source (source-of specification)))
+    ;; The inner INDEX reads the store before it, under a fresh name.
+    (true (< (search "data[index] = index;" source)
+             (search "uint index_2 = (index + data[index]);" source)
+             (search "data[index_2] = index_2;" source)))
+    (compiles (hlsl:compile-hlsl specification))))

@@ -334,9 +334,11 @@ the structures it contains.  #V16OXI"
       ("name" . ,(snake-identifier (shader:shader-program-resource-name
                                     resource)))
       ("kind" . ,(substitute #\_ #\- (string-downcase (symbol-name kind))))
-      ("family" . ,(string-downcase
-                    (symbol-name
-                     (shader:shader-program-resource-family resource))))
+      ("family" . ,(substitute #\_ #\-
+                               (string-downcase
+                                (symbol-name
+                                 (shader:shader-program-resource-family
+                                  resource)))))
       ("binding" . ,binding)
       ("stages" . (:array ,@(mapcar #'stage-name
                                     (shader:shader-program-resource-stages
@@ -371,22 +373,38 @@ the structures it contains.  #V16OXI"
                                   (shader:shader-storage-buffer-element-type
                                    declaration))))))
              ("stride" . ,(shader:shader-storage-buffer-element-stride
-                           declaration)))))
+                           declaration))))
+          (shader:shader-resource
+           (let ((format (shader:shader-type-storage-format
+                          (shader:shader-declaration-type declaration))))
+             (when format
+               `(("format" . ,(string-downcase (symbol-name format))))))))
       ("msl" . ,(format nil "[[~A(~D)]]"
                         (ecase (shader:shader-program-resource-family resource)
                           (:buffer "buffer")
-                          (:texture "texture")
+                          ((:texture :storage-texture) "texture")
                           (:sampler "sampler"))
-                        binding))
+                        (resource-msl-index resource)))
       ("hlsl" . ,(ecase kind
                    (:uniform-block (format nil "b~D" binding))
                    (:storage-buffer (format nil "t~D, space0" binding))
                    (:read-write-storage-buffer
                     (format nil "u~D, space0" binding))
-                   ((:texture-2d :depth-texture-2d :uint-texture-2d)
+                   ((:texture-2d :depth-texture-2d :uint-texture-2d
+                     :texture-2d-array :depth-texture-2d-array
+                     :texture-cube :texture-3d)
                     (format nil "t~D, space1" binding))
+                   (:read-write-texture-2d
+                    (format nil "u~D, space1" binding))
                    ((:sampler :comparison-sampler)
                     (format nil "s~D" binding)))))))
+
+(defun resource-msl-index (resource)
+  "Metal numbers storage textures after the sampled ones: texture(16 + i)."
+  (+ (shader:shader-program-resource-binding resource)
+     (if (eq :storage-texture (shader:shader-program-resource-family resource))
+         msl:*storage-texture-index-offset*
+         0)))
 
 (defun program-json (compiled)
   "The reflection manifest of COMPILED as a JSON string."
@@ -588,14 +606,12 @@ be the shaders' (see SHADER:DEFINE-SHADER-STRUCT).  #V16OXI"
         (format stream "    .resources = resources,~%")
         (format stream "    .color_outputs = ~D,~%"
                 (length (shader:shader-program-linkage-color-outputs linkage)))
-        (format stream "  };~%")
         (let ((compute (shader:shader-program-linkage-specification
                         linkage :compute)))
           (when compute
-            ;; Program has no field for it yet, so the size stands beside.
-            (format stream "  inline constexpr std::array<std::uint32_t, 3> ~
-                            workgroup_size {~{~D~^, ~}};~%"
+            (format stream "    .workgroup_size = {~{~D~^, ~}},~%"
                     (shader:shader-specification-workgroup-size compute))))
+        (format stream "  };~%")
         (format stream "}~%")))))
 
 ;;; Writing.

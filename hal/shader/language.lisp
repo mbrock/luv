@@ -82,7 +82,19 @@
     :initarg :column-count
     :initform nil
     :reader shader-type-column-count
-    :documentation "A matrix's number of columns, or NIL.")))
+    :documentation "A matrix's number of columns, or NIL.")
+   (texture-dimension
+    :initarg :texture-dimension
+    :initform nil
+    :reader shader-type-texture-dimension
+    :documentation ":2D, :2D-ARRAY, :CUBE, or :3D for a texture type.")
+   (storage-format
+    :initarg :storage-format
+    :initform nil
+    :reader shader-type-storage-format
+    :documentation
+    "A storage texture's texel format, such as :RGBA16F; see
+*STORAGE-TEXTURE-FORMATS*.")))
 
 (defmethod print-object ((type shader-type) stream)
   (print-unreadable-object (type stream :type t)
@@ -92,7 +104,8 @@
 
 (defun register-shader-type
     (name &key component-count scalar-kind bit-width opaque-kind
-               sample-result-type image-depth-p column-type column-count)
+               sample-result-type image-depth-p column-type column-count
+               texture-dimension)
   (setf (gethash name *shader-types*)
         (make-instance 'shader-type
                        :name name
@@ -103,7 +116,8 @@
                        :sample-result-type sample-result-type
                        :image-depth-p image-depth-p
                        :column-type column-type
-                       :column-count column-count)))
+                       :column-count column-count
+                       :texture-dimension texture-dimension)))
 
 ;;; Scalars and vectors: the four scalar kinds are :FLOAT, :UINT, :INT (two's
 ;;; complement), and :BOOL.  A boolean has one component so that comparisons
@@ -139,15 +153,32 @@
 (register-shader-type :mat4 :scalar-kind :float :bit-width 32
                       :column-type :vec4 :column-count 4)
 (register-shader-type :texture-2d
-                      :opaque-kind :texture-2d
+                      :opaque-kind :texture :texture-dimension :2d
                       :sample-result-type :vec4)
 (register-shader-type :depth-texture-2d
-                      :opaque-kind :texture-2d
+                      :opaque-kind :texture :texture-dimension :2d
                       :sample-result-type :vec4
                       :image-depth-p t)
 (register-shader-type :uint-texture-2d
-                      :opaque-kind :texture-2d
+                      :opaque-kind :texture :texture-dimension :2d
                       :sample-result-type :uvec4)
+(register-shader-type :texture-2d-array
+                      :opaque-kind :texture :texture-dimension :2d-array
+                      :sample-result-type :vec4)
+(register-shader-type :depth-texture-2d-array
+                      :opaque-kind :texture :texture-dimension :2d-array
+                      :sample-result-type :vec4
+                      :image-depth-p t)
+(register-shader-type :texture-cube
+                      :opaque-kind :texture :texture-dimension :cube
+                      :sample-result-type :vec4)
+(register-shader-type :texture-3d
+                      :opaque-kind :texture :texture-dimension :3d
+                      :sample-result-type :vec4)
+;; A storage texture's declaration names a format, which decides its texel
+;; type; STORAGE-TEXTURE-TYPE returns the resource's format-specific type.
+(register-shader-type :read-write-texture-2d
+                      :opaque-kind :storage-texture :texture-dimension :2d)
 (register-shader-type :sampler :opaque-kind :sampler)
 (register-shader-type :uniform-block :opaque-kind :uniform-block)
 (register-shader-type :storage-buffer :opaque-kind :storage-buffer)
@@ -353,6 +384,17 @@ buffer may also be stored to by a compute stage with SET-BUFFER-ELEMENT."))
 (defun shader-storage-buffer-element-stride (buffer)
   "Return the byte distance between consecutive elements of BUFFER."
   (shader-type-byte-size (shader-storage-buffer-element-type buffer)))
+
+(defclass shader-shared-array (shader-variable-declaration)
+  ((element-count
+    :initarg :element-count
+    :reader shader-shared-array-element-count))
+  (:documentation
+   "A fixed array in workgroup memory, shared by one compute workgroup's
+invocations: groupshared in HLSL, threadgroup in MSL, and the Workgroup
+storage class in SPIR-V.  Its type is the element type.  It starts
+undefined; invocations store into it, meet at WORKGROUP-BARRIER, and read
+what the others stored."))
 
 (defclass shader-task-payload (shader-named-object)
   ((fields
@@ -900,6 +942,63 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (:documentation
    "A compute stage's store of one element into a read-write storage buffer."))
 
+(defclass shader-block-statement (shader-statement)
+  ((bindings
+    :initarg :bindings
+    :reader shader-block-statement-bindings)
+   (statements
+    :initarg :statements
+    :reader shader-block-statement-statements))
+  (:documentation
+   "A statement-level LET*: its bindings are evaluated where it stands, after
+every earlier statement, and its statements follow.  This is how a stage
+sequences values after effects, such as reading shared memory after a
+barrier or binding the result of an atomic."))
+
+(defclass shader-discard (shader-statement) ()
+  (:documentation "A fragment stage's DISCARD: the fragment writes nothing."))
+
+(defclass shader-barrier (shader-statement)
+  ((memory
+    :initarg :memory
+    :reader shader-barrier-memory
+    :documentation
+    ":WORKGROUP for WORKGROUP-BARRIER, or :STORAGE for STORAGE-BARRIER, whose
+ordering also covers storage buffers and storage textures."))
+  (:documentation
+   "A compute stage's workgroup execution barrier and memory ordering."))
+
+(defclass shader-evaluation (shader-statement)
+  ((expression
+    :initarg :expression
+    :reader shader-evaluation-expression))
+  (:documentation
+   "An effect expression, such as an atomic, evaluated for its effect alone."))
+
+(defclass shader-texel-store (shader-statement)
+  ((texture
+    :initarg :texture
+    :reader shader-texel-store-texture)
+   (coordinate
+    :initarg :coordinate
+    :reader shader-texel-store-coordinate)
+   (value
+    :initarg :value
+    :reader shader-texel-store-value))
+  (:documentation "A store of one texel into a read-write storage texture."))
+
+(defclass shader-shared-store (shader-statement)
+  ((array
+    :initarg :array
+    :reader shader-shared-store-array)
+   (index
+    :initarg :index
+    :reader shader-shared-store-index)
+   (value
+    :initarg :value
+    :reader shader-shared-store-value))
+  (:documentation "A compute stage's store into one workgroup array element."))
+
 (defclass shader-emit-mesh-workgroups (shader-statement)
   ((workgroups
     :initarg :workgroups
@@ -992,6 +1091,11 @@ leaves it again while retaining the semantic operand in the expression graph."))
     :initarg :workgroup-size
     :initform nil
     :reader shader-specification-workgroup-size)
+   (shared-arrays
+    :initarg :shared-arrays
+    :initform nil
+    :reader shader-specification-shared-arrays
+    :documentation "A compute stage's workgroup arrays, from its :SHARED.")
    (task-payload
     :initarg :task-payload
     :initform nil
@@ -1204,6 +1308,46 @@ leaves it again while retaining the semantic operand in the expression graph."))
     ((statement shader-emit-mesh-workgroups))
   (list (shader-emit-mesh-workgroups-counts statement)))
 
+(defmethod shader-statement-expressions ((statement shader-block-statement))
+  (append (mapcar #'shader-binding-expression
+                  (shader-block-statement-bindings statement))
+          (mapcan #'shader-statement-expressions
+                  (shader-block-statement-statements statement))))
+
+(defmethod shader-statement-expressions ((statement shader-discard))
+  (declare (ignore statement))
+  nil)
+
+(defmethod shader-statement-expressions ((statement shader-barrier))
+  (declare (ignore statement))
+  nil)
+
+(defmethod shader-statement-expressions ((statement shader-evaluation))
+  (list (shader-evaluation-expression statement)))
+
+(defmethod shader-statement-expressions ((statement shader-texel-store))
+  (list (shader-texel-store-coordinate statement)
+        (shader-texel-store-value statement)))
+
+(defmethod shader-statement-expressions ((statement shader-shared-store))
+  (list (shader-shared-store-index statement)
+        (shader-shared-store-value statement)))
+
+(defgeneric shader-statement-children (statement)
+  (:documentation
+   "Return the statements STATEMENT structurally contains, in order."))
+
+(defmethod shader-statement-children ((statement shader-statement))
+  (declare (ignore statement))
+  nil)
+
+(defmethod shader-statement-children
+    ((statement shader-conditional-statement))
+  (shader-conditional-statement-statements statement))
+
+(defmethod shader-statement-children ((statement shader-block-statement))
+  (shader-block-statement-statements statement))
+
 (defun shader-specification-expressions (specification)
   "Return the expression graph in source order, without duplicate objects."
   (let ((seen (make-hash-table :test #'eq))
@@ -1240,7 +1384,8 @@ leaves it again while retaining the semantic operand in the expression graph."))
       (shader-resource :workgroup)
       (shader-interface-variable
        (if (member (shader-interface-built-in target)
-                   '(:workgroup-id :num-workgroups :workgroup-size))
+                   '(:workgroup-id :num-workgroups :workgroup-size
+                     :wave-lane-count))
            :workgroup
            :invocation))
       (t :invocation))))
@@ -1277,6 +1422,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
     (when (typep target 'shader-storage-buffer)
       (error 'shader-language-error
              :form source-form :reason :storage-buffer-requires-element
+             :details name))
+    (when (typep target 'shader-shared-array)
+      (error 'shader-language-error
+             :form source-form :reason :shared-array-requires-element
              :details name))
     (make-instance 'shader-reference
                    :target target
@@ -1440,10 +1589,11 @@ silent loss of meaning."
     ((operator (eql 'sample-compare)) operands source-form)
   (declare (ignore operator))
   (let ((coordinate (third operands))
-        (reference (fourth operands)))
+        (reference (car (last operands))))
     (when (or (shader-expression-quantity-checked-p coordinate)
               (shader-expression-quantity-checked-p reference))
-      (require-semantic-operands operands source-form '(2 3))
+      (require-semantic-operands
+       operands source-form (list 2 (1- (length operands))))
       (require-dimensionless-coordinate
        (shader-expression-quantity-specification coordinate) source-form)
       (unless (zerop (math:quantity-specification-tensor-order
@@ -1687,32 +1837,6 @@ a vector comparison a BVEC of the same width.  #CAI3RP"
    operands source-form :invalid-dot-product)
   (find-shader-type :float))
 
-(defmethod infer-shader-call-type ((operator (eql 'sample)) operands source-form)
-  (require-shader-types
-   (lambda (types)
-     (and (= (length types) 3)
-          (eq (shader-type-opaque-kind (first types)) :texture-2d)
-          (shader-type-sample-result-type (first types))
-          (eq (shader-type-opaque-kind (second types)) :sampler)
-          (shader-type= (third types) :vec2)))
-   operands source-form :invalid-texture-sample)
-  (find-shader-type
-   (shader-type-sample-result-type
-    (shader-expression-type (first operands)))))
-
-(defmethod infer-shader-call-type
-    ((operator (eql 'texel-load)) operands source-form)
-  (require-shader-types
-   (lambda (types)
-     (and (= (length types) 2)
-          (eq (shader-type-opaque-kind (first types)) :texture-2d)
-          (shader-type-sample-result-type (first types))
-          (shader-type= (second types) :uvec2)))
-   operands source-form :invalid-texel-load)
-  (find-shader-type
-   (shader-type-sample-result-type
-    (shader-expression-type (first operands)))))
-
 (defun require-scalar-conversion (operands source-form reason kinds)
   (require-shader-types
    (lambda (types)
@@ -1780,19 +1904,6 @@ conversion."
 
 (defmethod infer-shader-call-type ((operator (eql 'rem)) operands source-form)
   (require-integer-operands operands source-form :invalid-remainder))
-
-(defmethod infer-shader-call-type
-    ((operator (eql 'sample-compare)) operands source-form)
-  (require-shader-types
-   (lambda (types)
-     (and (= (length types) 4)
-          (eq (shader-type-opaque-kind (first types)) :texture-2d)
-          (shader-type-image-depth-p (first types))
-          (eq (shader-type-opaque-kind (second types)) :sampler)
-          (shader-type= (third types) :vec2)
-          (shader-type= (fourth types) :float)))
-   operands source-form :invalid-depth-comparison-sample)
-  (find-shader-type :float))
 
 (defmethod infer-shader-call-type ((operator (eql 'mix)) operands source-form)
   (require-shader-types
@@ -4001,6 +4112,7 @@ NIL leaves the character to the named definition; T is the historical
 (defun parse-resource-declaration (form)
   (destructuring-bind
       (name type &key (set 0) binding members element (access nil access-p)
+                       format
                        sample-quantity sample-dimension sample-unit
                        sample-affine-p sample-character sample-components
                        sample-transfer)
@@ -4020,6 +4132,12 @@ NIL leaves the character to the named definition; T is the historical
       (error 'shader-language-error
              :form form :reason :invalid-storage-buffer-access
              :details access))
+    (when (and format
+               (not (eq :storage-texture
+                        (shader-type-opaque-kind
+                         (find-shader-type type form)))))
+      (error 'shader-language-error
+             :form form :reason :format-on-non-storage-texture))
     (cond
       ((shader-symbol= type :storage-buffer)
        (let ((element-type (and element (find-shader-type element form))))
@@ -4100,7 +4218,11 @@ NIL leaves the character to the named definition; T is the historical
                             :source-form member-form))))))
          block))
       (t
-       (let* ((resolved-type (find-shader-type type form))
+       (let* ((resolved-type
+                (let ((declared (find-shader-type type form)))
+                  (if (eq :storage-texture (shader-type-opaque-kind declared))
+                      (storage-texture-type declared format form)
+                      declared)))
               (sample-type
                 (and (shader-type-sample-result-type resolved-type)
                      (find-shader-type
@@ -4512,25 +4634,9 @@ NIL leaves the character to the named definition; T is the historical
     (if (and (consp form) (eq (first form) 'let*))
         (destructuring-bind (operator raw-bindings &rest statements) form
           (declare (ignore operator))
-          (let ((bindings nil)
-                (lexical-environment environment))
-            (dolist (raw-binding raw-bindings)
-              (unless (and (consp raw-binding) (= (length raw-binding) 2)
-                           (symbolp (first raw-binding)))
-                (error 'shader-language-error
-                       :form raw-binding :reason :invalid-binding))
-              (let* ((name (first raw-binding))
-                     (expression
-                       (parse-shader-expression (second raw-binding)
-                                                lexical-environment))
-                     (binding
-                       (make-instance 'shader-binding
-                                      :name name :expression expression
-                                      :source-form raw-binding)))
-                (setf (shader-expression-name expression) name)
-                (push binding bindings)
-                (push (cons name binding) lexical-environment)))
-            (values (nreverse bindings)
+          (multiple-value-bind (bindings lexical-environment)
+              (parse-shader-statement-bindings raw-bindings environment)
+            (values bindings
                     (mapcar (lambda (statement)
                               (parse-shader-statement-form
                                statement
@@ -4587,6 +4693,9 @@ evaluate work which the condition excludes."
                   (dolist (child
                            (shader-conditional-statement-statements statement))
                     (visit-statement child nil)))
+                 ;; A statement-level LET* owns its bindings and statements
+                 ;; at its own place in the sequence, like a conditional arm.
+                 (shader-block-statement nil)
                  (t
                   (dolist (expression (shader-statement-expressions statement))
                     (visit expression hoist-p))))))
@@ -4650,11 +4759,12 @@ evaluate work which the condition excludes."
     (otherwise nil)))
 
 (defun validate-workgroup-inputs
-    (inputs options &key (require-local-invocation-index t))
+    (inputs options &key (require-local-invocation-index t) stage)
   (let ((seen nil))
     (dolist (input inputs)
       (let* ((built-in (shader-interface-built-in input))
-             (expected (workgroup-built-in-type built-in)))
+             (expected (or (workgroup-built-in-type built-in)
+                           (stage-built-in-type stage :input built-in))))
         (unless expected
           (error 'shader-language-error
                  :form (shader-object-source-form input)
@@ -4678,10 +4788,8 @@ evaluate work which the condition excludes."
   (loop for statement in statements
         append
         (append (when (typep statement class) (list statement))
-                (when (typep statement 'shader-conditional-statement)
-                  (statement-tree-occurrences
-                   (shader-conditional-statement-statements statement)
-                   class)))))
+                (statement-tree-occurrences
+                 (shader-statement-children statement) class))))
 
 (defun validate-stage-statements
     (stage statements source-form &optional mesh-output)
@@ -4755,6 +4863,9 @@ evaluate work which the condition excludes."
          (workgroup-size
            (and (member stage '(:task :mesh :compute))
                 (parse-workgroup-size (getf options :workgroup-size) options)))
+         (shared-arrays
+           (parse-shared-array-declarations stage (getf options :shared)
+                                            options))
          (payload-name (getf options :payload))
          (payload
            (and payload-name
@@ -4771,17 +4882,20 @@ evaluate work which the condition excludes."
                          if (typep resource 'shader-uniform-block)
                            append (shader-uniform-block-members resource)
                          else collect resource)
-                   (and payload (shader-task-payload-fields payload))))
+                   (and payload (shader-task-payload-fields payload))
+                   shared-arrays))
          (environment
            (mapcar (lambda (item) (cons (shader-object-name item) item))
                    environment-items)))
     (unless (member stage '(:vertex :fragment :compute :task :mesh))
       (error 'shader-language-error
              :form options :reason :invalid-stage :details stage))
+    (validate-stage-built-ins stage inputs outputs)
     (when (member stage '(:task :mesh :compute))
       (validate-workgroup-inputs
        inputs options
-       :require-local-invocation-index (not (eq stage :compute)))
+       :require-local-invocation-index (not (eq stage :compute))
+       :stage stage)
       (when outputs
         (error 'shader-language-error
                :form options :reason :ordinary-outputs-on-workgroup-stage)))
@@ -4803,11 +4917,13 @@ evaluate work which the condition excludes."
           (validate-stage-statements
            stage statements (list* 'define-shader name options body)
            mesh-output)
+          (validate-stage-effects stage bindings statements)
           (make-instance
            'shader-specification
            :name name :stage stage
            :inputs inputs :outputs outputs :resources resources
            :workgroup-size workgroup-size
+           :shared-arrays shared-arrays
            :task-payload payload :mesh-output mesh-output
            :bindings (collect-shader-bindings bindings statements)
            :statements statements

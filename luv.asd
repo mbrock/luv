@@ -99,6 +99,8 @@
   :serial t
   :components ((:file "hal/shader/package")
                (:file "hal/shader/language")
+               (:file "hal/shader/effects")
+               (:file "hal/shader/textures")
                (:file "hal/shader/semantics")
                (:file "hal/shader/resources")
                (:file "hal/shader/program")))
@@ -112,7 +114,8 @@
   :components ((:file "hal/vulkan/spir-v/package")
                (:file "hal/vulkan/spir-v/instructions")
                (:file "hal/vulkan/spir-v/module")
-               (:file "hal/vulkan/spir-v/lowering")))
+               (:file "hal/vulkan/spir-v/lowering")
+               (:file "hal/vulkan/spir-v/effects")))
 
 (defsystem "luv/msl"
   :description "Structured Metal Shading Language lowering for luv's shader graph."
@@ -121,7 +124,8 @@
   :depends-on ("luv/shader")
   :serial t
   :components ((:file "hal/metal/msl/package")
-               (:file "hal/metal/msl/lowering")))
+               (:file "hal/metal/msl/lowering")
+               (:file "hal/metal/msl/effects")))
 
 (defsystem "luv/wgsl"
   :description "Structured WebGPU Shading Language lowering for luv's shader graph."
@@ -139,7 +143,8 @@
   :depends-on ("luv/shader")
   :serial t
   :components ((:file "hal/d3d12/hlsl/package")
-               (:file "hal/d3d12/hlsl/lowering"))
+               (:file "hal/d3d12/hlsl/lowering")
+               (:file "hal/d3d12/hlsl/effects"))
   :in-order-to ((test-op (test-op "luv/hlsl/test"))))
 
 (defsystem "luv/hlsl/test"
@@ -163,7 +168,8 @@
                (:file "hal/shaderc/main")
                (:static-file "hal/shaderc/examples/textured-instances.lisp")
                (:static-file "hal/shaderc/examples/particle-advance.lisp")
-               (:static-file "hal/shaderc/examples/particle-swarm.lisp"))
+               (:static-file "hal/shaderc/examples/particle-swarm.lisp")
+               (:static-file "hal/shaderc/examples/instance-culling.lisp"))
   :in-order-to ((test-op (test-op "luv/shaderc/test"))))
 
 (defsystem "luv/shaderc/program"

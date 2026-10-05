@@ -310,6 +310,7 @@
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "hal/shader/resource-tests")
+               (:file "hal/shader/effect-tests")
                (:file "luvcraft/world-tests")
                (:file "luvcraft/tests")
                (:file "luvcraft/renderer-tests")

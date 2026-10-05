@@ -103,5 +103,5 @@ invalid stages, sets, and conflicting inputs fail before GPU allocation."
                       (luv.shader:shader-declaration-type resource))
                 (:uniform-block :uniform-buffer)
                 (:storage-buffer :storage-buffer)
-                (:texture-2d :texture)
+                (:texture :texture)
                 (:sampler :sampler))))

@@ -180,6 +180,11 @@
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (register-enumeration ',name ',entries)))
 
+(defmacro extend-enumeration (name &body entries)
+  "Add ENTRIES to the enumeration NAME, which another file defines."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (register-enumeration-entries ',name ',entries)))
+
 (defmacro define-typed-unary-instructions (&body definitions)
   `(progn
      ,@(loop for (name opcode) in definitions
@@ -425,7 +430,15 @@
       (dolist (entry entries)
         (destructuring-bind (enumerant value) entry
           (setf (gethash (registry-key enumerant) values) value)))
-      (setf (gethash (registry-key name) *enumerants*) values))))
+      (setf (gethash (registry-key name) *enumerants*) values)))
+
+  (defun register-enumeration-entries (name entries)
+    (let ((values (or (gethash (registry-key name) *enumerants*)
+                      (setf (gethash (registry-key name) *enumerants*)
+                            (make-hash-table :test #'equal)))))
+      (dolist (entry entries)
+        (destructuring-bind (enumerant value) entry
+          (setf (gethash (registry-key enumerant) values) value))))))
 
 (define-enumeration capability
   (shader 1)

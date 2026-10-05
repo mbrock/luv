@@ -73,6 +73,14 @@
    (interfaces :initform nil :accessor context-interfaces)
    (fold-values :initform (make-hash-table :test #'eq)
                 :accessor context-fold-values)
+   (required-capabilities
+    :initform nil :accessor context-required-capabilities
+    :documentation "Capabilities the lowered features ask for, in order.")
+   (minimum-version
+    :initform #x00010000 :accessor context-minimum-version)
+   (shared-array-variables
+    :initform (make-hash-table :test #'eq)
+    :reader context-shared-array-variables)
    (basic-blocks :initform nil :accessor context-basic-blocks)
    (current-block :initform nil :accessor context-current-block)
    (instructions :initform nil :accessor context-instructions)))
@@ -167,19 +175,8 @@ same type serves as a value and as a storage-buffer element.  #V16OXI"
            'type-declarations context
            (cond ((shader-type= type :bool)
                   (list id 'type-bool))
-                 ((eq kind :texture-2d)
-                  (list id 'type-image
-                        (ensure-shader-type-id
-                         context
-                         (ecase
-                             (shader-type-scalar-kind
-                              (find-shader-type
-                               (shader-type-sample-result-type type)))
-                           (:float :float)
-                           (:uint :uint)))
-                        '2d
-                        (if (shader-type-image-depth-p type) 1 0)
-                        0 0 1 'unknown))
+                 ((member kind '(:texture :storage-texture))
+                  (shader-image-type-form context id type))
                  ((eq kind :sampler) (list id 'type-sampler))
                  ((shader-matrix-type-p type)
                   (list id 'type-matrix
@@ -526,7 +523,8 @@ Modules whose expressions use no extended mathematics never acquire one."
         (if (shader-interface-built-in declaration)
             (list 'decorate variable-id 'built-in
                   (list 'enum 'built-in
-                        (shader-interface-built-in declaration)))
+                        (spir-v-built-in-name
+                         context (shader-interface-built-in declaration))))
             (list 'decorate variable-id 'location
                   (shader-interface-location declaration))))
        (when (shader-interface-interpolation declaration)
@@ -534,6 +532,10 @@ Modules whose expressions use no extended mathematics never acquire one."
           'annotations context
           (list 'decorate variable-id
                 (shader-interface-interpolation declaration))))
+       ;; Vulkan wants every integer fragment input flat, built-ins included.
+       (when (eq :sample-index (shader-interface-built-in declaration))
+         (append-context-form 'annotations context
+                              (list 'decorate variable-id 'flat)))
        (setf (context-interfaces context)
              (nconc (context-interfaces context) (list variable-id))))
       (shader-resource
@@ -1673,56 +1675,6 @@ OpShift* wants as many count components as value components."
 (defmethod lower-shader-call ((operator (eql 'normalize)) context expression)
   (lower-extended-call context expression 'normalize))
 
-(defmethod lower-shader-call ((operator (eql 'sample)) context expression)
-  (destructuring-bind (texture sampler coordinate)
-      (shader-call-operands expression)
-    (let* ((texture-id (lower-shader-expression context texture))
-           (sampler-id (lower-shader-expression context sampler))
-           (coordinate-id (lower-shader-expression context coordinate))
-           (texture-type (shader-expression-type texture))
-           (sampled-id
-             (fresh-shader-id context
-                              (expression-result-name expression))))
-      (emit-shader-instruction
-       context expression
-       (list sampled-id 'sampled-image
-             (ensure-sampled-image-type-id context texture-type)
-             texture-id sampler-id))
-      (emit-value-instruction
-       context expression (shader-expression-type expression)
-       'image-sample-implicit-lod
-       (list sampled-id coordinate-id)))))
-
-(defmethod lower-shader-call ((operator (eql 'texel-load)) context expression)
-  (destructuring-bind (texture coordinate) (shader-call-operands expression)
-    (emit-value-instruction
-     context expression (shader-expression-type expression) 'image-fetch
-     (list (lower-shader-expression context texture)
-           (lower-shader-expression context coordinate)))))
-
-(defmethod lower-shader-call
-    ((operator (eql 'sample-compare)) context expression)
-  (destructuring-bind (texture sampler coordinate depth-reference)
-      (shader-call-operands expression)
-    (let* ((texture-id (lower-shader-expression context texture))
-           (sampler-id (lower-shader-expression context sampler))
-           (coordinate-id (lower-shader-expression context coordinate))
-           (depth-reference-id
-             (lower-shader-expression context depth-reference))
-           (texture-type (shader-expression-type texture))
-           (sampled-id
-             (fresh-shader-id context
-                              (expression-result-name expression))))
-      (emit-shader-instruction
-       context expression
-       (list sampled-id 'sampled-image
-             (ensure-sampled-image-type-id context texture-type)
-             texture-id sampler-id))
-      (emit-value-instruction
-       context expression (shader-expression-type expression)
-       'image-sample-dref-implicit-lod
-       (list sampled-id coordinate-id depth-reference-id)))))
-
 (defgeneric lower-shader-expression-value (context expression)
   (:documentation "Lower EXPRESSION into instructions and return its value id."))
 
@@ -2204,6 +2156,8 @@ OpShift* wants as many count components as value components."
              (append (shader-specification-outputs specification)
                      (shader-specification-resources specification)))
       (register-shader-variable context declaration))
+    (dolist (array (shader-specification-shared-arrays specification))
+      (register-shared-array context array))
     (when (shader-specification-task-payload specification)
       (register-task-payload
        context (shader-specification-task-payload specification)))
@@ -2225,10 +2179,11 @@ OpShift* wants as many count components as value components."
              (make-instance
               'spir-v-module
               :version
-              (if (member (shader-specification-stage specification)
-                          '(:task :mesh))
-                  #x00010400
-                  #x00010000)
+              (max (if (member (shader-specification-stage specification)
+                               '(:task :mesh))
+                       #x00010400
+                       #x00010000)
+                   (context-minimum-version context))
               :capabilities
               (append
                '(shader)
@@ -2237,7 +2192,8 @@ OpShift* wants as many count components as value components."
                  '(int64))
                (when (member (shader-specification-stage specification)
                              '(:task :mesh))
-                 '(mesh-shading-ext)))
+                 '(mesh-shading-ext))
+               (context-required-capabilities context))
               :extensions
               (append
                (when (member (shader-specification-stage specification)
@@ -2260,7 +2216,9 @@ OpShift* wants as many count components as value components."
                       (shader-specification-stage specification))
                      :function main-id
                      :interfaces (context-interfaces context)))
-              :execution-modes (shader-execution-modes specification main-id)
+              :execution-modes
+              (append (shader-execution-modes specification main-id)
+                      (shader-effect-execution-modes specification main-id))
               :annotations (context-annotations context)
               :global-declarations
               (append (context-type-declarations context)

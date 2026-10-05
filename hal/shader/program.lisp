@@ -120,17 +120,20 @@ redefining a stage reaches the program without redefining it."
   "The resource's kind keyword, before program-wide sampler analysis."
   (let ((type (shader-declaration-type resource)))
     (case (shader-type-opaque-kind type)
-      (:texture-2d (shader-type-name type))
+      ((:texture :storage-texture) (shader-type-name type))
       (:storage-buffer (if (shader-storage-buffer-writable-p resource)
                            :read-write-storage-buffer
                            :storage-buffer))
       (otherwise (shader-type-opaque-kind type)))))
 
 (defun shader-resource-family (resource)
-  "Return :BUFFER, :TEXTURE, or :SAMPLER for RESOURCE's binding space."
+  "Return :BUFFER, :TEXTURE, :STORAGE-TEXTURE, or :SAMPLER for RESOURCE's
+binding space.  Storage textures number apart from sampled ones: Metal
+places them after the sampled textures, Direct3D in u-registers."
   (ecase (shader-type-opaque-kind (shader-declaration-type resource))
     ((:uniform-block :storage-buffer) :buffer)
-    (:texture-2d :texture)
+    (:texture :texture)
+    (:storage-texture :storage-texture)
     (:sampler :sampler)))
 
 (defun shader-resource-target (expression)
@@ -164,6 +167,11 @@ the bodies of inline functions and folds seen through their bindings."
       (dolist (statement (shader-specification-statements specification))
         (mapc #'visit (shader-statement-expressions statement))))))
 
+(defparameter *sampling-operators*
+  '(sample sample-level sample-bias sample-grad gather
+    sample-compare gather-compare)
+  "Operators whose second operand is a sampler.")
+
 (defun shader-sampler-uses (specification)
   "Return two lists: samplers used to sample, and samplers used to compare."
   (let ((sampling nil) (comparing nil))
@@ -171,13 +179,13 @@ the bodies of inline functions and folds seen through their bindings."
      (lambda (expression)
        (when (typep expression 'shader-call)
          (let ((operator (shader-call-operator expression)))
-           (when (member operator '(sample sample-compare))
+           (when (member operator *sampling-operators*)
              (let ((sampler (shader-resource-target
                              (second (shader-call-operands expression)))))
                (when sampler
-                 (if (eq operator 'sample)
-                     (pushnew sampler sampling)
-                     (pushnew sampler comparing))))))))
+                 (if (member operator '(sample-compare gather-compare))
+                     (pushnew sampler comparing)
+                     (pushnew sampler sampling))))))))
      specification)
     (values sampling comparing)))
 
@@ -248,7 +256,8 @@ two uses different object types."
 (defun shader-program-linkage-specification (linkage stage)
   (cdr (assoc stage (shader-program-linkage-specifications linkage))))
 
-(defparameter *shader-family-order* '(:buffer :texture :sampler))
+(defparameter *shader-family-order*
+  '(:buffer :texture :storage-texture :sampler))
 
 (defun link-shader-family-resources (stage-specifications comparison-samplers)
   (let ((names (make-hash-table :test #'eq))

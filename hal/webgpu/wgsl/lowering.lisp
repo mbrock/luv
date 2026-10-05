@@ -813,9 +813,12 @@ defaults.  Other source values retain the native folded-literal semantics."))
     (cond (built-in
            (format nil "@builtin(~A)"
                    (case built-in
-                     (:position "position")
+                     ((:position :frag-coord) "position")
                      (:vertex-index "vertex_index")
                      (:instance-index "instance_index")
+                     (:front-facing "front_facing")
+                     (:sample-index "sample_index")
+                     (:frag-depth "frag_depth")
                      (otherwise
                       (error 'shader:shader-language-error
                              :form source-form
@@ -870,7 +873,7 @@ defaults.  Other source values retain the native folded-literal semantics."))
       (error 'shader:shader-language-error
              :form (shader:shader-object-source-form resource)
              :reason :unsupported-wgsl-resource
-             :details (shader:shader-type-opaque-kind
+             :details (shader:shader-type-name
                        (shader:shader-declaration-type resource))))
     (let ((resource-name
             (wgsl-identifier (shader:shader-object-name resource))))
@@ -916,6 +919,45 @@ defaults.  Other source values retain the native folded-literal semantics."))
        (mapcan (lambda (child) (lower-wgsl-statement context child))
                (shader:shader-conditional-statement-statements statement)))))))
 
+(defclass wgsl-line-statement ()
+  ((text :initarg :text :reader wgsl-line-statement-text)))
+
+(defmethod lower-wgsl-statement
+    ((context wgsl-lowering-context) (statement shader:shader-discard))
+  (declare (ignore context))
+  (list (make-instance 'wgsl-line-statement :text "discard;")))
+
+(defun wgsl-unique-local-name (context base)
+  (let ((taken (loop for name being the hash-values
+                       of (wgsl-context-references context)
+                     collect name)))
+    (if (member base taken :test #'equal)
+        (loop for ordinal from 2
+              for candidate = (format nil "~A_~D" base ordinal)
+              unless (member candidate taken :test #'equal)
+                return candidate)
+        base)))
+
+(defmethod lower-wgsl-statement
+    ((context wgsl-lowering-context) (statement shader:shader-block-statement))
+  (nconc
+   (loop for binding in (shader:shader-block-statement-bindings statement)
+         nconc
+         (let* ((expression (shader:shader-binding-expression binding))
+                (name (wgsl-unique-local-name
+                       context
+                       (wgsl-identifier (shader:shader-object-name binding))))
+                (value (lower-wgsl-expression context expression)))
+           (setf (gethash binding (wgsl-context-references context)) name)
+           (append (drain-wgsl-pending-statements context)
+                   (list (make-instance
+                          'wgsl-variable-statement
+                          :type (wgsl-type-name
+                                 (shader:shader-expression-type expression))
+                          :name name :value value)))))
+   (mapcan (lambda (child) (lower-wgsl-statement context child))
+           (shader:shader-block-statement-statements statement))))
+
 (defmethod lower-wgsl-statement
     ((context wgsl-lowering-context) (statement shader:shader-statement))
   (declare (ignore context))
@@ -937,6 +979,10 @@ defaults.  Other source values retain the native folded-literal semantics."))
         do (write-string "  " stream)))
 
 (defgeneric write-wgsl-statement-form (statement stream))
+
+(defmethod write-wgsl-statement-form ((statement wgsl-line-statement) stream)
+  (write-wgsl-indent stream)
+  (format stream "~A~%" (wgsl-line-statement-text statement)))
 
 (defmethod write-wgsl-statement-form
     ((statement wgsl-variable-statement) stream)

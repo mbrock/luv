@@ -49,5 +49,6 @@
            #:msl-document-source
            #:msl-document-expression-occurrences
            #:msl-document-occurrence-expression
+           #:*storage-texture-index-offset*
            #:compile-msl
            #:write-msl))

@@ -6,7 +6,10 @@
   ;; These names are literal SPIR-V instructions rather than Common Lisp or
   ;; shared-shader operators.  They belong to this backend package.
   (:shadow #:dot #:function #:load #:return #:variable #:any #:all
-           #:select #:transpose)
+           #:select #:transpose
+           ;; Atomic instructions share their words with shader operators.
+           #:atomic-and #:atomic-or #:atomic-xor #:atomic-exchange
+           #:atomic-compare-exchange)
   (:documentation
    "Literal SPIR-V instructions, modules, and shader lowering.")
   (:export #:spir-v-error

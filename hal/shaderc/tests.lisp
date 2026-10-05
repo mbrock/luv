@@ -10,6 +10,7 @@
   (:import-from #:parachute #:define-test #:true #:false #:is #:fail)
   (:local-nicknames (#:shader #:luv.shader)
                     (#:shaderc #:luv.shaderc)
+                    (#:hlsl #:luv.hlsl)
                     (#:spv #:luv.spir-v)))
 
 (in-package #:luv.shaderc.tests)
@@ -41,6 +42,61 @@ point DEVELOPER_DIR at a bare SDK; Metal's compiler lives in Xcode's."
                                 :ignore-error-status t)
     (unless (zerop status)
       (format nil "~{~A~^ ~}~%~A~A" command output error-output))))
+
+(defun header-diagnostics (pathname)
+  "Compile the generated header PATHNAME against the copy of moppe's
+reflection header; NIL on success or without a C++ compiler."
+  (let ((compiler (or (uiop:getenv "CXX") "c++")))
+    (when (tool-available-p compiler "--version")
+      (run-tool
+       (list compiler "-std=c++20" "-fsyntax-only" "-x" "c++"
+             "-I" (uiop:native-namestring
+                   (merge-pathnames "hal/shaderc/fixtures/" *root*))
+             (uiop:native-namestring pathname))))))
+
+(defun native-diagnostics (directory program stage)
+  "Compile PROGRAM's STAGE in DIRECTORY with metal and DXC when present;
+return their failures."
+  (let ((base (format nil "~A.~A" program stage))
+        (failures nil))
+    (when (apply #'tool-available-p
+                 (xcrun-command "-sdk" "macosx" "--find" "metal"))
+      (push (run-tool
+             (xcrun-command
+              "-sdk" "macosx" "metal" "-std=metal4.0" "-c"
+              (uiop:native-namestring
+               (merge-pathnames (format nil "~A.metal" base) directory))
+              "-o" (uiop:native-namestring
+                    (merge-pathnames (format nil "~A.air" base) directory))))
+            failures))
+    (let ((dxc (or (uiop:getenv "LUV_DXC") "dxc")))
+      (when (tool-available-p dxc "--version")
+        (push (run-tool
+               (list dxc "-HV" "2021" "-WX"
+                     "-T" (format nil "~A_6_0"
+                                  (cond ((string= stage "vertex") "vs")
+                                        ((string= stage "fragment") "ps")
+                                        (t "cs")))
+                     "-E" (format nil "~A_~A" program stage)
+                     "-Fo" (uiop:native-namestring
+                            (merge-pathnames (format nil "~A.dxil" base)
+                                             directory))
+                     (uiop:native-namestring
+                      (merge-pathnames (format nil "~A.hlsl" base)
+                                       directory))))
+              failures)))
+    (remove nil failures)))
+
+(defmacro with-scratch-directory ((directory) &body body)
+  (let ((scratch (gensym "SCRATCH")))
+    `(uiop:with-temporary-file (:pathname ,scratch :keep nil)
+       (let ((,directory (uiop:ensure-directory-pathname
+                          (format nil "~A.d" (uiop:native-namestring
+                                              ,scratch)))))
+         (unwind-protect (progn ,@body)
+           (uiop:delete-directory-tree ,directory :validate t
+                                                  :if-does-not-exist
+                                                  :ignore))))))
 
 (defun failure-reason (thunk)
   (handler-case (progn (funcall thunk) nil)
@@ -344,7 +400,10 @@ point DEVELOPER_DIR at a bare SDK; Metal's compiler lives in Xcode's."
                              header))
                (true (search ".compute_entry = \"particle_advance_compute\","
                              header))
-               (true (search "workgroup_size {64, 1, 1};" header))
+               (true (search ".workgroup_size = {64, 1, 1}," header))
+               (is eq nil (header-diagnostics
+                           (merge-pathnames "particle_advance.hh"
+                                            directory)))
                (true (search "\"hlsl\": \"u1, space0\"" json))
                (true (search "\"hlsl_profile\": \"cs_6_0\"" json))
                ;; The same specification is a GLCompute module for Vulkan.
@@ -542,3 +601,102 @@ bind COMPILED to it, and run BODY."
             nil)
         (shader:shader-language-error () :struct-name)
         (shaderc:shaderc-error () :struct-name))))
+
+(defparameter *culling-example*
+  (merge-pathnames "hal/shaderc/examples/instance-culling.lisp" *root*))
+
+(define-test the-culling-example-compiles-for-every-target
+  (with-scratch-directory (directory)
+    (let* ((programs (shaderc:compile-shader-files (list *culling-example*)
+                                                   :directory directory))
+           (linkage (shaderc:compiled-program-linkage (first programs)))
+           (specification (shader:shader-program-linkage-specification
+                           linkage :compute))
+           (header (uiop:read-file-string
+                    (merge-pathnames "instance_culling.hh" directory)))
+           (metal (uiop:read-file-string
+                   (merge-pathnames "instance_culling.compute.metal"
+                                    directory)))
+           (hlsl (uiop:read-file-string
+                  (merge-pathnames "instance_culling.compute.hlsl"
+                                   directory)))
+           (spir-v (merge-pathnames "instance_culling.spv" directory)))
+      (true (search ".workgroup_size = {64, 1, 1}," header))
+      (true (search "{\"arguments\", ResourceKind::read_write_storage_buffer, 3,"
+                    header))
+      ;; The argument record is atomic in Metal, so every access to it is.
+      (true (search "device atomic_uint* arguments [[buffer(3)]]" metal))
+      (true (search "atomic_fetch_add_explicit(&arguments[" metal))
+      (true (search "InterlockedAdd(arguments[" hlsl))
+      (is eq nil (header-diagnostics
+                  (merge-pathnames "instance_culling.hh" directory)))
+      (is equal nil (native-diagnostics directory "instance_culling"
+                                        "compute"))
+      (spv:write-spir-v (spv:assemble-shader-specification specification)
+                        spir-v)
+      (when (tool-available-p "spirv-val" "--version")
+        (is eq nil (run-tool
+                    (list "spirv-val" "--target-env" "vulkan1.0"
+                          (uiop:native-namestring spir-v))))))))
+
+(define-test texture-kinds-and-storage-textures-reach-the-reflection
+  (stage-probe 'kinds-vertex :vertex
+               :inputs '((index :uint :built-in :vertex-index))
+               :outputs '((position :vec4 :built-in :position)
+                          (uv :vec2 :location 0))
+               :body '(let* ((x (float index)))
+                       (shader:set-output position
+                        (shader:vec4 x 0.0 0.0 1.0))
+                       (shader:set-output uv (shader:vec2 x x))))
+  (stage-probe 'kinds-fragment :fragment
+               :inputs '((uv :vec2 :location 0))
+               :outputs '((color :vec4 :location 0))
+               :resources '((layers :texture-2d-array :binding 0)
+                            (cascades :depth-texture-2d-array :binding 1)
+                            (sky :texture-cube :binding 2)
+                            (volume :texture-3d :binding 3)
+                            (heat :read-write-texture-2d :binding 0
+                             :format :r32f)
+                            (filter :sampler :binding 0))
+               :body '(let* ((layer (shader:uint 1.0))
+                             (direction (shader:vec3 uv 1.0)))
+                       (shader:set-texel heat (shader:uvec2 layer layer)
+                        (shader:vec4 1.0 0.0 0.0 0.0))
+                       (shader:set-output color
+                        (+ (shader:sample layers filter uv layer)
+                           (shader:sample-level cascades filter uv layer 0.0)
+                           (shader:sample sky filter direction)
+                           (shader:sample volume filter direction)))))
+  (let* ((compiled (shaderc:compile-shader-program
+                    (probe-program :vertex 'kinds-vertex
+                                   :fragment 'kinds-fragment)))
+         (json (shaderc:program-json compiled))
+         (header (shaderc:program-header compiled))
+         (fragment (find :fragment (shaderc:compiled-program-stages compiled)
+                         :key #'shaderc:compiled-stage-stage)))
+    ;; The storage texture is binding 0 of its own family, beside texture 0.
+    (dolist (text '("\"kind\": \"texture_2d_array\""
+                    "\"kind\": \"depth_texture_2d_array\""
+                    "\"kind\": \"texture_cube\""
+                    "\"kind\": \"texture_3d\""
+                    "\"kind\": \"read_write_texture_2d\""
+                    "\"family\": \"storage_texture\""
+                    "\"format\": \"r32f\""
+                    "\"msl\": \"[[texture(16)]]\""
+                    "\"hlsl\": \"u0, space1\""))
+      (true (search text json)))
+    (dolist (text '("ResourceKind::texture_2d_array, 0,"
+                    "ResourceKind::depth_texture_2d_array, 1,"
+                    "ResourceKind::texture_cube, 2,"
+                    "ResourceKind::texture_3d, 3,"
+                    "ResourceKind::read_write_texture_2d, 0,"))
+      (true (search text header)))
+    (true (search "RWTexture2D<float> heat : register(u0, space1);"
+                  (hlsl:hlsl-document-source
+                   (shaderc:compiled-stage-hlsl fragment))))
+    (with-scratch-directory (directory)
+      (shaderc:write-compiled-program compiled directory)
+      (is eq nil (header-diagnostics
+                  (merge-pathnames "probe_program.hh" directory)))
+      (is equal nil (native-diagnostics directory "probe_program"
+                                        "fragment")))))

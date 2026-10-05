@@ -661,3 +661,61 @@ on success or without the compiler, else its report."
     (true (search "ProbeParticle fold_state_1 = " source))
     (true (search "if (hit.inside)" source))
     (parachute:is eq nil (metal-compiler-diagnostics source))))
+
+;;; Textures, fragment built-ins, and compute effects in MSL.
+
+(define-test texture-kinds-and-fragment-built-ins-lower-to-metal
+  (let* ((document (msl:compile-msl (texture-kinds-fragment-probe)))
+         (source (msl:msl-document-source document)))
+    (dolist (text '("depth2d_array<float> cascades [[texture(1)]]"
+                    "texturecube<float> sky [[texture(2)]]"
+                    "texture3d<float> volume [[texture(3)]]"
+                    "texture2d_array<float> layers [[texture(4)]]"
+                    "float4 pixel [[position]]"
+                    "bool front [[front_facing]]"
+                    "uint sample_number [[sample_id]]"
+                    "float depth [[depth(any)]];"
+                    ;; Metal takes an array's layer as its own argument.
+                    "layers.sample(linear_clamp, stage_in.uv, layer, metal::level(2.0f))"
+                    "albedo.sample(linear_clamp, stage_in.uv, metal::bias(0.5f))"
+                    "sky.sample(linear_clamp, direction, metal::gradientcube(direction, direction))"
+                    "cascades.sample_compare(shadow, stage_in.uv, layer, 0.5f)"
+                    "cascades.gather_compare(shadow, stage_in.uv, layer, 0.5f)"
+                    "albedo.gather(linear_clamp, stage_in.uv, int2(0), metal::component::x)"
+                    "heights.gather(linear_clamp, stage_in.uv)"
+                    "volume.read(uint3(layer, layer, layer), uint(1.0f))"
+                    "layers.read(uint2(layer, layer), layer, uint(0.0f))"
+                    "uint3(cascades.get_width(0u), cascades.get_height(0u), cascades.get_array_size())"
+                    "discard_fragment();"
+                    "result.depth = pixel.z;"))
+      (true (search text source)))
+    (false (metal-compiler-diagnostics source))))
+
+(define-test workgroup-effects-lower-to-metal-atomics-and-simdgroups
+  (let* ((document (msl:compile-msl (workgroup-effects-probe)))
+         (source (msl:msl-document-source document)))
+    (dolist (text '("uint lane [[thread_index_in_simdgroup]]"
+                    "uint lanes [[threads_per_simdgroup]]"
+                    ;; An atomic target is atomic_uint throughout the stage.
+                    "device atomic_uint* counter [[buffer(0)]]"
+                    "device float4* values [[buffer(1)]]"
+                    ;; Storage textures follow the sixteen sampled indices.
+                    "texture2d<float, access::read_write> image [[texture(16)]]"
+                    "texture2d<uint, access::read_write> mask [[texture(17)]]"
+                    "threadgroup float4 tile[64];"
+                    "threadgroup atomic_uint counts[4];"
+                    "atomic_store_explicit(&counts[zero], zero, memory_order_relaxed);"
+                    "threadgroup_barrier(mem_flags::mem_threadgroup);"
+                    "atomic_fetch_add_explicit(&counts[zero], one, memory_order_relaxed);"
+                    "uint slot = atomic_fetch_add_explicit(&counter[zero], one, memory_order_relaxed);"
+                    "atomic_fetch_min_explicit(&counter[one], index, memory_order_relaxed)"
+                    "atomic_exchange_explicit(&counter[one], index, memory_order_relaxed)"
+                    "atomic_compare_exchange_weak_explicit(&counter[one],"
+                    "simd_sum(float(index))"
+                    "simd_prefix_exclusive_sum(index)"
+                    "static_cast<ulong>(simd_ballot("
+                    "mem_flags::mem_device | mem_flags::mem_threadgroup | mem_flags::mem_texture"
+                    "image.write(neighbour, texel);"
+                    "uint2(image.get_width(), image.get_height())"))
+      (true (search text source)))
+    (false (metal-compiler-diagnostics source))))

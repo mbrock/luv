@@ -26,6 +26,13 @@
            #:shader-type-opaque-kind
            #:shader-type-sample-result-type
            #:shader-type-image-depth-p
+           #:shader-type-texture-dimension
+           #:shader-type-storage-format
+           #:shader-texture-type-p
+           #:shader-storage-texture-type-p
+           #:shader-texture-arrayed-p
+           #:storage-texture-format-channels
+           #:*storage-texture-formats*
            #:find-shader-type
            #:shader-type=
            #:shader-float-type-p
@@ -181,7 +188,30 @@
            #:dot
            #:sample
            #:sample-compare
+           #:sample-level
+           #:sample-grad
+           #:sample-bias
+           #:gather
+           #:gather-compare
            #:texel-load
+           #:texture-size
+           #:set-texel
+           #:discard
+           #:workgroup-barrier
+           #:storage-barrier
+           #:shared-element
+           #:set-shared-element
+           #:atomic-add
+           #:atomic-min
+           #:atomic-max
+           #:atomic-and
+           #:atomic-or
+           #:atomic-xor
+           #:atomic-exchange
+           #:atomic-compare-exchange
+           #:wave-active-sum
+           #:wave-prefix-sum
+           #:wave-ballot
            #:derivative-x
            #:derivative-y
            #:mix
@@ -312,6 +342,35 @@
            #:shader-buffer-element
            #:shader-buffer-element-buffer
            #:shader-buffer-element-index
+           ;; Stage effects and workgroup memory.
+           #:shader-block-statement
+           #:shader-block-statement-bindings
+           #:shader-block-statement-statements
+           #:shader-statement-children
+           #:shader-discard
+           #:shader-barrier
+           #:shader-barrier-memory
+           #:shader-evaluation
+           #:shader-evaluation-expression
+           #:shader-texel-store
+           #:shader-texel-store-texture
+           #:shader-texel-store-coordinate
+           #:shader-texel-store-value
+           #:shader-shared-array
+           #:shader-shared-array-element-count
+           #:shader-shared-store
+           #:shader-shared-store-array
+           #:shader-shared-store-index
+           #:shader-shared-store-value
+           #:shader-shared-element
+           #:shader-shared-element-array
+           #:shader-shared-element-index
+           #:shader-specification-shared-arrays
+           #:shader-atomic-call
+           #:shader-atomic-call-target
+           #:shader-specification-atomic-targets
+           #:texture-coordinate-type
+           #:texture-size-type
            #:shader-bit-field-call
            #:shader-bit-field-size
            #:shader-bit-field-position

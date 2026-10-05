@@ -24,6 +24,10 @@ A program compiler gives every stage a stable name of its own."))
 (defparameter *metal-4-target*
   (make-instance 'msl-target :language-version "4.0"))
 
+(defparameter *storage-texture-index-offset* 16
+  "Metal texture index of storage texture binding 0: storage textures
+follow the sixteen sampled texture bindings in one texture index space.")
+
 (defclass msl-source-occurrence ()
   ((expression
     :initarg :expression
@@ -122,6 +126,8 @@ A program compiler gives every stage a stable name of its own."))
   ((buffer :initarg :buffer :reader msl-buffer-store-buffer)
    (index :initarg :index :reader msl-buffer-store-index)
    (value :initarg :value :reader msl-buffer-store-value)
+   (atomic-p :initarg :atomic-p :initform nil
+             :reader msl-buffer-store-atomic-p)
    (origin :initarg :origin :reader msl-buffer-store-origin))
   (:documentation "One compute store into a read-write storage buffer."))
 
@@ -190,7 +196,18 @@ A program compiler gives every stage a stable name of its own."))
     :reader msl-context-function-call-results)
    (pending-statements
     :initform nil :accessor msl-context-pending-statements)
-   (fold-counter :initform 0 :accessor msl-context-fold-counter)))
+   (fold-counter :initform 0 :accessor msl-context-fold-counter)
+   (atomic-targets
+    :initarg :atomic-targets
+    :initform nil
+    :reader msl-context-atomic-targets
+    :documentation
+    "Buffers and workgroup arrays some atomic touches: atomic_uint in MSL,
+so every access to them is atomic.")
+   (local-names
+    :initform (make-hash-table :test #'equal)
+    :reader msl-context-local-names)
+   (temporary-counter :initform 0 :accessor msl-context-temporary-counter)))
 
 (defun drain-msl-pending-statements (context)
   (prog1 (msl-context-pending-statements context)
@@ -230,6 +247,10 @@ A program compiler gives every stage a stable name of its own."))
     (return-from msl-type-name
       (msl-structure-name-for
        (shader:shader-type-name (shader:find-shader-type type)))))
+  (when (shader:shader-storage-texture-type-p
+         (shader:find-shader-type type source-form))
+    (return-from msl-type-name
+      (msl-storage-texture-type-name (shader:find-shader-type type))))
   (case (shader:shader-type-name (shader:find-shader-type type source-form))
     (:bool "bool")
     (:float "float")
@@ -254,6 +275,10 @@ A program compiler gives every stage a stable name of its own."))
     (:texture-2d "texture2d<float>")
     (:depth-texture-2d "depth2d<float>")
     (:uint-texture-2d "texture2d<uint>")
+    (:texture-2d-array "texture2d_array<float>")
+    (:depth-texture-2d-array "depth2d_array<float>")
+    (:texture-cube "texturecube<float>")
+    (:texture-3d "texture3d<float>")
     (:sampler "sampler")
     (otherwise
      (error 'shader:shader-language-error
@@ -365,14 +390,15 @@ A program compiler gives every stage a stable name of its own."))
     ((context msl-lowering-context) (expression shader:shader-buffer-element))
   (let ((index
           (lower-msl-expression
-           context (shader:shader-buffer-element-index expression))))
+           context (shader:shader-buffer-element-index expression)))
+        (buffer (shader:shader-buffer-element-buffer expression)))
     (note-msl-occurrence
      context expression
-     (format nil "~A[~A]"
-             (msl-identifier
-              (shader:shader-object-name
-               (shader:shader-buffer-element-buffer expression)))
-             (msl-occurrence-text index)))))
+     (msl-atomic-load-text
+      context buffer
+      (format nil "~A[~A]"
+              (msl-identifier (shader:shader-object-name buffer))
+              (msl-occurrence-text index))))))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-call))
@@ -1077,53 +1103,6 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
      context expression
      (format nil "~A.~A" (msl-occurrence-text operand) components))))
 
-(defmethod shader:lower-shader-call
-    ((operator (eql 'shader:sample))
-     (context msl-lowering-context)
-     (expression shader:shader-call))
-  (declare (ignore operator))
-  (destructuring-bind (texture sampler coordinate)
-      (shader:shader-call-operands expression)
-    (let* ((lowered
-             (mapcar (lambda (operand)
-                       (lower-msl-expression context operand))
-                     (list texture sampler coordinate)))
-           (sample
-             (format nil "~A.sample(~A, ~A)"
-                     (msl-occurrence-text (first lowered))
-                     (msl-occurrence-text (second lowered))
-                     (msl-occurrence-text (third lowered))))
-           (text
-             (if (shader:shader-type-image-depth-p
-                  (shader:shader-expression-type texture))
-                 (format nil "float4(~A)" sample)
-                 sample)))
-      (note-msl-occurrence context expression text))))
-
-(defmethod shader:lower-shader-call
-    ((operator (eql 'shader:sample-compare))
-     (context msl-lowering-context)
-     (expression shader:shader-call))
-  (declare (ignore operator))
-  (let ((operands (mapcar #'msl-occurrence-text
-                          (lower-msl-operands context expression))))
-    (note-msl-occurrence
-     context expression
-     (destructuring-bind (texture sampler coordinate depth-reference) operands
-       (format nil "~A.sample_compare(~A, ~A, ~A)"
-               texture sampler coordinate depth-reference)))))
-
-(defmethod shader:lower-shader-call
-    ((operator (eql 'shader:texel-load))
-     (context msl-lowering-context)
-     (expression shader:shader-call))
-  (declare (ignore operator))
-  (destructuring-bind (texture coordinate)
-      (mapcar #'msl-occurrence-text
-              (lower-msl-operands context expression))
-    (note-msl-occurrence
-     context expression (format nil "~A.read(~A)" texture coordinate))))
-
 (defun msl-interface-attribute (stage declaration)
   (let ((direction (shader:shader-interface-direction declaration))
         (location (shader:shader-interface-location declaration))
@@ -1133,6 +1112,7 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
     (cond
       ((and (eq direction :output) (eq built-in :position))
        "[[position]]")
+      ((msl-stage-built-in-attribute stage direction built-in))
       ((and (eq stage :vertex) (eq direction :input)
             (eq built-in :vertex-index))
        "[[vertex_id]]")
@@ -1222,7 +1202,7 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
        :array-length (shader:shader-task-payload-field-element-count field)))
     (shader:shader-task-payload-fields payload))))
 
-(defun msl-resource-parameter (resource)
+(defun msl-resource-parameter (resource &optional atomic-targets)
   (unless (zerop (shader:shader-resource-descriptor-set resource))
     (error 'shader:shader-language-error
            :form (shader:shader-object-source-form resource)
@@ -1246,16 +1226,27 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
         'msl-parameter
         :type (format nil "~:[const ~;~]device ~A*"
                       (shader:shader-storage-buffer-writable-p resource)
-                      (msl-type-name
-                       (shader:shader-storage-buffer-element-type resource)
-                       (shader:shader-object-source-form resource)))
+                      (if (member resource atomic-targets)
+                          "atomic_uint"
+                          (msl-type-name
+                           (shader:shader-storage-buffer-element-type resource)
+                           (shader:shader-object-source-form resource))))
         :name name :attribute (format nil "[[buffer(~D)]]" binding)
         :origin resource))
-      (:texture-2d
+      (:texture
        (make-instance
         'msl-parameter
         :type (msl-type-name type (shader:shader-object-source-form resource))
         :name name :attribute (format nil "[[texture(~D)]]" binding)
+        :origin resource))
+      ;; Storage textures follow the sampled textures' sixteen indices.
+      (:storage-texture
+       (make-instance
+        'msl-parameter
+        :type (msl-type-name type (shader:shader-object-source-form resource))
+        :name name
+        :attribute (format nil "[[texture(~D)]]"
+                           (+ binding *storage-texture-index-offset*))
         :origin resource))
       (:sampler
        (make-instance
@@ -1276,6 +1267,9 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
               (msl-identifier (shader:shader-object-name input))
               (format nil "~A.~A" input-parameter-name
                       (msl-identifier (shader:shader-object-name input))))))
+  (dolist (array (shader:shader-specification-shared-arrays specification))
+    (setf (gethash array (msl-context-references context))
+          (msl-identifier (shader:shader-object-name array))))
   (dolist (resource (shader:shader-specification-resources specification))
     (let ((resource-name (msl-identifier (shader:shader-object-name resource))))
       (setf (gethash resource (msl-context-references context)) resource-name)
@@ -1434,10 +1428,15 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
 
 (defmethod write-msl-statement ((statement msl-buffer-store-statement) stream)
   (write-msl-indent stream)
-  (format stream "~A[~A] = ~A;~%"
-          (msl-buffer-store-buffer statement)
-          (msl-occurrence-text (msl-buffer-store-index statement))
-          (msl-occurrence-text (msl-buffer-store-value statement))))
+  (if (msl-buffer-store-atomic-p statement)
+      (format stream "atomic_store_explicit(&~A[~A], ~A, memory_order_relaxed);~%"
+              (msl-buffer-store-buffer statement)
+              (msl-occurrence-text (msl-buffer-store-index statement))
+              (msl-occurrence-text (msl-buffer-store-value statement)))
+      (format stream "~A[~A] = ~A;~%"
+              (msl-buffer-store-buffer statement)
+              (msl-occurrence-text (msl-buffer-store-index statement))
+              (msl-occurrence-text (msl-buffer-store-value statement)))))
 
 (defmethod write-msl-statement
     ((statement msl-emit-mesh-workgroups-statement) stream)
@@ -1696,6 +1695,8 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
        :buffer (msl-identifier
                 (shader:shader-object-name
                  (shader:shader-buffer-store-buffer statement)))
+       :atomic-p (member (shader:shader-buffer-store-buffer statement)
+                         (msl-context-atomic-targets context))
        :index index :value value :origin statement)))))
 
 (defmethod lower-msl-statement
@@ -1717,7 +1718,9 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
   (let ((statements nil))
     (dolist (binding (shader:shader-specification-bindings specification))
       (let* ((expression (shader:shader-binding-expression binding))
-             (name (msl-identifier (shader:shader-object-name binding)))
+             (name (msl-local-name
+                    context
+                    (msl-identifier (shader:shader-object-name binding))))
              (value (lower-msl-expression context expression)))
         (setf statements
               (nconc statements (drain-msl-pending-statements context)))
@@ -1804,8 +1807,7 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
               (mapcar (lambda (input)
                         (msl-built-in-input-parameter stage input))
                       built-in-inputs)
-              (mapcar #'msl-resource-parameter
-                      (shader:shader-specification-resources specification)))
+              (msl-resource-parameters context specification))
              :statements
              (nconc (lower-msl-bindings context specification)
                     (lower-msl-statements context specification)))))
@@ -1849,8 +1851,7 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
                       :type "metal::mesh_grid_properties"
                       :name "mesh_grid" :attribute nil)))
        (msl-workgroup-parameters :task specification)
-       (mapcar #'msl-resource-parameter
-               (shader:shader-specification-resources specification)))
+       (msl-resource-parameters context specification))
       :statements
       (nconc (lower-msl-bindings context specification)
              (lower-msl-statements context specification))))))
@@ -1868,10 +1869,10 @@ takes the threadgroup size from the dispatch; the reflection carries it."
     :name (msl-entry-point-name-for target specification)
     :parameters
     (append (msl-workgroup-parameters :compute specification)
-            (mapcar #'msl-resource-parameter
-                    (shader:shader-specification-resources specification)))
+            (msl-resource-parameters context specification))
     :statements
-    (nconc (lower-msl-bindings context specification)
+    (nconc (msl-threadgroup-declarations context specification)
+           (lower-msl-bindings context specification)
            (lower-msl-statements context specification)))))
 
 (defun msl-mesh-topology-name (topology)
@@ -1922,8 +1923,7 @@ takes the threadgroup size from the dispatch; the reflection carries it."
                             :type mesh-type :name "mesh_out" :attribute nil))
        (remove nil (list (msl-payload-parameter :mesh payload)))
        (msl-workgroup-parameters :mesh specification)
-       (mapcar #'msl-resource-parameter
-               (shader:shader-specification-resources specification)))
+       (msl-resource-parameters context specification))
       :statements
       (nconc (lower-msl-bindings context specification)
              (lower-msl-statements context specification))))))
@@ -1953,7 +1953,10 @@ buffers; textures and samplers have their own.  Reject a shared index."
   (check-msl-binding-collisions specification)
   (let ((context
           (make-instance 'msl-lowering-context
-                         :target target :specification specification)))
+                         :target target :specification specification
+                         :atomic-targets
+                         (shader:shader-specification-atomic-targets
+                          specification))))
     (case (shader:shader-specification-stage specification)
       ((:vertex :fragment)
        (lower-traditional-msl-specification target specification context))

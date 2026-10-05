@@ -225,3 +225,34 @@
 }" source))
     (true (search "ProbeSegment(vec4<f32>(stage_in.uv, 0.0f, 1.0f)" source))
     (true (search "(segment.end - segment.start)" source))))
+
+(define-test wgsl-fragments-take-built-ins-discard-and-nested-bindings
+  (let* ((specification
+           (shader:parse-shader-specification
+            'wgsl-fragment-built-in-probe
+            '(:stage :fragment
+              :inputs ((pixel :vec4 :built-in :frag-coord)
+                       (front :bool :built-in :front-facing))
+              :outputs ((color :vec4 :location 0)
+                        (depth :float :built-in :frag-depth)))
+            '((let* ((shade (if front 1.0 0.5)))
+                (when (< (swizzle pixel :x) 0.5)
+                  (shader:discard))
+                (let* ((shade (* shade 2.0)))
+                  (set-output color (vec4 shade shade shade 1.0))
+                  (set-output depth (swizzle pixel :z)))))))
+         (source (wgsl:wgsl-document-source (wgsl:compile-wgsl specification))))
+    (true (search "@builtin(position) pixel: vec4<f32>" source))
+    (true (search "@builtin(front_facing) front: bool" source))
+    (true (search "@builtin(frag_depth) depth: f32" source))
+    (true (search "discard;" source))
+    (true (search "let shade_2: f32 = (shade * 2.0f);" source)))
+  ;; Textures and compute stay with the backends that have them.
+  (true (eq :unsupported-wgsl-resource
+            (effect-failure-reason
+             (lambda ()
+               (wgsl:compile-wgsl (texture-kinds-fragment-probe))))))
+  (true (eq :unsupported-wgsl-stage
+            (effect-failure-reason
+             (lambda ()
+               (wgsl:compile-wgsl (workgroup-effects-probe)))))))

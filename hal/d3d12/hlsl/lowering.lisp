@@ -183,7 +183,14 @@ initializer lists only in declarations, not in expressions."))
     :reader hlsl-context-function-call-results)
    (pending-statements
     :initform nil :accessor hlsl-context-pending-statements)
-   (fold-counter :initform 0 :accessor hlsl-context-fold-counter)))
+   (fold-counter :initform 0 :accessor hlsl-context-fold-counter)
+   (local-names
+    :initform (make-hash-table :test #'equal)
+    :reader hlsl-context-local-names
+    :documentation
+    "Local names declared so far, so a nested LET* never redeclares one.")
+   (temporary-counter
+    :initform 0 :accessor hlsl-context-temporary-counter)))
 
 (defun hlsl-context-stage (context)
   (shader:shader-specification-stage (hlsl-context-specification context)))
@@ -256,6 +263,10 @@ initializer lists only in declarations, not in expressions."))
     (return-from hlsl-type-name
       (hlsl-structure-name-for
        (shader:shader-type-name (shader:find-shader-type type)))))
+  (when (shader:shader-storage-texture-type-p
+         (shader:find-shader-type type source-form))
+    (return-from hlsl-type-name
+      (hlsl-storage-texture-type-name (shader:find-shader-type type))))
   (case (shader:shader-type-name (shader:find-shader-type type source-form))
     (:bool "bool")
     (:float "float")
@@ -280,6 +291,10 @@ initializer lists only in declarations, not in expressions."))
     (:texture-2d "Texture2D<float4>")
     (:depth-texture-2d "Texture2D<float>")
     (:uint-texture-2d "Texture2D<uint4>")
+    (:texture-2d-array "Texture2DArray<float4>")
+    (:depth-texture-2d-array "Texture2DArray<float>")
+    (:texture-cube "TextureCube<float4>")
+    (:texture-3d "Texture3D<float4>")
     (otherwise
      (error 'shader:shader-language-error
             :form source-form :reason :unsupported-hlsl-type
@@ -449,10 +464,14 @@ structured buffer of them has the language's layout."
                    :reason :hlsl-structure-name-collision :details name))
           (push name seen))))))
 
-(defun lower-hlsl-local-binding (context binding)
-  "Lower BINDING to a local declaration, returning the statements it needs."
+(defun lower-hlsl-local-binding (context binding &key unique)
+  "Lower BINDING to a local declaration, returning the statements it needs.
+UNIQUE renames it when an earlier local has its name, as a nested LET*
+inside the same function scope must be."
   (let* ((expression (shader:shader-binding-expression binding))
-         (name (hlsl-identifier (shader:shader-object-name binding)))
+         (name (hlsl-local-name
+                context (hlsl-identifier (shader:shader-object-name binding))
+                unique))
          (value (lower-hlsl-expression context expression))
          (statements (drain-hlsl-pending-statements context)))
     (setf (gethash binding (hlsl-context-references context)) name)
@@ -949,61 +968,6 @@ vec4, which MSL builds as float4(depth).  A scalar cast splats the same way."
       text))
 
 (defmethod shader:lower-shader-call
-    ((operator (eql 'shader:sample))
-     (context hlsl-lowering-context)
-     (expression shader:shader-call))
-  (declare (ignore operator))
-  ;; Implicit-derivative Sample exists only in pixel shaders before SM 6.6.
-  ;; Elsewhere sample the base level, as Metal does outside fragments.
-  (destructuring-bind (texture sampler coordinate)
-      (lower-hlsl-operands context expression)
-    (note-hlsl-occurrence
-     context expression
-     (hlsl-widen-depth
-      (first (shader:shader-call-operands expression))
-      (if (eq :fragment (hlsl-context-stage context))
-          (format nil "~A.Sample(~A, ~A)" texture sampler coordinate)
-          (format nil "~A.SampleLevel(~A, ~A, 0.0f)"
-                  texture sampler coordinate))))))
-
-(defmethod shader:lower-shader-call
-    ((operator (eql 'shader:sample-compare))
-     (context hlsl-lowering-context)
-     (expression shader:shader-call))
-  (declare (ignore operator))
-  ;; Depth comparison reads the base level in every stage.  Shadow maps have
-  ;; one level, so this is Metal's sample_compare without the gradient
-  ;; requirement that would forbid it in vertex shaders and divergent code.
-  (let ((sampler (shader:shader-resource-target
-                  (second (shader:shader-call-operands expression)))))
-    (unless (and sampler
-                 (member (shader:shader-resource-key sampler)
-                         (hlsl-context-comparison-samplers context)))
-      (error 'shader:shader-language-error
-             :form (shader:shader-expression-source-form expression)
-             :reason :hlsl-comparison-sampler-unknown
-             :details (and sampler (shader:shader-object-name sampler)))))
-  (destructuring-bind (texture sampler coordinate reference)
-      (lower-hlsl-operands context expression)
-    (note-hlsl-occurrence
-     context expression
-     (format nil "~A.SampleCmpLevelZero(~A, ~A, ~A)"
-             texture sampler coordinate reference))))
-
-(defmethod shader:lower-shader-call
-    ((operator (eql 'shader:texel-load))
-     (context hlsl-lowering-context)
-     (expression shader:shader-call))
-  (declare (ignore operator))
-  (destructuring-bind (texture coordinate)
-      (lower-hlsl-operands context expression)
-    (note-hlsl-occurrence
-     context expression
-     (hlsl-widen-depth
-      (first (shader:shader-call-operands expression))
-      (format nil "~A.Load(int3(int2(~A), 0))" texture coordinate)))))
-
-(defmethod shader:lower-shader-call
     ((operator (eql 'shader:ldb))
      (context hlsl-lowering-context)
      (expression shader:shader-bit-field-call))
@@ -1058,6 +1022,15 @@ vec4, which MSL builds as float4(depth).  A scalar cast splats the same way."
          (:local-invocation-index "SV_GroupIndex")
          (:workgroup-id "SV_GroupID")))
       ((and (eq direction :output) (eq built-in :position)) "SV_Position")
+      ((and (eq stage :fragment) (eq direction :input)
+            (eq built-in :front-facing))
+       "SV_IsFrontFace")
+      ((and (eq stage :fragment) (eq direction :input)
+            (eq built-in :sample-index))
+       "SV_SampleIndex")
+      ((and (eq stage :fragment) (eq direction :output)
+            (eq built-in :frag-depth))
+       "SV_Depth")
       ((and (eq stage :vertex) (eq direction :input)
             (eq built-in :vertex-index))
        "SV_VertexID")
@@ -1171,11 +1144,19 @@ links the two stages by register layout as well as by semantic."
           :name name
           :register (format nil "~:[t~;u~]~D, space0" writable-p binding)
           :origin resource)))
-      (:texture-2d
+      (:texture
        (make-instance
         'hlsl-resource-declaration
         :type (hlsl-type-name type form)
         :name name :register (format nil "t~D, space1" binding)
+        :origin resource))
+      ;; Storage textures are unordered access views in space 1, apart from
+      ;; the read-write buffers' u-registers in space 0.
+      (:storage-texture
+       (make-instance
+        'hlsl-resource-declaration
+        :type (hlsl-type-name type form)
+        :name name :register (format nil "u~D, space1" binding)
         :origin resource))
       (:sampler
        (make-instance
@@ -1198,12 +1179,16 @@ links the two stages by register layout as well as by semantic."
                (format nil "uint3(~{~Du~^, ~})"
                        (shader:shader-specification-workgroup-size
                         specification)))
+              ((hlsl-expression-built-in-text input))
               ((shader:shader-interface-built-in input)
                (hlsl-identifier (shader:shader-object-name input)))
               (t
                (format nil "stage_in.~A"
                        (hlsl-identifier
                         (shader:shader-object-name input)))))))
+    (dolist (array (shader:shader-specification-shared-arrays specification))
+      (setf (gethash array references)
+            (hlsl-identifier (shader:shader-object-name array))))
     (dolist (resource (shader:shader-specification-resources specification))
       (let ((name (hlsl-identifier (shader:shader-object-name resource))))
         (setf (gethash resource references) name)
@@ -1483,7 +1468,7 @@ the contract numbers them together although HLSL registers would not clash."
            (remove-if #'shader:shader-interface-built-in
                       (shader:shader-specification-inputs specification)))
          (built-in-inputs
-           (remove-if-not #'shader:shader-interface-built-in
+           (remove-if-not #'hlsl-built-in-parameter-p
                           (shader:shader-specification-inputs specification)))
          (input-structure
            (cond
@@ -1549,9 +1534,13 @@ the contract numbers them together although HLSL registers would not clash."
 (defun lower-hlsl-compute-specification (context entry-point-name)
   (let* ((specification (hlsl-context-specification context))
          (resources
-           (mapcar (lambda (resource)
-                     (hlsl-resource-declaration context resource))
-                   (shader:shader-specification-resources specification))))
+           (append
+            (mapcar (lambda (resource)
+                      (hlsl-resource-declaration context resource))
+                    (shader:shader-specification-resources specification))
+            (mapcar #'hlsl-groupshared-declaration
+                    (shader:shader-specification-shared-arrays
+                     specification)))))
     (register-hlsl-references context specification)
     (values
      resources
@@ -1564,7 +1553,7 @@ the contract numbers them together although HLSL registers would not clash."
                 (hlsl-identifier (shader:shader-object-name specification)))
       :parameters
       (loop for input in (shader:shader-specification-inputs specification)
-            unless (eq :workgroup-size (shader:shader-interface-built-in input))
+            when (hlsl-built-in-parameter-p input)
               collect (make-instance
                        'hlsl-parameter
                        :type (hlsl-type-name
