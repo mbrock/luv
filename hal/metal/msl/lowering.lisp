@@ -118,6 +118,13 @@ A program compiler gives every stage a stable name of its own."))
    (value :initarg :value :reader msl-task-payload-store-value)
    (origin :initarg :origin :reader msl-task-payload-store-origin)))
 
+(defclass msl-buffer-store-statement ()
+  ((buffer :initarg :buffer :reader msl-buffer-store-buffer)
+   (index :initarg :index :reader msl-buffer-store-index)
+   (value :initarg :value :reader msl-buffer-store-value)
+   (origin :initarg :origin :reader msl-buffer-store-origin))
+  (:documentation "One compute store into a read-write storage buffer."))
+
 (defclass msl-emit-mesh-workgroups-statement ()
   ((lane :initarg :lane :reader msl-emit-mesh-workgroups-lane)
    (workgroups
@@ -896,10 +903,11 @@ A program compiler gives every stage a stable name of its own."))
       ((and (eq stage :vertex) (eq direction :input)
             (eq built-in :instance-index))
        "[[instance_id]]")
-      ((and (member stage '(:task :mesh)) (eq direction :input))
+      ((and (member stage '(:task :mesh :compute)) (eq direction :input))
        (case built-in
          (:local-invocation-index "[[thread_index_in_threadgroup]]")
          (:local-invocation-id "[[thread_position_in_threadgroup]]")
+         (:global-invocation-id "[[thread_position_in_grid]]")
          (:workgroup-id "[[threadgroup_position_in_grid]]")
          (:num-workgroups "[[threadgroups_per_grid]]")
          (:workgroup-size "[[threads_per_threadgroup]]")
@@ -1000,7 +1008,8 @@ A program compiler gives every stage a stable name of its own."))
       (:storage-buffer
        (make-instance
         'msl-parameter
-        :type (format nil "const device ~A*"
+        :type (format nil "~:[const ~;~]device ~A*"
+                      (shader:shader-storage-buffer-writable-p resource)
                       (msl-type-name
                        (shader:shader-storage-buffer-element-type resource)
                        (shader:shader-object-source-form resource)))
@@ -1185,6 +1194,13 @@ A program compiler gives every stage a stable name of its own."))
                        (msl-task-payload-store-index statement)))
               "")
           (msl-occurrence-text (msl-task-payload-store-value statement))))
+
+(defmethod write-msl-statement ((statement msl-buffer-store-statement) stream)
+  (write-msl-indent stream)
+  (format stream "~A[~A] = ~A;~%"
+          (msl-buffer-store-buffer statement)
+          (msl-occurrence-text (msl-buffer-store-index statement))
+          (msl-occurrence-text (msl-buffer-store-value statement))))
 
 (defmethod write-msl-statement
     ((statement msl-emit-mesh-workgroups-statement) stream)
@@ -1430,6 +1446,22 @@ A program compiler gives every stage a stable name of its own."))
        :index index :value value :origin statement)))))
 
 (defmethod lower-msl-statement
+    ((context msl-lowering-context) (statement shader:shader-buffer-store))
+  (let* ((index (lower-msl-expression
+                 context (shader:shader-buffer-store-index statement)))
+         (value (lower-msl-expression
+                 context (shader:shader-buffer-store-value statement))))
+    (append
+     (drain-msl-pending-statements context)
+     (list
+      (make-instance
+       'msl-buffer-store-statement
+       :buffer (msl-identifier
+                (shader:shader-object-name
+                 (shader:shader-buffer-store-buffer statement)))
+       :index index :value value :origin statement)))))
+
+(defmethod lower-msl-statement
     ((context msl-lowering-context)
      (statement shader:shader-emit-mesh-workgroups))
   (multiple-value-bind (workgroups pending)
@@ -1583,6 +1615,25 @@ A program compiler gives every stage a stable name of its own."))
       (nconc (lower-msl-bindings context specification)
              (lower-msl-statements context specification))))))
 
+(defun lower-compute-msl-specification (target specification context)
+  "A kernel: its workgroup built-ins and resources as parameters.  Metal
+takes the threadgroup size from the dispatch; the reflection carries it."
+  (register-msl-declaration-references context specification "stage_in")
+  (finish-msl-document
+   target specification context
+   (msl-uniform-structures specification)
+   (make-instance
+    'msl-entry-point
+    :stage :compute :return-type "void"
+    :name (msl-entry-point-name-for target specification)
+    :parameters
+    (append (msl-workgroup-parameters :compute specification)
+            (mapcar #'msl-resource-parameter
+                    (shader:shader-specification-resources specification)))
+    :statements
+    (nconc (lower-msl-bindings context specification)
+           (lower-msl-statements context specification)))))
+
 (defun msl-mesh-topology-name (topology)
   (ecase topology
     (:points "point")
@@ -1668,6 +1719,8 @@ buffers; textures and samplers have their own.  Reject a shared index."
        (lower-traditional-msl-specification target specification context))
       (:task (lower-task-msl-specification target specification context))
       (:mesh (lower-mesh-msl-specification target specification context))
+      (:compute
+       (lower-compute-msl-specification target specification context))
       (otherwise
        (error 'shader:shader-language-error
               :form (shader:shader-object-source-form specification)

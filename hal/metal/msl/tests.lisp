@@ -513,11 +513,13 @@
                (progn (msl:compile-msl specification) nil)
              (shader:shader-language-error (condition)
                (shader:shader-language-error-reason condition)))))
-    (let ((compute
+    (let ((workgroup-built-in
             (shader:parse-shader-specification
-             'compute-probe
-             '(:stage :compute :outputs ((value :float :location 0)))
-             '((shader:set-output value 1.0))))
+             'workgroup-built-in-probe
+             '(:stage :vertex
+               :inputs ((group :uvec3 :built-in :workgroup-id))
+               :outputs ((position :vec4 :built-in :position)))
+             '((shader:set-output position (shader:vec4 0.0 0.0 0.0 1.0)))))
           (descriptor-set
             (shader:parse-shader-specification
              'descriptor-set-probe
@@ -525,7 +527,7 @@
                :outputs ((value :float :location 0))
                :resources ((image :texture-2d :set 1 :binding 0)))
              '((shader:set-output value 1.0)))))
-      (true (eq :unsupported-msl-stage (reason-for compute)))
+      (true (eq :unsupported-msl-built-in (reason-for workgroup-built-in)))
       (true (eq :unsupported-msl-descriptor-set
                 (reason-for descriptor-set))))))
 
@@ -543,3 +545,30 @@
     (true (search "((term >> 0ul) & 0xFul)" source))
     (true (search "(word >> 16u)" source))
     (true (search "uint whole = (word);" source))))
+
+(define-test compute-stages-lower-to-metal-kernels-with-device-buffers
+  (let ((source
+          (msl:msl-document-source
+           (msl:compile-msl
+            (shader:parse-shader-specification
+             'msl-compute-probe
+             '(:stage :compute
+               :workgroup-size (64 1 1)
+               :inputs ((particle :uvec3 :built-in :global-invocation-id)
+                        (lane :uint :built-in :local-invocation-index))
+               :resources ((positions :storage-buffer :binding 0
+                                      :element :vec4 :access :read-write)
+                           (velocities :storage-buffer :binding 1
+                                       :element :vec4)))
+             '((let* ((index (shader:swizzle particle :x)))
+                 (shader:set-buffer-element
+                  positions index
+                  (+ (shader:buffer-element positions index)
+                     (shader:buffer-element velocities lane))))))))))
+    (true (search "kernel void msl_compute_probe(" source))
+    (true (search "uint3 particle [[thread_position_in_grid]]" source))
+    (true (search "uint lane [[thread_index_in_threadgroup]]" source))
+    (true (search "device float4* positions [[buffer(0)]]" source))
+    (true (search "const device float4* velocities [[buffer(1)]]" source))
+    (true (search "positions[index] = (positions[index] + velocities[lane]);"
+                  source))))

@@ -263,12 +263,23 @@ colour transfer of the value returned by sampling."))
 (defclass shader-storage-buffer (shader-resource)
   ((element-type
     :initarg :element-type
-    :reader shader-storage-buffer-element-type))
+    :reader shader-storage-buffer-element-type)
+   (access
+    :initarg :access
+    :initform :read
+    :reader shader-storage-buffer-access
+    :documentation
+    ":READ, or :READ-WRITE for a compute stage's SET-BUFFER-ELEMENT."))
   (:documentation
-   "One descriptor-backed read-only array of uniformly typed elements.
+   "One descriptor-backed array of uniformly typed elements.
 
 The array has no declared length: a shader indexes it with BUFFER-ELEMENT
-and the host decides how many elements it uploads.  #HFX2LI"))
+and the host decides how many elements it uploads.  #HFX2LI  A :READ-WRITE
+buffer may also be stored to by a compute stage with SET-BUFFER-ELEMENT."))
+
+(defun shader-storage-buffer-writable-p (buffer)
+  (and (typep buffer 'shader-storage-buffer)
+       (eq :read-write (shader-storage-buffer-access buffer))))
 
 (defun shader-storage-buffer-element-stride (buffer)
   "Return the byte distance between consecutive elements of BUFFER."
@@ -807,6 +818,19 @@ leaves it again while retaining the semantic operand in the expression graph."))
     :initarg :value
     :reader shader-task-payload-store-value)))
 
+(defclass shader-buffer-store (shader-statement)
+  ((buffer
+    :initarg :buffer
+    :reader shader-buffer-store-buffer)
+   (index
+    :initarg :index
+    :reader shader-buffer-store-index)
+   (value
+    :initarg :value
+    :reader shader-buffer-store-value))
+  (:documentation
+   "A compute stage's store of one element into a read-write storage buffer."))
+
 (defclass shader-emit-mesh-workgroups (shader-statement)
   ((workgroups
     :initarg :workgroups
@@ -1102,6 +1126,10 @@ leaves it again while retaining the semantic operand in the expression graph."))
     ((statement shader-task-payload-store))
   (remove nil (list (shader-task-payload-store-index statement)
                     (shader-task-payload-store-value statement))))
+
+(defmethod shader-statement-expressions ((statement shader-buffer-store))
+  (list (shader-buffer-store-index statement)
+        (shader-buffer-store-value statement)))
 
 (defmethod shader-statement-expressions
     ((statement shader-emit-mesh-workgroups))
@@ -3027,7 +3055,7 @@ NIL leaves the character to the named definition; T is the historical
 
 (defun parse-resource-declaration (form)
   (destructuring-bind
-      (name type &key (set 0) binding members element
+      (name type &key (set 0) binding members element (access nil access-p)
                        sample-quantity sample-dimension sample-unit
                        sample-affine-p sample-character sample-components
                        sample-transfer)
@@ -3040,6 +3068,13 @@ NIL leaves the character to the named definition; T is the historical
     (when (and element (not (shader-symbol= type :storage-buffer)))
       (error 'shader-language-error
              :form form :reason :element-on-non-storage-buffer))
+    (when (and access-p (not (shader-symbol= type :storage-buffer)))
+      (error 'shader-language-error
+             :form form :reason :access-on-non-storage-buffer))
+    (unless (member access '(nil :read :read-write))
+      (error 'shader-language-error
+             :form form :reason :invalid-storage-buffer-access
+             :details access))
     (cond
       ((shader-symbol= type :storage-buffer)
        (let ((element-type (and element (find-shader-type element form))))
@@ -3057,6 +3092,7 @@ NIL leaves the character to the named definition; T is the historical
                         :name name
                         :type (find-shader-type :storage-buffer form)
                         :element-type element-type
+                        :access (or access :read)
                         :descriptor-set set :binding binding
                         :source-form form)))
       ((shader-symbol= type :uniform-block)
@@ -3433,6 +3469,40 @@ NIL leaves the character to the named definition; T is the historical
                    :field field :index index :value value :source-form form)))
 
 (defmethod parse-shader-statement
+    ((operator (eql 'set-buffer-element)) (stage (eql :compute))
+     form environment context)
+  (declare (ignore operator context))
+  (unless (= (length form) 4)
+    (error 'shader-language-error
+           :form form :reason :set-buffer-element-arity))
+  (let* ((buffer-name (second form))
+         (buffer (shader-environment-value buffer-name environment form))
+         (index (parse-shader-expression (third form) environment))
+         (value (parse-shader-expression (fourth form) environment)))
+    (unless (typep buffer 'shader-storage-buffer)
+      (error 'shader-language-error
+             :form form :reason :not-storage-buffer :details buffer-name))
+    (unless (shader-storage-buffer-writable-p buffer)
+      (error 'shader-language-error
+             :form form :reason :read-only-storage-buffer
+             :details buffer-name))
+    (unless (shader-uint-type-p (shader-expression-type index))
+      (error 'shader-language-error
+             :form form :reason :buffer-index-type
+             :details (shader-type-name (shader-expression-type index))))
+    (unless (shader-type= (shader-storage-buffer-element-type buffer)
+                          (shader-expression-type value))
+      (error 'shader-language-error
+             :form form :reason :buffer-element-type-mismatch
+             :details (list (shader-type-name
+                             (shader-storage-buffer-element-type buffer))
+                            (shader-type-name
+                             (shader-expression-type value)))))
+    (make-instance 'shader-buffer-store
+                   :buffer buffer :index index :value value
+                   :source-form form)))
+
+(defmethod parse-shader-statement
     ((operator (eql 'emit-mesh-workgroups)) (stage (eql :task))
      form environment context)
   (declare (ignore operator context))
@@ -3616,11 +3686,13 @@ evaluate work which the condition excludes."
 (defun workgroup-built-in-type (built-in)
   (case built-in
     (:local-invocation-index :uint)
-    ((:local-invocation-id :workgroup-id :num-workgroups :workgroup-size)
+    ((:local-invocation-id :global-invocation-id :workgroup-id
+      :num-workgroups :workgroup-size)
      :uvec3)
     (otherwise nil)))
 
-(defun validate-workgroup-inputs (inputs options)
+(defun validate-workgroup-inputs
+    (inputs options &key (require-local-invocation-index t))
   (let ((seen nil))
     (dolist (input inputs)
       (let* ((built-in (shader-interface-built-in input))
@@ -3639,7 +3711,8 @@ evaluate work which the condition excludes."
                  :form options :reason :duplicate-workgroup-built-in
                  :details built-in))
         (push built-in seen)))
-    (unless (member :local-invocation-index seen)
+    (when (and require-local-invocation-index
+               (not (member :local-invocation-index seen)))
       (error 'shader-language-error
              :form options :reason :missing-local-invocation-index))))
 
@@ -3722,7 +3795,7 @@ evaluate work which the condition excludes."
          (resources (mapcar #'parse-resource-declaration
                             (getf options :resources)))
          (workgroup-size
-           (and (member stage '(:task :mesh))
+           (and (member stage '(:task :mesh :compute))
                 (parse-workgroup-size (getf options :workgroup-size) options)))
          (payload-name (getf options :payload))
          (payload
@@ -3747,8 +3820,10 @@ evaluate work which the condition excludes."
     (unless (member stage '(:vertex :fragment :compute :task :mesh))
       (error 'shader-language-error
              :form options :reason :invalid-stage :details stage))
-    (when (member stage '(:task :mesh))
-      (validate-workgroup-inputs inputs options)
+    (when (member stage '(:task :mesh :compute))
+      (validate-workgroup-inputs
+       inputs options
+       :require-local-invocation-index (not (eq stage :compute)))
       (when outputs
         (error 'shader-language-error
                :form options :reason :ordinary-outputs-on-workgroup-stage)))

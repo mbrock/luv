@@ -55,6 +55,12 @@
            #:shader-storage-buffer
            #:shader-storage-buffer-element-type
            #:shader-storage-buffer-element-stride
+           #:shader-storage-buffer-access
+           #:shader-storage-buffer-writable-p
+           #:shader-buffer-store
+           #:shader-buffer-store-buffer
+           #:shader-buffer-store-index
+           #:shader-buffer-store-value
            #:shader-uniform-member
            #:shader-uniform-member-block
            #:shader-uniform-member-index
@@ -183,6 +189,7 @@
            #:set-mesh-primitive
            #:set-payload
            #:set-payload-element
+           #:set-buffer-element
            #:emit-mesh-workgroups
            #:shader-operator
            #:define-shader-operator

@@ -121,6 +121,9 @@ redefining a stage reaches the program without redefining it."
   (let ((type (shader-declaration-type resource)))
     (case (shader-type-opaque-kind type)
       (:texture-2d (shader-type-name type))
+      (:storage-buffer (if (shader-storage-buffer-writable-p resource)
+                           :read-write-storage-buffer
+                           :storage-buffer))
       (otherwise (shader-type-opaque-kind type)))))
 
 (defun shader-resource-family (resource)

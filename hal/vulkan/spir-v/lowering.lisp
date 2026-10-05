@@ -300,8 +300,9 @@
                              (list 'decorate id 'block))
         (append-context-form 'annotations context
                              (list 'member-decorate id 0 'offset 0))
-        (append-context-form 'annotations context
-                             (list 'member-decorate id 0 'non-writable))
+        (unless (shader-storage-buffer-writable-p buffer)
+          (append-context-form 'annotations context
+                               (list 'member-decorate id 0 'non-writable)))
         id)))
 
 (defun ensure-storage-buffer-pointer-type-id (context buffer)
@@ -1630,6 +1631,29 @@ Modules whose expressions use no extended mathematics never acquire one."
      (list 'store pointer (lower-shader-expression context expression)))))
 
 (defmethod lower-shader-statement
+    (context (statement shader-buffer-store))
+  (let* ((buffer (shader-buffer-store-buffer statement))
+         (expression (shader-buffer-store-value statement))
+         (pointer
+           (fresh-shader-id
+            context
+            (format nil "~A-ELEMENT-POINTER" (shader-object-name buffer))))
+         (index (lower-shader-expression
+                 context (shader-buffer-store-index statement))))
+    (emit-shader-instruction
+     context expression
+     (list pointer 'access-chain
+           (ensure-pointer-type-id
+            context 'storage-buffer
+            (shader-storage-buffer-element-type buffer))
+           (gethash buffer (context-variable-ids context))
+           (ensure-shader-uint-constant context 0)
+           index))
+    (emit-shader-instruction
+     context expression
+     (list 'store pointer (lower-shader-expression context expression)))))
+
+(defmethod lower-shader-statement
     (context (statement shader-emit-mesh-workgroups))
   (let* ((expression (shader-emit-mesh-workgroups-counts statement))
          (counts (lower-shader-expression context expression))
@@ -1668,7 +1692,7 @@ Modules whose expressions use no extended mathematics never acquire one."
       (:fragment
        (list (make-instance 'spir-v-execution-mode
                             :function main-id :name 'origin-upper-left)))
-      ((:task :mesh)
+      ((:task :mesh :compute)
        (append
         (list
          (make-instance

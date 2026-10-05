@@ -8,10 +8,12 @@
 ;;;
 ;;; Resources follow the Metal/Direct3D binding families (see
 ;;; SHADER-RESOURCE-FAMILY): a uniform block is a cbuffer at bN; a read-only
-;;; storage buffer is a StructuredBuffer at tN in space0; a texture is a
-;;; Texture2D at tN in space1, so buffer and texture numbers never collide;
-;;; and a sampler is sN, a SamplerComparisonState when the program compares
-;;; depth through it.
+;;; storage buffer is a StructuredBuffer at tN in space0, a read-write one an
+;;; RWStructuredBuffer at uN; a texture is a Texture2D at tN in space1, so
+;;; buffer and texture numbers never collide; and a sampler is sN, a
+;;; SamplerComparisonState when the program compares depth through it.
+;;; Vertex, fragment, and compute stages lower; task and mesh stages do not,
+;;; since shader model 6.4 has no mesh shaders.
 
 (in-package #:luv.hlsl)
 
@@ -120,8 +122,17 @@ as BLOCK.MEMBER exactly as it does in MSL."))
           :reader hlsl-counted-fold-statement-until)
    (origin :initarg :origin :reader hlsl-counted-fold-statement-origin)))
 
+(defclass hlsl-buffer-store-statement ()
+  ((buffer :initarg :buffer :reader hlsl-buffer-store-buffer)
+   (index :initarg :index :reader hlsl-buffer-store-index)
+   (value :initarg :value :reader hlsl-buffer-store-value)
+   (origin :initarg :origin :reader hlsl-buffer-store-origin)))
+
 (defclass hlsl-entry-point ()
   ((stage :initarg :stage :reader hlsl-entry-point-stage)
+   (workgroup-size
+    :initarg :workgroup-size :initform nil
+    :reader hlsl-entry-point-workgroup-size)
    (return-type :initarg :return-type :reader hlsl-entry-point-return-type)
    (name :initarg :name :reader hlsl-entry-point-name)
    (parameters :initarg :parameters :reader hlsl-entry-point-parameters)
@@ -791,6 +802,14 @@ vec4, which MSL builds as float4(depth).  A scalar cast splats the same way."
         (location (shader:shader-interface-location declaration))
         (built-in (shader:shader-interface-built-in declaration)))
     (cond
+      ((and (eq stage :compute)
+            (member built-in '(:global-invocation-id :local-invocation-id
+                               :local-invocation-index :workgroup-id)))
+       (ecase built-in
+         (:global-invocation-id "SV_DispatchThreadID")
+         (:local-invocation-id "SV_GroupThreadID")
+         (:local-invocation-index "SV_GroupIndex")
+         (:workgroup-id "SV_GroupID")))
       ((and (eq direction :output) (eq built-in :position)) "SV_Position")
       ((and (eq stage :vertex) (eq direction :input)
             (eq built-in :vertex-index))
@@ -893,14 +912,18 @@ links the two stages by register layout as well as by semantic."
                     :origin member))
                  (shader:shader-uniform-block-members resource)))))
       (:storage-buffer
-       (make-instance
-        'hlsl-resource-declaration
-        :type (format nil "StructuredBuffer<~A>"
-                      (hlsl-type-name
-                       (shader:shader-storage-buffer-element-type resource)
-                       form))
-        :name name :register (format nil "t~D, space0" binding)
-        :origin resource))
+       ;; A read-write buffer is an unordered access view, register uN.
+       (let ((writable-p (shader:shader-storage-buffer-writable-p resource)))
+         (make-instance
+          'hlsl-resource-declaration
+          :type (format nil "~:[~;RW~]StructuredBuffer<~A>"
+                        writable-p
+                        (hlsl-type-name
+                         (shader:shader-storage-buffer-element-type resource)
+                         form))
+          :name name
+          :register (format nil "~:[t~;u~]~D, space0" writable-p binding)
+          :origin resource)))
       (:texture-2d
        (make-instance
         'hlsl-resource-declaration
@@ -921,10 +944,19 @@ links the two stages by register layout as well as by semantic."
   (let ((references (hlsl-context-references context)))
     (dolist (input (shader:shader-specification-inputs specification))
       (setf (gethash input references)
-            (if (shader:shader-interface-built-in input)
-                (hlsl-identifier (shader:shader-object-name input))
-                (format nil "stage_in.~A"
-                        (hlsl-identifier (shader:shader-object-name input))))))
+            (cond
+              ;; HLSL has no system value for the group size: it is the
+              ;; [numthreads] constant itself.
+              ((eq :workgroup-size (shader:shader-interface-built-in input))
+               (format nil "uint3(~{~Du~^, ~})"
+                       (shader:shader-specification-workgroup-size
+                        specification)))
+              ((shader:shader-interface-built-in input)
+               (hlsl-identifier (shader:shader-object-name input)))
+              (t
+               (format nil "stage_in.~A"
+                       (hlsl-identifier
+                        (shader:shader-object-name input)))))))
     (dolist (resource (shader:shader-specification-resources specification))
       (let ((name (hlsl-identifier (shader:shader-object-name resource))))
         (setf (gethash resource references) name)
@@ -985,6 +1017,21 @@ the contract numbers them together although HLSL registers would not clash."
                             statement))
                    :origin statement)))))
 
+(defmethod lower-hlsl-statement
+    ((context hlsl-lowering-context) (statement shader:shader-buffer-store))
+  (let* ((index (lower-hlsl-expression
+                 context (shader:shader-buffer-store-index statement)))
+         (value (lower-hlsl-expression
+                 context (shader:shader-buffer-store-value statement)))
+         (pending (drain-hlsl-pending-statements context)))
+    (append pending
+            (list (make-instance
+                   'hlsl-buffer-store-statement
+                   :buffer (hlsl-identifier
+                            (shader:shader-object-name
+                             (shader:shader-buffer-store-buffer statement)))
+                   :index index :value value :origin statement)))))
+
 (defmethod lower-hlsl-statement ((context hlsl-lowering-context) statement)
   (error 'shader:shader-language-error
          :form (shader:shader-statement-source-form statement)
@@ -1033,6 +1080,13 @@ the contract numbers them together although HLSL registers would not clash."
            (shader:shader-assignment-output
             (hlsl-output-statement-origin statement))
            (hlsl-text (hlsl-output-statement-value statement)))))
+
+(defmethod write-hlsl-statement ((statement hlsl-buffer-store-statement) stream)
+  (write-hlsl-indent stream)
+  (format stream "~A[~A] = ~A;~%"
+          (hlsl-buffer-store-buffer statement)
+          (hlsl-text (hlsl-buffer-store-index statement))
+          (hlsl-text (hlsl-buffer-store-value statement))))
 
 (defmethod write-hlsl-statement ((statement hlsl-if-statement) stream)
   (write-hlsl-indent stream)
@@ -1113,6 +1167,9 @@ the contract numbers them together although HLSL registers would not clash."
           (hlsl-resource-register declaration)))
 
 (defun write-hlsl-entry-point (entry-point stream)
+  (when (hlsl-entry-point-workgroup-size entry-point)
+    (format stream "[numthreads(~{~D~^, ~})]~%"
+            (hlsl-entry-point-workgroup-size entry-point)))
   (format stream "~A ~A(~{~A~^, ~}) {~%"
           (hlsl-entry-point-return-type entry-point)
           (hlsl-entry-point-name entry-point)
@@ -1122,12 +1179,16 @@ the contract numbers them together although HLSL registers would not clash."
                             (hlsl-parameter-name parameter)
                             (hlsl-parameter-semantic parameter)))
                   (hlsl-entry-point-parameters entry-point)))
-  (format stream "  ~A result = (~:*~A)0;~%"
-          (hlsl-entry-point-return-type entry-point))
-  (let ((*hlsl-indentation* 1))
-    (dolist (statement (hlsl-entry-point-statements entry-point))
-      (write-hlsl-statement statement stream)))
-  (format stream "  return result;~%}~%"))
+  (let ((void-p (string= "void" (hlsl-entry-point-return-type entry-point))))
+    (unless void-p
+      (format stream "  ~A result = (~:*~A)0;~%"
+              (hlsl-entry-point-return-type entry-point)))
+    (let ((*hlsl-indentation* 1))
+      (dolist (statement (hlsl-entry-point-statements entry-point))
+        (write-hlsl-statement statement stream)))
+    (unless void-p
+      (format stream "  return result;~%"))
+    (format stream "}~%")))
 
 (defun render-hlsl-document (document)
   (with-output-to-string (stream)
@@ -1218,6 +1279,39 @@ the contract numbers them together although HLSL registers would not clash."
                       resources)
               entry-point))))
 
+(defun lower-hlsl-compute-specification (context entry-point-name)
+  (let* ((specification (hlsl-context-specification context))
+         (resources
+           (mapcar (lambda (resource)
+                     (hlsl-resource-declaration context resource))
+                   (shader:shader-specification-resources specification))))
+    (register-hlsl-references context specification)
+    (values
+     resources
+     (make-instance
+      'hlsl-entry-point
+      :stage :compute :return-type "void"
+      :workgroup-size (shader:shader-specification-workgroup-size
+                       specification)
+      :name (or entry-point-name
+                (hlsl-identifier (shader:shader-object-name specification)))
+      :parameters
+      (loop for input in (shader:shader-specification-inputs specification)
+            unless (eq :workgroup-size (shader:shader-interface-built-in input))
+              collect (make-instance
+                       'hlsl-parameter
+                       :type (hlsl-type-name
+                              (shader:shader-declaration-type input))
+                       :name (hlsl-identifier (shader:shader-object-name input))
+                       :semantic (hlsl-interface-semantic :compute input)
+                       :origin input))
+      :statements
+      (nconc (lower-hlsl-bindings context specification)
+             (mapcan (lambda (statement)
+                       (lower-hlsl-statement context statement))
+                     (shader:shader-specification-statements
+                      specification)))))))
+
 (defmethod shader:lower-shader-specification
     ((target hlsl-target) (specification shader:shader-specification))
   "Lower the shared shader graph to an HLSL document named after it."
@@ -1235,7 +1329,7 @@ SamplerComparisonState; by default, those SPECIFICATION itself compares
 with.  INTERFACE, for a fragment stage, is the vertex stage's output
 declarations, so the pixel input signature mirrors it exactly."
   (let ((stage (shader:shader-specification-stage specification)))
-    (unless (member stage '(:vertex :fragment))
+    (unless (member stage '(:vertex :fragment :compute))
       (error 'shader:shader-language-error
              :form (shader:shader-object-source-form specification)
              :reason :unsupported-hlsl-stage :details stage)))
@@ -1249,8 +1343,10 @@ declarations, so the pixel input signature mirrors it exactly."
                comparison-samplers
                (shader:shader-comparison-samplers specification)))))
     (multiple-value-bind (declarations entry-point)
-        (lower-hlsl-traditional-specification
-         context entry-point-name interface)
+        (if (eq :compute (shader:shader-specification-stage specification))
+            (lower-hlsl-compute-specification context entry-point-name)
+            (lower-hlsl-traditional-specification
+             context entry-point-name interface))
       (maphash (lambda (expression occurrences)
                  (setf (gethash expression
                                 (hlsl-context-expression-occurrences context))

@@ -9,7 +9,8 @@
   (:use #:cl)
   (:import-from #:parachute #:define-test #:true #:false #:is #:fail)
   (:local-nicknames (#:shader #:luv.shader)
-                    (#:shaderc #:luv.shaderc)))
+                    (#:shaderc #:luv.shaderc)
+                    (#:spv #:luv.spir-v)))
 
 (in-package #:luv.shaderc.tests)
 
@@ -17,6 +18,9 @@
 
 (defparameter *example*
   (merge-pathnames "hal/shaderc/examples/textured-instances.lisp" *root*))
+
+(defparameter *compute-example*
+  (merge-pathnames "hal/shaderc/examples/particle-advance.lisp" *root*))
 
 (defun tool-available-p (&rest command)
   (ignore-errors
@@ -309,3 +313,71 @@ point DEVELOPER_DIR at a bare SDK; Metal's compiler lives in Xcode's."
       (true (typep condition 'shader:shader-language-error))
       (is eq :invalid-vector-width
           (shader:shader-language-error-reason condition)))))
+
+(define-test compute-programs-lower-to-every-target
+  (uiop:with-temporary-file (:pathname scratch :keep nil)
+    (let ((directory (uiop:ensure-directory-pathname
+                      (format nil "~A.d" (uiop:native-namestring scratch)))))
+      (unwind-protect
+           (multiple-value-bind (programs written)
+               (shaderc:compile-shader-files (list *compute-example*)
+                                             :directory directory)
+             (is equal '("particle_advance.compute.metal"
+                         "particle_advance.compute.hlsl"
+                         "particle_advance.json"
+                         "particle_advance.hh")
+                 (mapcar #'file-namestring written))
+             (let* ((program (shaderc:compiled-program-linkage
+                              (first programs)))
+                    (specification
+                      (shader:shader-program-linkage-specification
+                       program :compute))
+                    (header (uiop:read-file-string
+                             (merge-pathnames "particle_advance.hh"
+                                              directory)))
+                    (json (uiop:read-file-string
+                           (merge-pathnames "particle_advance.json"
+                                            directory)))
+                    (spir-v (merge-pathnames "particle_advance.spv"
+                                             directory)))
+               (true (search "ResourceKind::read_write_storage_buffer, 1,"
+                             header))
+               (true (search ".compute_entry = \"particle_advance_compute\","
+                             header))
+               (true (search "workgroup_size {64, 1, 1};" header))
+               (true (search "\"hlsl\": \"u1, space0\"" json))
+               (true (search "\"hlsl_profile\": \"cs_6_0\"" json))
+               ;; The same specification is a GLCompute module for Vulkan.
+               (spv:write-spir-v (spv:assemble-shader-specification
+                                  specification)
+                                 spir-v)
+               (when (tool-available-p "spirv-val" "--version")
+                 (is eq nil (run-tool
+                             (list "spirv-val" "--target-env" "vulkan1.0"
+                                   (uiop:native-namestring spir-v)))))
+               (when (apply #'tool-available-p
+                            (xcrun-command "-sdk" "macosx" "--find" "metal"))
+                 (is eq nil
+                     (run-tool
+                      (xcrun-command
+                       "-sdk" "macosx" "metal" "-std=metal4.0" "-c"
+                       (uiop:native-namestring
+                        (merge-pathnames "particle_advance.compute.metal"
+                                         directory))
+                       "-o" (uiop:native-namestring
+                             (merge-pathnames "compute.air" directory))))))
+               (let ((dxc (or (uiop:getenv "LUV_DXC") "dxc")))
+                 (when (tool-available-p dxc "--version")
+                   (is eq nil
+                       (run-tool
+                        (list dxc "-HV" "2021" "-WX" "-T" "cs_6_0"
+                              "-E" "particle_advance_compute"
+                              "-Fo" (uiop:native-namestring
+                                     (merge-pathnames "compute.dxil"
+                                                      directory))
+                              (uiop:native-namestring
+                               (merge-pathnames
+                                "particle_advance.compute.hlsl"
+                                directory)))))))))
+        (uiop:delete-directory-tree directory :validate t
+                                              :if-does-not-exist :ignore)))))

@@ -312,12 +312,18 @@ Without DXC, return NIL: the text claims still hold."
   (flet ((probe (options body)
            (shader:parse-shader-specification 'hlsl-boundary-probe
                                               options body)))
-    (is eq :unsupported-hlsl-stage
+    ;; Direct3D has no system value for the dispatch's group count.
+    (is eq :unsupported-hlsl-built-in
         (failure-reason
          (lambda ()
            (hlsl:compile-hlsl
-            (probe '(:stage :compute :outputs ((value :float :location 0)))
-                   '((shader:set-output value 1.0)))))))
+            (probe '(:stage :compute :workgroup-size (1 1 1)
+                     :inputs ((groups :uvec3 :built-in :num-workgroups))
+                     :resources ((out :storage-buffer :binding 0
+                                  :element :uint :access :read-write)))
+                   '((shader:set-buffer-element
+                      out (shader:swizzle groups :x)
+                      (shader:swizzle groups :y))))))))
     (is eq :unsupported-hlsl-descriptor-set
         (failure-reason
          (lambda ()
@@ -352,3 +358,81 @@ Without DXC, return NIL: the text claims still hold."
                       (+ (shader:sample-compare depth any uv 0.5)
                          (shader:swizzle (shader:sample depth any uv)
                                          :x)))))))))))
+
+(shader:define-shader hlsl-compute-probe
+    (:stage :compute
+     :workgroup-size (8 8 1)
+     :inputs ((cell :uvec3 :built-in :global-invocation-id)
+              (local :uvec3 :built-in :local-invocation-id)
+              (lane :uint :built-in :local-invocation-index)
+              (group :uvec3 :built-in :workgroup-id)
+              (extent :uvec3 :built-in :workgroup-size))
+     :resources ((grid :uniform-block :binding 0 :members ((size :vec4)))
+                 (heights :storage-buffer :binding 1 :element :float
+                          :access :read-write)
+                 (seeds :storage-buffer :binding 2 :element :uvec2)))
+  (let* ((width (shader:uint (shader:swizzle size :x)))
+         (index (+ (* (shader:swizzle cell :y) width) (shader:swizzle cell :x)))
+         (seed (shader:buffer-element seeds lane))
+         (bump (float (+ (shader:swizzle seed :x) (shader:swizzle local :y)
+                         (shader:swizzle group :x) (shader:swizzle extent :x)))))
+    (when (< (shader:swizzle cell :x) width)
+      (shader:set-buffer-element
+       heights index (+ (shader:buffer-element heights index) bump)))))
+
+(define-test compute-stages-lower-to-numthreads-and-unordered-access
+  (multiple-value-bind (source document) (source-of (hlsl-compute-probe))
+    (true (search "[numthreads(8, 8, 1)]" source))
+    (true (search (concatenate
+                   'string
+                   "void hlsl_compute_probe(uint3 cell : SV_DispatchThreadID, "
+                   "uint3 local : SV_GroupThreadID, uint lane : SV_GroupIndex, "
+                   "uint3 group : SV_GroupID)")
+                  source))
+    (true (search "RWStructuredBuffer<float> heights : register(u1, space0);"
+                  source))
+    (true (search "StructuredBuffer<uint2> seeds : register(t2, space0);"
+                  source))
+    ;; The group size is the [numthreads] constant.
+    (true (search "uint3(8u, 8u, 1u).x" source))
+    (true (search "heights[index] = (heights[index] + bump);" source))
+    (false (search "result" source))
+    (true (string= "cs_6_0" (hlsl:hlsl-document-profile document)))
+    (compiles document)))
+
+(define-test buffer-stores-belong-to-compute-and-read-write-buffers
+  (flet ((reason (options body)
+           (failure-reason
+            (lambda ()
+              (shader:parse-shader-specification 'store-probe options
+                                                 (list body))))))
+    (is eq :read-only-storage-buffer
+        (reason '(:stage :compute :workgroup-size (1 1 1)
+                  :resources ((data :storage-buffer :binding 0
+                               :element :float)))
+                '(shader:set-buffer-element data (shader:uint 0.0) 1.0)))
+    (is eq :buffer-element-type-mismatch
+        (reason '(:stage :compute :workgroup-size (1 1 1)
+                  :resources ((data :storage-buffer :binding 0
+                               :element :vec4 :access :read-write)))
+                '(shader:set-buffer-element data (shader:uint 0.0) 1.0)))
+    (is eq :invalid-statement-for-stage
+        (reason '(:stage :fragment
+                  :outputs ((color :vec4 :location 0))
+                  :resources ((data :storage-buffer :binding 0
+                               :element :float :access :read-write)))
+                '(shader:set-buffer-element data (shader:uint 0.0) 1.0)))
+    (is eq :invalid-workgroup-size
+        (reason '(:stage :compute
+                  :resources ((data :storage-buffer :binding 0
+                               :element :float :access :read-write)))
+                '(shader:set-buffer-element data (shader:uint 0.0) 1.0)))
+    (is eq :ordinary-outputs-on-workgroup-stage
+        (reason '(:stage :compute :workgroup-size (1 1 1)
+                  :outputs ((value :float :location 0)))
+                '(shader:set-output value 1.0)))
+    (is eq :invalid-storage-buffer-access
+        (reason '(:stage :compute :workgroup-size (1 1 1)
+                  :resources ((data :storage-buffer :binding 0
+                               :element :float :access :write)))
+                '(shader:set-buffer-element data (shader:uint 0.0) 1.0)))))

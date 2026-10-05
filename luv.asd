@@ -161,7 +161,8 @@
   :components ((:file "hal/shaderc/package")
                (:file "hal/shaderc/shaderc")
                (:file "hal/shaderc/main")
-               (:static-file "hal/shaderc/examples/textured-instances.lisp"))
+               (:static-file "hal/shaderc/examples/textured-instances.lisp")
+               (:static-file "hal/shaderc/examples/particle-advance.lisp"))
   :in-order-to ((test-op (test-op "luv/shaderc/test"))))
 
 (defsystem "luv/shaderc/program"
@@ -175,7 +176,7 @@
 (defsystem "luv/shaderc/test"
   :description "Executable claims for luv-shaderc, checked by Metal and DXC when present."
   :version "0.0.1"
-  :depends-on ("luv/shaderc" "luv/test-support")
+  :depends-on ("luv/shaderc" "luv/spir-v" "luv/test-support")
   :components ((:file "hal/shaderc/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

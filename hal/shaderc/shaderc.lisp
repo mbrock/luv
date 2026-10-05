@@ -336,6 +336,8 @@ and (:OBJECT (KEY . VALUE) ...)."
       ("hlsl" . ,(ecase kind
                    (:uniform-block (format nil "b~D" binding))
                    (:storage-buffer (format nil "t~D, space0" binding))
+                   (:read-write-storage-buffer
+                    (format nil "u~D, space0" binding))
                    ((:texture-2d :depth-texture-2d :uint-texture-2d)
                     (format nil "t~D, space1" binding))
                    ((:sampler :comparison-sampler)
@@ -391,7 +393,13 @@ and (:OBJECT (KEY . VALUE) ...)."
                        (shader:shader-program-linkage-color-outputs
                         linkage))))
          ("color_outputs"
-          . ,(length (shader:shader-program-linkage-color-outputs linkage))))
+          . ,(length (shader:shader-program-linkage-color-outputs linkage)))
+         ,@(let ((compute (shader:shader-program-linkage-specification
+                           linkage :compute)))
+             (when compute
+               `(("workgroup_size"
+                  . (:array ,@(shader:shader-specification-workgroup-size
+                               compute)))))))
        stream)
       (terpri stream))))
 
@@ -469,7 +477,15 @@ and (:OBJECT (KEY . VALUE) ...)."
         (format stream "    .resources = resources,~%")
         (format stream "    .color_outputs = ~D,~%"
                 (length (shader:shader-program-linkage-color-outputs linkage)))
-        (format stream "  };~%}~%")))))
+        (format stream "  };~%")
+        (let ((compute (shader:shader-program-linkage-specification
+                        linkage :compute)))
+          (when compute
+            ;; Program has no field for it yet, so the size stands beside.
+            (format stream "  inline constexpr std::array<std::uint32_t, 3> ~
+                            workgroup_size {~{~D~^, ~}};~%"
+                    (shader:shader-specification-workgroup-size compute))))
+        (format stream "}~%")))))
 
 ;;; Writing.
 

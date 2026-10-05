@@ -99,7 +99,9 @@ resource-handle validation belongs to the host/backend, not the shader DSL."
     ((left shader-storage-buffer) (right shader-storage-buffer))
   (and (call-next-method)
        (shader-type= (shader-storage-buffer-element-type left)
-                     (shader-storage-buffer-element-type right))))
+                     (shader-storage-buffer-element-type right))
+       (eq (shader-storage-buffer-access left)
+           (shader-storage-buffer-access right))))
 
 (defmethod shader-resource-compatible-p
     ((left shader-uniform-block) (right shader-uniform-block))
