@@ -739,6 +739,75 @@
             platforms = systems;
           };
         });
+      # luv-shaderc compiles shader programs ahead of time for a native
+      # renderer.  It needs the shader language and its textual lowerings
+      # alone, so it is built from those sources by an SBCL holding only
+      # Closer-MOP: no SDL, Vulkan, Metal, McCLIM, or workbench.
+      shadercPackage = system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          inherit (nixpkgs) lib;
+          closerMop = pkgs.sbcl.pkgs.closer-mop;
+          shadercLisp = pkgs.sbcl.withPackages (_lispPackages: [ closerMop ]);
+        in
+        pkgs.stdenv.mkDerivation {
+          pname = "luv-shaderc";
+          version = "0-unstable";
+          src = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              ./luv.asd
+              ./arithmetic
+              ./domains
+              ./hal/shader
+              ./hal/metal/msl
+              ./hal/d3d12
+              ./hal/shaderc
+              ./scripts/build-luv-shaderc.lisp
+            ];
+          };
+          nativeBuildInputs = [ shadercLisp ];
+          dontConfigure = true;
+          # The executable is an SBCL image; stripping would remove its core.
+          dontStrip = true;
+          dontPatchELF = true;
+          buildPhase = ''
+            runHook preBuild
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME" "$out/share"
+            # Build in place under $out so the image's source locations name
+            # its own output rather than a separate store path.
+            cp -R . "$out/share/luv-shaderc"
+            chmod -R u+w "$out/share/luv-shaderc"
+            cd "$out/share/luv-shaderc"
+            sbcl --non-interactive --load scripts/build-luv-shaderc.lisp
+            runHook postBuild
+          '';
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/bin"
+            mv build/luv-shaderc "$out/bin/luv-shaderc"
+            rm -rf build
+            # The image records where ASDF, Closer-MOP, and the unpacked source
+            # were loaded from, though it never reads them again; on Darwin
+            # the SBCL package alone would drag in a 400 MiB bootstrap
+            # closure.  Blank those store hashes in the core, which lies past
+            # the runtime's code signature (so remove-references-to's
+            # re-signing fails).  The runtime's own libraries stay referenced.
+            for reference in ${pkgs.sbcl} ${closerMop} ${closerMop.src} \
+                "$src"; do
+              hash=$(basename "$reference" | cut -c1-32)
+              env LC_ALL=C sed -i "s/$hash/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/g" \
+                "$out/bin/luv-shaderc"
+            done
+            runHook postInstall
+          '';
+          meta = {
+            description = "Compile Luv shader programs to MSL, HLSL, and reflection";
+            mainProgram = "luv-shaderc";
+            platforms = systems;
+          };
+        };
     in
     {
       lib = {
@@ -758,8 +827,9 @@
             buildScript = "luft/build.lisp";
             executable = "luft-atelier";
           };
+          luv-shaderc = shadercPackage system;
         in {
-          inherit luvcraft luft;
+          inherit luvcraft luft luv-shaderc;
           sbcl = env.sbcl;
           sbcl-2_6_8 = env.sbcl268;
           lisp = env.lisp;
@@ -847,6 +917,10 @@
         luft = {
           type = "app";
           program = "${self.packages.${system}.luft}/bin/luft";
+        };
+        luv-shaderc = {
+          type = "app";
+          program = "${self.packages.${system}.luv-shaderc}/bin/luv-shaderc";
         };
       });
     };

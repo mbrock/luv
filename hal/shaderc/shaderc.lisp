@@ -93,14 +93,33 @@ structure must not shadow.")
 
 ;;; Loading source files.
 
+(defun load-note-position (note)
+  "The \"line L, column C\" SBCL's LOAD notes for a failing form, or NIL."
+  (let* ((start (search "line " note))
+         (end (and start (position #\Newline note :start start))))
+    (and start (string-right-trim '(#\Space) (subseq note start end)))))
+
 (defun load-shader-source (pathname)
   "Load PATHNAME in LUV.SHADER-USER; return the programs it defines in order.
-The file may change package with IN-PACKAGE; LOAD restores ours after it."
+The file may change package with IN-PACKAGE; LOAD restores ours after it.
+An error names the failing top-level form's position in its context."
   (let ((shader:*shader-programs* nil)
         (*package* (find-package '#:luv.shader-user))
-        (*readtable* (copy-readtable nil)))
-    (handler-bind ((style-warning #'muffle-warning))
-      (load pathname))
+        (*readtable* (copy-readtable nil))
+        (notes (make-string-output-stream)))
+    (handler-bind ((style-warning #'muffle-warning)
+                   (error
+                     (lambda (condition)
+                       (declare (ignore condition))
+                       (let ((position (load-note-position
+                                        (get-output-stream-string notes))))
+                         (when position
+                           (push (format nil "the form at ~A" position)
+                                 *compilation-context*))))))
+      ;; SBCL's LOAD writes where a failing form starts to *ERROR-OUTPUT*;
+      ;; keep that for the context instead of interleaving it.
+      (let ((*error-output* notes))
+        (load pathname)))
     shader:*shader-programs*))
 
 ;;; The binding contract (moppe's docs/nhal.md).

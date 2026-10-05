@@ -1,6 +1,7 @@
 # Shader validation, GPU smoke tests, and Metal probes.
 
-.PHONY: shader-validate luft-shader-validate msl-validate smoke vulkan-smoke metal-smoke \
+.PHONY: shader-validate luft-shader-validate msl-validate hlsl-validate \
+	luv-shaderc smoke vulkan-smoke metal-smoke \
 	metal-text-closeup objective-c-probe metal-clear metal-shader metal-pipeline metal-draw \
 	roundrect-proof slug-proof slug-text-proof
 
@@ -49,11 +50,24 @@ MSL_SHADERS := block-world.vert \
 	mcluv-chassis.vert \
 	mcluv-chassis.frag
 
+# Nix's xcbuild xcrun and SDK cannot find Metal's compiler, which lives in
+# Xcode's toolchain; ask Apple's xcrun with the Nix SDK variables removed.
+METAL_XCRUN := env -u DEVELOPER_DIR -u SDKROOT /usr/bin/xcrun -sdk macosx
+
 msl-validate:
 	@sbcl --script scripts/write-production-msl.lisp
 	@set -e; for shader in $(MSL_SHADERS); do \
-		xcrun metal -std=metal4.0 -c "build/$$shader.metal" -o "build/$$shader.air"; \
+		$(METAL_XCRUN) metal -std=metal4.0 -c "build/$$shader.metal" -o "build/$$shader.air"; \
 	done
+
+# Every application vertex and fragment shader, lowered to HLSL and compiled
+# by DXC (in the development shells).
+hlsl-validate:
+	@sbcl --noinform --non-interactive --load scripts/hlsl-validation.lisp
+
+# The ahead-of-time shader compiler; `nix run .#luv-shaderc` builds the same.
+luv-shaderc:
+	@sbcl --noinform --non-interactive --load scripts/build-luv-shaderc.lisp
 
 smoke: luvcraft
 	mkdir -p build

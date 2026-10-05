@@ -51,26 +51,29 @@ languages are written.
             (or (nreverse targets) *targets*)
             (nreverse files))))
 
-(defun report-failure (condition)
+(defun report-failure (condition &optional (stream *error-output*))
   (let ((*print-pretty* t)
         (*print-right-margin* 100)
         (*print-length* 12)
         (*print-level* 6)
         (*print-case* :downcase))
-    (format *error-output* "luv-shaderc: error~{ in ~A~^,~}:~%  ~A~%"
-            (reverse *compilation-context*)
-            condition)
-    (when (typep condition 'shader:shader-language-error)
-      (format *error-output* "  reason: ~(~S~)~%"
-              (shader:shader-language-error-reason condition)))
-    (finish-output *error-output*)))
+    (format stream "luv-shaderc: error~@[ in ~{~A~^, ~}~]:~%"
+            (reverse *compilation-context*))
+    (if (typep condition 'shader:shader-language-error)
+        (format stream "  ~(~A~)~@[ ~S~]~@[~%  in ~S~]~%"
+                (shader:shader-language-error-reason condition)
+                (shader:shader-language-error-details condition)
+                (shader:shader-language-error-form condition))
+        (format stream "  ~A~%" condition))
+    (finish-output stream)))
 
 (defun main ()
   "Run luv-shaderc on the process's command-line arguments."
   (handler-case
-      (handler-bind ((error (lambda (condition)
-                              (report-failure condition)
-                              (uiop:quit 1))))
+      (handler-bind ((error (let ((stream *error-output*))
+                              (lambda (condition)
+                                (report-failure condition stream)
+                                (uiop:quit 1)))))
         (multiple-value-bind (directory targets files)
             (parse-command-line (uiop:command-line-arguments))
           (multiple-value-bind (programs written)
