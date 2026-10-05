@@ -541,6 +541,70 @@ The projective-map protocol is unchanged: =project-point= still takes four
 row vectors.  Expressing a map's coefficients as one =:mat4= is a natural
 next step, not yet taken.
 
+* Structures are values with one host layout
+:PROPERTIES:
+:ID: V16OXI
+:END:
+
+=define-shader-struct= names a value type the way =defstruct= does:
+
+#+begin_src lisp
+(define-shader-struct particle
+  (position :vec4)
+  (velocity :vec4)
+  (orientation :mat4)
+  (cell :ivec2)
+  (age :float)
+  (flags :uint))
+
+(define-shader-function advance-particle (particle delta gravity)
+  (let* ((velocity (+ (particle-velocity particle) (* gravity delta))))
+    (make-particle :position (+ (particle-position particle)
+                                (* velocity delta))
+                   :velocity velocity
+                   :orientation (particle-orientation particle)
+                   :cell (ivec2 (floor (swizzle (particle-position particle)
+                                                :xz)))
+                   :age (+ (particle-age particle) delta)
+                   :flags (particle-flags particle))))
+#+end_src
+
+=(make-particle :field value ...)= takes every field by keyword and
+=(particle-field value)= reads one; the symbols are interned beside the
+structure's name.  A structure is an ordinary value: let-bound, an argument
+or result of a shader function, the state of a =counted-fold=, a field of
+another structure, and a storage-buffer element
+(=(particles :storage-buffer :binding 1 :element particle)=).  =if= does
+not choose between structures (SPIR-V 1.0 cannot select them), and no stage
+interface or uniform block holds one.  The constructor and accessors are
+parsed into =shader-struct-construction= and =shader-struct-field-read=
+expressions; SPIR-V builds and extracts composites, MSL uses aggregate
+initialization, WGSL its constructor call, and HLSL, which initializes
+structures only in declarations, a generated =construct_Particle= function.
+
+A storage-buffer element must have one layout in every target, and the rule
+is the safe one rather than any API's packing algorithm: every field is a
+32-bit scalar (aligned to 4), a two-component vector (8), a four-component
+vector or =:mat4= (16), or a structure obeying the same rule (its widest
+field); each field must already start at a multiple of its alignment; and
+the size must be a multiple of the structure's alignment.  Nothing is ever
+padded implicitly, so the offsets are running sums, and std430 SPIR-V,
+Metal device memory, HLSL's tightly packed structured buffers, and a C++
+structure of =float=, =std::int32_t=, =std::uint32_t=, and =std::array=
+members all agree.  Three-component vectors, booleans, =:mat2=, =:mat3=,
+and 64-bit scalars have no such layout: a structure holding one is still a
+fine value, but naming it as an element is an error that says why
+(=:host-layout-vec3=, =:unaligned-struct-field=, =:unpadded-struct-size=);
+pad with explicit fields instead.  luv-shaderc writes each element structure
+into the program's header with =static_assert= on its =sizeof= and on every
+=offsetof=, and into the manifest's =structs=; see
+[[file:../hal/shaderc/examples/particle-swarm.lisp][=examples/particle-swarm.lisp=]].
+
+Fixed-size arrays, as local values or as fields, are not yet in the
+language.  Constant indexing would be cheap; indexing by a run-time value
+needs function-scope variables in SPIR-V, which the lowering has avoided so
+far by keeping every value in SSA form.
+
 * What this does not decide
 :PROPERTIES:
 :ID: F2Q9WU
@@ -551,7 +615,9 @@ Lisp inside Common Lisp.  Control flow, user functions, general matrix values
 and composition, integer and boolean types, storage buffers, derivative
 operations, and stage-specific validation should arrive only with shaders that
 require them.  The projective-map slice exists because two production shaders
-already supply that requirement.
+already supply that requirement; signed integers, booleans, bit operations,
+matrices, and structures (#CAI3RP, #QEHEEE, #V16OXI) arrived because a native
+renderer's shaders (#LSVW2S) need them.
 
 The useful constraints for the next experiments are already visible:
 

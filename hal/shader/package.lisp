@@ -42,6 +42,30 @@
            #:shader-type-column-count
            #:shader-type-byte-size
            #:shader-product-type
+           #:define-shader-struct
+           #:shader-struct
+           #:shader-struct-type
+           #:shader-struct-type-p
+           #:shader-struct-type-fields
+           #:shader-struct-type-constructor
+           #:shader-struct-type-size
+           #:shader-struct-type-alignment
+           #:shader-struct-type-layout-error
+           #:shader-struct-field
+           #:shader-struct-field-struct
+           #:shader-struct-field-type
+           #:shader-struct-field-index
+           #:shader-struct-field-offset
+           #:shader-struct-field-accessor
+           #:shader-struct-operation
+           #:shader-struct-construction
+           #:shader-struct-construction-values
+           #:shader-struct-field-read
+           #:shader-struct-field-read-operand
+           #:shader-struct-field-read-field
+           #:shader-host-layout
+           #:shader-host-shareable-p
+           #:shader-specification-struct-types
            #:shader-vector-conversion-p
            #:shader-object-name
            #:shader-object-source-form

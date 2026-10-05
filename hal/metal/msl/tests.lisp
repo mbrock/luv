@@ -635,3 +635,29 @@ on success or without the compiler, else its report."
     (true (search "((2.0f * float2x2(" source))
     (true (search "frame.view_projection[3].w" source))
     (parachute:is eq nil (metal-compiler-diagnostics source))))
+
+(define-test structures-lower-to-metal-device-structs
+  ;; #V16OXI
+  (let ((source (msl:msl-document-source
+                 (msl:compile-msl (struct-compute-probe)))))
+    ;; Contained structures come first.
+    (true (< (search "struct ProbeSegment {" source)
+             (search "struct ProbeParticle {" source)))
+    (true (search "  ProbeSegment segment;
+  int2 cell;
+  float age;
+  uint flags;
+};" source))
+    (true (search "struct ProbeHit {
+  float3 normal;
+  float distance;
+  bool inside;
+};" source))
+    (true (search "device ProbeParticle* particles [[buffer(0)]]" source))
+    (true (search "ProbeParticle particle = particles[index];" source))
+    (true (search "= particle.segment;" source))
+    (true (search "probe_advance_1_local_1_segment.end" source))
+    (true (search "ProbeHit{normalize(" source))
+    (true (search "ProbeParticle fold_state_1 = " source))
+    (true (search "if (hit.inside)" source))
+    (parachute:is eq nil (metal-compiler-diagnostics source))))

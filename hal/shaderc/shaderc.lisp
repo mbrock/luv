@@ -281,7 +281,46 @@ and (:OBJECT (KEY . VALUE) ...)."
       (t (error "Cannot write ~S as JSON." value)))))
 
 (defun json-type-name (type)
-  (string-downcase (symbol-name (shader:shader-type-name type))))
+  (if (shader:shader-struct-type-p type)
+      (snake-identifier (shader:shader-type-name type))
+      (string-downcase (symbol-name (shader:shader-type-name type)))))
+
+(defun program-struct-types (linkage)
+  "The structures the host lays out: storage-buffer elements, each after
+the structures it contains.  #V16OXI"
+  (let ((types nil))
+    (labels ((note (type)
+               (when (and (shader:shader-struct-type-p type)
+                          (not (member type types)))
+                 (dolist (field (shader:shader-struct-type-fields type))
+                   (note (shader:shader-struct-field-type field)))
+                 (unless (member type types)
+                   (push type types)))))
+      (dolist (resource (shader:shader-program-linkage-resources linkage))
+        (let ((declaration
+                (shader:shader-program-resource-declaration resource)))
+          (when (typep declaration 'shader:shader-storage-buffer)
+            (note (shader:find-shader-type
+                   (shader:shader-storage-buffer-element-type
+                    declaration)))))))
+    (nreverse types)))
+
+(defun struct-json (struct)
+  `(:object
+    ("name" . ,(json-type-name struct))
+    ("cpp" . ,(camel-identifier (shader:shader-type-name struct)))
+    ("size" . ,(shader:shader-struct-type-size struct))
+    ("alignment" . ,(shader:shader-struct-type-alignment struct))
+    ("fields"
+     . (:array
+        ,@(mapcar (lambda (field)
+                    `(:object
+                      ("name" . ,(snake-identifier
+                                  (shader:shader-object-name field)))
+                      ("type" . ,(json-type-name
+                                  (shader:shader-struct-field-type field)))
+                      ("offset" . ,(shader:shader-struct-field-offset field))))
+                  (shader:shader-struct-type-fields struct))))))
 
 (defun stage-file-name (compiled stage extension)
   (format nil "~A.~A.~A" (compiled-program-name compiled) (stage-name stage)
@@ -325,6 +364,12 @@ and (:OBJECT (KEY . VALUE) ...)."
            `(("element" . ,(json-type-name
                             (shader:shader-storage-buffer-element-type
                              declaration)))
+             ,@(when (shader:shader-struct-type-p
+                      (shader:shader-storage-buffer-element-type declaration))
+                 `(("struct" . ,(camel-identifier
+                                 (shader:shader-type-name
+                                  (shader:shader-storage-buffer-element-type
+                                   declaration))))))
              ("stride" . ,(shader:shader-storage-buffer-element-stride
                            declaration)))))
       ("msl" . ,(format nil "[[~A(~D)]]"
@@ -394,6 +439,9 @@ and (:OBJECT (KEY . VALUE) ...)."
                         linkage))))
          ("color_outputs"
           . ,(length (shader:shader-program-linkage-color-outputs linkage)))
+         ,@(let ((structs (program-struct-types linkage)))
+             (when structs
+               `(("structs" . (:array ,@(mapcar #'struct-json structs))))))
          ,@(let ((compute (shader:shader-program-linkage-specification
                            linkage :compute)))
              (when compute
@@ -408,6 +456,41 @@ and (:OBJECT (KEY . VALUE) ...)."
 (defun stage-mask-text (stages)
   (format nil "~{stage_~A~^ | ~}" (mapcar #'stage-name stages)))
 
+(defun cpp-field-type (type)
+  "The C++ type holding one host-shareable value of TYPE."
+  (let ((type (shader:find-shader-type type)))
+    (cond ((shader:shader-struct-type-p type)
+           (camel-identifier (shader:shader-type-name type)))
+          ((shader:shader-matrix-type-p type)
+           (format nil "std::array<float, ~D>"
+                   (floor (shader:shader-type-byte-size type) 4)))
+          (t
+           (let ((scalar (ecase (shader:shader-type-scalar-kind type)
+                           (:float "float")
+                           (:uint "std::uint32_t")
+                           (:int "std::int32_t")))
+                 (count (shader:shader-type-component-count type)))
+             (if (= count 1)
+                 scalar
+                 (format nil "std::array<~A, ~D>" scalar count)))))))
+
+(defun write-struct-header (struct stream)
+  "STRUCT as a C++ structure whose size and every offset are asserted to
+be the shaders' (see SHADER:DEFINE-SHADER-STRUCT).  #V16OXI"
+  (let ((type (camel-identifier (shader:shader-type-name struct))))
+    (format stream "  struct ~A {~%" type)
+    (dolist (field (shader:shader-struct-type-fields struct))
+      (format stream "    ~A ~A;~%"
+              (cpp-field-type (shader:shader-struct-field-type field))
+              (snake-identifier (shader:shader-object-name field))))
+    (format stream "  };~%  static_assert(sizeof(~A) == ~D);~%"
+            type (shader:shader-struct-type-size struct))
+    (dolist (field (shader:shader-struct-type-fields struct))
+      (format stream "  static_assert(offsetof(~A, ~A) == ~D);~%"
+              type (snake-identifier (shader:shader-object-name field))
+              (shader:shader-struct-field-offset field)))
+    (terpri stream)))
+
 (defun program-header (compiled)
   "The C++ reflection header of COMPILED as a string."
   (let* ((linkage (compiled-program-linkage compiled))
@@ -419,14 +502,37 @@ and (:OBJECT (KEY . VALUE) ...)."
                     (typep (shader:shader-program-resource-declaration
                             resource)
                            'shader:shader-uniform-block))
-                  resources)))
+                  resources))
+         (structs (program-struct-types linkage))
+         (names (append
+                 (mapcar (lambda (struct)
+                           (camel-identifier (shader:shader-type-name struct)))
+                         structs)
+                 (mapcar (lambda (resource)
+                           (camel-identifier
+                            (shader:shader-object-name
+                             (shader:shader-program-resource-declaration
+                              resource))))
+                         blocks))))
+    (let ((duplicate (find-if (lambda (name)
+                                (< 1 (count name names :test #'string=)))
+                              names)))
+      (when duplicate
+        (shaderc-fail "Two C++ structures would be named ~A: rename the ~
+                       uniform block or the shader structure."
+                      duplicate)))
     (with-output-to-string (stream)
       (format stream "// Generated by luv-shaderc~@[ from ~A~]; do not edit.~%"
               (and source (file-namestring source)))
       (format stream "#pragma once~%#include <moppe/nhal/reflection.hh>~%")
-      (format stream "#include <array>~%~%")
+      (format stream "#include <array>~%")
+      (when structs
+        (format stream "#include <cstddef>~%#include <cstdint>~%"))
+      (terpri stream)
       (format stream "namespace moppe::nhal::shaders::~A {~%"
               (compiled-program-name compiled))
+      (dolist (struct structs)
+        (write-struct-header struct stream))
       (dolist (resource blocks)
         (let* ((declaration (shader:shader-program-resource-declaration resource))
                (type (camel-identifier (shader:shader-object-name declaration))))

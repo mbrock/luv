@@ -468,3 +468,77 @@ bind COMPILED to it, and run BODY."
       (true (search "\"type\": \"mat4\"," json))
       (true (search "\"offset\": 64" json))
       (is equal nil (native-output-diagnostics compiled directory)))))
+
+(defparameter *struct-example*
+  (merge-pathnames "hal/shaderc/examples/particle-swarm.lisp" *root*))
+
+(define-test storage-structures-become-asserted-cpp-structures
+  ;; #V16OXI
+  (uiop:with-temporary-file (:pathname scratch :keep nil)
+    (let ((directory (uiop:ensure-directory-pathname
+                      (format nil "~A.d" (uiop:native-namestring scratch)))))
+      (unwind-protect
+           (let* ((compiled
+                    (first (let ((shader:*shader-programs* nil))
+                             (shaderc:compile-shader-files
+                              (list *struct-example*)
+                              :directory directory))))
+                  (header (uiop:read-file-string
+                           (merge-pathnames "particle_swarm.hh" directory)))
+                  (json (uiop:read-file-string
+                         (merge-pathnames "particle_swarm.json" directory)))
+                  (specification
+                    (shader:shader-program-linkage-specification
+                     (shaderc:compiled-program-linkage compiled) :compute))
+                  (spir-v (merge-pathnames "particle_swarm.spv" directory)))
+             (true (search "#include <cstddef>" header))
+             (true (search "#include <cstdint>" header))
+             (true (search "  struct Particle {
+    std::array<float, 4> position;
+    std::array<float, 4> velocity;
+    std::array<float, 16> orientation;
+    std::array<std::int32_t, 2> cell;
+    float age;
+    std::uint32_t flags;
+  };
+  static_assert(sizeof(Particle) == 112);" header))
+             (true (search "static_assert(offsetof(Particle, flags) == 108);"
+                           header))
+             (true (search "std::array<float, 16> world;" header))
+             (true (search "\"element\": \"particle\"," json))
+             (true (search "\"struct\": \"Particle\"," json))
+             (true (search "\"stride\": 112" json))
+             (true (search "\"structs\": [" json))
+             (true (search "\"alignment\": 16," json))
+             (is equal nil (native-output-diagnostics compiled directory))
+             ;; Vulkan reads the same layout from the same source.
+             (spv:write-spir-v (spv:assemble-shader-specification
+                                specification)
+                               spir-v)
+             (when (tool-available-p "spirv-val" "--version")
+               (is eq nil (run-tool
+                           (list "spirv-val" "--target-env" "vulkan1.0"
+                                 (uiop:native-namestring spir-v))))))
+        (uiop:delete-directory-tree directory :validate t
+                                              :if-does-not-exist :ignore)))))
+
+(define-test cpp-structure-names-must-not-collide
+  (is eq :struct-name
+      (handler-case
+          (with-compiled-source (compiled directory
+                                 "(define-shader-struct frame (origin :vec4))
+(define-shader frame-compute
+    (:stage :compute
+     :workgroup-size (1 1 1)
+     :inputs ((thread :uvec3 :built-in :global-invocation-id))
+     :resources ((frame :uniform-block :binding 0 :members ((scale :vec4)))
+                 (frames :storage-buffer :binding 1 :element frame
+                         :access :read-write)))
+  (set-buffer-element frames (swizzle thread :x)
+                      (make-frame :origin scale)))
+(define-shader-program framed :compute frame-compute)
+")
+            (declare (ignore compiled directory))
+            nil)
+        (shader:shader-language-error () :struct-name)
+        (shaderc:shaderc-error () :struct-name))))

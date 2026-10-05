@@ -226,6 +226,10 @@ A program compiler gives every stage a stable name of its own."))
         identifier)))
 
 (defun msl-type-name (type &optional source-form)
+  (when (shader:shader-struct-type-p (shader:find-shader-type type source-form))
+    (return-from msl-type-name
+      (msl-structure-name-for
+       (shader:shader-type-name (shader:find-shader-type type)))))
   (case (shader:shader-type-name (shader:find-shader-type type source-form))
     (:bool "bool")
     (:float "float")
@@ -374,6 +378,61 @@ A program compiler gives every stage a stable name of its own."))
     ((context msl-lowering-context) (expression shader:shader-call))
   (shader:lower-shader-call (shader:shader-call-operator expression)
                          context expression))
+
+(defmethod lower-msl-expression
+    ((context msl-lowering-context)
+     (expression shader:shader-struct-construction))
+  ;; Aggregate initialization, in field order.  #V16OXI
+  (note-msl-occurrence
+   context expression
+   (format nil "~A{~{~A~^, ~}}"
+           (msl-type-name (shader:shader-expression-type expression))
+           (mapcar (lambda (value)
+                     (msl-occurrence-text (lower-msl-expression context value)))
+                   (shader:shader-struct-construction-values expression)))))
+
+(defmethod lower-msl-expression
+    ((context msl-lowering-context)
+     (expression shader:shader-struct-field-read))
+  (note-msl-occurrence
+   context expression
+   (format nil "~A.~A"
+           (msl-occurrence-text
+            (lower-msl-expression
+             context (shader:shader-struct-field-read-operand expression)))
+           (msl-identifier
+            (shader:shader-object-name
+             (shader:shader-struct-field-read-field expression))))))
+
+(defun msl-struct-structures (specification)
+  "Declarations of the structures SPECIFICATION uses, contained ones
+first.  Metal's device layout of a host-shareable structure is the
+language's (see SHADER:DEFINE-SHADER-STRUCT)."
+  (mapcar (lambda (struct)
+            (make-instance
+             'msl-structure-declaration
+             :name (msl-type-name struct)
+             :fields
+             (mapcar (lambda (field)
+                       (make-instance
+                        'msl-field
+                        :type (msl-type-name (shader:shader-struct-field-type
+                                              field))
+                        :name (msl-identifier (shader:shader-object-name field))
+                        :attribute nil :origin nil))
+                     (shader:shader-struct-type-fields struct))))
+          (shader:shader-specification-struct-types specification)))
+
+(defun check-msl-structure-names (declarations)
+  "A structure the author defined must not share a generated one's name."
+  (let ((seen nil))
+    (dolist (declaration declarations declarations)
+      (when (typep declaration 'msl-structure-declaration)
+        (when (member (msl-structure-name declaration) seen :test #'string=)
+          (error 'shader:shader-language-error
+                 :reason :msl-structure-name-collision
+                 :details (msl-structure-name declaration)))
+        (push (msl-structure-name declaration) seen)))))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-function-call))
@@ -1240,8 +1299,9 @@ A program compiler gives every stage a stable name of its own."))
     ((declaration msl-structure-declaration) stream)
   (format stream "struct ~A {~%" (msl-structure-name declaration))
   (dolist (field (msl-structure-fields declaration))
-    (write-msl-semantic-comments
-     (msl-field-origin field) stream "  " :unannotated-p t)
+    (when (msl-field-origin field)
+      (write-msl-semantic-comments
+       (msl-field-origin field) stream "  " :unannotated-p t))
     (format stream "  ~A ~A~A~@[ ~A~];~%"
             (msl-field-type field)
             (msl-field-name field)
@@ -1685,6 +1745,9 @@ A program compiler gives every stage a stable name of its own."))
 
 (defun finish-msl-document
     (target specification context declarations entry-point)
+  (setf declarations
+        (check-msl-structure-names
+         (append (msl-struct-structures specification) declarations)))
   (maphash (lambda (expression occurrences)
              (setf (gethash expression
                             (msl-context-expression-occurrences context))

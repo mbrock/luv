@@ -124,9 +124,36 @@
         (nconc (slot-value context slot) (list form)))
   form)
 
+(defun ensure-struct-type-id (context struct)
+  "Declare STRUCT after its member types.  A host-shareable structure is
+decorated with its offsets (and column-major matrices) everywhere, so the
+same type serves as a value and as a storage-buffer element.  #V16OXI"
+  (let* ((member-ids
+           (mapcar (lambda (field)
+                     (ensure-shader-type-id context
+                                            (shader-struct-field-type field)))
+                   (shader-struct-type-fields struct)))
+         (id (reserve-shader-id
+              context (format nil "~A-STRUCT" (shader-type-name struct)))))
+    (setf (gethash struct (context-type-ids context)) id)
+    (append-context-form 'type-declarations context
+                         (list* id 'type-struct member-ids))
+    (when (shader-struct-type-size struct)
+      (dolist (field (shader-struct-type-fields struct))
+        (append-context-form
+         'annotations context
+         (list 'member-decorate id (shader-struct-field-index field)
+               'offset (shader-struct-field-offset field)))
+        (when (shader-matrix-type-p (shader-struct-field-type field))
+          (decorate-matrix-member
+           context id (shader-struct-field-index field)))))
+    id))
+
 (defun ensure-shader-type-id (context type)
   (let ((type (find-shader-type type)))
     (or (gethash type (context-type-ids context))
+        (and (typep type 'shader-struct-type)
+             (ensure-struct-type-id context type))
         (and (shader-boolean-type-p type) (shader-vector-type-p type)
              ;; One BVEC type serves both declared values and the splatted
              ;; conditions of vector selects.
@@ -731,6 +758,14 @@ Modules whose expressions use no extended mathematics never acquire one."
 (defmethod shader-expression-provenance-name
     ((expression shader-buffer-element))
   (shader-object-name (shader-buffer-element-buffer expression)))
+
+(defmethod shader-expression-provenance-name
+    ((expression shader-struct-construction))
+  (shader-type-name (shader-expression-type expression)))
+
+(defmethod shader-expression-provenance-name
+    ((expression shader-struct-field-read))
+  (shader-object-name (shader-struct-field-read-field expression)))
 
 (defmethod shader-expression-provenance-name
     ((expression shader-interpretation))
@@ -1744,6 +1779,23 @@ OpShift* wants as many count components as value components."
 
 (defmethod lower-shader-expression-value (context (expression shader-call))
   (lower-shader-call (shader-call-operator expression) context expression))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-struct-construction))
+  (emit-value-instruction
+   context expression (shader-expression-type expression)
+   'composite-construct
+   (mapcar (lambda (value) (lower-shader-expression context value))
+           (shader-struct-construction-values expression))))
+
+(defmethod lower-shader-expression-value
+    (context (expression shader-struct-field-read))
+  (emit-value-instruction
+   context expression (shader-expression-type expression) 'composite-extract
+   (list (lower-shader-expression
+          context (shader-struct-field-read-operand expression))
+         (shader-struct-field-index
+          (shader-struct-field-read-field expression)))))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-function-call))

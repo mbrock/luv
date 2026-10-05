@@ -2759,3 +2759,182 @@ Return NIL on success or without the tool, else its report."
     (true (search "OFFSET 80" forms))
     (true (search "ARRAY-STRIDE 64" forms))
     (parachute:is eq nil (spir-v-validation-diagnostics specification))))
+
+;;; Structures.  #V16OXI
+
+(shader:define-shader-struct probe-segment
+  (start :vec4)
+  (end :vec4))
+
+(shader:define-shader-struct probe-particle
+  "A host-shareable element: every field starts aligned, nothing pads."
+  (position :vec4)
+  (orientation :mat4)
+  (segment probe-segment)
+  (cell :ivec2)
+  (age :float)
+  (flags :uint))
+
+(shader:define-shader-struct probe-hit
+  "A value-only structure: its vec3 and bool have no shared host layout."
+  (normal :vec3)
+  (distance :float)
+  (inside :bool))
+
+(shader:define-shader-function probe-advance (particle delta)
+  (let* ((segment (probe-particle-segment particle))
+         (heading (- (probe-segment-end segment)
+                     (probe-segment-start segment)))
+         (moved (+ (probe-particle-position particle)
+                   (* (probe-particle-orientation particle) heading delta))))
+    (make-probe-particle
+     :position moved
+     :orientation (probe-particle-orientation particle)
+     :segment (make-probe-segment :start moved
+                                  :end (probe-segment-end segment))
+     :cell (shader:ivec2 (swizzle moved :xy))
+     :age (+ (probe-particle-age particle) delta)
+     :flags (logior (probe-particle-flags particle) (uint 1.0)))))
+
+(shader:define-shader struct-compute-probe
+    (:stage :compute
+     :workgroup-size (64 1 1)
+     :inputs ((thread :uvec3 :built-in :global-invocation-id))
+     :resources ((particles :storage-buffer :binding 0
+                            :element probe-particle :access :read-write)
+                 (hits :storage-buffer :binding 1 :element :vec4
+                       :access :read-write)))
+  (let* ((index (swizzle thread :x))
+         (particle (shader:buffer-element particles index))
+         (next (probe-advance particle 0.016))
+         (hit (make-probe-hit
+               :normal (normalize (swizzle (probe-particle-position next)
+                                           :xyz))
+               :distance (probe-particle-age next)
+               :inside (< (probe-particle-age next) 1.0)))
+         (aged (counted-fold (lap (uint 3.0) state next)
+                 (probe-advance state 0.5))))
+    (shader:set-buffer-element particles index aged)
+    (when (probe-hit-inside hit)
+      (shader:set-buffer-element
+       hits index (vec4 (probe-hit-normal hit) (probe-hit-distance hit))))))
+
+(defun struct-probe-error-reason (resources body)
+  (handler-case
+      (progn
+        (shader:parse-shader-specification
+         'struct-probe
+         `(:stage :compute
+           :workgroup-size (1 1 1)
+           :inputs ((thread :uvec3 :built-in :global-invocation-id))
+           :resources ,resources)
+         (list body))
+        nil)
+    (shader:shader-language-error (condition)
+      (shader:shader-language-error-reason condition))))
+
+(defun struct-definition-error-reason (form)
+  (handler-case (progn (eval form) nil)
+    (shader:shader-language-error (condition)
+      (shader:shader-language-error-reason condition))))
+
+(define-test structures-have-one-host-layout-or-none
+  (let ((particle (shader:find-shader-type 'probe-particle))
+        (hit (shader:find-shader-type 'probe-hit)))
+    (true (shader:shader-struct-type-p particle))
+    (true (= 128 (shader:shader-struct-type-size particle)))
+    (true (= 16 (shader:shader-struct-type-alignment particle)))
+    (true (equal '(0 16 80 112 120 124)
+                 (mapcar #'shader:shader-struct-field-offset
+                         (shader:shader-struct-type-fields particle))))
+    (true (eq 'make-probe-particle
+              (shader:shader-struct-type-constructor particle)))
+    (true (eq 'probe-particle-age
+              (shader:shader-struct-field-accessor
+               (fifth (shader:shader-struct-type-fields particle)))))
+    ;; A vec3 is a fine value but has no layout every target shares.
+    (true (null (shader:shader-struct-type-size hit)))
+    (true (eq :host-layout-vec3
+              (first (shader:shader-struct-type-layout-error hit))))
+    (true (equal '(probe-segment probe-particle probe-hit)
+                 (mapcar #'shader:shader-type-name
+                         (shader:shader-specification-struct-types
+                          (struct-compute-probe)))))
+    (true (= 128 (shader:shader-storage-buffer-element-stride
+                  (first (shader:shader-specification-resources
+                          (struct-compute-probe)))))))
+  ;; Padding is explicit: an unaligned field or an unrounded size is a
+  ;; layout error, reported when the structure becomes a buffer element.
+  (true (null (struct-definition-error-reason
+               '(shader:define-shader-struct probe-unaligned
+                 (weight :float) (direction :vec4)))))
+  (true (eq :unaligned-struct-field
+            (first (shader:shader-struct-type-layout-error
+                    (shader:find-shader-type 'probe-unaligned)))))
+  (true (null (struct-definition-error-reason
+               '(shader:define-shader-struct probe-unpadded
+                 (direction :vec4) (weight :float)))))
+  (true (eq :unpadded-struct-size
+            (first (shader:shader-struct-type-layout-error
+                    (shader:find-shader-type 'probe-unpadded)))))
+  (true (eq :unpadded-struct-size
+            (struct-probe-error-reason
+             '((items :storage-buffer :binding 0 :element probe-unpadded))
+             '(when t))))
+  (true (eq :host-layout-vec3
+            (struct-probe-error-reason
+             '((items :storage-buffer :binding 0 :element probe-hit))
+             '(when t))))
+  (true (eq :duplicate-struct-field
+            (struct-definition-error-reason
+             '(shader:define-shader-struct probe-twice
+               (weight :float) (weight :float)))))
+  (true (eq :opaque-struct-field
+            (struct-definition-error-reason
+             '(shader:define-shader-struct probe-opaque
+               (image :texture-2d)))))
+  (true (eq :struct-name-is-a-type
+            (struct-definition-error-reason
+             '(shader:define-shader-struct :vec4 (x :float)))))
+  (let ((resources '((items :storage-buffer :binding 0
+                      :element probe-segment :access :read-write))))
+    (macrolet ((rejects (reason body)
+                 `(true (eq ,reason
+                            (struct-probe-error-reason resources ',body)))))
+      (rejects :missing-struct-fields
+               (shader:set-buffer-element
+                items (swizzle thread :x)
+                (make-probe-segment :start (vec4 0.0 0.0 0.0 0.0))))
+      (rejects :unknown-struct-field
+               (shader:set-buffer-element
+                items (swizzle thread :x)
+                (make-probe-segment :start (vec4 0.0 0.0 0.0 0.0)
+                                    :finish (vec4 0.0 0.0 0.0 0.0))))
+      (rejects :struct-field-type-mismatch
+               (shader:set-buffer-element
+                items (swizzle thread :x)
+                (make-probe-segment :start 0.0
+                                    :end (vec4 0.0 0.0 0.0 0.0))))
+      (rejects :struct-accessor-type-mismatch
+               (shader:set-buffer-element
+                items (swizzle thread :x)
+                (probe-particle-segment
+                 (shader:buffer-element items (swizzle thread :x)))))
+      (rejects :conditional-composite-type
+               (shader:set-buffer-element
+                items (swizzle thread :x)
+                (if t (shader:buffer-element items (uint 0.0))
+                    (shader:buffer-element items (uint 1.0))))))))
+
+(define-test structures-lower-to-validated-spir-v
+  (let* ((specification (struct-compute-probe))
+         (instructions (spv:lower-spir-v (spv:shader-module specification)))
+         (names (mapcar #'spv:instruction-name instructions))
+         (forms (write-to-string (mapcar #'spv:instruction-form instructions))))
+    (dolist (name '(spv::type-struct spv::composite-construct
+                    spv::composite-extract spv::phi))
+      (true (find name names)))
+    (true (search "ARRAY-STRIDE 128" forms))
+    (true (search "OFFSET 124" forms))
+    (true (search "MATRIX-STRIDE 16" forms))
+    (parachute:is eq nil (spir-v-validation-diagnostics specification))))

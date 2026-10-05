@@ -203,3 +203,25 @@
     (true (search "(stage_in.position * transpose(frame.view_projection))"
                   source))
     (true (search "frame.view_projection[3]" source))))
+
+(define-test structure-values-lower-to-wgsl
+  ;; #V16OXI
+  (let ((source
+          (wgsl:wgsl-document-source
+           (wgsl:compile-wgsl
+            (shader:parse-shader-specification
+             'wgsl-struct-probe
+             '(:stage :fragment
+               :inputs ((uv :vec2 :location 0))
+               :outputs ((color :vec4 :location 0)))
+             '((let* ((segment (make-probe-segment
+                                :start (vec4 uv 0.0 1.0)
+                                :end (vec4 1.0 1.0 0.0 1.0))))
+                 (set-output color (- (probe-segment-end segment)
+                                      (probe-segment-start segment))))))))))
+    (true (search "struct ProbeSegment {
+  start: vec4<f32>,
+  end: vec4<f32>,
+}" source))
+    (true (search "ProbeSegment(vec4<f32>(stage_in.uv, 0.0f, 1.0f)" source))
+    (true (search "(segment.end - segment.start)" source))))

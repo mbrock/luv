@@ -109,8 +109,10 @@ from storage buffers.  For a program =NAME= it writes =NAME.STAGE.metal=,
 line, the program and stage, the language's reason, and the source form, and
 exit nonzero.  [[file:../hal/shaderc/examples/textured-instances.lisp][=examples/textured-instances.lisp=]] pulls vertices and
 instances, samples a texture, and compares a shadow map;
-[[file:../hal/shaderc/examples/particle-advance.lisp][=examples/particle-advance.lisp=]] is a compute program.  The tests compile both
-with Metal, DXC, spirv-val, and the C++ compiler.
+[[file:../hal/shaderc/examples/particle-advance.lisp][=examples/particle-advance.lisp=]] is a compute program, and
+[[file:../hal/shaderc/examples/particle-swarm.lisp][=examples/particle-swarm.lisp=]] one over structured particles with a mat4
+uniform.  The tests compile them with Metal, DXC, spirv-val, and the C++
+compiler.
 
 The flake's =packages.<system>.luv-shaderc= builds from the shader sources
 alone with an SBCL holding only Closer-MOP, through
@@ -124,17 +126,17 @@ Vulkan, Metal, or McCLIM.
 :END:
 
 Compute stages and read-write storage buffers exist (=:access :read-write=,
-=set-buffer-element=, =:workgroup-size=, =:global-invocation-id=), but a
-renderer of moppe's kind still lacks, roughly in order of need:
+=set-buffer-element=, =:workgroup-size=, =:global-invocation-id=), and so do
+signed integers, booleans, and bit operations (#CAI3RP), column-major
+matrices, which HLSL represents transposed (#QEHEEE), and structures with
+one host layout, written into the header as asserted C++ structures
+(#V16OXI); but a renderer of moppe's kind still lacks, roughly in order of
+need:
 
-- matrices (=float4x4= and products); today projections are rows of vec4 in a
-  uniform block with =dot=, or a projective map (#4XAF9Z);
-- structures, as storage-buffer elements and as values, and vec3 elements;
-- signed integers, bitwise operators other than =ldb=, and integer vectors in
-  comparisons; comparisons are scalar only and there are no boolean
-  operators (=and=, =or=, =not=) or =select= over vectors;
-- uniform members other than vec4 lanes (deliberately, for the layout
-  contract), arrays in uniform blocks, and push or root constants;
+- vec3 storage elements and structure fields (deliberately: pad them), and
+  fixed-size arrays as values or fields;
+- uniform members other than vec4 lanes and mat4s (deliberately, for the
+  layout contract), arrays in uniform blocks, and push or root constants;
 - fragment built-ins (frag coord, front facing, sample index, depth output),
   =discard=, and blending-relevant outputs beyond colour;
 - texture variety: arrays, cubes, 3D, explicit LOD and gradients, gather,

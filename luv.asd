@@ -162,7 +162,8 @@
                (:file "hal/shaderc/shaderc")
                (:file "hal/shaderc/main")
                (:static-file "hal/shaderc/examples/textured-instances.lisp")
-               (:static-file "hal/shaderc/examples/particle-advance.lisp"))
+               (:static-file "hal/shaderc/examples/particle-advance.lisp")
+               (:static-file "hal/shaderc/examples/particle-swarm.lisp"))
   :in-order-to ((test-op (test-op "luv/shaderc/test"))))
 
 (defsystem "luv/shaderc/program"

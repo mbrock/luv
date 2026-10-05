@@ -186,9 +186,11 @@
 (defun shader-type-byte-size (type)
   "The bytes one value of TYPE occupies in a host buffer: components times
 their width for scalars and vectors, columns times sixteen-byte column
-strides for matrices (only MAT4 is host-shareable, see SHADER-HOST-LAYOUT)."
+strides for matrices (only MAT4 is host-shareable, see SHADER-HOST-LAYOUT),
+and the laid-out size of a host-shareable structure."
   (let ((type (find-shader-type type)))
-    (cond ((shader-matrix-type-p type)
+    (cond ((typep type 'shader-struct-type) (shader-struct-type-size type))
+          ((shader-matrix-type-p type)
            (* (shader-type-column-count type) 16))
           ((and (shader-type-component-count type)
                 (shader-type-bit-width type))
@@ -2439,6 +2441,409 @@ call's parameter."
   ;; means.
   (raw mat2 mat3 mat4 transpose))
 
+;;; Structures.  #V16OXI
+;;;
+;;; DEFINE-SHADER-STRUCT names a value type of named fields, with Common
+;;; Lisp's DEFSTRUCT vocabulary: (MAKE-NAME :FIELD VALUE ...) constructs one
+;;; and (NAME-FIELD VALUE) reads a field.  A structure is an ordinary value
+;;; -- let-bound, passed to and returned from shader functions, folded over
+;;; -- and, when its layout is host-shareable, a storage-buffer element.
+;;;
+;;; Host-shareable means one layout in std430 SPIR-V, Metal device memory,
+;;; HLSL structured buffers, and C++: every field is a 32-bit scalar (4-byte
+;;; aligned), a two-component vector (8), a four-component vector or MAT4
+;;; (16), or a host-shareable structure (its widest field); every field
+;;; already starts at a multiple of its alignment; and the size is a multiple
+;;; of the structure's alignment.  No target then inserts padding, so the
+;;; offsets are the running sums of the sizes and HLSL's tightly packed
+;;; structured buffers agree with the aligned layouts.  Three-component
+;;; vectors, booleans, MAT2, MAT3, and 64-bit scalars are not host-shareable;
+;;; pad with explicit fields instead.
+
+(defclass shader-struct-type (shader-type)
+  ((fields
+    :initarg :fields
+    :accessor shader-struct-type-fields)
+   (constructor
+    :initarg :constructor
+    :reader shader-struct-type-constructor)
+   (size
+    :initarg :size
+    :initform nil
+    :accessor shader-struct-type-size
+    :documentation "The host byte size, or NIL when not host-shareable.")
+   (alignment
+    :initarg :alignment
+    :initform nil
+    :accessor shader-struct-type-alignment)
+   (layout-error
+    :initarg :layout-error
+    :initform nil
+    :accessor shader-struct-type-layout-error
+    :documentation "Why the layout is not host-shareable: (REASON DETAILS).")
+   (source-form
+    :initarg :source-form
+    :reader shader-struct-type-source-form))
+  (:documentation
+   "A named structure of typed fields, with its host layout when it has one."))
+
+(defclass shader-struct-field (shader-named-object)
+  ((struct
+    :initarg :struct
+    :reader shader-struct-field-struct)
+   (type
+    :initarg :type
+    :reader shader-struct-field-type)
+   (index
+    :initarg :index
+    :reader shader-struct-field-index)
+   (offset
+    :initarg :offset
+    :initform nil
+    :accessor shader-struct-field-offset)
+   (accessor
+    :initarg :accessor
+    :reader shader-struct-field-accessor))
+  (:documentation "One field of a SHADER-STRUCT-TYPE."))
+
+(defun shader-struct-type-p (type)
+  (typep (find-shader-type type) 'shader-struct-type))
+
+(defun shader-host-layout (type &optional source-form)
+  "Return the host byte size and alignment of TYPE, or signal why it has no
+layout shared by every target (see DEFINE-SHADER-STRUCT)."
+  (let ((type (find-shader-type type source-form)))
+    (flet ((reject (reason)
+             (error 'shader-language-error
+                    :form source-form :reason reason
+                    :details (shader-type-name type))))
+      (cond
+        ((typep type 'shader-struct-type)
+         (if (shader-struct-type-size type)
+             (values (shader-struct-type-size type)
+                     (shader-struct-type-alignment type))
+             (destructuring-bind (reason details)
+                 (shader-struct-type-layout-error type)
+               (error 'shader-language-error
+                      :form source-form :reason reason :details details))))
+        ((shader-type= type :mat4) (values 64 16))
+        ((shader-matrix-type-p type) (reject :host-layout-matrix))
+        ((shader-type-opaque-kind type) (reject :host-layout-opaque))
+        ((eq :bool (shader-type-scalar-kind type)) (reject :host-layout-bool))
+        ((not (eql 32 (shader-type-bit-width type)))
+         (reject :host-layout-wide-scalar))
+        (t
+         (case (shader-type-component-count type)
+           (1 (values 4 4))
+           (2 (values 8 8))
+           (4 (values 16 16))
+           (otherwise (reject :host-layout-vec3))))))))
+
+(defun shader-host-shareable-p (type)
+  (ignore-errors (shader-host-layout type) t))
+
+(defun compute-shader-struct-layout (struct)
+  "Set STRUCT's offsets, size, and alignment, or record why it has none."
+  (handler-case
+      (let ((offset 0) (alignment 1))
+        (dolist (field (shader-struct-type-fields struct))
+          (multiple-value-bind (size field-alignment)
+              (shader-host-layout (shader-struct-field-type field)
+                                  (shader-object-source-form field))
+            (unless (zerop (mod offset field-alignment))
+              (error 'shader-language-error
+                     :form (shader-object-source-form field)
+                     :reason :unaligned-struct-field
+                     :details (list (shader-object-name field)
+                                    :offset offset
+                                    :alignment field-alignment)))
+            (setf (shader-struct-field-offset field) offset
+                  alignment (max alignment field-alignment))
+            (incf offset size)))
+        (unless (zerop (mod offset alignment))
+          (error 'shader-language-error
+                 :form (shader-struct-type-source-form struct)
+                 :reason :unpadded-struct-size
+                 :details (list :size offset :alignment alignment)))
+        (setf (shader-struct-type-size struct) offset
+              (shader-struct-type-alignment struct) alignment
+              (shader-struct-type-layout-error struct) nil))
+    (shader-language-error (condition)
+      (dolist (field (shader-struct-type-fields struct))
+        (setf (shader-struct-field-offset field) nil))
+      (setf (shader-struct-type-size struct) nil
+            (shader-struct-type-alignment struct) nil
+            (shader-struct-type-layout-error struct)
+            (list (shader-language-error-reason condition)
+                  (shader-language-error-details condition))))))
+
+(defvar *shader-struct-operations* (make-hash-table :test #'eq)
+  "Constructor and accessor symbols of the defined structures:
+SYMBOL -> (STRUCT . FIELD), with FIELD :CONSTRUCTOR for the constructor.")
+
+(defun shader-struct-operation (symbol)
+  "Return the structure and field (or :CONSTRUCTOR) SYMBOL operates on."
+  (let ((entry (and (symbolp symbol)
+                    (gethash symbol *shader-struct-operations*))))
+    (values (car entry) (cdr entry))))
+
+(defun make-shader-struct-type (name field-forms source-form)
+  (when (and (symbolp name)
+             (let ((existing (gethash name *shader-types*)))
+               (and existing (not (typep existing 'shader-struct-type)))))
+    (error 'shader-language-error
+           :form source-form :reason :struct-name-is-a-type :details name))
+  (unless (and (symbolp name) (listp field-forms) field-forms)
+    (error 'shader-language-error
+           :form source-form :reason :empty-struct :details name))
+  (let* ((package (or (symbol-package name) *package*))
+         (struct
+           (make-instance
+            'shader-struct-type
+            :name name :source-form source-form
+            :constructor (intern (format nil "MAKE-~A" (symbol-name name))
+                                 package))))
+    (setf (shader-struct-type-fields struct)
+          (loop with names = nil
+                for field-form in field-forms
+                for index from 0
+                collect
+                (destructuring-bind (field-name field-type) field-form
+                  (unless (symbolp field-name)
+                    (error 'shader-language-error
+                           :form field-form :reason :invalid-struct-field))
+                  (when (find field-name names :test #'shader-symbol=)
+                    (error 'shader-language-error
+                           :form field-form :reason :duplicate-struct-field
+                           :details field-name))
+                  (push field-name names)
+                  (let ((type (find-shader-type field-type field-form)))
+                    (when (shader-type-opaque-kind type)
+                      (error 'shader-language-error
+                             :form field-form :reason :opaque-struct-field
+                             :details field-type))
+                    (make-instance
+                     'shader-struct-field
+                     :name field-name :struct struct :type type :index index
+                     :accessor (intern (format nil "~A-~A" (symbol-name name)
+                                               (symbol-name field-name))
+                                       package)
+                     :source-form field-form)))))
+    (compute-shader-struct-layout struct)
+    struct))
+
+(defun register-shader-struct-type (struct)
+  "Install STRUCT's type, constructor, and accessors, replacing any older
+definition of the same name."
+  (let ((old (gethash (shader-type-name struct) *shader-types*)))
+    (when (typep old 'shader-struct-type)
+      (remhash (shader-struct-type-constructor old) *shader-struct-operations*)
+      (dolist (field (shader-struct-type-fields old))
+        (remhash (shader-struct-field-accessor field)
+                 *shader-struct-operations*))))
+  (dolist (symbol (cons (shader-struct-type-constructor struct)
+                        (mapcar #'shader-struct-field-accessor
+                                (shader-struct-type-fields struct))))
+    (when (or (shader-operator-p symbol)
+              (shader-function-definition-for symbol))
+      (error 'shader-language-error
+             :form (shader-struct-type-source-form struct)
+             :reason :struct-operation-name-taken :details symbol)))
+  (setf (gethash (shader-type-name struct) *shader-types*) struct
+        (gethash (shader-struct-type-constructor struct)
+                 *shader-struct-operations*)
+        (cons struct :constructor))
+  (dolist (field (shader-struct-type-fields struct))
+    (setf (gethash (shader-struct-field-accessor field)
+                   *shader-struct-operations*)
+          (cons struct field)))
+  struct)
+
+(defmacro define-shader-struct (name &body fields)
+  "Define NAME as a shader structure of FIELDS, each (FIELD-NAME TYPE),
+with a constructor MAKE-NAME taking every field by keyword and an accessor
+NAME-FIELD-NAME for each field, as DEFSTRUCT names them.  #V16OXI"
+  (let* ((documentation (and (stringp (first fields)) (first fields)))
+         (fields (if documentation (rest fields) fields)))
+    `(progn
+       (register-shader-struct-type
+        (make-shader-struct-type
+         ',name ',fields '(define-shader-struct ,name ,@fields)))
+       ,@(when documentation
+           `((setf (documentation ',name 'shader-struct) ,documentation)))
+       (note-shader-source-redefinition ',name)
+       ',name)))
+
+(defvar *shader-struct-documentation* (make-hash-table :test #'eq))
+
+(defmethod documentation ((name symbol) (type (eql 'shader-struct)))
+  (gethash name *shader-struct-documentation*))
+
+(defmethod (setf documentation)
+    (new-value (name symbol) (type (eql 'shader-struct)))
+  (if new-value
+      (setf (gethash name *shader-struct-documentation*) new-value)
+      (progn (remhash name *shader-struct-documentation*) nil)))
+
+(defclass shader-struct-construction (shader-expression)
+  ((values
+    :initarg :values
+    :reader shader-struct-construction-values
+    :documentation "One expression per field, in field order."))
+  (:documentation "A structure value built from one value per field."))
+
+(defclass shader-struct-field-read (shader-expression)
+  ((operand
+    :initarg :operand
+    :reader shader-struct-field-read-operand)
+   (field
+    :initarg :field
+    :reader shader-struct-field-read-field))
+  (:documentation "One field of a structure value."))
+
+(defmethod shader-expression-children ((expression shader-struct-construction))
+  (shader-struct-construction-values expression))
+
+(defmethod shader-expression-children ((expression shader-struct-field-read))
+  (list (shader-struct-field-read-operand expression)))
+
+(defmethod lang:arithmetic-expression-children
+    ((expression shader-struct-construction))
+  (shader-struct-construction-values expression))
+
+(defmethod lang:arithmetic-expression-children
+    ((expression shader-struct-field-read))
+  (list (shader-struct-field-read-operand expression)))
+
+(defmethod shader-expression-form ((expression shader-struct-construction))
+  (shader-expression-source-form expression))
+
+(defmethod shader-expression-form ((expression shader-struct-field-read))
+  (shader-expression-source-form expression))
+
+;;; Structure values and their fields are raw representations, like buffer
+;;; elements: a field means something once a shader interprets it.
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-struct-construction))
+  (declare (ignore expression))
+  nil)
+
+(defmethod shader-expression-quantity-checked-p
+    ((expression shader-struct-field-read))
+  (declare (ignore expression))
+  nil)
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
+    ((expression shader-struct-construction))
+  (declare (ignore expression))
+  nil)
+
+(defmethod lang:arithmetic-expression-quantity-checked-p
+    ((expression shader-struct-field-read))
+  (declare (ignore expression))
+  nil)
+
+(defun parse-shader-struct-operation (struct field form environment)
+  (if (eq field :constructor)
+      (let ((arguments (rest form))
+            (values nil))
+        (unless (evenp (length arguments))
+          (error 'shader-language-error
+                 :form form :reason :odd-struct-constructor-arguments))
+        (loop for (keyword value) on arguments by #'cddr
+              for field = (find keyword (shader-struct-type-fields struct)
+                                :key #'shader-object-name
+                                :test #'shader-symbol=)
+              do (unless field
+                   (error 'shader-language-error
+                          :form form :reason :unknown-struct-field
+                          :details keyword))
+                 (when (assoc field values)
+                   (error 'shader-language-error
+                          :form form :reason :duplicate-struct-field
+                          :details keyword))
+                 (let ((expression (parse-shader-expression value environment)))
+                   (unless (shader-type= (shader-struct-field-type field)
+                                         (shader-expression-type expression))
+                     (error 'shader-language-error
+                            :form form :reason :struct-field-type-mismatch
+                            :details
+                            (list (shader-object-name field)
+                                  (shader-type-name
+                                   (shader-struct-field-type field))
+                                  (shader-type-name
+                                   (shader-expression-type expression)))))
+                   (push (cons field expression) values)))
+        (let ((missing (remove-if (lambda (field) (assoc field values))
+                                  (shader-struct-type-fields struct))))
+          (when missing
+            (error 'shader-language-error
+                   :form form :reason :missing-struct-fields
+                   :details (mapcar #'shader-object-name missing))))
+        (make-instance 'shader-struct-construction
+                       :values (mapcar (lambda (field)
+                                         (cdr (assoc field values)))
+                                       (shader-struct-type-fields struct))
+                       :type struct
+                       :quantity-specification nil :quantity-layout nil
+                       :source-form form))
+      (progn
+        (unless (= (length form) 2)
+          (error 'shader-language-error
+                 :form form :reason :struct-accessor-arity))
+        (let ((operand (parse-shader-expression (second form) environment)))
+          (unless (eq struct (find-shader-type
+                              (shader-expression-type operand)))
+            (error 'shader-language-error
+                   :form form :reason :struct-accessor-type-mismatch
+                   :details (list (shader-type-name struct)
+                                  (shader-type-name
+                                   (shader-expression-type operand)))))
+          (make-instance 'shader-struct-field-read
+                         :operand operand :field field
+                         :type (shader-struct-field-type field)
+                         :quantity-specification nil :quantity-layout nil
+                         :source-form form)))))
+
+(defun shader-specification-struct-types (specification)
+  "Every structure type SPECIFICATION's values and buffers use, each after
+the structures it contains, so a target can declare them in order."
+  (let ((seen (make-hash-table :test #'eq))
+        (types nil))
+    (labels ((note-type (type)
+               (let ((type (find-shader-type type)))
+                 (when (and (typep type 'shader-struct-type)
+                            (not (member type types)))
+                   (dolist (field (shader-struct-type-fields type))
+                     (note-type (shader-struct-field-type field)))
+                   (unless (member type types)
+                     (push type types)))))
+             (visit (expression)
+               (unless (gethash expression seen)
+                 (setf (gethash expression seen) t)
+                 (note-type (shader-expression-type expression))
+                 (typecase expression
+                   (shader-reference
+                    (let ((target (shader-reference-target expression)))
+                      (when (typep target 'shader-binding)
+                        (visit (shader-binding-expression target)))))
+                   (shader-function-call
+                    (mapc #'visit (shader-function-call-arguments expression))
+                    (dolist (binding
+                             (shader-function-call-bindings expression))
+                      (visit (shader-binding-expression binding)))
+                    (visit (shader-function-call-result expression)))
+                   (t
+                    (mapc #'visit (shader-expression-children expression)))))))
+      (dolist (resource (shader-specification-resources specification))
+        (when (typep resource 'shader-storage-buffer)
+          (note-type (shader-storage-buffer-element-type resource))))
+      (dolist (binding (shader-specification-bindings specification))
+        (visit (shader-binding-expression binding)))
+      (dolist (statement (shader-specification-statements specification))
+        (mapc #'visit (shader-statement-expressions statement))))
+    (nreverse types)))
+
 ;;; Shader functions are typed source composition.  Authors write an ordinary
 ;;; expression body, including lexical LET*, and every call is parsed against
 ;;; its actual arguments into an inspectable SHADER-FUNCTION-CALL.  Backends
@@ -3068,6 +3473,10 @@ loop header, so it may not itself fold."
            (parse-shader-counted-fold form environment))
           ((eq operator 'if)
            (parse-shader-conditional form environment))
+          ((shader-struct-operation operator)
+           (multiple-value-bind (struct field)
+               (shader-struct-operation operator)
+             (parse-shader-struct-operation struct field form environment)))
           ((shader-operator-p operator)
            (parse-shader-operator-call operator form environment))
           (function
@@ -3619,10 +4028,14 @@ NIL leaves the character to the named definition; T is the historical
                                (member (shader-type-component-count
                                         element-type)
                                        '(1 2 4)))
-                          (shader-type= element-type :mat4)))
+                          (shader-type= element-type :mat4)
+                          (shader-struct-type-p element-type)))
            (error 'shader-language-error
                   :form form :reason :invalid-storage-buffer-element
                   :details element))
+         (when (shader-struct-type-p element-type)
+           ;; Signals the structure's own layout complaint.
+           (shader-host-layout element-type form))
          (when members
            (error 'shader-language-error
                   :form form :reason :members-on-opaque-resource))

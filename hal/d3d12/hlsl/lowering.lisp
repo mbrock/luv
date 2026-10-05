@@ -79,6 +79,12 @@
    "A cbuffer holding one structure-typed member, so a uniform block reads
 as BLOCK.MEMBER exactly as it does in MSL."))
 
+(defclass hlsl-struct-constructor-declaration ()
+  ((struct :initarg :struct :reader hlsl-struct-constructor-struct))
+  (:documentation
+   "A function building one structure value from its fields: HLSL has
+initializer lists only in declarations, not in expressions."))
+
 (defclass hlsl-parameter ()
   ((type :initarg :type :reader hlsl-parameter-type)
    (name :initarg :name :reader hlsl-parameter-name)
@@ -246,6 +252,10 @@ as BLOCK.MEMBER exactly as it does in MSL."))
         (write-string suffix stream)))))
 
 (defun hlsl-type-name (type &optional source-form)
+  (when (shader:shader-struct-type-p (shader:find-shader-type type source-form))
+    (return-from hlsl-type-name
+      (hlsl-structure-name-for
+       (shader:shader-type-name (shader:find-shader-type type)))))
   (case (shader:shader-type-name (shader:find-shader-type type source-form))
     (:bool "bool")
     (:float "float")
@@ -374,6 +384,70 @@ columns, consecutive in memory, are the rows of a row_major HLSL matrix."
     ((context hlsl-lowering-context) (expression shader:shader-call))
   (shader:lower-shader-call (shader:shader-call-operator expression)
                             context expression))
+
+(defun hlsl-struct-constructor-name (struct)
+  ;; Field and local identifiers are lower case, so this cannot collide.
+  (format nil "construct_~A" (hlsl-type-name struct)))
+
+(defmethod lower-hlsl-expression
+    ((context hlsl-lowering-context)
+     (expression shader:shader-struct-construction))
+  ;; #V16OXI
+  (note-hlsl-occurrence
+   context expression
+   (format nil "~A(~{~A~^, ~})"
+           (hlsl-struct-constructor-name (shader:shader-expression-type expression))
+           (mapcar (lambda (value)
+                     (hlsl-text (lower-hlsl-expression context value)))
+                   (shader:shader-struct-construction-values expression)))))
+
+(defmethod lower-hlsl-expression
+    ((context hlsl-lowering-context)
+     (expression shader:shader-struct-field-read))
+  (note-hlsl-occurrence
+   context expression
+   (format nil "~A.~A"
+           (hlsl-text (lower-hlsl-expression
+                       context
+                       (shader:shader-struct-field-read-operand expression)))
+           (hlsl-identifier
+            (shader:shader-object-name
+             (shader:shader-struct-field-read-field expression))))))
+
+(defun hlsl-struct-declarations (specification)
+  "Each structure SPECIFICATION uses, contained ones first, with its
+constructor function.  Matrix fields are row_major, as in buffers, so a
+structured buffer of them has the language's layout."
+  (loop for struct in (shader:shader-specification-struct-types specification)
+        collect (make-instance
+                 'hlsl-structure-declaration
+                 :name (hlsl-type-name struct)
+                 :fields
+                 (mapcar (lambda (field)
+                           (make-instance
+                            'hlsl-field
+                            :type (hlsl-field-type-name
+                                   (shader:shader-struct-field-type field))
+                            :name (hlsl-identifier
+                                   (shader:shader-object-name field))))
+                         (shader:shader-struct-type-fields struct)))
+        collect (make-instance 'hlsl-struct-constructor-declaration
+                               :struct struct)))
+
+(defun check-hlsl-structure-names (declarations)
+  "A structure the author defined must not share a generated one's name."
+  (let ((seen nil))
+    (dolist (declaration declarations declarations)
+      (let ((name (typecase declaration
+                    (hlsl-structure-declaration
+                     (hlsl-structure-name declaration))
+                    (hlsl-constant-buffer-declaration
+                     (hlsl-resource-type declaration)))))
+        (when name
+          (when (member name seen :test #'string=)
+            (error 'shader:shader-language-error
+                   :reason :hlsl-structure-name-collision :details name))
+          (push name seen))))))
 
 (defun lower-hlsl-local-binding (context binding)
   "Lower BINDING to a local declaration, returning the statements it needs."
@@ -1331,6 +1405,26 @@ the contract numbers them together although HLSL registers would not clash."
           (hlsl-resource-name declaration)))
 
 (defmethod write-hlsl-declaration
+    ((declaration hlsl-struct-constructor-declaration) stream)
+  (let* ((struct (hlsl-struct-constructor-struct declaration))
+         (fields (shader:shader-struct-type-fields struct))
+         (names (mapcar (lambda (field)
+                          (hlsl-identifier (shader:shader-object-name field)))
+                        fields)))
+    (format stream "~A ~A(~{~A~^, ~}) {~%"
+            (hlsl-type-name struct) (hlsl-struct-constructor-name struct)
+            (loop for field in fields
+                  for name in names
+                  collect (format nil "~A ~A"
+                                  (hlsl-type-name
+                                   (shader:shader-struct-field-type field))
+                                  name)))
+    (format stream "  ~A constructed_;~%" (hlsl-type-name struct))
+    (dolist (name names)
+      (format stream "  constructed_.~A = ~:*~A;~%" name))
+    (format stream "  return constructed_;~%}~%")))
+
+(defmethod write-hlsl-declaration
     ((declaration hlsl-resource-declaration) stream)
   (write-hlsl-semantic-comments
    (hlsl-resource-origin declaration) stream "" :sampled-p t)
@@ -1520,6 +1614,9 @@ declarations, so the pixel input signature mirrors it exactly."
             (lower-hlsl-compute-specification context entry-point-name)
             (lower-hlsl-traditional-specification
              context entry-point-name interface))
+      (setf declarations
+            (check-hlsl-structure-names
+             (append (hlsl-struct-declarations specification) declarations)))
       (maphash (lambda (expression occurrences)
                  (setf (gethash expression
                                 (hlsl-context-expression-occurrences context))

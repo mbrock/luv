@@ -609,3 +609,52 @@ access chain named: (ID . INDEX)."
             (remove-if-not (lambda (operation)
                              (and (second operation) (third operation)))
                            (matrix-operations disassembly)))))))
+
+;;; Structures.  #V16OXI
+
+(shader:define-shader-struct hlsl-instance
+  (transform :mat4)
+  (tint :vec4)
+  (cell :ivec2)
+  (layer :uint)
+  (weight :float))
+
+(shader:define-shader hlsl-struct-probe
+    (:stage :compute
+     :workgroup-size (64 1 1)
+     :inputs ((thread :uvec3 :built-in :global-invocation-id))
+     :resources ((instances :storage-buffer :binding 0
+                            :element hlsl-instance :access :read-write)
+                 (sources :storage-buffer :binding 1 :element hlsl-instance)))
+  (let* ((index (shader:swizzle thread :x))
+         (source (shader:buffer-element sources index))
+         (moved (make-hlsl-instance
+                 :transform (* (hlsl-instance-transform source)
+                               (hlsl-instance-transform source))
+                 :tint (* (hlsl-instance-transform source)
+                          (hlsl-instance-tint source))
+                 :cell (+ (hlsl-instance-cell source)
+                          (shader:ivec2 (shader:int 1) (shader:int -1)))
+                 :layer (hlsl-instance-layer source)
+                 :weight 0.5)))
+    (shader:set-buffer-element instances index moved)))
+
+(define-test structures-lower-to-hlsl-structured-buffers
+  (multiple-value-bind (source document) (source-of (hlsl-struct-probe))
+    (true (search "struct HlslInstance {
+  row_major float4x4 transform;
+  float4 tint;
+  int2 cell;
+  uint layer;
+  float weight;
+};" source))
+    ;; HLSL initializes structures only in declarations, so each has a
+    ;; constructor function.
+    (true (search "HlslInstance construct_HlslInstance(float4x4 transform, float4 tint, int2 cell, uint layer, float weight) {"
+                  source))
+    (true (search "RWStructuredBuffer<HlslInstance> instances" source))
+    (true (search "StructuredBuffer<HlslInstance> sources" source))
+    (true (search "mul(source.transform, source.transform)" source))
+    (true (search "mul(source.tint, source.transform)" source))
+    (true (search "instances[index] = moved;" source))
+    (compiles document)))

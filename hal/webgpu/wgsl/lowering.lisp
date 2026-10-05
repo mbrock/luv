@@ -121,6 +121,10 @@ defaults.  Other source values retain the native folded-literal semantics."))
       (write-string suffix stream))))
 
 (defun wgsl-type-name (type &optional source-form)
+  (when (shader:shader-struct-type-p (shader:find-shader-type type source-form))
+    (return-from wgsl-type-name
+      (wgsl-structure-name
+       (shader:shader-type-name (shader:find-shader-type type)) "")))
   (case (shader:shader-type-name (shader:find-shader-type type source-form))
     (:bool "bool")
     (:float "f32")
@@ -198,6 +202,40 @@ defaults.  Other source values retain the native folded-literal semantics."))
                  :default (shader:shader-literal-value expression)))))))
 
 (defgeneric lower-wgsl-expression (context expression))
+
+(defmethod lower-wgsl-expression
+    ((context wgsl-lowering-context)
+     (expression shader:shader-struct-construction))
+  ;; #V16OXI
+  (note-wgsl-occurrence
+   context expression
+   (format nil "~A(~{~A~^, ~})"
+           (wgsl-type-name (shader:shader-expression-type expression))
+           (mapcar (lambda (value)
+                     (wgsl-occurrence-text (lower-wgsl-expression context value)))
+                   (shader:shader-struct-construction-values expression)))))
+
+(defmethod lower-wgsl-expression
+    ((context wgsl-lowering-context)
+     (expression shader:shader-struct-field-read))
+  (note-wgsl-occurrence
+   context expression
+   (format nil "~A.~A"
+           (wgsl-occurrence-text
+            (lower-wgsl-expression
+             context (shader:shader-struct-field-read-operand expression)))
+           (wgsl-identifier
+            (shader:shader-object-name
+             (shader:shader-struct-field-read-field expression))))))
+
+(defun write-wgsl-struct-declarations (stream specification)
+  (dolist (struct (shader:shader-specification-struct-types specification))
+    (format stream "struct ~A {~%" (wgsl-type-name struct))
+    (dolist (field (shader:shader-struct-type-fields struct))
+      (format stream "  ~A: ~A,~%"
+              (wgsl-identifier (shader:shader-object-name field))
+              (wgsl-type-name (shader:shader-struct-field-type field))))
+    (format stream "}~%~%")))
 
 (defmethod lower-wgsl-expression
     ((context wgsl-lowering-context) (expression shader:shader-literal))
@@ -993,6 +1031,7 @@ defaults.  Other source values retain the native folded-literal semantics."))
                 (wgsl-override-type override)
                 (wgsl-float-literal (wgsl-override-default override))))
       (when (encountered-wgsl-overrides context) (terpri stream))
+      (write-wgsl-struct-declarations stream specification)
       (dolist (resource (shader:shader-specification-resources specification))
         (write-wgsl-uniform-block stream resource))
       (let ((input-name
