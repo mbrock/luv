@@ -4093,7 +4093,9 @@ NIL leaves the character to the named definition; T is the historical
               quantity dimension unit (declared-character affine-p character)
               resolved-type form)))
       ;; Stages exchange numbers: no booleans, matrices, or opaque values.
-      (unless (shader-numeric-type-p resolved-type)
+      ;; A boolean built-in, such as :FRONT-FACING, comes from the system.
+      (unless (or (shader-numeric-type-p resolved-type)
+                  (and built-in (shader-type= resolved-type :bool)))
         (error 'shader-language-error
                :form form :reason :invalid-interface-type :details type))
       (make-instance 'shader-interface-variable

@@ -169,9 +169,11 @@ guaranteed minimum, below Direct3D's and Metal's 32 KiB.")
                   (destructuring-bind (name type count) form
                     (let ((element-type (find-shader-type type form)))
                       (unless (and (shader-type-component-count element-type)
+                                   (null (shader-type-column-count
+                                          element-type))
                                    (member (shader-type-scalar-kind
                                             element-type)
-                                           '(:float :uint))
+                                           '(:float :uint :int))
                                    (= 32 (shader-type-bit-width element-type)))
                         (error 'shader-language-error
                                :form form :reason :invalid-shared-array-element
@@ -465,7 +467,8 @@ MSL must type these as atomic_uint and access them only atomically."
    (lambda (types)
      (and (= 1 (length types))
           (eql 1 (shader-type-component-count (first types)))
-          (member (shader-type-scalar-kind (first types)) '(:float :uint))
+          (member (shader-type-scalar-kind (first types))
+                  '(:float :uint :int))
           (= 32 (shader-type-bit-width (first types)))))
    operands source-form :invalid-wave-sum)
   (shader-expression-type (first operands)))
