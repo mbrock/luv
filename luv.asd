@@ -109,7 +109,7 @@
   :description "Literal SPIR-V modules and lowering for luv's shader language."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("cffi" "closer-mop" "luv/shader")
+  :depends-on ("closer-mop" "luv/shader")
   :serial t
   :components ((:file "hal/vulkan/spir-v/package")
                (:file "hal/vulkan/spir-v/instructions")
@@ -167,10 +167,10 @@
                (:file "hal/shader/slug-shader")))
 
 (defsystem "luv/shaderc"
-  :description "Ahead-of-time shader programs: MSL, HLSL, and their reflection."
+  :description "Ahead-of-time shader programs: MSL, HLSL, SPIR-V, and their reflection."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/msl" "luv/hlsl" "luv/slug-shader")
+  :depends-on ("luv/msl" "luv/hlsl" "luv/spir-v" "luv/slug-shader")
   :serial t
   :components ((:file "hal/shaderc/package")
                (:file "hal/shaderc/shaderc")

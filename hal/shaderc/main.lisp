@@ -3,19 +3,22 @@
 (in-package #:luv.shaderc)
 
 (defparameter *usage*
-  "Usage: luv-shaderc --out DIR [--target msl] [--target hlsl] FILE.lisp...
+  "Usage: luv-shaderc --out DIR [--target msl|hlsl|spirv]... FILE.lisp...
 
 Compile every DEFINE-SHADER-PROGRAM in the given files.  For a program NAME
 it writes, into DIR:
 
   NAME.STAGE.metal   one MSL 4 document per stage
   NAME.STAGE.hlsl    one HLSL document per stage (DXC, shader model 6.0)
+  NAME.STAGE.spv     one SPIR-V module per stage (Vulkan, every resource in
+                     set 0: buffers from binding 0, textures from 16,
+                     storage textures from 32, samplers from 48)
   NAME.json          stages, entry points, resources, and fragment outputs
   NAME.hh            the same reflection for C++ (moppe/nhal/reflection.hh)
 
 Files are read in package LUV.SHADER-USER, which uses COMMON-LISP and the
-shader language, unless they say IN-PACKAGE.  Without --target, both
-languages are written.
+shader language, unless they say IN-PACKAGE.  Without --target, every
+language is written.
 ")
 
 (defun parse-command-line (arguments)
@@ -36,8 +39,9 @@ languages are written.
                     (pushnew
                      (cond ((equal target "msl") :msl)
                            ((equal target "hlsl") :hlsl)
+                           ((equal target "spirv") :spir-v)
                            (t (shaderc-fail "Unknown target ~S; expected ~
-                                             msl or hlsl." target)))
+                                             msl, hlsl, or spirv." target)))
                      targets)))
                  ((and (plusp (length argument))
                        (char= #\- (char argument 0)))

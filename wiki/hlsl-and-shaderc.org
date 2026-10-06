@@ -9,9 +9,10 @@
 The mathematical shader language (#S4H8DR) now has a third textual lowering
 and a consumer outside the live image.  =luv/hlsl= lowers the same typed graph
 to HLSL for DXC, and =luv-shaderc= compiles named programs ahead of time into
-MSL, HLSL, and the reflection a native C++ renderer builds its pipelines from.
-The first such renderer is moppe's NHAL: Metal 4 on Apple platforms and
-Direct3D 12 on an Xbox Series in Developer Mode, shader model 6.4 at most.
+MSL, HLSL, SPIR-V, and the reflection a native C++ renderer builds its
+pipelines from.  The first such renderer is moppe's NHAL: Metal 4 on Apple
+platforms, Direct3D 12 on an Xbox Series in Developer Mode (shader model 6.4
+at most), and Vulkan.
 
 #+begin_example
 shader source file (DEFINE-SHADER, DEFINE-SHADER-PROGRAM)
@@ -22,6 +23,7 @@ shader-program-linkage -- resources in binding families, stage interface
         |
         +-- compile-msl  --> NAME.STAGE.metal
         +-- compile-hlsl --> NAME.STAGE.hlsl   (DXC: vs_6_0 / ps_6_0 / cs_6_0)
+        +-- luv.spir-v   --> NAME.STAGE.spv    (families folded into set 0)
         +-- program-json --> NAME.json
         `-- program-header -> NAME.hh          (moppe/nhal/reflection.hh)
 #+end_example
@@ -243,7 +245,7 @@ indirect-draw argument record, whose five words Direct3D's
 :END:
 
 #+begin_example
-nix run github:mbrock/luv#luv-shaderc -- --out DIR [--target msl] [--target hlsl] FILE.lisp...
+nix run github:mbrock/luv#luv-shaderc -- --out DIR [--target msl|hlsl|spirv]... FILE.lisp...
 #+end_example
 
 [[file:../hal/shaderc/shaderc.lisp][=hal/shaderc/=]] reads each file in =LUV.SHADER-USER= (Common Lisp plus the
@@ -252,8 +254,8 @@ checks moppe's binding contract (=docs/nhal.md= there): buffer and texture
 bindings below 16, descriptor set 0, the standard sampler set by number (3 is
 the comparison sampler), and no vertex attributes, since vertex stages pull
 from storage buffers.  For a program =NAME= it writes =NAME.STAGE.metal=,
-=NAME.STAGE.hlsl=, =NAME.json=, and =NAME.hh=; every entry point is
-=name_stage= in both languages.  Errors name the file, the failing form's
+=NAME.STAGE.hlsl=, =NAME.STAGE.spv=, =NAME.json=, and =NAME.hh=; every entry
+point is =name_stage= in every language.  Errors name the file, the failing form's
 line, the program and stage, the language's reason, and the source form, and
 exit nonzero.  [[file:../hal/shaderc/examples/textured-instances.lisp][=examples/textured-instances.lisp=]] pulls vertices and
 instances, samples a texture, and compares a shadow map;
@@ -269,6 +271,15 @@ The resource kinds in the manifest and header are the enumerators of moppe's
 manifest entry also names its =format=, its family =storage_texture=, and its
 Metal index =[[texture(16 + N)]]=.  A compute program's header carries its
 workgroup size in the =Program= value itself, =.workgroup_size = {64, 1, 1}=.
+
+The SPIR-V modules come from Luv's own Vulkan lowering,
+[[file:../hal/vulkan/spir-v/lowering.lisp][=hal/vulkan/spir-v/=]], which takes the entry point's name and a function
+placing each resource.  Vulkan numbers bindings once per descriptor set, so
+the families that Metal and Direct3D keep apart share set 0 at fixed bases:
+buffers from binding 0, sampled textures from 16, storage textures from 32,
+and the standard samplers from 48.  A renderer can push the whole set per
+draw; each entry's manifest records its place, ="spirv": "set 0, binding
+17"=.
 [[file:../hal/shaderc/fixtures/moppe/nhal/reflection.hh][=fixtures/moppe/nhal/reflection.hh=]] is a copy of moppe's header for those
 tests; refresh it when moppe's changes.
 

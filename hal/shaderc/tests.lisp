@@ -256,8 +256,10 @@ return their failures."
              (is = 1 (length programs))
              (is equal '("textured_instances.vertex.metal"
                          "textured_instances.vertex.hlsl"
+                         "textured_instances.vertex.spv"
                          "textured_instances.fragment.metal"
                          "textured_instances.fragment.hlsl"
+                         "textured_instances.fragment.spv"
                          "textured_instances.json"
                          "textured_instances.hh")
                  (mapcar #'file-namestring written))
@@ -378,23 +380,20 @@ return their failures."
            (multiple-value-bind (programs written)
                (shaderc:compile-shader-files (list *compute-example*)
                                              :directory directory)
+             (is = 1 (length programs))
              (is equal '("particle_advance.compute.metal"
                          "particle_advance.compute.hlsl"
+                         "particle_advance.compute.spv"
                          "particle_advance.json"
                          "particle_advance.hh")
                  (mapcar #'file-namestring written))
-             (let* ((program (shaderc:compiled-program-linkage
-                              (first programs)))
-                    (specification
-                      (shader:shader-program-linkage-specification
-                       program :compute))
-                    (header (uiop:read-file-string
+             (let* ((header (uiop:read-file-string
                              (merge-pathnames "particle_advance.hh"
                                               directory)))
                     (json (uiop:read-file-string
                            (merge-pathnames "particle_advance.json"
                                             directory)))
-                    (spir-v (merge-pathnames "particle_advance.spv"
+                    (spir-v (merge-pathnames "particle_advance.compute.spv"
                                              directory)))
                (true (search "ResourceKind::read_write_storage_buffer, 1,"
                              header))
@@ -406,10 +405,9 @@ return their failures."
                                             directory)))
                (true (search "\"hlsl\": \"u1, space0\"" json))
                (true (search "\"hlsl_profile\": \"cs_6_0\"" json))
-               ;; The same specification is a GLCompute module for Vulkan.
-               (spv:write-spir-v (spv:assemble-shader-specification
-                                  specification)
-                                 spir-v)
+               ;; Vulkan's module folds the families into set 0: the
+               ;; read-write buffer keeps buffer binding 1.
+               (true (search "\"spirv\": \"set 0, binding 1\"" json))
                (when (tool-available-p "spirv-val" "--version")
                  (is eq nil (run-tool
                              (list "spirv-val" "--target-env" "vulkan1.0"

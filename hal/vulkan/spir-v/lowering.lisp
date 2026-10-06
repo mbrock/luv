@@ -83,7 +83,12 @@
     :reader context-shared-array-variables)
    (basic-blocks :initform nil :accessor context-basic-blocks)
    (current-block :initform nil :accessor context-current-block)
-   (instructions :initform nil :accessor context-instructions)))
+   (instructions :initform nil :accessor context-instructions)
+   (resource-binding
+    :initarg :resource-binding :initform nil
+    :reader context-resource-binding
+    :documentation "NIL, or a function of a resource declaration returning
+its descriptor set and binding in place of the declared ones.")))
 
 (defun begin-shader-basic-block (context label)
   (let ((block (make-instance 'spir-v-basic-block :label label)))
@@ -539,14 +544,15 @@ Modules whose expressions use no extended mathematics never acquire one."
        (setf (context-interfaces context)
              (nconc (context-interfaces context) (list variable-id))))
       (shader-resource
-       (append-context-form
-        'annotations context
-        (list 'decorate variable-id 'descriptor-set
-              (shader-resource-descriptor-set declaration)))
-       (append-context-form
-        'annotations context
-        (list 'decorate variable-id 'binding
-              (shader-resource-binding declaration)))
+       (multiple-value-bind (set binding)
+           (if (context-resource-binding context)
+               (funcall (context-resource-binding context) declaration)
+               (values (shader-resource-descriptor-set declaration)
+                       (shader-resource-binding declaration)))
+         (append-context-form 'annotations context
+                              (list 'decorate variable-id 'descriptor-set set))
+         (append-context-form 'annotations context
+                              (list 'decorate variable-id 'binding binding)))
        ;; SPIR-V 1.4 modules list every global the entry point touches.
        (when (member (context-stage context) '(:task :mesh))
          (setf (context-interfaces context)
@@ -2130,10 +2136,16 @@ OpShift* wants as many count components as value components."
               :literals (list
                          (shader-mesh-output-max-primitives mesh-output)))))))))))
 
-(defun compile-shader-specification (specification)
-  "Lower SPECIFICATION and retain bidirectional expression/instruction links."
+(defun compile-shader-specification (specification
+                                     &key (entry-point-name "main")
+                                          resource-binding)
+  "Lower SPECIFICATION and retain bidirectional expression/instruction links.
+The module's entry point is ENTRY-POINT-NAME.  RESOURCE-BINDING, when given,
+is a function of each resource declaration returning its descriptor set and
+binding, for hosts whose binding families share one descriptor set."
   (check-type specification shader-specification)
-  (let* ((context (make-instance 'shader-lowering-context))
+  (let* ((context (make-instance 'shader-lowering-context
+                                 :resource-binding resource-binding))
          (void-id (ensure-void-type-id context))
          (main-id (reserve-shader-id context "MAIN"))
          (storage-buffers
@@ -2215,6 +2227,7 @@ OpShift* wants as many count components as value components."
                      (shader-entry-execution-model
                       (shader-specification-stage specification))
                      :function main-id
+                     :name entry-point-name
                      :interfaces (context-interfaces context)))
               :execution-modes
               (append (shader-execution-modes specification main-id)
@@ -2248,8 +2261,12 @@ OpShift* wants as many count components as value components."
   (declare (ignore target))
   (compile-shader-specification specification))
 
-(defun shader-module (specification)
-  (shader-lowering-module (compile-shader-specification specification)))
+(defun shader-module (specification &rest options)
+  "SPECIFICATION's structured module; OPTIONS are COMPILE-SHADER-SPECIFICATION's."
+  (shader-lowering-module
+   (apply #'compile-shader-specification specification options)))
 
-(defun assemble-shader-specification (specification)
-  (assemble-spir-v-module (shader-module specification)))
+(defun assemble-shader-specification (specification &rest options)
+  "SPECIFICATION as assembled SPIR-V words; OPTIONS are
+COMPILE-SHADER-SPECIFICATION's."
+  (assemble-spir-v-module (apply #'shader-module specification options)))

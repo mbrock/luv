@@ -682,9 +682,7 @@
       (error 'spir-v-error :form form :reason :unknown-id :details name)))
 
 (defun single-float-word (value)
-  (cffi:with-foreign-object (storage :float)
-    (setf (cffi:mem-ref storage :float) (coerce value 'single-float))
-    (cffi:mem-ref storage :uint32)))
+  (ldb (byte 32 0) (sb-kernel:single-float-bits (coerce value 'single-float))))
 
 (defun literal-word (value form)
   (cond ((typep value '(unsigned-byte 32)) value)

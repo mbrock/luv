@@ -3,13 +3,14 @@
 ;;; A source file holds ordinary DEFINE-SHADER, DEFINE-SHADER-FUNCTION, and
 ;;; DEFINE-SHADER-PROGRAM forms.  Each program it defines is linked once
 ;;; (SHADER:LINK-SHADER-PROGRAM), checked against the binding contract the
-;;; renderer's hardware layer expects, lowered to one MSL and one HLSL
-;;; document per stage, and described twice for the host: as a JSON manifest
-;;; and as a C++ header of uniform structures and a resource table.  #1I6G0R
+;;; renderer's hardware layer expects, lowered to one MSL document, one HLSL
+;;; document, and one SPIR-V module per stage, and described twice for the
+;;; host: as a JSON manifest and as a C++ header of uniform structures and a
+;;; resource table.  #1I6G0R
 
 (in-package #:luv.shaderc)
 
-(defparameter *targets* '(:msl :hlsl)
+(defparameter *targets* '(:msl :hlsl :spir-v)
   "The shading languages written when a caller names none.")
 
 (define-condition shaderc-error (error)
@@ -127,6 +128,19 @@ An error names the failing top-level form's position in its context."
 (defparameter *binding-limit* 16
   "Buffer and texture binding numbers run from 0 below this limit.")
 
+(defparameter *spir-v-family-bases*
+  '((:buffer . 0) (:texture . 16) (:storage-texture . 32) (:sampler . 48))
+  "Vulkan has one binding space per descriptor set, so SPIR-V modules put
+every resource in set 0 at its family's base plus its binding number.")
+
+(defun spir-v-binding (family binding)
+  (+ (cdr (assoc family *spir-v-family-bases*)) binding))
+
+(defun spir-v-resource-binding (declaration)
+  "The descriptor set and binding of DECLARATION in a SPIR-V module."
+  (values 0 (spir-v-binding (shader:shader-resource-family declaration)
+                            (shader:shader-resource-binding declaration))))
+
 (defparameter *standard-samplers*
   '((0 :sampler "linear filtering, clamp to edge")
     (1 :sampler "linear filtering, repeat")
@@ -178,7 +192,9 @@ An error names the failing top-level form's position in its context."
     :initarg :specification :reader compiled-stage-specification)
    (entry-point :initarg :entry-point :reader compiled-stage-entry-point)
    (msl :initarg :msl :initform nil :reader compiled-stage-msl)
-   (hlsl :initarg :hlsl :initform nil :reader compiled-stage-hlsl)))
+   (hlsl :initarg :hlsl :initform nil :reader compiled-stage-hlsl)
+   (spir-v :initarg :spir-v :initform nil :reader compiled-stage-spir-v
+           :documentation "The stage's assembled SPIR-V words.")))
 
 (defclass compiled-program ()
   ((name :initarg :name :reader compiled-program-name
@@ -227,7 +243,13 @@ and lower every stage to each of TARGETS."
                               :interface
                               (and (eq stage :fragment) vertex
                                    (shader:shader-specification-outputs
-                                    vertex))))))))))))
+                                    vertex))))
+                  :spir-v (and (member :spir-v targets)
+                               (spv:assemble-shader-specification
+                                specification
+                                :entry-point-name entry
+                                :resource-binding
+                                #'spir-v-resource-binding))))))))))
 
 ;;; JSON, written by hand: the manifest is small and its shape is fixed.
 
@@ -397,7 +419,11 @@ the structures it contains.  #V16OXI"
                    (:read-write-texture-2d
                     (format nil "u~D, space1" binding))
                    ((:sampler :comparison-sampler)
-                    (format nil "s~D" binding)))))))
+                    (format nil "s~D" binding))))
+      ("spirv" . ,(format nil "set 0, binding ~D"
+                          (spir-v-binding
+                           (shader:shader-program-resource-family resource)
+                           binding))))))
 
 (defun resource-msl-index (resource)
   "Metal numbers storage textures after the sampled ones: texture(16 + i)."
@@ -436,7 +462,10 @@ the structures it contains.  #V16OXI"
                       ,@(when (compiled-stage-hlsl compiled-stage)
                           `(("hlsl" . ,(stage-file-name compiled stage "hlsl"))
                             ("hlsl_profile"
-                             . ,(hlsl:hlsl-profile stage)))))))
+                             . ,(hlsl:hlsl-profile stage))))
+                      ,@(when (compiled-stage-spir-v compiled-stage)
+                          `(("spirv" . ,(stage-file-name compiled stage
+                                                         "spv")))))))
                 (compiled-program-stages compiled))))
          ("resources"
           . (:array ,@(mapcar #'resource-json
@@ -642,7 +671,13 @@ Return the written pathnames."
           (when (compiled-stage-hlsl compiled-stage)
             (output (stage-file-name compiled stage "hlsl")
                     (hlsl:hlsl-document-source
-                     (compiled-stage-hlsl compiled-stage))))))
+                     (compiled-stage-hlsl compiled-stage))))
+          (when (compiled-stage-spir-v compiled-stage)
+            (push (spv:write-spir-v
+                   (compiled-stage-spir-v compiled-stage)
+                   (merge-pathnames (stage-file-name compiled stage "spv")
+                                    directory))
+                  written))))
       (output (format nil "~A.json" (compiled-program-name compiled))
               (program-json compiled))
       (output (format nil "~A.hh" (compiled-program-name compiled))

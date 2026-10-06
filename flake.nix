@@ -740,9 +740,9 @@
           };
         });
       # luv-shaderc compiles shader programs ahead of time for a native
-      # renderer.  It needs the shader language and its textual lowerings
-      # alone, so it is built from those sources by an SBCL holding only
-      # Closer-MOP: no SDL, Vulkan, Metal, McCLIM, or workbench.
+      # renderer.  It needs the shader language and its lowerings alone, so
+      # it is built from those sources by an SBCL holding only Closer-MOP:
+      # no SDL, Vulkan, Metal, McCLIM, or workbench.
       shadercPackage = system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
@@ -762,6 +762,7 @@
               ./hal/shader
               ./hal/metal/msl
               ./hal/d3d12
+              ./hal/vulkan/spir-v
               ./hal/shaderc
               ./scripts/build-luv-shaderc.lisp
             ];
