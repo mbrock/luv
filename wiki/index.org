@@ -176,10 +176,12 @@ The following are starting paths rather than a table of settled doctrine.
   agent surface in CLIM terms: tools as commands with presentation-typed
   arguments, results as presentations read under a model view, cassettes
   drawn on the HUD and committed to a wall, and an agent with a body.
-- [[file:compositor.org][Luvcraft as a Wayland compositor]] observes that luvcraft on a console
-  already owns the display and that the IOSurface portal is a small private
-  Wayland, then asks what a libwayland-server socket, dmabuf import, and
-  in-world window placement would add, including agent computer use.
+- [[file:compositor.org][A Wayland atelier]] observes that luvcraft on a console already owns the
+  display and that the IOSurface portal is a small private Wayland, then
+  proposes a third application beside Luvcraft and LUFT, a voxel-free
+  three-dimensional niri, as the first host of a luv-owned libwayland-server
+  socket with dmabuf import, in-world window placement, and agent computer
+  use.
 - [[file:luft.org][LUFT: packed sites, chains, and the atelier]] names every vertex, edge,
   face, and cell of a cubical world with one fixnum, treats a block world as a
   3-chain whose boundary is its surface, and draws that surface by vertex
