@@ -698,3 +698,24 @@ bind COMPILED to it, and run BODY."
                   (merge-pathnames "probe_program.hh" directory)))
       (is equal nil (native-diagnostics directory "probe_program"
                                         "fragment")))))
+
+(define-test scalar-products-scale-a-vector-in-spir-v
+  ;; (* 2.0 (dot n v) n) multiplies two floats before scaling the vector;
+  ;; the first step once took the whole product's vector type.
+  (let ((specification
+          (stage-probe 'reflect-fragment :fragment
+                       :inputs '((n :vec3 :location 0)
+                                 (v :vec3 :location 1))
+                       :outputs '((color :vec4 :location 0))
+                       :body '(shader:set-output color
+                               (shader:vec4 (- (* 2.0 (shader:dot n v) n) v)
+                                1.0)))))
+    (with-scratch-directory (directory)
+      (let ((path (ensure-directories-exist
+                   (merge-pathnames "reflect.spv" directory))))
+        (spv:write-spir-v (spv:assemble-shader-specification specification)
+                          path)
+        (when (tool-available-p "spirv-val" "--version")
+          (is eq nil (run-tool
+                      (list "spirv-val" "--target-env" "vulkan1.0"
+                            (uiop:native-namestring path)))))))))

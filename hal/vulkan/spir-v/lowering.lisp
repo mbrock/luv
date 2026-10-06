@@ -964,26 +964,28 @@ Modules whose expressions use no extended mathematics never acquire one."
              (list value (lower-shader-expression context operand)))))))
 
 (defun lower-chained-arithmetic (context expression)
-  "Fold EXPRESSION's operands left to right through its binary operator."
+  "Fold EXPRESSION's operands left to right through its binary operator.
+Each step's type is a vector once either side is one; before that it stays
+scalar, so (* 2.0 (dot a b) v) multiplies two floats before scaling V."
   (let* ((operator (shader-call-operator expression))
          (operands (shader-call-operands expression))
          (first (first operands))
          (value (lower-shader-expression context first))
-         (value-type (shader-expression-type first)))
+         (value-type (shader-expression-type first))
+         (result-type (shader-expression-type expression)))
     (dolist (operand (rest operands) value)
-      (let ((operand-value (lower-shader-expression context operand))
-            (operand-type (shader-expression-type operand)))
-        (setf value
-              (emit-binary-arithmetic
-               context expression operator
+      (let* ((operand-value (lower-shader-expression context operand))
+             (operand-type (shader-expression-type operand))
+             (step-type
                (cond ((shader-vector-type-p value-type) value-type)
                      ((shader-vector-type-p operand-type) operand-type)
-                     (t (shader-expression-type expression)))
+                     ((shader-vector-type-p result-type) value-type)
+                     (t result-type))))
+        (setf value
+              (emit-binary-arithmetic
+               context expression operator step-type
                value value-type operand-value operand-type)
-              value-type
-              (cond ((shader-vector-type-p value-type) value-type)
-                    ((shader-vector-type-p operand-type) operand-type)
-                    (t (shader-expression-type expression))))))))
+              value-type step-type)))))
 
 (defmethod lower-shader-call ((operator (eql '+)) context expression)
   (lower-chained-arithmetic context expression))
