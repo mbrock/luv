@@ -173,8 +173,8 @@ window" as an object both the player and the agent can point at
 :ID: TRHHAP
 :END:
 
-Smithay (Rust, under niri) and wlroots (C, under sway) are the usual
-foundations.  Much of what they provide is a renderer, a scene graph, and
+Smithay (Rust, under niri, read in #2BFRKV) and wlroots (C, under sway)
+are the usual foundations.  Much of what they provide is a renderer, a scene graph, and
 output management, which luv already has in its own terms.  What luv lacks
 is the protocol and the buffer import, so the smaller dependency is
 =libwayland-server= over CFFI plus the protocol XML: the event loop,
@@ -202,7 +202,9 @@ never become an X window manager.
 - Synchronization.  dmabufs carry implicit fences, and
   =wp_linux_drm_syncobj_v1= offers explicit timeline semaphores.  Which
   does the Vulkan backend want to wait on before sampling a client buffer,
-  and which do current Mesa and NVIDIA clients actually provide?
+  and which do current Mesa and NVIDIA clients actually provide?  Niri
+  ships with implicit fences alone, holding each commit until the dmabuf
+  polls readable (#8RQB6G).
 - Sessions.  SDL's KMSDRM driver assumes it owns the machine.  Switching
   virtual terminals, or living beside another compositor, is libseat's
   territory; is that ever needed if luvcraft /is/ the session?
@@ -214,7 +216,8 @@ never become an X window manager.
   wall, or the hand like the phone.
 - Popups and menus are surfaces positioned relative to a parent
   (=xdg_positioner=).  On a wall seen obliquely, what does "below the
-  cursor" mean?
+  cursor" mean?  Niri's answer, read in #RXH8EI, suggests declaring the
+  window quad's own bounds as the constraint rectangle.
 
 * IDEA Run foot in Luvland through a nested socket
 :PROPERTIES:

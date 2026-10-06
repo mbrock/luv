@@ -182,6 +182,11 @@ The following are starting paths rather than a table of settled doctrine.
   three-dimensional niri, as the first host of a luv-owned libwayland-server
   socket with dmabuf import, in-world window placement, and agent computer
   use.
+- [[file:niri.org][Field notes on niri]] reads the scrollable-tiling compositor for
+  Luvland: a camera stored relative to focus, closed-form springs and
+  projected flicks, animation time pinned to presentation, snapshot
+  resizes and shared transactions, implicit-fence commit blockers, frame
+  callbacks counted in frames shown, and a JSON IPC shaped for agents.
 - [[file:luft.org][LUFT: packed sites, chains, and the atelier]] names every vertex, edge,
   face, and cell of a cubical world with one fixnum, treats a block world as a
   3-chain whose boundary is its surface, and draws that surface by vertex

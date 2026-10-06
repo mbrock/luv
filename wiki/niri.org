@@ -1,0 +1,323 @@
+#+title: Field notes on niri
+#+startup: overview
+
+* Niri, read for what Luvland can borrow
+:PROPERTIES:
+:ID: 2BFRKV
+:END:
+
+Niri is a scrollable-tiling Wayland compositor in Rust, built on Smithay:
+windows sit in an endless horizontal strip of columns, and the view slides
+along it.  Luvland (#Y1TBYB) wants to be roughly that strip carried into
+three dimensions, so niri is the nearest working ancestor.  This page is a
+reading of its source, not a plan: tricks stated concretely enough that a
+later design can cite them.
+
+The reading is of upstream =ed22699d=, cloned to =~/niri=; paths below are
+relative to its =src/=, and line numbers belong to that commit.  It falls
+into four groups: how the view moves (#SUEK9P to #9CLT8R), how resizes stay
+smooth (#1B11JY, #SQWXYL), how buffers and frames are paced (#8RQB6G to
+#J7SV93), and how the protocol, input, and outside tools are handled
+(#YA7OL8 to #LKFZ5E).
+
+* The view is one scalar, relative to the active column
+:PROPERTIES:
+:ID: SUEK9P
+:END:
+
+A workspace is a vector of columns, a parallel cache of their widths, and
+an active index (=layout/scrolling.rs:36-139=).  Column positions are never
+stored; they are a running sum of widths and gaps recomputed when needed.
+The camera is the active column's position plus a =view_offset=, which is
+one of three things:
+
+#+begin_src rust
+enum ViewOffset { Static(f64), Animation(Animation), Gesture(ViewGesture) }
+#+end_src
+
+Because the offset is relative to the active column, inserting or removing
+columns to its left does not move the camera.  Each mode answers three
+questions: =current= (what to draw now), =target= (where it is going), and
+=stationary= (the value safe to save and restore, never a mid-animation
+one).  When focus moves, the offset is first re-based onto the new column
+and only then animated, and nothing animates if the target is within one
+physical pixel.
+
+For Luvland: store the camera relative to the focused window, and keep
+current, target, and resting values distinct.
+
+* Springs are closed-form, and one animation type covers all motion
+:PROPERTIES:
+:ID: MS2WHR
+:END:
+
+Springs are not integrated per frame (=animation/spring.rs:141-177=).  The
+position is the exact solution of the damped oscillator, with critically
+damped, underdamped, and overdamped branches, configured by damping ratio
+and stiffness.  Since position is a pure function of time, any frame time
+can be evaluated directly, which #R7TM57 relies on.
+
+Two end times are solved once: when the spring settles within epsilon
+(an envelope estimate refined by Newton steps), and when it first reaches
+its target.  The second gives a /clamped/ value for quantities that must
+not overshoot (=animation/mod.rs:303-309=): a window's position may bounce
+while its opacity does not.
+
+=Animation= is easing, spring, or iOS-style exponential deceleration, whose
+rest point is analytic.  Spring output is clamped to ten ranges either side
+as a guard against numerical blow-up, and =restarted(from, to, v)= retargets
+a running animation without losing its configured feel.
+
+The rubber band at the strip's ends (=rubber_band.rs=, 39 lines) is an
+asymptotic clamp, =(1 - 1/(x·c/d + 1))·d=, shipped with its derivative.  On
+release the finger's velocity is multiplied by that derivative, so the
+spring starts from the speed visible on screen, not the finger's.
+
+* A flick projects its rest point and snaps there with its own velocity
+:PROPERTIES:
+:ID: FC5V7R
+:END:
+
+The swipe tracker (=input/swipe_tracker.rs=, 87 lines) keeps 150 ms of
+deltas and timestamps.  Velocity is total delta over that window, and the
+projected end is the closed-form deceleration of #MS2WHR:
+=pos - v / (1000·ln 0.997)=.
+
+On release (=layout/scrolling.rs:3203-3529=) niri pushes one zero delta at
+"now", so a pause before lifting the finger decays the velocity.  It then
+builds snap points from column edges, bounds them by the first and last
+column, picks the one nearest the projected end, and starts a spring from
+the current position with the gesture's velocity as initial velocity.
+Release has no velocity discontinuity.
+
+A gesture stores =tracker position + adjustment= rather than an absolute
+position, so when the layout changes mid-swipe only the adjustment moves
+and the finger keeps its grip.  Edge auto-scroll during drag-and-drop is
+the same gesture fed synthetic deltas (=scrolling.rs:3129-3200=), so its
+release reuses the snapping path.  Every influence on the camera is either
+the gesture or an additive offset on top of it.
+
+* Animation time is the predicted presentation time, read once a frame
+:PROPERTIES:
+:ID: R7TM57
+:END:
+
+The frame clock (=frame_clock.rs:56-97=) predicts the next vblank as the
+last presentation plus a whole number of refresh intervals.  Before
+rendering, the animation clock is pinned to that prediction
+(=niri.rs:4749-4752=):
+
+#+begin_src rust
+let target_presentation_time = state.frame_clock.next_presentation_time();
+self.clock.set_unadjusted(target_presentation_time);
+#+end_src
+
+The clock (=animation/clock.rs=) reads time lazily and holds it until
+cleared, so every animation in one frame sees the same =t=, and that =t= is
+when the frame reaches the screen rather than when the CPU ran.  A rate
+adjuster accumulates scaled deltas for slow motion without
+discontinuities; gesture velocities are divided by the rate so swipes
+still feel right.
+
+* The view moves as little as it can
+:PROPERTIES:
+:ID: 9CLT8R
+:END:
+
+=compute_new_view_offset= (=layout/scrolling.rs:5588-5620=): a column wider
+than the view is left-aligned; a column already fully visible does not
+move the view; otherwise the view aligns whichever edge needs the smaller
+move.  Together with returning focus to the previous column when one
+closes, opening and closing a window brings the camera back to exactly
+where it was.  Much of niri's calm is this one rule.
+
+* A resize animates a snapshot, and neighbours keep pace
+:PROPERTIES:
+:ID: 1B11JY
+:END:
+
+Just before a commit that should animate, niri renders the window into a
+snapshot texture (=layout/tile.rs:268-389=).  When the client's new buffer
+arrives, the tile interpolates from the old size to the new one and
+crossfades from the snapshot to the live buffer.  A resize retargeted
+mid-flight starts from the interpolated size, changes under 10 px are not
+animated, and fullscreen and maximize progress are separate clamped
+animations.
+
+Move animations are stored as an offset =from · value= with the animation
+running from 1 to 0 (=tile.rs:560-624=).  The logical position updates at
+once; only the visual offset decays.  When a column's width changes, the
+columns beside it either slide in step with the resize or, if it was not
+animated, jump; a neighbour already moving rescales its =from= so its
+on-screen position is unchanged (=scrolling.rs:1302-1345=).  The side that
+moves is chosen so the focused window stays still.
+
+For Luvland every window is already a texture on a quad, so "keep last
+frame's texture while the client catches up" costs nothing.
+
+* Windows resized together appear together
+:PROPERTIES:
+:ID: SQWXYL
+:END:
+
+A transaction (=utils/transaction.rs=, 193 lines) is a reference-counted
+token.  Every window configured by one layout change gets a clone, paired
+with its configure serial.  A window's commit is held behind a weak
+reference to the token until the token completes, and the token completes
+when the last clone drops, which happens as each window commits its
+serial.  All the held commits are then released in the same frame.
+
+A 300 ms deadline stops a slow client from freezing the rest.  Closing a
+window uses the same barrier: the closing animation waits until the
+remaining windows have committed their new sizes.  Configures are also
+throttled per column: while any tile in a column awaits a previous
+configure, none of them receive a new one (=scrolling.rs:3686-3700=).
+
+* Niri has no explicit sync; commits wait for the dmabuf to be readable
+:PROPERTIES:
+:ID: 8RQB6G
+:END:
+
+There is no =linux-drm-syncobj-v1= in niri's source, and its renderer is
+GLES.  Correctness comes from implicit fences: a pre-commit hook asks for a
+blocker that polls the client's dmabuf file descriptor until it is
+readable, which means the implicit fence has signalled
+(=handlers/compositor.rs:528-570=).  The commit is held until then, so the
+compositor never samples a buffer that is still being drawn.  Resize
+transactions (#SQWXYL) wait on the same readiness.
+
+This answers half of the synchronization question in #P6IFHF: polling the
+dmabuf in Luvland's event loop is a sufficient first step, and explicit
+timeline semaphores can wait until a client needs them.
+
+* Frame callbacks are counted in frames shown, not in time
+:PROPERTIES:
+:ID: U6N1FL
+:END:
+
+Each surface remembers the output and frame sequence of its last callback
+and gets no second one until the sequence changes (=niri.rs:5178-5214=).
+The sequence advances only when a frame actually latched client buffers.
+Without this, a client that commits with no damage loops as fast as it can.
+
+A surface gets callbacks only from its primary scanout output, which is
+derived from what was really drawn, so windows on hidden workspaces stop
+receiving them.  A timer still sends one about every second to every
+surface (=niri.rs:197-201=), so hidden clients never block forever in
+their swap or present call.  When a frame draws nothing and no page flip
+follows, a timer at the predicted vblank keeps callbacks flowing anyway.
+
+Two admissions matter for Luvland's free camera.  A window about to come
+into view shows stale content for one frame (=niri.rs:4841-4862=); with a
+moving camera that is constant, so callbacks should go to windows /near/
+the view, not only those in it.  And niri's nested backend
+(=backend/winit.rs=) repaints fully every frame and redraws without waiting
+for the parent's frame callback; Luvland nested should pace itself on the
+parent compositor.
+
+* Dmabuf feedback and scanout carry hard-won driver lore
+:PROPERTIES:
+:ID: J7SV93
+:END:
+
+From =backend/tty.rs=, worth knowing before Luvland runs on a console:
+
+- Feedback tranches intersect scanout formats with those the renderer can
+  sample, so a render fallback always exists.  When the scanout device
+  differs from the render node, scanout formats are cut to =Linear=,
+  because AMD iGPU and dGPU share modifiers whose cross-device buffers
+  scan out garbled.
+- Intel's compressed CCS modifiers are filtered from swapchain formats
+  for bandwidth; if creating the DRM compositor still fails, it retries
+  with only the invalid modifier.
+- NVIDIA copying to an iGPU understands only ABGR and XBGR orderings, so
+  output color formats are ordered accordingly.
+- Some drivers deliver vblanks early; one sooner than half a refresh after
+  the previous is delayed by a timer (=utils/vblank_throttle.rs=).
+- Overlay planes are off by default.  Direct scanout matters to Luvland
+  only for a fullscreen, untransformed quad, but the feedback plumbing is
+  what lets clients choose formats the display can show.
+
+* The first configure waits for the rest of the client's batch
+:PROPERTIES:
+:ID: YA7OL8
+:END:
+
+An unmapped window is a small state machine
+(=window/unmapped.rs:19-78=): =NotConfigured= only records requests such
+as fullscreen; =Configured= carries everything decided at configure time
+to map time.  The first commit does not configure immediately; it queues
+the initial configure on an idle callback (=handlers/xdg_shell.rs:1236=),
+so an app id, parent, or fullscreen request sent in the same batch is seen
+before window rules are matched.  =libwayland-server= offers the same
+through =wl_event_loop_add_idle=.
+
+Some decisions can only be made at map time: GTK's about dialog sets its
+minimum and maximum size after the initial configure but before mapping,
+so whether a window floats is decided last.  A window that unmaps must
+perform the initial commit and configure afresh.
+
+* Focus is a pure function, and hits return surface origins
+:PROPERTIES:
+:ID: WANIQC
+:END:
+
+Keyboard focus is recomputed from scratch as a priority chain (lock
+screen, popup grabs, exclusive overlays, then the layout) and applied only
+when it differs from the stored focus (=niri.rs:1241-1374=).  When focus
+moves, the keyboard first loses focus and only then switches the
+per-window XKB layout, so the old surface never sees the new layout.
+
+Hit testing (=niri.rs:3444-3620=) returns a surface and its origin in
+global coordinates, and the toolkit derives local coordinates as
+pointer minus origin.  For ray picking, Luvland can compute the
+surface-local hit point and report =origin = pointer - local=; pointer
+constraints, which check regions with the same subtraction, keep working
+unchanged.
+
+Bound keys record their keycodes so the matching release is swallowed
+too, and bindings match both the current keysym and the raw Latin one, so
+shortcuts survive a Cyrillic layout.
+
+* Popups unconstrain in parent coordinates, with padding tried first
+:PROPERTIES:
+:ID: RXH8EI
+:END:
+
+The constraint rectangle for a popup is the window's allowed area in the
+parent's own coordinates (=handlers/xdg_shell.rs:1306-1313=).
+Unconstraining first tries an 8 px inset with resizing forbidden, accepts
+that only if the popup fits, and otherwise unconstrains against the full
+area with resizing allowed.  Reactive popups are repositioned on every
+parent commit.  A popup's grab is refused, and the popup dismissed, unless
+its root is the focused window; otherwise keyboard focus desyncs.
+
+This answers the oblique-wall question in #P6IFHF: the constraint
+rectangle is whatever the compositor declares, and the window quad's own
+bounds are a natural declaration.  "Below the cursor" then means below it
+in the window's plane.
+
+* Niri's IPC is a model for agent access
+:PROPERTIES:
+:ID: LKFZ5E
+:END:
+
+The IPC (=ipc/server.rs=) is newline-delimited JSON on a socket in
+=$XDG_RUNTIME_DIR=.  Queries are answered from a snapshot model rather
+than the live compositor.  An event stream begins by replaying the current
+state as events, so a subscriber bootstraps from the same events it later
+receives incrementally, and a slow reader is disconnected after 64 queued
+events rather than buffered.  Each action runs on an idle callback and
+its reply waits until it has run, so a following query sees its effect.
+
+Windows have stable integer ids that actions can target, with app id,
+pid, size, and position in the view.  =PickWindow= installs a crosshair
+pointer grab and returns the id of the window the user clicks: the user
+points, the agent acts.  This is the shape #N3M9SF needs, and its
+vocabulary maps onto CLIM presentations of windows (#4Y8Q8B).
+
+Niri starts X11 support lazily the same way: it binds the X socket itself
+and spawns =xwayland-satellite= with the listening descriptor only on the
+first connection (=utils/xwayland/satellite.rs=), draining queued
+connections before re-arming if satellite exits, lest it respawn in a
+loop.
