@@ -1743,14 +1743,19 @@ output topology."
 
 (defun cmd-transition-image
     (command-buffer image old-layout new-layout
-     src-access dst-access src-stage dst-stage &key (aspect :color))
+     src-access dst-access src-stage dst-stage
+     &key (aspect :color)
+          (src-queue-family +queue-family-ignored+)
+          (dst-queue-family +queue-family-ignored+))
+  "Record one image barrier; distinct queue families make it an ownership
+transfer, such as acquiring a dmabuf from +QUEUE-FAMILY-FOREIGN+."
   (with-vk (barrier image-memory-barrier
             :src-access-mask src-access
             :dst-access-mask dst-access
             :old-layout old-layout
             :new-layout new-layout
-            :src-queue-family-index +queue-family-ignored+
-            :dst-queue-family-index +queue-family-ignored+
+            :src-queue-family-index src-queue-family
+            :dst-queue-family-index dst-queue-family
             :image image)
     (fill-image-subresource-range
      (cffi:foreign-slot-pointer
@@ -2427,3 +2432,175 @@ entries as understood by FILL-SEMAPHORE-SUBMIT-INFOS."
                        :error-out-of-date-khr
                        :error-present-timing-queue-full-ext)
                     (vk:queue-present-khr queue present-info)))))))))))
+
+;;; Importing Linux dmabufs.
+
+(defun physical-device-drm-render-node (physical-device)
+  "The render node's MAJOR and MINOR, as VK_EXT_physical_device_drm reports
+them, or NIL when the device has none or the extension is absent."
+  (when (member +physical-device-drm-extension-name+
+                (enumerate-device-extension-names physical-device)
+                :test #'string=)
+    (with-vk (drm physical-device-drm-properties-ext)
+      (with-vk (properties physical-device-properties-2 :p-next drm)
+        (vk:get-physical-device-properties2 physical-device properties)
+        (cffi:with-foreign-slots ((has-render render-major render-minor)
+                                  drm (:struct physical-device-drm-properties-ext))
+          (when (plusp has-render)
+            (values render-major render-minor)))))))
+
+(defun physical-device-drm-format-modifiers (physical-device format)
+  "Each DRM format modifier PHYSICAL-DEVICE knows for FORMAT, as a list
+(modifier plane-count tiling-features)."
+  (with-vk (list drm-format-modifier-properties-list-ext)
+    (with-vk (properties format-properties-2 :p-next list)
+      (vk:get-physical-device-format-properties2 physical-device format properties)
+      (let ((count (cffi:foreign-slot-value
+                    list '(:struct drm-format-modifier-properties-list-ext)
+                    'drm-format-modifier-count)))
+        (when (plusp count)
+          (cffi:with-foreign-object (entries '(:struct drm-format-modifier-properties-ext)
+                                             count)
+            (clear-foreign-object entries '(:struct drm-format-modifier-properties-ext)
+                                  count)
+            (setf (cffi:foreign-slot-value
+                   list '(:struct drm-format-modifier-properties-list-ext)
+                   'p-drm-format-modifier-properties)
+                  entries)
+            (vk:get-physical-device-format-properties2 physical-device format properties)
+            (loop for index below (cffi:foreign-slot-value
+                                   list '(:struct drm-format-modifier-properties-list-ext)
+                                   'drm-format-modifier-count)
+                  for entry = (cffi:mem-aptr
+                               entries '(:struct drm-format-modifier-properties-ext) index)
+                  collect (cffi:with-foreign-slots
+                              ((drm-format-modifier drm-format-modifier-plane-count
+                                drm-format-modifier-tiling-features)
+                               entry (:struct drm-format-modifier-properties-ext))
+                            (list drm-format-modifier drm-format-modifier-plane-count
+                                  drm-format-modifier-tiling-features)))))))))
+
+(defun physical-device-dmabuf-importable-p (physical-device format modifier usage)
+  "Whether an image of FORMAT and MODIFIER with USAGE can be imported from a
+dmabuf on PHYSICAL-DEVICE."
+  (with-vk (modifier-info physical-device-image-drm-format-modifier-info-ext
+            :drm-format-modifier modifier
+            :sharing-mode :exclusive
+            :queue-family-index-count 0
+            :p-queue-family-indices (cffi:null-pointer))
+    (with-vk (external-info physical-device-external-image-format-info
+              :p-next modifier-info
+              :handle-type +external-memory-handle-type-dma-buf+)
+      (with-vk (info physical-device-image-format-info-2
+                :p-next external-info
+                :format format :type :2d
+                :tiling :drm-format-modifier-ext
+                :usage usage :flags 0)
+        (with-vk (external-properties external-image-format-properties)
+          (with-vk (properties image-format-properties-2 :p-next external-properties)
+            (and (eq :success
+                     (with-vulkan-results (:get-physical-device-image-format-properties2
+                                           :success :error-format-not-supported)
+                       (vk:get-physical-device-image-format-properties2
+                        physical-device info properties)))
+                 (logtest +external-memory-feature-importable+
+                          (cffi:foreign-slot-value
+                           (cffi:foreign-slot-pointer
+                            external-properties '(:struct external-image-format-properties)
+                            'external-memory-properties)
+                           '(:struct external-memory-properties)
+                           'external-memory-features)))))))))
+
+(defun duplicate-fd (fd)
+  (let ((copy (cffi:foreign-funcall "fcntl" :int fd :int 1030 :int 0 :int)))
+    (when (minusp copy)
+      (error "Could not duplicate dmabuf fd ~D." fd))
+    copy))
+
+(defun import-dmabuf-image
+    (device physical-device &key format width height modifier planes usage
+                                 memory-type-filter)
+  "Create an image over a dmabuf and bind its imported memory.
+
+PLANES is a list of (fd offset stride), all of one dmabuf, so the image is
+not disjoint and one memory object backs every plane.  The caller keeps its
+fds; Vulkan owns a duplicate.  MEMORY-TYPE-FILTER, given the memory type bits
+both the image and the fd allow, picks one index.  Returns the image and the
+memory."
+  (let ((plane-count (length planes))
+        (image nil)
+        (memory nil))
+    (unwind-protect
+         (progn
+           (cffi:with-foreign-object (layouts '(:struct subresource-layout) plane-count)
+             (loop for (nil offset stride) in planes
+                   for index from 0
+                   do (fill-vk (cffi:mem-aptr layouts '(:struct subresource-layout) index)
+                               'subresource-layout
+                               :offset offset :size 0 :row-pitch stride
+                               :array-pitch 0 :depth-pitch 0))
+             (with-vk (explicit image-drm-format-modifier-explicit-create-info-ext
+                       :drm-format-modifier modifier
+                       :drm-format-modifier-plane-count plane-count
+                       :p-plane-layouts layouts)
+               (with-vk (external external-memory-image-create-info
+                         :p-next explicit
+                         :handle-types +external-memory-handle-type-dma-buf+)
+                 (with-vk (create-info image-create-info
+                           :p-next external
+                           :flags 0 :image-type :2d :format format
+                           :mip-levels 1 :array-layers 1 :samples :1
+                           :tiling :drm-format-modifier-ext
+                           :usage usage :sharing-mode :exclusive
+                           :queue-family-index-count 0
+                           :p-queue-family-indices (cffi:null-pointer)
+                           ;; Required for external memory (VUID 01443).
+                           ;; The contents live in the foreign owner's GENERAL
+                           ;; layout, from which every acquire transfers.
+                           :initial-layout :undefined)
+                   (fill-vk (cffi:foreign-slot-pointer
+                             create-info '(:struct image-create-info) 'extent)
+                            'extent-3d :width width :height height :depth 1)
+                   (setf image (create-image-handle device create-info))))))
+           (let* ((fd (first (first planes)))
+                  (requirements (get-image-memory-requirements device image))
+                  (fd-bits (with-vk (fd-properties memory-fd-properties-khr)
+                             (with-vulkan-results (:get-memory-fd-properties)
+                               (vk:get-memory-fd-properties-khr
+                                device +external-memory-handle-type-dma-buf+
+                                fd fd-properties))
+                             (cffi:foreign-slot-value
+                              fd-properties '(:struct memory-fd-properties-khr)
+                              'memory-type-bits)))
+                  (bits (logand fd-bits (image-memory-requirements-memory-type-bits
+                                         requirements)))
+                  (type-index (funcall memory-type-filter bits))
+                  (copy (duplicate-fd fd)))
+             (declare (ignorable physical-device))
+             (unless type-index
+               (%close-fd copy)
+               (error "No memory type fits dmabuf fd ~D (fd bits #b~B, image bits #b~B)."
+                      fd fd-bits (image-memory-requirements-memory-type-bits requirements)))
+             (with-vk (dedicated memory-dedicated-allocate-info
+                       :image image :buffer (cffi:null-pointer))
+               (with-vk (import import-memory-fd-info-khr
+                         :p-next dedicated
+                         :handle-type +external-memory-handle-type-dma-buf+
+                         :fd copy)
+                 (with-vk (allocate-info memory-allocate-info
+                           :p-next import
+                           :allocation-size (image-memory-requirements-size requirements)
+                           :memory-type-index type-index)
+                   (handler-bind ((error (lambda (condition)
+                                           (declare (ignore condition))
+                                           ;; A failed import leaves the fd ours.
+                                           (%close-fd copy))))
+                     (setf memory (allocate-memory-handle device allocate-info))))))
+             (bind-image-memory device image memory)
+             (multiple-value-prog1 (values image memory)
+               (setf image nil memory nil))))
+      (when image (destroy-image device image))
+      (when memory (free-memory device memory)))))
+
+(defun %close-fd (fd)
+  (cffi:foreign-funcall "close" :int fd :int))

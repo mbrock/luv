@@ -22,12 +22,20 @@
 
 (defparameter +mesh-shader-extension-name+ "VK_EXT_mesh_shader")
 
+(defparameter +dmabuf-import-extension-names+
+  '("VK_KHR_external_memory_fd" "VK_EXT_external_memory_dma_buf"
+    "VK_EXT_image_drm_format_modifier" "VK_EXT_queue_family_foreign")
+  "Device extensions which together import a Linux dmabuf as an image.")
+
+(defparameter +physical-device-drm-extension-name+ "VK_EXT_physical_device_drm")
+
 ;;; Symbolic pieces of the Vulkan vocabulary we currently speak.
 
 (cffi:defcenum (result :int32)
   (:success 0)
   (:not-ready 1)
   (:incomplete 5)
+  (:error-format-not-supported -11)
   (:error-out-of-date-khr -1000001004)
   (:error-present-timing-queue-full-ext -1000208000)
   (:suboptimal-khr 1000001003))
@@ -98,7 +106,21 @@
   (:swapchain-create-info-khr 1000001000)
   (:present-info-khr 1000001001)
   (:debug-utils-messenger-callback-data-ext 1000128003)
-  (:debug-utils-messenger-create-info-ext 1000128004))
+  (:debug-utils-messenger-create-info-ext 1000128004)
+  (:physical-device-properties-2 1000059001)
+  (:format-properties-2 1000059002)
+  (:image-format-properties-2 1000059003)
+  (:physical-device-image-format-info-2 1000059004)
+  (:physical-device-external-image-format-info 1000071000)
+  (:external-image-format-properties 1000071001)
+  (:external-memory-image-create-info 1000072001)
+  (:import-memory-fd-info-khr 1000074000)
+  (:memory-fd-properties-khr 1000074001)
+  (:memory-dedicated-allocate-info 1000127001)
+  (:drm-format-modifier-properties-list-ext 1000158000)
+  (:physical-device-image-drm-format-modifier-info-ext 1000158002)
+  (:image-drm-format-modifier-explicit-create-info-ext 1000158004)
+  (:physical-device-drm-properties-ext 1000353000))
 
 (cffi:defcenum (image-type :uint32)
   (:1d 0)
@@ -122,7 +144,8 @@
 
 (cffi:defcenum (image-tiling :uint32)
   (:optimal 0)
-  (:linear 1))
+  (:linear 1)
+  (:drm-format-modifier-ext 1000158000))
 
 (cffi:defcenum (sharing-mode :uint32)
   (:exclusive 0)
@@ -140,6 +163,7 @@
   (:shader-read-only-optimal 5)
   (:transfer-src-optimal 6)
   (:transfer-dst-optimal 7)
+  (:preinitialized 8)
   (:present-src-khr 1000001002))
 
 (cffi:defcenum (sample-count :uint32)
@@ -388,7 +412,11 @@
   (:depth #x2)
   (:stencil #x4)
   (:plane-0 #x10)
-  (:plane-1 #x20))
+  (:plane-1 #x20)
+  (:memory-plane-0-ext #x80)
+  (:memory-plane-1-ext #x100)
+  (:memory-plane-2-ext #x200)
+  (:memory-plane-3-ext #x400))
 
 (cffi:defbitfield (access-flags :uint32)
   (:depth-stencil-attachment-read #x200)
@@ -446,6 +474,12 @@
   (:inherit #x8))
 
 (defconstant +queue-family-ignored+ #xffffffff)
+(defconstant +queue-family-foreign+ #xfffffffd
+  "VK_QUEUE_FAMILY_FOREIGN_EXT: (~2U), the owner of memory shared with
+other drivers and processes.")
+(defconstant +external-memory-handle-type-dma-buf+ #x200)
+(defconstant +external-memory-feature-importable+ #x4)
+(defconstant +format-feature-sampled-image+ #x1)
 (defvkstruct extension-properties ()
   (extension-name (:array :char 256))
   (spec-version :uint32))
@@ -1802,3 +1836,128 @@
   (device :pointer)
   (past-presentation-timing-info :pointer)
   (past-presentation-timing-properties :pointer))
+
+;;; Importing Linux dmabufs as images.  Layouts were checked against
+;;; vulkan_core.h 1.4.357 by a C program printing sizeof and offsetof.
+
+(defvkstruct external-memory-image-create-info
+    (:s-type :external-memory-image-create-info)
+  (handle-types :uint32))
+
+(defvkstruct import-memory-fd-info-khr (:s-type :import-memory-fd-info-khr)
+  (handle-type :uint32)
+  (fd :int))
+
+(defvkstruct memory-fd-properties-khr (:s-type :memory-fd-properties-khr)
+  (memory-type-bits :uint32))
+
+(defvkstruct memory-dedicated-allocate-info
+    (:s-type :memory-dedicated-allocate-info)
+  (image :pointer)
+  (buffer :pointer))
+
+(defvkstruct subresource-layout ()
+  (offset :uint64)
+  (size :uint64)
+  (row-pitch :uint64)
+  (array-pitch :uint64)
+  (depth-pitch :uint64))
+
+(defvkstruct image-drm-format-modifier-explicit-create-info-ext
+    (:s-type :image-drm-format-modifier-explicit-create-info-ext)
+  (drm-format-modifier :uint64)
+  (drm-format-modifier-plane-count :uint32)
+  (p-plane-layouts :pointer))
+
+(defvkstruct format-properties ()
+  (linear-tiling-features :uint32)
+  (optimal-tiling-features :uint32)
+  (buffer-features :uint32))
+
+(defvkstruct format-properties-2 (:s-type :format-properties-2)
+  (format-properties (:struct format-properties)))
+
+(defvkstruct drm-format-modifier-properties-ext ()
+  (drm-format-modifier :uint64)
+  (drm-format-modifier-plane-count :uint32)
+  (drm-format-modifier-tiling-features :uint32))
+
+(defvkstruct drm-format-modifier-properties-list-ext
+    (:s-type :drm-format-modifier-properties-list-ext)
+  (drm-format-modifier-count :uint32)
+  (p-drm-format-modifier-properties :pointer))
+
+(defvkstruct physical-device-image-format-info-2
+    (:s-type :physical-device-image-format-info-2)
+  (format format)
+  (type image-type)
+  (tiling image-tiling)
+  (usage image-usage-flags)
+  (flags :uint32))
+
+(defvkstruct physical-device-external-image-format-info
+    (:s-type :physical-device-external-image-format-info)
+  (handle-type :uint32))
+
+(defvkstruct physical-device-image-drm-format-modifier-info-ext
+    (:s-type :physical-device-image-drm-format-modifier-info-ext)
+  (drm-format-modifier :uint64)
+  (sharing-mode sharing-mode)
+  (queue-family-index-count :uint32)
+  (p-queue-family-indices :pointer))
+
+(defvkstruct image-format-properties ()
+  (max-extent (:struct extent-3d))
+  (max-mip-levels :uint32)
+  (max-array-layers :uint32)
+  (sample-counts :uint32)
+  (max-resource-size :uint64))
+
+(defvkstruct image-format-properties-2 (:s-type :image-format-properties-2)
+  (image-format-properties (:struct image-format-properties)))
+
+(defvkstruct external-memory-properties ()
+  (external-memory-features :uint32)
+  (export-from-imported-handle-types :uint32)
+  (compatible-handle-types :uint32))
+
+(defvkstruct external-image-format-properties
+    (:s-type :external-image-format-properties)
+  (external-memory-properties (:struct external-memory-properties)))
+
+(defvkstruct physical-device-drm-properties-ext
+    (:s-type :physical-device-drm-properties-ext)
+  (has-primary :uint32)
+  (has-render :uint32)
+  (primary-major :int64)
+  (primary-minor :int64)
+  (render-major :int64)
+  (render-minor :int64))
+
+;;; VkPhysicalDeviceProperties is 824 bytes; only the pNext chain is read.
+(defvkstruct physical-device-properties-2 (:s-type :physical-device-properties-2)
+  (properties (:array :uint8 824)))
+
+(defvkfun "vkGetPhysicalDeviceProperties2"
+    :void
+  (physical-device :pointer)
+  (properties :pointer))
+
+(defvkfun "vkGetPhysicalDeviceFormatProperties2"
+    :void
+  (physical-device :pointer)
+  (format format)
+  (format-properties :pointer))
+
+(defvkfun "vkGetPhysicalDeviceImageFormatProperties2"
+    checked-result
+  (physical-device :pointer)
+  (image-format-info :pointer)
+  (image-format-properties :pointer))
+
+(defvkdeviceproc "vkGetMemoryFdPropertiesKHR"
+    checked-result
+  (device :pointer)
+  (handle-type :uint32)
+  (fd :int)
+  (memory-fd-properties :pointer))

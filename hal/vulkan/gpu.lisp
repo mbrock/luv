@@ -358,7 +358,13 @@ and scheduled texture layouts across the canvas and REPL threads.")))
    (layout
     :initarg :layout
     :initform :undefined
-    :accessor vulkan-texture-layout)))
+    :accessor vulkan-texture-layout)
+   (foreign-p
+    :initarg :foreign-p
+    :initform nil
+    :reader vulkan-texture-foreign-p
+    :documentation "Whether the memory belongs to the foreign queue family
+between uses, as an imported dmabuf does.")))
 
 (defclass vulkan-gpu-texture-view (gpu-texture-view vulkan-gpu-object)
   ((device
@@ -471,6 +477,10 @@ and scheduled texture layouts across the canvas and REPL threads.")))
    (texture-layouts
     :initform (make-hash-table :test #'eq)
     :reader vulkan-command-encoder-texture-layouts)
+   (acquired-foreign-textures
+    :initform '()
+    :accessor vulkan-command-encoder-acquired-foreign-textures
+    :documentation "Foreign textures this encoder acquired; FINISH releases them.")
    (textures
     :initform (make-hash-table :test #'eq)
     :reader vulkan-command-encoder-textures)
@@ -994,6 +1004,8 @@ therefore be abandoned without replaying native calls which already returned."
                             (available-vulkan-presentation-timing-device-extensions
                              physical-device)
                             (available-vulkan-video-device-extensions
+                             physical-device)
+                            (available-vulkan-dmabuf-device-extensions
                              physical-device))
                            :test #'string=))))
                    (setf native-device (vulkan-handle device)
@@ -2117,6 +2129,14 @@ ownership and cancel this finalizer."
           layout))))
 
 (defun transition-vulkan-texture (encoder texture new-layout)
+  (when (and (vulkan-texture-foreign-p texture)
+             (not (member texture
+                          (vulkan-command-encoder-acquired-foreign-textures encoder))))
+    ;; The acquire is a queue-family transfer, which a render pass may not
+    ;; contain; doing it here would record an invalid barrier.
+    (error 'gpu-invalid-state-error
+           :object texture :operation :transition
+           :state :foreign :expected-state :acquired))
   (let ((old-layout (vulkan-encoder-texture-layout encoder texture)))
     (unless (eq old-layout new-layout)
       (multiple-value-bind (src-access src-stage)
@@ -3193,7 +3213,8 @@ lowering later without changing this queue-level operation."
                  :state (vulkan-command-encoder-state encoder)
                  :expected-state :recording-or-ended))
         (when (eq :recording (vulkan-command-encoder-state encoder))
-          (ensure-no-active-vulkan-pass encoder :finish))
+          (ensure-no-active-vulkan-pass encoder :finish)
+          (release-vulkan-foreign-textures encoder))
         (let ((command-buffer
                 (vulkan-command-encoder-command-buffer encoder))
               (command-pool
@@ -3466,6 +3487,18 @@ lowering later without changing this queue-level operation."
   (lvk:semaphore-counter-value
    (vulkan-handle (vulkan-queue-device queue))
    (vulkan-queue-timeline queue)))
+
+(defmethod queue-completion-watch ((queue vulkan-gpu-queue))
+  ;; The timeline semaphore's counter is the newest completed submission.
+  ;; Reading it needs no external synchronization, so the predicate takes no
+  ;; queue lock and never waits, like Metal's shared-event read.
+  (let ((index (vulkan-queue-submission-counter queue))
+        (device (vulkan-queue-device queue))
+        (timeline (vulkan-queue-timeline queue)))
+    (lambda ()
+      (and (not (vulkan-object-destroyed-p device))
+           (>= (lvk:semaphore-counter-value (vulkan-handle device) timeline)
+               index)))))
 
 (defun wait-for-vulkan-submission (queue index)
   "Block until QUEUE's completion frontier reaches INDEX."
@@ -4067,3 +4100,100 @@ can make a successful native call repeat."
                 (tear-down-device))
               (tear-down-device))))))
   (values))
+
+;;; Imported dmabufs.  Between submissions their memory belongs to the
+;;; foreign queue family in the GENERAL layout; an encoder acquires one before
+;;; sampling it and FINISH releases it, as wlroots' Vulkan renderer does.
+
+(defun available-vulkan-dmabuf-device-extensions (physical-device)
+  "All of the dmabuf import extensions, or none."
+  (let ((available (lvk:enumerate-device-extension-names physical-device)))
+    (when (every (lambda (name) (member name available :test #'string=))
+                 lvk:+dmabuf-import-extension-names+)
+      lvk:+dmabuf-import-extension-names+)))
+
+(defun vulkan-device-dmabuf-p (device)
+  (every (lambda (name)
+           (member name (vulkan-device-extension-names device) :test #'string=))
+         lvk:+dmabuf-import-extension-names+))
+
+(defmethod dmabuf-render-node ((device vulkan-gpu-device))
+  (lvk:physical-device-drm-render-node (vulkan-device-physical-device device)))
+
+(defmethod dmabuf-modifiers ((device vulkan-gpu-device) format)
+  (when (vulkan-device-dmabuf-p device)
+    (let ((physical-device (vulkan-device-physical-device device))
+          (vk-format (vulkan-gpu-format format format)))
+      (loop for (modifier nil features)
+              in (lvk:physical-device-drm-format-modifiers physical-device vk-format)
+            when (and (logtest lvk:+format-feature-sampled-image+ features)
+                      (lvk:physical-device-dmabuf-importable-p
+                       physical-device vk-format modifier '(:sampled)))
+              collect modifier))))
+
+(defmethod import-dmabuf-texture
+    ((device vulkan-gpu-device) (descriptor texture-descriptor) &key modifier planes)
+  (with-vulkan-gpu-driver-environment
+    (ensure-live-vulkan-object device :import-dmabuf-texture)
+    (unless (vulkan-device-dmabuf-p device)
+      (reject-gpu-request descriptor :unsupported-dmabuf-import device))
+    (let* ((descriptor (canonical-texture-descriptor descriptor))
+           (size (texture-descriptor-size descriptor))
+           (vk-format (vulkan-texture-format descriptor)))
+      (multiple-value-bind (image memory)
+          (lvk:import-dmabuf-image
+           (vulkan-handle device) (vulkan-device-physical-device device)
+           :format vk-format :width (first size) :height (second size)
+           :modifier modifier :planes planes :usage '(:sampled)
+           :memory-type-filter
+           (lambda (bits)
+             (loop for index below 32
+                   when (logbitp index bits) return index)))
+        (make-instance 'vulkan-gpu-texture
+                       :label (gpu-descriptor-label descriptor)
+                       :size size
+                       :usage '(:texture-binding)
+                       :dimensions :2d
+                       :format (texture-descriptor-format descriptor)
+                       :sample-count 1
+                       :handle image
+                       :device device
+                       :memory memory
+                       :vk-format vk-format
+                       ;; Between uses the memory is the foreign queue's, in
+                       ;; GENERAL; each acquire transfers from there.
+                       :layout :general
+                       :foreign-p t)))))
+
+(defun record-foreign-transfer (encoder texture new-layout acquire-p)
+  (let ((old-layout (vulkan-encoder-texture-layout encoder texture))
+        (family (vulkan-device-queue-family (vulkan-command-encoder-device encoder))))
+    (multiple-value-bind (src-access src-stage) (vulkan-layout-access-and-stage old-layout)
+      (multiple-value-bind (dst-access dst-stage) (vulkan-layout-access-and-stage new-layout)
+        (lvk:cmd-transition-image
+         (vulkan-command-encoder-command-buffer encoder)
+         (vulkan-handle texture) old-layout new-layout
+         src-access dst-access src-stage dst-stage
+         :aspect (vulkan-texture-aspect texture)
+         :src-queue-family (if acquire-p lvk:+queue-family-foreign+ family)
+         :dst-queue-family (if acquire-p family lvk:+queue-family-foreign+))))
+    (setf (gethash texture (vulkan-command-encoder-texture-layouts encoder))
+          new-layout)))
+
+(defmethod acquire-external-texture
+    ((encoder vulkan-gpu-command-encoder) (texture vulkan-gpu-texture))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-command-encoder-state encoder :acquire-external-texture)
+    (ensure-no-active-vulkan-pass encoder :acquire-external-texture)
+    (unless (vulkan-texture-foreign-p texture)
+      (reject-gpu-request texture :not-external texture))
+    (ensure-vulkan-texture-for-command encoder texture encoder :texture-binding)
+    (unless (member texture (vulkan-command-encoder-acquired-foreign-textures encoder))
+      (record-foreign-transfer encoder texture :shader-read-only-optimal t)
+      (push texture (vulkan-command-encoder-acquired-foreign-textures encoder))))
+  texture)
+
+(defun release-vulkan-foreign-textures (encoder)
+  "Give every acquired foreign texture back in the GENERAL layout."
+  (dolist (texture (vulkan-command-encoder-acquired-foreign-textures encoder))
+    (record-foreign-transfer encoder texture :general nil)))

@@ -734,6 +734,31 @@ of some object fulfilling the DESCRIPTOR."))
 (defgeneric adopt-native-texture (device native-object owner descriptor)
   (:documentation "Wrap a platform texture and its retained OWNER in the HAL."))
 
+;;; Linux dmabufs: memory another process or driver rendered into.
+
+(defgeneric dmabuf-render-node (device)
+  (:documentation "The MAJOR and MINOR of the DRM render node DEVICE runs on,
+or NIL when it cannot say.")
+  (:method ((device gpu-device)) nil))
+
+(defgeneric dmabuf-modifiers (device format)
+  (:documentation "The DRM format modifiers with which DEVICE can import and
+sample a dmabuf as a texture of FORMAT; NIL when it cannot import at all.")
+  (:method ((device gpu-device) format)
+    (declare (ignore format))
+    nil))
+
+(defgeneric import-dmabuf-texture (device descriptor &key modifier planes)
+  (:documentation "A sampled texture over the dmabuf PLANES, a list of
+(fd offset stride) of one buffer, laid out by MODIFIER.  DESCRIPTOR gives its
+size and format.  The caller keeps its fds.  The texture's memory belongs to
+another queue between uses: an encoder must ACQUIRE-EXTERNAL-TEXTURE it before
+any pass samples it, and gives it back when finished."))
+
+(defgeneric acquire-external-texture (encoder texture)
+  (:documentation "Take TEXTURE, imported from outside this device, for the
+commands ENCODER records next, ready to sample.  Call outside any pass."))
+
 (defgeneric encode (encoder command)
   (:documentation "Record an inspectable GPU COMMAND onto ENCODER."))
 

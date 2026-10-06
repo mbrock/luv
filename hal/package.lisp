@@ -22,6 +22,13 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:+present-id-2-extension-name+
            #:+debug-utils-extension-name+
            #:+mesh-shader-extension-name+
+           #:+dmabuf-import-extension-names+
+           #:+queue-family-foreign+
+           #:+format-feature-sampled-image+
+           #:physical-device-drm-render-node
+           #:physical-device-drm-format-modifiers
+           #:physical-device-dmabuf-importable-p
+           #:import-dmabuf-image
            #:vulkan-call-error
            #:vulkan-call-error-operation
            #:vulkan-call-error-result
@@ -423,6 +430,10 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:device-queue
            #:create
            #:adopt-native-texture
+           #:dmabuf-render-node
+           #:dmabuf-modifiers
+           #:import-dmabuf-texture
+           #:acquire-external-texture
            #:encode
            #:enqueue
            #:finish
