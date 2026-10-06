@@ -600,6 +600,25 @@ on success or without the compiler, else its report."
             (unless (zerop status)
               (format nil "~A~A~%~A" output error-output source))))))))
 
+;;; A depth texture's texel is a scalar in Metal; the language's texel-load
+;;; result is a vec4 on every target, as HLSL's Load widens it.
+(shader:define-shader depth-texel-fragment-probe
+    (:stage :fragment
+     :outputs ((color :vec4 :location 0))
+     :resources ((depth :depth-texture-2d :binding 0)))
+  (let* ((texel (shader:texel-load depth (shader:uvec2 (shader:uint 1.0)
+                                                       (shader:uint 2.0)))))
+    (shader:set-output color
+                       (shader:vec4 (shader:swizzle texel :x) 0.0 0.0 1.0))))
+
+(define-test depth-texel-loads-widen-to-the-languages-vec4
+  (let ((source (msl:msl-document-source
+                 (msl:compile-msl (depth-texel-fragment-probe)))))
+    (true (search "float4 texel = float4(depth.read(uint2(uint(1.0f), uint(2.0f))));"
+                  source)
+          "the scalar read widens to float4: ~A" source)
+    (parachute:is eq nil (metal-compiler-diagnostics source))))
+
 (define-test integers-and-booleans-lower-to-metal
   (let ((source (msl:msl-document-source
                  (msl:compile-msl (integer-bits-fragment-probe)))))

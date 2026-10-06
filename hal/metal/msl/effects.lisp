@@ -220,12 +220,16 @@ the trailing arguments from the operator's own operand texts."
 
 (define-msl-operator shader:texel-load (context expression)
   ;; read(coordinate[, layer][, level]); storage textures have no level.
+  ;; A depth texture reads a scalar, which widens to the language's vec4
+  ;; texel as HLSL's Load does.
   (multiple-value-bind (type texts) (msl-texture-operand-texts context expression)
-    (declare (ignore type))
     (destructuring-bind (texture &rest arguments) texts
       (note-msl-occurrence
        context expression
-       (format nil "~A.read(~{~A~^, ~})" texture arguments)))))
+       (format nil (if (shader:shader-type-image-depth-p type)
+                       "float4(~A.read(~{~A~^, ~}))"
+                       "~A.read(~{~A~^, ~})")
+               texture arguments)))))
 
 (define-msl-operator shader:texture-size (context expression)
   (multiple-value-bind (type texts) (msl-texture-operand-texts context expression)
