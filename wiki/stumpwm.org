@@ -1,0 +1,115 @@
+#+title: Field notes on StumpWM and Mahogany
+#+startup: overview
+
+* Two Lisp window managers, read for Luvland's interaction
+:PROPERTIES:
+:ID: PH31JN
+:END:
+
+StumpWM is the X11 window manager that grew out of ratpoison: a prefix key,
+keymaps, commands with typed arguments, and a live Lisp image as the
+configuration language.  Mahogany is its authors' Wayland compositor, also
+in Common Lisp, but over wlroots through a C library (=heart=).  Luvland
+(#Y1TBYB) owns its protocol and renderer in Lisp, so it can borrow
+StumpWM's interaction model without Mahogany's split.  This page reads both
+for what to borrow; it is not a plan.
+
+The reading is of StumpWM =902d5c2= and Mahogany =e1d3105=, cloned to
+=~/stumpwm= and =~/mahogany=; Mahogany's submodules were not checked out.
+
+* Keymaps are lists that name each other by symbol
+:PROPERTIES:
+:ID: 5ZACIA
+:END:
+
+A StumpWM key is a keysym and one flag per modifier; a keymap is a list of
+=(key . command)= bindings searched in order (=kmap.lisp:51-88=).  A binding
+may name another keymap by symbol, resolved at lookup time, so rebinding the
+variable takes effect live.  The active maps are computed fresh on every
+key, =top-maps= in =events.lisp:218-251=: the global =*top-map*= first, then
+minor modes, then the current group type's maps.  The prefix key is bound in
+each layer, and the reader keeps every keymap that matched, so layers merge:
+the first non-NIL binding wins, but all keymap-valued matches continue the
+sequence (=events.lisp:184-216=).
+
+Bindings are command strings with arguments, such as ="gselect 3"= or
+="move-focus left"=, so one command serves many keys; Mahogany binds
+function objects instead and so needs ten commands =group-select-1= to
+=group-select-10=.  Pressing =?= or =C-h= in the middle of a sequence shows
+the bindings reachable from there, built into the reader, and a hook on
+every step is enough for a which-key display.
+
+* Mahogany reads key sequences as a state machine, not a blocking read
+:PROPERTIES:
+:ID: BCG9SH
+:END:
+
+StumpWM reads the rest of a sequence with a blocking read inside the X event
+handler.  A libwayland compositor cannot block its event loop, and Mahogany
+does not: a =key-state= holds the sequence so far and the keymaps still in
+play, and each key event advances it one step (=lisp/keyboard/kmap.lisp:87-130=).
+The seat is grabbed only mid-sequence.  An unbound key mid-sequence is
+consumed with a message; at top level it passes to the client.  Sending the
+prefix itself to a client needs no faked event: a binding to =:pass-through=
+simply does not swallow the real one.
+
+Mahogany also wraps every callback from C in restarts that return a safe
+value (=define-hrt-callback=), as luv's server records failures instead of
+unwinding through libwayland (#QYFVAF).  Two of its choices are cautions:
+every command runs on a new thread and gathers its arguments by shelling out
+to rofi, and messages are drawn in C with Pango.  Neither prompt nor message
+is then live-editable Lisp, and there is no =eval= prompt at all.
+
+* Commands, prompts, and hooks make the configuration a Lisp program
+:PROPERTIES:
+:ID: MPBE9G
+:END:
+
+=defcommand= (=command.lisp:57-150=) defines a function and registers it
+with argument specs such as =(:window-number "Select: ")=; a missing
+argument is prompted for by its type, and =define-stumpwm-type= adds types
+with their own readers and completion.  =;= runs a command by name with
+completion over the commands valid here; =:= reads and evaluates a Lisp form
+and prints every value.  The input line is itself a keymap of Emacs editing
+keys with pluggable completion (=input.lisp:158-195=).
+
+Hooks are plain lists of functions run with restarts, so a broken hook shows
+a message instead of killing the window manager (=primitives.lisp:862=):
+new, destroyed, focused, mapped, and urgent windows; key presses; before and
+after each command; messages.  The init file is =~/.stumpwmrc=, reloadable
+with =loadrc=.  Neither project starts Slynk; a luv image always has it.
+
+* Ratpoison's defaults, as StumpWM keeps them
+:PROPERTIES:
+:ID: KZ0O3Q
+:END:
+
+Under =C-t= (=bindings.lisp=): =c= a terminal, =!= run a command, =;= and
+=:= the two prompts, =k= close politely and =K= kill, =n= and =p= next and
+previous, =C-t= the other window (most recently used), =t= send =C-t= to the
+client, =0= to =9= select by number, =w= list windows, ="= a window menu,
+='= select by name, =a= the time, =m= the last message, =?= help, =g= a
+keymap of group commands.
+
+Windows keep stable numbers, the lowest free one, and the window list is
+most-recently-used first, so "other" is just the second element.  The list
+is printed through a format string of =%= directives (="%m%n%s%50t"=:
+mark, number, status, title) whose formatters are an alist users extend.
+
+* What Luvland can take, and what it should do otherwise
+:PROPERTIES:
+:ID: 5IJ883
+:END:
+
+Take StumpWM's keymaps that name each other, its freshly computed list of
+active maps, command strings with arguments, typed commands with prompts,
+both =;= and =:=, mid-sequence help, hook lists with restarts, numbered
+windows in most-recently-used order, and format strings.  Take Mahogany's
+non-blocking key state, with pass-through as a binding value.
+
+Do otherwise where Luvland owns more.  Messages, the input line, the window
+list, and pending-sequence help are drawn by Luvland's own renderer in the
+same image, so they stay live Lisp.  Commands run on the canvas or server
+thread, never a thread each; a prompt is a state fed by key events, not a
+blocking read.  The pending sequence is always visible, so nobody is left
+stranded mid-prefix.

@@ -187,6 +187,10 @@ The following are starting paths rather than a table of settled doctrine.
   projected flicks, animation time pinned to presentation, snapshot
   resizes and shared transactions, implicit-fence commit blockers, frame
   callbacks counted in frames shown, and a JSON IPC shaped for agents.
+- [[file:stumpwm.org][Field notes on StumpWM and Mahogany]] reads the two Lisp window
+  managers for Luvland's interaction: keymaps that name each other, a key
+  reader that never blocks, command strings with typed arguments, the =;=
+  and =:= prompts, hooks with restarts, and ratpoison's defaults.
 - [[file:luft.org][LUFT: packed sites, chains, and the atelier]] names every vertex, edge,
   face, and cell of a cubical world with one fixnum, treats a block world as a
   3-chain whose boundary is its surface, and draws that surface by vertex
