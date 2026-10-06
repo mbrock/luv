@@ -168,11 +168,10 @@ Call on the server thread."
   (post-event toplevel :close))
 
 (defmethod role-committed ((toplevel toplevel) surface)
-  (let ((mapped (and (surface-snapshot surface) t)))
+  (let ((mapped (and (surface-has-contents-p surface) t)))
     (unless (eq mapped (toplevel-mapped-p toplevel))
       (setf (toplevel-mapped-p toplevel) mapped)
-      (server-log "~A ~:[unmapped~;mapped at ~A~]" toplevel mapped
-                  (surface-snapshot surface)))
+      (server-log "~A ~:[unmapped~;mapped~]" toplevel mapped))
     (unless mapped
       ;; An unmapped toplevel must perform the initial configure afresh.
       (let ((xdg-surface (toplevel-xdg-surface toplevel)))

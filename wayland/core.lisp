@@ -179,11 +179,18 @@ if it is not one we can read."
              :documentation "The newest committed contents.  Read its pixels only
 through CALL-WITH-SURFACE-SNAPSHOT.")
    (snapshot-pool :initform (make-snapshot-pool) :reader surface-snapshot-pool)
+   (dmabuf-frame :initform nil :accessor surface-dmabuf-frame
+                 :documentation "The newest committed dmabuf, claimed through
+CLAIM-DMABUF-FRAME; at most one of this and the snapshot is set.")
+   (pending-dmabuf-frame :initform nil :accessor surface-pending-dmabuf-frame
+                         :documentation "A committed dmabuf still waiting for its fences.")
    (role :initform nil :accessor surface-role
          :documentation "The xdg_surface, subsurface, or other role object.")))
 
 (defmethod resource-destroyed ((surface surface))
   (forget-pending-buffer surface)
+  (let ((frame (surface-dmabuf-frame surface)))
+    (when frame (retire-dmabuf-frame frame)))
   (setf (server-surfaces *server*) (remove surface (server-surfaces *server*))))
 
 (defun forget-pending-buffer (surface)
@@ -237,6 +244,12 @@ through CALL-WITH-SURFACE-SNAPSHOT.")
 (define-request (surface surface :offset) (x y)
   (declare (ignore x y)))
 
+(defun surface-has-contents-p (surface)
+  "Whether SURFACE shows a buffer, counting a dmabuf still awaiting its fences."
+  (or (surface-snapshot surface)
+      (surface-dmabuf-frame surface)
+      (surface-pending-dmabuf-frame surface)))
+
 (defgeneric surface-committed (role surface)
   (:documentation "Called after SURFACE applied its pending state, with its role.")
   (:method (role surface) (declare (ignore role surface)) nil))
@@ -246,10 +259,16 @@ through CALL-WITH-SURFACE-SNAPSHOT.")
     (unless (eq buffer :unchanged)
       (forget-pending-buffer surface)
       (setf (surface-pending-buffer surface) :unchanged)
+      (setf (surface-pending-dmabuf-frame surface) nil)
       (cond
         ((null buffer)
-         (publish-snapshot surface nil))
+         (publish-snapshot surface nil)
+         (publish-dmabuf-frame surface nil))
+        ((typep buffer 'dmabuf-buffer)
+         (commit-dmabuf surface buffer))
         (t
+         (when (surface-dmabuf-frame surface)
+           (publish-dmabuf-frame surface nil))
          (let ((snapshot (copy-shm-buffer (resource-pointer buffer)
                                           (surface-snapshot-pool surface))))
            (if snapshot

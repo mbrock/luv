@@ -58,6 +58,26 @@ supplies placement, picking, and focus.")
    #:snapshot-pixels
    #:snapshot-serial
    #:snapshot-format
+   #:surface-dmabuf-frame
+   #:claim-dmabuf-frame
+   #:release-dmabuf-frame
+   #:dmabuf-frame
+   #:dmabuf-frame-buffer
+   #:dmabuf-frame-serial
+   #:dmabuf-frame-planes
+   #:dmabuf-buffer
+   #:dmabuf-width
+   #:dmabuf-height
+   #:dmabuf-format
+   #:dmabuf-modifier
+   #:dmabuf-planes
+   #:dmabuf-host-data
+   #:on-dmabuf-destroyed
+   #:make-dev-t
+   #:+drm-format-argb8888+
+   #:+drm-format-xrgb8888+
+   #:+drm-format-abgr8888+
+   #:+drm-format-xbgr8888+
    #:toplevel
    #:toplevel-surface
    #:toplevel-title

@@ -112,7 +112,13 @@
    (focus :initform nil :accessor luvland-focus)
    (camera :initform (make-spring 0.0) :reader luvland-camera)
    (frame-states :initform (make-hash-table :test 'eq) :reader luvland-frame-states)
-   (graveyard :initform '() :accessor luvland-graveyard)
+   (graveyard :initform '() :accessor luvland-graveyard
+              :documentation "(done-p . thunk) pairs: work to do once the GPU has
+finished everything submitted before it was queued.")
+   (dead-buffers :initform '() :accessor luvland-dead-buffers
+                 :documentation "Destroyed dmabuf buffers whose imports to drop,
+pushed by the server thread.")
+   (failures :initform '() :accessor luvland-failures)
    (frame-number :initform 0 :accessor luvland-frame-number)
    (processes :initform '() :accessor luvland-processes)
    (suppressed-keys :initform '() :accessor luvland-suppressed-keys)
@@ -130,6 +136,11 @@
   toplevel
   texture
   view
+  ;; The texture shm snapshots upload into, and its view.
+  (shm-texture nil)
+  (shm-view nil)
+  ;; The dmabuf frame being shown, claimed from the server.
+  (held-frame nil)
   (snapshot-serial -1)
   (width 0)
   (height 0)
@@ -154,20 +165,35 @@ predicted on."
   (declare (ignore luvland))
   (luv::monotonic-seconds))
 
+(defun after-gpu (luvland thunk)
+  "Call THUNK on the canvas thread once the GPU has finished all work
+submitted so far, which is all work that could still read what THUNK frees."
+  (let ((done-p (or (luv:queue-completion-watch (luv:device-queue (luvland-device luvland)))
+                    ;; A backend that cannot say: four frames is plenty.
+                    (let ((frame (+ (luvland-frame-number luvland) 4)))
+                      (lambda () (>= (luvland-frame-number luvland) frame))))))
+    (push (cons done-p thunk) (luvland-graveyard luvland))))
+
 (defun retire (luvland resource)
-  "Destroy RESOURCE once frames that may still sample it have finished."
+  "Destroy RESOURCE once nothing in flight samples it."
   (when resource
-    (push (cons (+ (luvland-frame-number luvland) 4) resource)
-          (luvland-graveyard luvland))))
+    (after-gpu luvland (lambda () (luv:destroy resource)))))
+
+(defun release-later (luvland frame)
+  "Give FRAME's buffer back to its client once nothing in flight reads it."
+  (when frame
+    (after-gpu luvland
+               (lambda ()
+                 (wl:call-in-server (lambda () (wl:release-dmabuf-frame frame))
+                                    :server (luvland-server luvland) :wait nil)))))
 
 (defun bury-the-dead (luvland)
-  (let ((frame (luvland-frame-number luvland)))
-    (setf (luvland-graveyard luvland)
-          (remove-if (lambda (entry)
-                       (when (<= (car entry) frame)
-                         (luv:destroy (cdr entry))
-                         t))
-                     (luvland-graveyard luvland)))))
+  (setf (luvland-graveyard luvland)
+        (remove-if (lambda (entry)
+                     (when (funcall (car entry))
+                       (funcall (cdr entry))
+                       t))
+                   (luvland-graveyard luvland))))
 
 (defun create-pipeline (luvland)
   (let* ((device (luvland-device luvland))
@@ -209,8 +235,10 @@ fresh snapshots.  Runs on the canvas thread."
                                 (member (window-toplevel window) toplevels))
                               (luvland-windows luvland))))
     (dolist (window (set-difference (luvland-windows luvland) kept))
-      (retire luvland (window-view window))
-      (retire luvland (window-texture window)))
+      (retire luvland (window-shm-view window))
+      (retire luvland (window-shm-texture window))
+      (release-later luvland (window-held-frame window)))
+    (drop-dead-imports luvland)
     (dolist (toplevel toplevels)
       (unless (find toplevel kept :key #'window-toplevel)
         (setf kept (append kept (list (make-window toplevel))))
@@ -223,39 +251,130 @@ fresh snapshots.  Runs on the canvas thread."
       (setf (luvland-focus luvland) (and kept (window-toplevel (first kept))))
       (focus-keyboard-later luvland (luvland-focus luvland)))
     (dolist (window kept)
-      (upload-snapshot luvland window))
+      (or (take-dmabuf-frame luvland window)
+          (upload-snapshot luvland window)))
     (layout-strip luvland)))
 
+(defun show (window texture view width height)
+  (setf (window-texture window) texture
+        (window-view window) view
+        (window-width window) width
+        (window-height window) height))
+
 (defun upload-snapshot (luvland window)
-  "Copy WINDOW's newest commit to its texture, if there is one this thread
-has not read yet."
+  "Copy WINDOW's newest shm commit to its texture, if there is one this
+thread has not read yet."
   (wl:call-with-surface-snapshot
    (wl:toplevel-surface (window-toplevel window))
    (lambda (snapshot)
      (let ((width (wl:snapshot-width snapshot))
            (height (wl:snapshot-height snapshot))
-           (device (luvland-device luvland)))
-       (unless (and (= width (window-width window)) (= height (window-height window)))
-         (retire luvland (window-view window))
-         (retire luvland (window-texture window))
-         (let ((texture (luv:create device (luv:make-texture-descriptor
-                                            :label "Luvland client window"
-                                            :size (list width height)
-                                            :dimensions :2d
-                                            :format (luvland-texture-format luvland)
-                                            :usage '(:copy-dst :texture-binding)))))
-           (setf (window-texture window) texture
-                 (window-view window) (luv:create device (luv:make-texture-view-descriptor
-                                                         :texture texture))
-                 (window-width window) width
-                 (window-height window) height)))
+           (device (luvland-device luvland))
+           (texture (window-shm-texture window)))
+       (unless (and texture (equal (list width height) (luv:gpu-texture-size texture)))
+         (retire luvland (window-shm-view window))
+         (retire luvland texture)
+         (setf texture (luv:create device (luv:make-texture-descriptor
+                                           :label "Luvland client window"
+                                           :size (list width height)
+                                           :dimensions :2d
+                                           :format (luvland-texture-format luvland)
+                                           :usage '(:copy-dst :texture-binding)))
+               (window-shm-texture window) texture
+               (window-shm-view window) (luv:create device (luv:make-texture-view-descriptor
+                                                          :texture texture))))
        (luv:write-texture (luv:device-queue device)
-                          (luv:make-texture-copy :texture (window-texture window))
+                          (luv:make-texture-copy :texture texture)
                           (wl:snapshot-pixels snapshot)
                           (luv:make-texture-data-layout :bytes-per-row (* 4 width)
                                                         :rows-per-image height)
                           (list width height))
+       ;; A client that went back to shm no longer needs its last dmabuf.
+       (release-later luvland (shiftf (window-held-frame window) nil))
+       (show window texture (window-shm-view window) width height)
        (setf (window-snapshot-serial window) (wl:snapshot-serial snapshot))))))
+
+;;; dmabufs.  Each client buffer is imported once and kept in the buffer's
+;;; host data, since clients cycle through two to four of them.
+
+(defun fourcc-texture-format (luvland fourcc)
+  (let ((srgb-p (eq (luvland-texture-format luvland) :bgra8-unorm-srgb)))
+    (cond
+      ((or (= fourcc wl:+drm-format-argb8888+) (= fourcc wl:+drm-format-xrgb8888+))
+       (if srgb-p :bgra8-unorm-srgb :bgra8-unorm))
+      ((or (= fourcc wl:+drm-format-abgr8888+) (= fourcc wl:+drm-format-xbgr8888+))
+       (if srgb-p :rgba8-unorm-srgb :rgba8-unorm)))))
+
+(defun dmabuf-description (device texture-format)
+  "What DEVICE can import, in the form LUV.WAYLAND:SERVER's :DMABUF takes,
+or NIL when it cannot import dmabufs at all."
+  (multiple-value-bind (major minor) (luv:dmabuf-render-node device)
+    (when major
+      (let ((srgb-p (eq texture-format :bgra8-unorm-srgb))
+            (formats '()))
+        (loop for (fourcc format) in (list (list wl:+drm-format-argb8888+ :bgra8-unorm)
+                                           (list wl:+drm-format-xrgb8888+ :bgra8-unorm)
+                                           (list wl:+drm-format-abgr8888+ :rgba8-unorm)
+                                           (list wl:+drm-format-xbgr8888+ :rgba8-unorm))
+              do (dolist (modifier (luv:dmabuf-modifiers
+                                    device (if srgb-p
+                                               (intern (format nil "~A-SRGB" format) :keyword)
+                                               format)))
+                   (push (cons fourcc modifier) formats)))
+        (when formats
+          (list :main-device (wl:make-dev-t major minor)
+                :formats (nreverse formats)))))))
+
+(defun import-buffer (luvland buffer frame)
+  "BUFFER's imported (texture view), made now from FRAME's planes if need be."
+  (or (wl:dmabuf-host-data buffer)
+      (let* ((device (luvland-device luvland))
+             (texture (luv:import-dmabuf-texture
+                       device
+                       (luv:make-texture-descriptor
+                        :label "Luvland client dmabuf"
+                        :size (list (wl:dmabuf-width buffer) (wl:dmabuf-height buffer))
+                        :dimensions :2d
+                        :format (fourcc-texture-format luvland (wl:dmabuf-format buffer))
+                        :usage '(:texture-binding))
+                       :modifier (wl:dmabuf-modifier buffer)
+                       :planes (wl:dmabuf-frame-planes frame)))
+             (import (list texture (luv:create device (luv:make-texture-view-descriptor
+                                                       :texture texture)))))
+        (setf (wl:dmabuf-host-data buffer) import)
+        ;; Forget the import when the client destroys the buffer.
+        (wl:call-in-server
+         (lambda ()
+           (flet ((dead (buffer) (sb-ext:atomic-push buffer (slot-value luvland 'dead-buffers))))
+             (if (wl:resource-live-p buffer)
+                 (wl:on-dmabuf-destroyed buffer #'dead)
+                 (dead buffer))))
+         :server (luvland-server luvland) :wait nil)
+        import)))
+
+(defun drop-dead-imports (luvland)
+  (loop for buffer = (sb-ext:atomic-pop (slot-value luvland 'dead-buffers))
+        while buffer
+        do (destructuring-bind (&optional texture view) (wl:dmabuf-host-data buffer)
+             (setf (wl:dmabuf-host-data buffer) nil)
+             (retire luvland view)
+             (retire luvland texture))))
+
+(defun take-dmabuf-frame (luvland window)
+  "Show WINDOW's newest dmabuf frame, if there is one to claim; true if so."
+  (let ((frame (wl:claim-dmabuf-frame (wl:toplevel-surface (window-toplevel window)))))
+    (when frame
+      (let ((buffer (wl:dmabuf-frame-buffer frame)))
+        (handler-case
+            (destructuring-bind (texture view) (import-buffer luvland buffer frame)
+              (release-later luvland (shiftf (window-held-frame window) frame))
+              (show window texture view (wl:dmabuf-width buffer) (wl:dmabuf-height buffer))
+              (setf (window-snapshot-serial window) (wl:dmabuf-frame-serial frame)))
+          (error (condition)
+            (push (list :import buffer condition) (luvland-failures luvland))
+            (wl:call-in-server (lambda () (wl:release-dmabuf-frame frame))
+                               :server (luvland-server luvland) :wait nil))))
+      t)))
 
 (defun layout-strip (luvland)
   "Place windows left to right along X, each centered on Y = 0."
@@ -355,6 +474,15 @@ this frame rewrites them."
 (defun encode-windows (luvland encoder target extent time)
   "Draw every window into TARGET, a texture of EXTENT (width height), as
 the world will be at TIME."
+  ;; Imported dmabufs belong to their clients' queues until acquired, and an
+  ;; acquire cannot happen inside the pass.
+  (let ((acquired '()))
+    (dolist (window (luvland-windows luvland))
+      (let ((texture (window-texture window)))
+        (when (and (window-held-frame window) texture
+                   (not (member texture acquired)))
+          (luv:acquire-external-texture encoder texture)
+          (push texture acquired)))))
   (let* ((state (frame-state luvland target))
          (view-projection (view-projection luvland time extent))
          (focus (luvland-focus luvland))
@@ -395,6 +523,10 @@ the world will be at TIME."
         (synced nil)
         (encoded nil))
     (sync-windows luvland)
+    ;; A buffer replaced just now was last sampled by the previous frame,
+    ;; which has usually finished: give it back before drawing, not a frame
+    ;; later, or a client with three swapchain images starves.
+    (bury-the-dead luvland)
     (aim-camera luvland)
     (setf synced (milliseconds-since start))
     (luv:call-with-canvas-frame
@@ -613,8 +745,7 @@ swapchain encodes on write, so colors pass through unchanged."
 a program run as the first client."
   (when *luvland*
     (error "Luvland is already running: ~A" *luvland*))
-  (let ((server (wl:start-server :initargs `(:initial-toplevel-size ,window-size
-                                              :output-size ,(list width height))))
+  (let ((server nil)
         (canvas nil)
         (device nil)
         (luvland nil))
@@ -623,7 +754,7 @@ a program run as the first client."
                        (declare (ignore condition))
                        (when canvas (ignore-errors (luv:close-canvas canvas)))
                        (when device (ignore-errors (luv:destroy device)))
-                       (wl:stop-server server))))
+                       (when server (wl:stop-server server)))))
       (setf canvas (luv:make-sdl-canvas
                     :title "Luvland" :width width :height height
                     :fullscreen-p fullscreen-p :high-pixel-density-p t
@@ -635,6 +766,12 @@ a program run as the first client."
                       canvas luv:*gpu-provider*
                       (luv:make-canvas-configuration
                        :device device :usage '(:render-attachment :copy-src)))))
+        (setf server (wl:start-server
+                      :initargs `(:initial-toplevel-size ,window-size
+                                  :output-size ,(list width height)
+                                  :dmabuf ,(dmabuf-description
+                                            device (texture-format-for
+                                                    (luv:canvas-format context))))))
         (setf luvland (make-instance 'luvland
                                      :canvas canvas :device device :context context
                                      :server server

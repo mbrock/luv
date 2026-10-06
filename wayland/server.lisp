@@ -33,6 +33,9 @@
    (log :initform '() :accessor server-log-entries)
    (failures :initform '() :accessor server-failures)
    (keymap :initarg :keymap :initform nil :reader server-keymap-names)
+   (dmabuf :initarg :dmabuf :initform nil :reader server-dmabuf
+           :documentation "What the host can import: a plist with :MAIN-DEVICE, a
+dev_t, and :FORMATS, a list of (fourcc . modifier).  NIL offers shm only.")
    (output-size :initarg :output-size :initform '(1920 1080)
                 :accessor server-output-size)
    (initial-toplevel-size :initarg :initial-toplevel-size :initform nil
@@ -461,6 +464,35 @@ re-signal its error here; otherwise return at once."
   "Run FUNCTION on this server's thread after the current batch of requests,
 as niri queues an initial configure behind the rest of a client's commit."
   (call-in-server function :wait nil))
+
+;;; Waiting on file descriptors, once.
+
+(defvar *fd-watches* (make-hash-table)
+  "Pending one-shot fd watches by key: (function source fd).")
+
+(defun when-readable (fd function)
+  "Call FUNCTION on the server thread once FD is readable.  FD is duplicated,
+so the caller keeps ownership of its own descriptor."
+  (let* ((key (allocate-key *server*))
+         (copy (cffi:foreign-funcall "fcntl" :int fd :int 1030 :int 0 :int))) ; F_DUPFD_CLOEXEC
+    (when (minusp copy)
+      (error "Could not duplicate fd ~D to watch it." fd))
+    (let ((source (%event-loop-add-fd (server-event-loop *server*) copy +event-readable+
+                                      (cffi:callback fd-readable) (cffi:make-pointer key))))
+      (setf (gethash key *fd-watches*) (list function source copy))
+      key)))
+
+(cffi:defcallback fd-readable :int ((fd :int) (mask :uint32) (data :pointer))
+  (declare (ignore fd mask))
+  (let ((watch (gethash (cffi:pointer-address data) *fd-watches*)))
+    (remhash (cffi:pointer-address data) *fd-watches*)
+    (when watch
+      (destructuring-bind (function source copy) watch
+        (%event-source-remove source)
+        (%close copy)
+        (guarding-callback ("fd watch")
+          (funcall function)))))
+  0)
 
 ;;; Starting and stopping.
 

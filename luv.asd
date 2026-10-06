@@ -264,7 +264,8 @@
                  (:file "server")
                  (:file "core")
                  (:file "xdg-shell")
-                 (:file "seat"))))
+                 (:file "seat")
+                 (:file "dmabuf"))))
   :in-order-to ((test-op (test-op "luv/wayland/test"))))
 
 (defsystem "luv/wayland/test"

@@ -262,15 +262,52 @@ learned on the way:
   author's niri 1000, settling three times slower, and now animates to
   the predicted presentation time (#R7TM57).
 
-* NEXT Import dmabufs from GPU clients, then run on a console
+* DONE Import dmabufs from GPU clients
 :PROPERTIES:
 :ID: MG1LRT
 :END:
 
-The rest of the first plan for #LWMBMS.  Advertise =zwp_linux_dmabuf_v1=
-with feedback naming the Vulkan device's DRM node, import client buffers
-through =VK_EXT_external_memory_dma_buf= (#F1A8BL), and hold each commit
-until the dmabuf polls readable, as niri does (#8RQB6G).  A Chromium-based
-client is the proof.  Then the same build on a console, where nothing
-changes but the output.  Only after that does luvcraft host a surface on a
-terminal wall (#QYFVAF).
+The second step of #LWMBMS.  Luvland advertises =zwp_linux_dmabuf_v1=
+version 4 with feedback naming its render node, 226:128 from
+=VK_EXT_physical_device_drm=, and a table of every format and modifier the
+device can both import and sample: linear and six AMD tilings, several of
+them DCC-compressed with a second memory plane.  =vkcube= spins in a window
+whose pixels never touch the CPU.
+
+[[file:images/luvland-vkcube.png]]
+
+The server never calls Vulkan.  It holds a dmabuf commit until the buffer
+polls readable (#8RQB6G), publishes a frame that owns duplicates of the
+plane fds, and releases a frame the host never claimed as soon as a newer
+one replaces it.  The HAL's =import-dmabuf-texture= creates an image with
+explicit plane layouts and imports the memory; =acquire-external-texture=
+takes it from =VK_QUEUE_FAMILY_FOREIGN_EXT= before the pass, and =finish=
+gives it back in =GENERAL=.  =luvland/test= serves a real vkcube headlessly
+and imports what it draws.  Things learned:
+
+- Seventeen new Vulkan structs were checked against =vulkan_core.h= by a C
+  program printing =sizeof= and =offsetof=; none differed.
+- The validation layer (=VK_LOADER_LAYERS_ENABLE='*validation*'=) caught
+  what RADV tolerated: an external-memory image must be created
+  =UNDEFINED= (VUID 01443), not =PREINITIALIZED=.  The convention that
+  passes is that the foreign owner leaves its memory in =GENERAL=, from
+  which every acquire transfers.  With that, a run reports nothing.
+- A frame carries its own duplicated fds, because the client may destroy
+  its =wl_buffer= while the canvas thread imports it, and a closed fd
+  number can be reused by then.
+- vkcube ran at 45 frames a second, skipping every third frame callback for
+  want of a free buffer.  Luv's Vulkan backend had no
+  =queue-completion-watch=, so Luvland released buffers on a four-frame
+  guess; reading the queue's timeline semaphore instead releases them
+  within a millisecond of the GPU finishing, and vkcube runs at 60.
+
+* NEXT Run Luvland on a console
+:PROPERTIES:
+:ID: RRONLT
+:END:
+
+The last step of the first plan: the same build on a virtual terminal,
+where SDL's KMSDRM driver owns the display (#P6721I) and nothing changes
+but the output.  Then luvcraft hosts a surface on a terminal wall
+(#QYFVAF).  A Chromium-based client, the other proof #MG1LRT named, is
+still to be tried.
