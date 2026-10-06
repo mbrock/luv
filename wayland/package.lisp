@@ -31,6 +31,7 @@ supplies placement, picking, and focus.")
    #:server-clients
    #:server-surfaces
    #:server-toplevels
+   #:server-initial-toplevel-size
    #:call-in-server
    #:server-log
    #:*server*

@@ -301,6 +301,35 @@ and imports what it draws.  Things learned:
   guess; reading the queue's timeline semaphore instead releases them
   within a millisecond of the GPU finishing, and vkcube runs at 60.
 
+* The focused window is shown one to one, framed by the compositor
+:PROPERTIES:
+:ID: P9O2XY
+:END:
+
+A terminal shown at four fifths of the view looked blurred: not a small
+font, but every glyph resampled to three quarters of its size.  The focused
+window now stands alone at the distance where one client pixel is one
+drawable pixel, =H / (2000 tan(fov/2))= for a view =H= pixels high, with the
+camera shifted half a pixel when the window's and the view's sizes differ in
+parity, so texel centres land on pixel centres.  Every window is configured
+to the view less a margin, in the four =tiled= states so that foot takes the
+size exactly instead of rounding to whole cells; only the focused one is
+=activated=.
+
+[[file:images/luvland-framed.png]]
+
+Frames are the compositor's: one vertex shader expands each window's quad
+and measures in window pixels, a frame pass draws a rounded border and a
+soft shadow, and a window pass clips the client's pixels to the matching
+corners, both with premultiplied alpha.  The claim is checked, not seen: in
+a capture, all 1,011,608 interior pixels of a focused 894 by 1132 foot equal
+its buffer exactly, through the sRGB decode, the blend, and the projection.
+
+Oversized client buffers would only pay where the camera comes closer than
+one to one.  Windows seen in perspective are minified, for which the honest
+answer is mipmaps; on a dense display the rule becomes one buffer pixel per
+physical pixel, through =wl_output.scale= or fractional scale.
+
 * NEXT Run Luvland on a console
 :PROPERTIES:
 :ID: RRONLT

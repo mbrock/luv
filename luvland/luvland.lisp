@@ -68,32 +68,96 @@
 
 ;;; The window shader: four strip vertices mapped through one matrix.
 
-(shader:define-shader window-vertex-specification
-    (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index))
-     :resources
-     ((placement :uniform-block :set 0 :binding 2
-                 :members ((model-view-projection :mat4) (tint :vec4))))
-     :outputs ((clip-position :vec4 :built-in :position)
-               (texture-coordinate :vec2 :location 0)))
+;;; Windows and their frames share one vertex shader.  It expands the unit
+;;; square by EXTEND pixels on every side and hands the fragment shader the
+;;; point in window pixels, so frame, border, shadow, and rounded corners are
+;;; all measured in the client's own pixels: exact when the window is shown
+;;; one to one.
+
+(defmacro define-window-shader (name stage inputs resources outputs &body body)
+  `(shader:define-shader ,name
+       (:stage ,stage
+        :inputs ,inputs
+        :resources ((placement :uniform-block :set 0 :binding 2
+                               :members ((model-view-projection :mat4)
+                                         (tint :vec4)
+                                         ;; width, height, corner radius, extension
+                                         (shape :vec4)
+                                         ;; border width, shadow blur, shadow alpha, unused
+                                         (frame :vec4)
+                                         (border-color :vec4)))
+                    ,@resources)
+        :outputs ,outputs)
+     ,@body))
+
+(define-window-shader window-vertex-specification :vertex
+    ((vertex-index :uint :built-in :vertex-index))
+    ()
+    ((clip-position :vec4 :built-in :position)
+     (window-pixel :vec2 :location 0))
   (let* ((two (shader:uint 2.0))
          (u (shader:float (mod vertex-index two)))
-         (v (shader:float (/ vertex-index two))))
-    (shader:set-output texture-coordinate (shader:vec2 u v))
+         (v (shader:float (/ vertex-index two)))
+         (width (shader:swizzle shape :x))
+         (height (shader:swizzle shape :y))
+         (extend (shader:swizzle shape :w))
+         (x (- (* u (+ width (* 2.0 extend))) extend))
+         (y (- (* v (+ height (* 2.0 extend))) extend)))
+    (shader:set-output window-pixel (shader:vec2 x y))
     (shader:set-output clip-position
-                       (* model-view-projection (shader:vec4 u v 0.0 1.0)))))
+                       (* model-view-projection
+                          (shader:vec4 (/ x width) (/ y height) 0.0 1.0)))))
 
-(shader:define-shader window-fragment-specification
-    (:stage :fragment
-     :inputs ((texture-coordinate :vec2 :location 0))
-     :resources
-     ((image :texture-2d :set 0 :binding 0)
-      (image-sampler :sampler :set 0 :binding 1)
-      (placement :uniform-block :set 0 :binding 2
-                 :members ((model-view-projection :mat4) (tint :vec4))))
-     :outputs ((color-output :vec4 :location 0)))
-  (let* ((texel (shader:sample image image-sampler texture-coordinate)))
-    (shader:set-output color-output (* texel tint))))
+(shader:define-shader-function rounded-box-distance (point half-size radius)
+  "Signed distance from POINT to a box of HALF-SIZE about the origin whose
+corners are rounded by RADIUS."
+  (let* ((corner (+ (- (shader:vec2 (abs (shader:swizzle point :x))
+                                    (abs (shader:swizzle point :y)))
+                       half-size)
+                    (shader:vec2 radius radius)))
+         (outside (shader:vec2 (max (shader:swizzle corner :x) 0.0)
+                               (max (shader:swizzle corner :y) 0.0))))
+    (- (+ (sqrt (shader:dot outside outside))
+          (min (max (shader:swizzle corner :x) (shader:swizzle corner :y)) 0.0))
+       radius)))
+
+(define-window-shader window-fragment-specification :fragment
+    ((window-pixel :vec2 :location 0))
+    ((image :texture-2d :set 0 :binding 0)
+     (image-sampler :sampler :set 0 :binding 1))
+    ((color-output :vec4 :location 0))
+  (let* ((size (shader:swizzle shape :xy))
+         (texel (shader:sample image image-sampler (/ window-pixel size)))
+         (distance (rounded-box-distance (- window-pixel (* size 0.5))
+                                         (* size 0.5)
+                                         (shader:swizzle shape :z)))
+         (coverage (shader:clamp (- 0.5 distance) 0.0 1.0))
+         (color (* (shader:swizzle texel :xyz) (shader:swizzle tint :xyz) coverage)))
+    ;; Clients are opaque for now: their alpha is not trusted (XRGB).
+    (shader:set-output color-output (shader:vec4 color coverage))))
+
+(define-window-shader frame-fragment-specification :fragment
+    ((window-pixel :vec2 :location 0))
+    ((image :texture-2d :set 0 :binding 0)
+     (image-sampler :sampler :set 0 :binding 1))
+    ((color-output :vec4 :location 0))
+  (let* ((size (shader:swizzle shape :xy))
+         (border (shader:swizzle frame :x))
+         (blur (shader:swizzle frame :y))
+         (shadow-alpha (shader:swizzle frame :z))
+         (point (- window-pixel (* size 0.5)))
+         (half-outer (+ (* size 0.5) (shader:vec2 border border)))
+         (radius (+ (shader:swizzle shape :z) border))
+         (edge (rounded-box-distance point half-outer radius))
+         (coverage (shader:clamp (- 0.5 edge) 0.0 1.0))
+         ;; The shadow falls a little below, as from a light overhead.
+         (lowered (- point (shader:vec2 0.0 (* blur 0.25))))
+         (shadow (* shadow-alpha
+                    (- 1.0 (shader:smoothstep (* blur -0.5) blur
+                                              (rounded-box-distance lowered half-outer radius)))))
+         (alpha (+ coverage (* shadow (- 1.0 coverage))))
+         (color (* (shader:swizzle border-color :xyz) coverage)))
+    (shader:set-output color-output (shader:vec4 color alpha))))
 
 ;;; The atelier.
 
@@ -106,6 +170,8 @@
    (sampler :accessor luvland-sampler)
    (layout :accessor luvland-layout)
    (pipeline :accessor luvland-pipeline)
+   (frame-pipeline :accessor luvland-frame-pipeline)
+   (configured-extent :initform nil :accessor luvland-configured-extent)
    (modules :initform '() :accessor luvland-modules)
    (windows :initform '() :accessor luvland-windows
             :documentation "WINDOW records in strip order, oldest first.")
@@ -142,6 +208,8 @@ pushed by the server thread.")
   ;; The dmabuf frame being shown, claimed from the server.
   (held-frame nil)
   (snapshot-serial -1)
+  ;; The (size states) last sent to the client, to configure only on change.
+  (configured nil)
   (width 0)
   (height 0)
   (x 0.0))
@@ -153,7 +221,6 @@ pushed by the server thread.")
 
 (defparameter *pixels-per-unit* 1000.0
   "Client pixels per world unit: a 1000-pixel window is one unit wide.")
-(defparameter *window-gap* 0.06)
 (defparameter *field-of-view* (* 50 (/ pi 180)))
 
 (defun canvas-extent (luvland)
@@ -197,32 +264,38 @@ submitted so far, which is all work that could still read what THUNK frees."
 
 (defun create-pipeline (luvland)
   (let* ((device (luvland-device luvland))
-         (vertex (luv:create device (luv:make-shader-module-descriptor
-                                     :label "Luvland window vertex"
-                                     :language :mathematical
-                                     :code (window-vertex-specification))))
-         (fragment (luv:create device (luv:make-shader-module-descriptor
-                                       :label "Luvland window fragment"
-                                       :language :mathematical
-                                       :code (window-fragment-specification))))
+         (format (luv:canvas-format (luvland-context luvland)))
          (layout (luv:create device (luv:make-bind-group-layout-descriptor
                                      :label "Luvland window"
                                      :entries '((:binding 0 :type :texture)
                                                 (:binding 1 :type :sampler)
-                                                (:binding 2 :type :uniform-buffer))))))
-    (setf (luvland-modules luvland) (list vertex fragment)
-          (luvland-layout luvland) layout
-          (luvland-sampler luvland)
-          (luv:create device (luv:make-sampler-descriptor :label "Luvland window sampler"))
-          (luvland-pipeline luvland)
-          (luv:create device (luv:make-render-pipeline-descriptor
-                              :label "Luvland windows"
-                              :layout layout
-                              :vertex `(:module ,vertex)
-                              :fragment `(:module ,fragment
-                                          :targets ((:format ,(luv:canvas-format
-                                                               (luvland-context luvland)))))
-                              :primitive '(:topology :triangle-strip))))))
+                                                (:binding 2 :type :uniform-buffer)))))
+         (modules '()))
+    (flet ((module (label specification)
+             (let ((module (luv:create device (luv:make-shader-module-descriptor
+                                               :label label :language :mathematical
+                                               :code specification))))
+               (push module modules)
+               module)))
+      (let ((vertex (module "Luvland window vertex" (window-vertex-specification)))
+            (window (module "Luvland window fragment" (window-fragment-specification)))
+            (frame (module "Luvland frame fragment" (frame-fragment-specification))))
+        (flet ((pipeline (label fragment)
+                 (luv:create device (luv:make-render-pipeline-descriptor
+                                     :label label
+                                     :layout layout
+                                     :vertex `(:module ,vertex)
+                                     :fragment `(:module ,fragment
+                                                 :targets ((:format ,format
+                                                            :blend :premultiplied-alpha)))
+                                     :primitive '(:topology :triangle-strip)))))
+          (setf (luvland-modules luvland) modules
+                (luvland-layout luvland) layout
+                (luvland-sampler luvland)
+                (luv:create device (luv:make-sampler-descriptor
+                                    :label "Luvland window sampler"))
+                (luvland-pipeline luvland) (pipeline "Luvland windows" window)
+                (luvland-frame-pipeline luvland) (pipeline "Luvland frames" frame)))))))
 
 ;;; Windows follow the server's toplevels.
 
@@ -376,12 +449,22 @@ or NIL when it cannot import dmabufs at all."
                                :server (luvland-server luvland) :wait nil))))
       t)))
 
+(defparameter *window-margin* 28
+  "Pixels between the focused window's border and the edge of the view.")
+(defparameter *border-width* 2.0)
+(defparameter *corner-radius* 10.0)
+(defparameter *shadow-blur* 24.0)
+(defparameter *shadow-alpha* 0.45)
+(defparameter *focused-border-color* '(0.94 0.62 0.34))
+(defparameter *border-color* '(0.24 0.25 0.29))
+
 (defun layout-strip (luvland)
-  "Place windows left to right along X, each centered on Y = 0."
+  "Place windows left to right along X, each centered on Y = 0, a margin's
+width apart so one stands alone in the view when it has focus."
   (let ((x 0.0))
     (dolist (window (luvland-windows luvland))
       (setf (window-x window) x)
-      (incf x (+ (/ (window-width window) *pixels-per-unit*) *window-gap*)))))
+      (incf x (/ (+ (window-width window) (* 2 *window-margin*)) *pixels-per-unit*)))))
 
 (defun window-world-size (window)
   (values (/ (window-width window) *pixels-per-unit*)
@@ -390,30 +473,37 @@ or NIL when it cannot import dmabufs at all."
 (defun focused-window (luvland)
   (find (luvland-focus luvland) (luvland-windows luvland) :key #'window-toplevel))
 
-(defun window-center-x (window)
-  (+ (window-x window) (/ (window-world-size window) 2)))
-
-(defun camera-distance (window aspect)
-  "The distance at which WINDOW fills four fifths of the view in its tighter
-dimension, for a view of width-to-height ASPECT."
-  (multiple-value-bind (width height) (window-world-size window)
-    (/ (* 0.5 (/ (max height (/ width aspect)) 0.8))
-       (tan (/ *field-of-view* 2)))))
-
-(defun view-aspect (luvland)
+(defun native-distance (luvland)
+  "The distance at which a window in the plane Z = 0 shows one client pixel
+per drawable pixel: the view's height in pixels, in world units, divided by
+twice the tangent of half the field of view."
   (destructuring-bind (width height) (canvas-extent luvland)
-    (/ width (max 1 height))))
+    (declare (ignore width))
+    (/ (/ height *pixels-per-unit*) (* 2 (tan (/ *field-of-view* 2))))))
+
+(defun pixel-alignment (view-pixels window-pixels)
+  "Half a pixel, in world units, when centering WINDOW-PIXELS in VIEW-PIXELS
+would put its edges between pixels; otherwise zero."
+  (if (oddp (- view-pixels window-pixels)) (/ 0.5 *pixels-per-unit*) 0.0))
+
+(defun camera-target (luvland window)
+  "Where the camera looks to show WINDOW one to one, its edges on pixel
+boundaries."
+  (destructuring-bind (width height) (canvas-extent luvland)
+    (values (+ (window-x window) (/ (window-width window) *pixels-per-unit* 2)
+               (pixel-alignment width (window-width window)))
+            (pixel-alignment height (window-height window)))))
 
 (defun camera-position (luvland time)
   (let ((window (focused-window luvland)))
     (values (spring-state (luvland-camera luvland) time)
-            0.0
-            (if window (camera-distance window (view-aspect luvland)) 1.0))))
+            (if window (nth-value 1 (camera-target luvland window)) 0.0)
+            (native-distance luvland))))
 
 (defun aim-camera (luvland)
   (let ((window (focused-window luvland)))
     (when window
-      (let ((target (window-center-x window))
+      (let ((target (camera-target luvland window))
             (spring (luvland-camera luvland)))
         (unless (= target (spring-target spring))
           (retarget-spring spring target (now luvland)))))))
@@ -432,6 +522,33 @@ dimension, for a view of width-to-height ASPECT."
           0 0 1 0
           (window-x window) (/ height 2) 0 1)))
 
+;;; Configuring clients: every window is sized to stand alone in the view,
+;;; tiled so clients take the size exactly, and only the focused one is
+;;; activated.
+
+(defun fitted-window-size (luvland)
+  (destructuring-bind (width height) (canvas-extent luvland)
+    (list (max 64 (- width (* 2 *window-margin*)))
+          (max 64 (- height (* 2 *window-margin*))))))
+
+(defun reconfigure-windows (luvland)
+  "Send each window the size and states it should have, if they changed."
+  (let ((size (fitted-window-size luvland))
+        (server (luvland-server luvland)))
+    (unless (equal size (wl:server-initial-toplevel-size server))
+      (setf (wl:server-initial-toplevel-size server) size))
+    (dolist (window (luvland-windows luvland))
+      (let* ((toplevel (window-toplevel window))
+             (states (append (when (eq toplevel (luvland-focus luvland)) '(:activated))
+                             '(:tiled-left :tiled-right :tiled-top :tiled-bottom)))
+             (wanted (list size states)))
+        (unless (equal wanted (window-configured window))
+          (setf (window-configured window) wanted)
+          (wl:call-in-server (lambda ()
+                               (when (wl:resource-live-p toplevel)
+                                 (wl:configure-toplevel toplevel :size size :states states)))
+                             :server server :wait nil))))))
+
 ;;; Frames.
 
 (defun frame-state (luvland surface-texture)
@@ -447,28 +564,50 @@ this frame rewrites them."
               (gethash surface-texture (luvland-frame-states luvland)) state))))
 
 (defun window-bindings (luvland state window)
+  "The uniform buffers and bind groups for drawing WINDOW's frame and its
+contents into the swapchain image STATE belongs to."
   (let ((entry (gethash window state)))
-    (unless (and entry (eq (second entry) (window-view window)))
-      (let* ((device (luvland-device luvland))
-             (buffer (or (first entry)
-                         (luv:create device (luv:make-buffer-descriptor
-                                             :label "Luvland window placement"
-                                             :size 80 :usage '(:uniform))))))
-        (when entry (retire luvland (third entry)))
-        (setf entry (list buffer (window-view window)
-                          (luv:create device (luv:make-bind-group-descriptor
-                                              :label "Luvland window"
-                                              :layout (luvland-layout luvland)
-                                              :entries `((:binding 0 :resource ,(window-view window))
-                                                         (:binding 1 :resource ,(luvland-sampler luvland))
-                                                         (:binding 2 :resource ,buffer)))))
-              (gethash window state) entry)))
+    (unless (and entry (eq (getf entry :view) (window-view window)))
+      (let ((device (luvland-device luvland)))
+        (flet ((buffer (key)
+                 (or (getf entry key)
+                     (luv:create device (luv:make-buffer-descriptor
+                                         :label "Luvland window placement"
+                                         :size 128 :usage '(:uniform)))))
+               (bind-group (buffer)
+                 (luv:create device (luv:make-bind-group-descriptor
+                                     :label "Luvland window"
+                                     :layout (luvland-layout luvland)
+                                     :entries `((:binding 0 :resource ,(window-view window))
+                                                (:binding 1 :resource ,(luvland-sampler luvland))
+                                                (:binding 2 :resource ,buffer))))))
+          (when entry
+            (retire luvland (getf entry :frame-group))
+            (retire luvland (getf entry :window-group)))
+          (let ((frame-buffer (buffer :frame-buffer))
+                (window-buffer (buffer :window-buffer)))
+            (setf entry (list :view (window-view window)
+                              :frame-buffer frame-buffer
+                              :frame-group (bind-group frame-buffer)
+                              :window-buffer window-buffer
+                              :window-group (bind-group window-buffer))
+                  (gethash window state) entry)))))
     entry))
 
-(defun placement-uniform (matrix tint)
-  (let ((data (make-array 20 :element-type 'single-float)))
+(defun placement-uniform (matrix window &key tint extend border-color)
+  (let ((data (make-array 32 :element-type 'single-float :initial-element 0.0)))
     (replace data matrix)
-    (replace data tint :start1 16)
+    (replace data (map 'vector (lambda (x) (coerce x 'single-float)) tint) :start1 16)
+    (setf (aref data 20) (float (window-width window) 1.0)
+          (aref data 21) (float (window-height window) 1.0)
+          (aref data 22) (float *corner-radius* 1.0)
+          (aref data 23) (float extend 1.0)
+          (aref data 24) (float *border-width* 1.0)
+          (aref data 25) (float *shadow-blur* 1.0)
+          (aref data 26) (float *shadow-alpha* 1.0))
+    (replace data (map 'vector (lambda (x) (coerce x 'single-float)) border-color)
+             :start1 28)
+    (setf (aref data 31) 1.0)
     data))
 
 (defun encode-windows (luvland encoder target extent time)
@@ -486,6 +625,7 @@ the world will be at TIME."
   (let* ((state (frame-state luvland target))
          (view-projection (view-projection luvland time extent))
          (focus (luvland-focus luvland))
+         (windows (remove-if-not #'window-view (luvland-windows luvland)))
          (pass (luv:begin-render-pass
                 encoder
                 (luv:make-render-pass-descriptor
@@ -493,20 +633,31 @@ the world will be at TIME."
                  :color-attachments `((:view ,(gethash :target state)
                                        :load-op :clear :store-op :store
                                        :clear-value #(0.012 0.014 0.022 1.0)))))))
+    (dolist (window windows)
+      (let* ((focused (eq (window-toplevel window) focus))
+             (entry (window-bindings luvland state window))
+             (matrix (mat4* view-projection (window-model window))))
+        (luv:write-buffer (getf entry :frame-buffer)
+                          (placement-uniform matrix window
+                                             :tint '(1 1 1 1)
+                                             :extend (+ *border-width* *shadow-blur*)
+                                             :border-color (if focused
+                                                               *focused-border-color*
+                                                               *border-color*)))
+        (luv:write-buffer (getf entry :window-buffer)
+                          (placement-uniform matrix window
+                                             :tint (if focused '(1 1 1 1) '(0.62 0.62 0.68 1))
+                                             :extend 0
+                                             :border-color '(0 0 0)))))
+    ;; Frames first, so no window's shadow falls across a neighbour.
+    (luv:set-pipeline pass (luvland-frame-pipeline luvland))
+    (dolist (window windows)
+      (luv:set-bind-group pass 0 (getf (gethash window state) :frame-group))
+      (luv:draw pass 4))
     (luv:set-pipeline pass (luvland-pipeline luvland))
-    (dolist (window (luvland-windows luvland))
-      (when (window-view window)
-        (destructuring-bind (buffer view bind-group)
-            (window-bindings luvland state window)
-          (declare (ignore view))
-          (luv:write-buffer buffer
-                            (placement-uniform
-                             (mat4* view-projection (window-model window))
-                             (if (eq (window-toplevel window) focus)
-                                 #(1.0 1.0 1.0 1.0)
-                                 #(0.55 0.55 0.6 1.0))))
-          (luv:set-bind-group pass 0 bind-group)
-          (luv:draw pass 4))))
+    (dolist (window windows)
+      (luv:set-bind-group pass 0 (getf (gethash window state) :window-group))
+      (luv:draw pass 4))
     (luv:end-pass pass)))
 
 (defun milliseconds-since (start)
@@ -523,6 +674,7 @@ the world will be at TIME."
         (synced nil)
         (encoded nil))
     (sync-windows luvland)
+    (reconfigure-windows luvland)
     ;; A buffer replaced just now was last sampled by the previous frame,
     ;; which has usually finished: give it back before drawing, not a frame
     ;; later, or a client with three swapchain images starves.
@@ -553,10 +705,8 @@ the world will be at TIME."
       (loop for key being the hash-keys of state using (hash-value value)
             do (if (eq key :target)
                    (luv:destroy value)
-                   (destructuring-bind (buffer view bind-group) value
-                     (declare (ignore view))
-                     (luv:destroy bind-group)
-                     (luv:destroy buffer)))))))
+                   (dolist (slot '(:frame-group :window-group :frame-buffer :window-buffer))
+                     (luv:destroy (getf value slot))))))))
 
 ;;; Screenshots through luv's shared capture transaction.
 
