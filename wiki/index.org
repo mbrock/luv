@@ -176,7 +176,7 @@ The following are starting paths rather than a table of settled doctrine.
   agent surface in CLIM terms: tools as commands with presentation-typed
   arguments, results as presentations read under a model view, cassettes
   drawn on the HUD and committed to a wall, and an agent with a body.
-- [[file:compositor.org][A Wayland atelier]] observes that luvcraft on a console already owns the
+- [[file:compositor.org][Luvland, a Wayland atelier]] observes that luvcraft on a console already owns the
   display and that the IOSurface portal is a small private Wayland, then
   proposes a third application beside Luvcraft and LUFT, a voxel-free
   three-dimensional niri, as the first host of a luv-owned libwayland-server
