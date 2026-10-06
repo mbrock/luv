@@ -1,0 +1,185 @@
+#+title: Luvcraft as a Wayland compositor
+#+startup: overview
+
+Luvcraft already puts other programs' pictures on world surfaces: a Ghostty
+terminal across a wall of blocks (#NMAD2U), the same terminal in the hand
+(#S27JKR), and on Darwin a whole second luvcraft through a shared IOSurface
+(#TWKA93).  On a Linux console it also owns the display outright.  This page
+asks what is missing for luvcraft to be a Wayland compositor: a program that
+any Linux application can draw into, whose windows are things in the world
+that the player and the agent can both look at and operate.
+
+It is a page of readings and questions rather than decisions.  Claims about
+current luv code are observed in source; claims about Wayland describe the
+protocols' contracts; everything under "questions" is an invitation.
+
+* Luvcraft on a console is already a compositor with no clients
+:PROPERTIES:
+:ID: P6721I
+:END:
+
+Observed: when the flake's environment starts on a =/dev/ttyN= with neither
+=DISPLAY= nor =WAYLAND_DISPLAY= set, it exports =SDL_VIDEODRIVER=kmsdrm=
+([[file:../flake.nix][flake.nix]]).  SDL then hosts the canvas directly on
+DRM/KMS and Vulkan presents through =VK_KHR_display=, at a mode the display
+actually advertises (=resolve-kmsdrm-vulkan-canvas-size= in
+[[file:../hal/sdl/canvas.lisp][hal/sdl/canvas.lisp]]).  The same file already
+paid for running on bare metal: SDL's console-keyboard handlers are kept away
+from SBCL's fatal signals, and the Dvorak and caps/control conventions are
+reapplied because KMSDRM never learns the console keymap.
+
+So the bottom half of a compositor exists: one process owns the scanout, the
+GPU, and the input devices, and draws a world every frame.  What a Wayland
+compositor adds is the top half: a socket where other processes announce
+surfaces, hand over buffers, and receive input.
+
+* The portal handshake is a small private Wayland
+:PROPERTIES:
+:ID: TIS9IM
+:END:
+
+[[file:../luvcraft/mirror.lisp][mirror.lisp]] and
+[[file:../luvcraft/portal.lisp][portal.lisp]] let a child luvcraft draw into
+surfaces its parent samples.  Their lockstep protocol solves, in miniature,
+the problems Wayland's core and =xdg-shell= protocols solve for arbitrary
+clients:
+
+| portal (mirror.lisp)                           | Wayland                                                  |
+|------------------------------------------------+----------------------------------------------------------|
+| parent writes =size W H=                       | =xdg_toplevel.configure= proposes a size                 |
+| child answers =extent W H=                     | =xdg_surface.ack_configure=, then a buffer of that size  |
+| parent creates a ring and writes =surfaces=    | client creates =wl_buffer=s (=wl_shm= or =linux-dmabuf=) |
+| parent writes =frame K=                        | =wl_surface.frame= callback: "now is a good time"        |
+| child renders, answers                         | =wl_surface.attach= + =damage= + =commit=                |
+| three slots; never redraw the one being shown  | =wl_buffer.release= returns a buffer to the client       |
+
+The inversion worth noticing: in the portal the parent allocates the
+surfaces; in Wayland the client allocates its buffers and the compositor
+only imports them.  The ring discipline of #TWKA93 becomes the compositor's
+obligation to release a buffer only once no frame in flight still samples it.
+
+* A file descriptor is the Linux IOSurface
+:PROPERTIES:
+:ID: F1A8BL
+:END:
+
+[[file:../hal/metal/iosurface.lisp][iosurface.lisp]] relies on a surface
+having a small machine-wide integer name, which is why a pipe carrying one
+number each way suffices.  Linux has no such global name.  The equivalent
+of an IOSurface is a dmabuf: a file descriptor for GPU memory, together with
+a DRM fourcc format and a format modifier describing its tiling.  A
+descriptor crosses a process boundary only as =SCM_RIGHTS= ancillary data on
+a Unix socket, never as a number written to a pipe.
+
+On the importing side Vulkan wraps a dmabuf as an image through
+=VK_EXT_external_memory_dma_buf= and =VK_EXT_image_drm_format_modifier=.
+[[file:../luvcraft/video-interop-vulkan.lisp][video-interop-vulkan.lisp]] already adopts FFmpeg's =AVVkFrame=
+planes, which is neighbouring skill: plane layouts, explicit ownership of
+imported images, and publishing only complete pictures.
+
+This also explains why the portal is Darwin-only (#TWKA93): a Linux portal
+needs exactly the socket and the dmabuf import that a Wayland server needs.
+Building one builds the other.
+
+* Every client window is a texture with a place in the world
+:PROPERTIES:
+:ID: 0V1GBM
+:END:
+
+A terminal wall is a Ghostty display projected onto authored blocks; the
+phone is the same display in the grip frame.  Replace "Ghostty display" with
+"the client surface's current texture" and both become window placements.
+Nothing requires a window to be a flat screen-aligned rectangle; that is
+merely the placement desktop compositors choose.
+
+Input runs the other way.  A ray from the camera meets a panel; the hit
+point in panel coordinates becomes a surface-local position; the compositor
+sends =wl_pointer.enter= and =motion= to that one client.  Keyboard focus is
+the modal-focus relationship already designed for terminals (#8JCMA5), now
+delivered through =wl_keyboard= with real keycodes and an XKB keymap.
+
+Text sharpness is the open cost.  #GJUPMQ made terminals sharp at any
+distance by drawing glyphs as geometry; a client's buffer is a raster, so a
+browser window on a distant wall is a texture again, the fallback #S8LIJP
+warns about.  Choosing buffer scale per placement, through
+=wp_fractional_scale_v1= and =wp_viewporter=, is one partial answer.
+
+* The compositor is the only place where computer use is easy
+:PROPERTIES:
+:ID: N3M9SF
+:END:
+
+Wayland forbids applications from seeing other windows or synthesizing
+input into them.  The sanctioned routes for an assistant that drives a
+desktop are the ScreenCast and RemoteDesktop portals, each behind a consent
+dialog and each supported unevenly across compositors, or kernel-level
+=uinput= injection that is blind to what is on screen.  This is why desktop
+agents arrive on Linux last.
+
+The compositor is the one trusted party, so in luvcraft the problem
+dissolves.  The agent already has a body and a wall in the world (#5JDNKF);
+given compositor access it can sample a specific client's texture, send
+input to a specific surface rather than to screen coordinates, and know the
+surface's application id and title.  The policy becomes luv's to design:
+which surfaces the agent may see, a visible mark while it is driving, and a
+key that takes control back.  CLIM supplies the vocabulary for "this
+window" as an object both the player and the agent can point at
+(#4Y8Q8B).
+
+* Speak libwayland-server directly, not through wlroots
+:PROPERTIES:
+:ID: TRHHAP
+:END:
+
+Smithay (Rust, under niri) and wlroots (C, under sway) are the usual
+foundations.  Much of what they provide is a renderer, a scene graph, and
+output management, which luv already has in its own terms.  What luv lacks
+is the protocol and the buffer import, so the smaller dependency is
+=libwayland-server= over CFFI plus the protocol XML: the event loop,
+resources, and marshalling, with every interface implemented in Lisp.
+
+The interface set that admits ordinary clients is small:
+
+- =wl_compositor=, =wl_surface=, =wl_region=, =wl_subcompositor=
+- =wl_shm= (CPU buffers; the McCLIM raster mirror's path in reverse)
+- =xdg_wm_base=, =xdg_surface=, =xdg_toplevel=, =xdg_popup=
+- =zwp_linux_dmabuf_v1=, version 4, whose feedback names the main device
+  and format table; =VK_EXT_physical_device_drm= maps the Vulkan device to
+  that DRM node
+- =wl_seat=, =wl_pointer=, =wl_keyboard=, =wl_output=, =wl_data_device=
+
+X11 applications can arrive through =xwayland-satellite=, which presents
+Xwayland windows as ordinary Wayland clients, as niri does.  Luv would
+never become an X window manager.
+
+* Questions for luv
+:PROPERTIES:
+:ID: P6IFHF
+:END:
+
+- Synchronization.  dmabufs carry implicit fences, and
+  =wp_linux_drm_syncobj_v1= offers explicit timeline semaphores.  Which
+  does the Vulkan backend want to wait on before sampling a client buffer,
+  and which do current Mesa and NVIDIA clients actually provide?
+- Sessions.  SDL's KMSDRM driver assumes it owns the machine.  Switching
+  virtual terminals, or living beside another compositor, is libseat's
+  territory; is that ever needed if luvcraft /is/ the session?
+- Several displays and hotplug arrive only as far as SDL's KMSDRM driver
+  exposes them.  Is raw DRM ever worth owning?
+- Where does a window live?  On authored blocks like a terminal wall, in
+  the hand like the phone, or in a CLIM-arranged space that is not the
+  block world at all?
+- Popups and menus are surfaces positioned relative to a parent
+  (=xdg_positioner=).  On a wall seen obliquely, what does "below the
+  cursor" mean?
+
+* IDEA Run foot on a terminal wall through a nested Wayland socket
+:PROPERTIES:
+:ID: LWMBMS
+:END:
+
+Develop nested first: luvcraft as an ordinary window under niri, exposing
+its own =WAYLAND_DISPLAY=.  The first proof is =foot= drawing through
+=wl_shm= onto a wall, taking keyboard focus as the shell walls do.  Then
+dmabuf import with a GPU client such as a Chromium-based application, then
+the same build on a console, where nothing changes but the output.
