@@ -2378,15 +2378,30 @@ ownership and cancel this finalizer."
 
 (defun copy-texture-words-to-mapped-memory
     (data pointer width height offset bytes-per-row bytes-per-texel)
-  (let ((foreign-type (ecase bytes-per-texel
-                        (2 :uint16) (4 :uint32) (8 :uint64))))
-    (dotimes (row height)
-      (let ((destination
-              (cffi:inc-pointer pointer (+ offset (* row bytes-per-row)))))
-        (dotimes (column width)
-          (setf (cffi:mem-aref destination foreign-type column)
-                (row-major-aref
-                 data (+ (* row (array-dimension data 1)) column))))))))
+  ;; A simple array whose elements are exactly one texel is already laid out
+  ;; as the staging rows want it: copy each row with memcpy.  Element by
+  ;; element through ROW-MAJOR-AREF costs ~160 ms for a 1000x700 window.
+  (if (typep data `(simple-array (unsigned-byte ,(* 8 bytes-per-texel)) (* *)))
+      (let ((row-bytes (* width bytes-per-texel))
+            (source-row-bytes (* (array-dimension data 1) bytes-per-texel)))
+        (sb-sys:with-pinned-objects (data)
+          (let ((source (sb-sys:vector-sap (sb-ext:array-storage-vector data))))
+            (dotimes (row height)
+              (cffi:foreign-funcall
+               "memcpy"
+               :pointer (cffi:inc-pointer pointer (+ offset (* row bytes-per-row)))
+               :pointer (cffi:inc-pointer source (* row source-row-bytes))
+               :size row-bytes
+               :pointer)))))
+      (let ((foreign-type (ecase bytes-per-texel
+                            (2 :uint16) (4 :uint32) (8 :uint64))))
+        (dotimes (row height)
+          (let ((destination
+                  (cffi:inc-pointer pointer (+ offset (* row bytes-per-row)))))
+            (dotimes (column width)
+              (setf (cffi:mem-aref destination foreign-type column)
+                    (row-major-aref
+                     data (+ (* row (array-dimension data 1)) column)))))))))
 
 (defun record-vulkan-texture-write (encoder command)
   "Lower one queue texture write through a private Vulkan command encoder."

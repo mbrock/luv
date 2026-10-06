@@ -253,6 +253,14 @@ learned on the way:
   libxkbcommon, and an =ls -l= typed by QWERTY habit arrived as =ls .l=.
 - A capture must sync windows itself; drawing the last uploaded textures
   showed a frame from before the keys.
+- Switching felt laggy and sometimes snapped.  Measured, each foot commit
+  cost 160 to 200 ms in =write-texture=, which copied texel by texel
+  through =row-major-aref=; a focus change redraws two windows, so the
+  time-based spring leapt ahead over a third of a second.  Row =memcpy=
+  from the pinned word array made an upload 1 to 4 ms and the worst
+  switching frame 8 ms.  The camera also used stiffness 120 against the
+  author's niri 1000, settling three times slower, and now animates to
+  the predicted presentation time (#R7TM57).
 
 * NEXT Import dmabufs from GPU clients, then run on a console
 :PROPERTIES:

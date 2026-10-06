@@ -37,12 +37,16 @@
 ;;; (#MS2WHR): position is a function of time, so retargeting reads the exact
 ;;; current position and velocity and starts a new curve from there.
 
-(defstruct (spring (:constructor make-spring (position &key (stiffness 120.0))))
+(defparameter *camera-stiffness* 1000.0
+  "The author's niri horizontal-view-movement spring, critically damped.")
+
+(defstruct (spring (:constructor make-spring
+                       (position &key (stiffness *camera-stiffness*))))
   position
   (velocity 0.0)
   (target position)
   (start 0.0)
-  (stiffness 120.0))
+  (stiffness *camera-stiffness*))
 
 (defun spring-state (spring time)
   "Position and velocity of SPRING at TIME."
@@ -110,10 +114,11 @@
    (frame-states :initform (make-hash-table :test 'eq) :reader luvland-frame-states)
    (graveyard :initform '() :accessor luvland-graveyard)
    (frame-number :initform 0 :accessor luvland-frame-number)
-   (start-time :initform (get-internal-real-time) :reader luvland-start-time)
    (processes :initform '() :accessor luvland-processes)
    (suppressed-keys :initform '() :accessor luvland-suppressed-keys)
-   (running-p :initform t :accessor luvland-running-p)))
+   (running-p :initform t :accessor luvland-running-p)
+   (frame-times :initform '() :accessor luvland-frame-times
+                :documentation "Recent frames, newest first, as plists of milliseconds.")))
 
 (defmethod print-object ((luvland luvland) stream)
   (print-unreadable-object (luvland stream :type t)
@@ -144,8 +149,10 @@
   (or (luv:canvas-extent (luvland-context luvland)) '(1 1)))
 
 (defun now (luvland)
-  (/ (- (get-internal-real-time) (luvland-start-time luvland))
-     (float internal-time-units-per-second 1.0)))
+  "Seconds on luv's monotonic canvas clock, the clock presentation times are
+predicted on."
+  (declare (ignore luvland))
+  (luv::monotonic-seconds))
 
 (defun retire (luvland resource)
   "Destroy RESOURCE once frames that may still sample it have finished."
@@ -342,10 +349,11 @@ this frame rewrites them."
     (replace data tint :start1 16)
     data))
 
-(defun encode-windows (luvland encoder target extent)
-  "Draw every window into TARGET, a texture of EXTENT (width height)."
+(defun encode-windows (luvland encoder target extent time)
+  "Draw every window into TARGET, a texture of EXTENT (width height), as
+the world will be at TIME."
   (let* ((state (frame-state luvland target))
-         (view-projection (view-projection luvland (now luvland) extent))
+         (view-projection (view-projection luvland time extent))
          (focus (luvland-focus luvland))
          (pass (luv:begin-render-pass
                 encoder
@@ -370,14 +378,32 @@ this frame rewrites them."
           (luv:draw pass 4))))
     (luv:end-pass pass)))
 
+(defun milliseconds-since (start)
+  (/ (- (get-internal-real-time) start)
+     (/ internal-time-units-per-second 1000.0)))
+
+(defun record-frame-time (luvland &rest times)
+  (let ((entries (cons (list* :at (now luvland) times) (luvland-frame-times luvland))))
+    (setf (luvland-frame-times luvland)
+          (if (> (length entries) 240) (subseq entries 0 240) entries))))
+
 (defun render-frame (luvland)
-  (sync-windows luvland)
-  (aim-camera luvland)
-  (luv:call-with-canvas-frame
-   (luvland-context luvland)
-   (lambda (surface-texture encoder presentation-time)
-     (declare (ignore presentation-time))
-     (encode-windows luvland encoder surface-texture (canvas-extent luvland))))
+  (let ((start (get-internal-real-time))
+        (synced nil)
+        (encoded nil))
+    (sync-windows luvland)
+    (aim-camera luvland)
+    (setf synced (milliseconds-since start))
+    (luv:call-with-canvas-frame
+     (luvland-context luvland)
+     (lambda (surface-texture encoder presentation-time)
+       ;; Animate to when this frame will be seen, not when it is drawn.
+       (let ((begun (get-internal-real-time)))
+         (encode-windows luvland encoder surface-texture (canvas-extent luvland)
+                         (or presentation-time (now luvland)))
+         (setf encoded (milliseconds-since begun)))))
+    (record-frame-time luvland :sync synced :encode encoded
+                               :total (milliseconds-since start)))
   (incf (luvland-frame-number luvland))
   (bury-the-dead luvland)
   ;; Now is a good time for every client to draw its next frame.
@@ -407,7 +433,7 @@ this frame rewrites them."
   ;; A capture may run while window frames are held; show the newest commits.
   (sync-windows luvland)
   (aim-camera luvland)
-  (encode-windows luvland encoder target extent)
+  (encode-windows luvland encoder target extent (now luvland))
   nil)
 
 (defmethod luv:cleanup-capture ((luvland luvland) capture)
