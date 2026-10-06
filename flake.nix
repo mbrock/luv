@@ -244,6 +244,11 @@
               pkgs.sdl3-image
               pkgs.sdl3-ttf
               pkgs.vulkan-loader
+            ] ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              # Luvland serves Wayland clients through libwayland-server and
+              # hands them an XKB keymap compiled by libxkbcommon.
+              pkgs.libxkbcommon
+              pkgs.wayland
             ] ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               pkgs.moltenvk
             ];
@@ -261,6 +266,11 @@
               pkgs.sdl3-image
               pkgs.sdl3-ttf
               pkgs.vulkan-loader
+            ] ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              # Luvland serves Wayland clients through libwayland-server and
+              # hands them an XKB keymap compiled by libxkbcommon.
+              pkgs.libxkbcommon
+              pkgs.wayland
             ] ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
               pkgs.moltenvk
             ];
@@ -414,6 +424,9 @@
             pkgs.vulkan-validation-layers
             pkgs.yt-dlp
             pkgs.zig
+          ] ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            # The first Luvland client: a terminal that draws through wl_shm.
+            pkgs.foot
           ];
           # Remote agents need the complete Lisp closure and the native/build
           # tools exercised by ordinary builds, but not optional workstation

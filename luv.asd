@@ -243,6 +243,41 @@
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luv.ghostty.tests)))
 
+(defsystem "luv/wayland"
+  :description "A Wayland server over libwayland-server, implemented in Lisp."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("cffi" "cffi-libffi" "cxml")
+  :serial t
+  :components
+  ((:module "wayland"
+    :serial t
+    :components ((:static-file "protocols/wayland.xml")
+                 (:static-file "protocols/xdg-shell.xml")
+                 (:static-file "protocols/xdg-decoration-unstable-v1.xml")
+                 (:static-file "protocols/viewporter.xml")
+                 (:static-file "protocols/presentation-time.xml")
+                 (:static-file "protocols/linux-dmabuf-v1.xml")
+                 (:file "package")
+                 (:file "ffi")
+                 (:file "protocol")
+                 (:file "server")
+                 (:file "core")
+                 (:file "xdg-shell")
+                 (:file "seat"))))
+  :in-order-to ((test-op (test-op "luv/wayland/test"))))
+
+(defsystem "luv/wayland/test"
+  :description "Protocol claims, and a real foot window served headlessly."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/wayland" "luv/test-support")
+  :components ((:file "wayland/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.wayland.tests)))
+
 (defsystem "luv/mupdf"
   :description "A narrow CFFI binding to MuPDF: pages as pixels or as text."
   :long-description
