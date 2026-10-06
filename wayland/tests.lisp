@@ -45,6 +45,13 @@
       (setf (gethash (row-major-aref pixels index) seen) t))
     (hash-table-count seen)))
 
+(defun host-frame (server toplevel function)
+  "Do what a host does each frame: claim TOPLEVEL's newest snapshot for
+FUNCTION, then send frame callbacks.  Return FUNCTION's value, or NIL when
+there was nothing new to claim."
+  (prog1 (wl:call-with-surface-snapshot (wl:toplevel-surface toplevel) function)
+    (wl:call-in-server #'wl:send-frame-callbacks :server server)))
+
 (define-test foot-draws-a-window-of-the-configured-size
   (let ((foot (foot-program)))
     (if (null foot)
@@ -81,15 +88,36 @@
                        (is = 640 (wl:snapshot-width snapshot))
                        (is = 400 (wl:snapshot-height snapshot)))
                      ;; The first commit is bare background.  Play the host:
-                     ;; send frame callbacks until the shell's text is drawn.
+                     ;; send frame callbacks and claim each new snapshot
+                     ;; until the shell's text is drawn.
                      (true (wait-for
                             (lambda ()
-                              (wl:call-in-server #'wl:send-frame-callbacks
-                                                 :server server)
-                              (> (distinct-pixels
-                                  (wl:snapshot-pixels
-                                   (wl:surface-snapshot (wl:toplevel-surface toplevel))))
-                                 2))))
+                              (host-frame server toplevel
+                                          (lambda (snapshot)
+                                            (> (distinct-pixels (wl:snapshot-pixels snapshot))
+                                               2))))))
+                     ;; Typing echoes through the tty, so each key is a commit.
+                     ;; However many commits arrive, the surface reuses a
+                     ;; handful of arrays instead of allocating per commit.
+                     (let ((surface (wl:toplevel-surface toplevel))
+                           (serials '()))
+                       (wl:call-in-server (lambda () (wl:focus-keyboard surface))
+                                          :server server)
+                       (dotimes (index 12)
+                         (wl:call-in-server (lambda ()
+                                              (wl:send-key 30 t)
+                                              (wl:send-key 30 nil))
+                                            :server server)
+                         (wait-for (lambda ()
+                                     (host-frame server toplevel
+                                                 (lambda (snapshot)
+                                                   (pushnew (wl:snapshot-serial snapshot)
+                                                            serials))))
+                                   :timeout 2))
+                       (true (>= (length serials) 8))
+                       (true (<= (wl:snapshot-pool-allocated
+                                  (wl:surface-snapshot-pool surface))
+                                 3)))
                      (wl:call-in-server (lambda () (wl:close-toplevel toplevel))
                                         :server server)
                      (true (wait-for (lambda () (not (sb-ext:process-alive-p process)))

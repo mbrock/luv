@@ -227,32 +227,35 @@ fresh snapshots.  Runs on the canvas thread."
     (layout-strip luvland)))
 
 (defun upload-snapshot (luvland window)
-  (let ((snapshot (wl:surface-snapshot (wl:toplevel-surface (window-toplevel window)))))
-    (when (and snapshot (/= (wl:snapshot-serial snapshot) (window-snapshot-serial window)))
-      (let ((width (wl:snapshot-width snapshot))
-            (height (wl:snapshot-height snapshot))
-            (device (luvland-device luvland)))
-        (unless (and (= width (window-width window)) (= height (window-height window)))
-          (retire luvland (window-view window))
-          (retire luvland (window-texture window))
-          (let ((texture (luv:create device (luv:make-texture-descriptor
-                                             :label "Luvland client window"
-                                             :size (list width height)
-                                             :dimensions :2d
-                                             :format (luvland-texture-format luvland)
-                                             :usage '(:copy-dst :texture-binding)))))
-            (setf (window-texture window) texture
-                  (window-view window) (luv:create device (luv:make-texture-view-descriptor
-                                                          :texture texture))
-                  (window-width window) width
-                  (window-height window) height)))
-        (luv:write-texture (luv:device-queue device)
-                           (luv:make-texture-copy :texture (window-texture window))
-                           (wl:snapshot-pixels snapshot)
-                           (luv:make-texture-data-layout :bytes-per-row (* 4 width)
-                                                         :rows-per-image height)
-                           (list width height))
-        (setf (window-snapshot-serial window) (wl:snapshot-serial snapshot))))))
+  "Copy WINDOW's newest commit to its texture, if there is one this thread
+has not read yet."
+  (wl:call-with-surface-snapshot
+   (wl:toplevel-surface (window-toplevel window))
+   (lambda (snapshot)
+     (let ((width (wl:snapshot-width snapshot))
+           (height (wl:snapshot-height snapshot))
+           (device (luvland-device luvland)))
+       (unless (and (= width (window-width window)) (= height (window-height window)))
+         (retire luvland (window-view window))
+         (retire luvland (window-texture window))
+         (let ((texture (luv:create device (luv:make-texture-descriptor
+                                            :label "Luvland client window"
+                                            :size (list width height)
+                                            :dimensions :2d
+                                            :format (luvland-texture-format luvland)
+                                            :usage '(:copy-dst :texture-binding)))))
+           (setf (window-texture window) texture
+                 (window-view window) (luv:create device (luv:make-texture-view-descriptor
+                                                         :texture texture))
+                 (window-width window) width
+                 (window-height window) height)))
+       (luv:write-texture (luv:device-queue device)
+                          (luv:make-texture-copy :texture (window-texture window))
+                          (wl:snapshot-pixels snapshot)
+                          (luv:make-texture-data-layout :bytes-per-row (* 4 width)
+                                                        :rows-per-image height)
+                          (list width height))
+       (setf (window-snapshot-serial window) (wl:snapshot-serial snapshot))))))
 
 (defun layout-strip (luvland)
   "Place windows left to right along X, each centered on Y = 0."

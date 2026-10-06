@@ -48,6 +48,9 @@ supplies placement, picking, and focus.")
    ;; Surfaces and their contents.
    #:surface
    #:surface-snapshot
+   #:surface-snapshot-pool
+   #:snapshot-pool-allocated
+   #:call-with-surface-snapshot
    #:surface-role
    #:snapshot
    #:snapshot-width
