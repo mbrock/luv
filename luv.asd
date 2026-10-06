@@ -157,11 +157,20 @@
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luv.hlsl.tests)))
 
+(defsystem "luv/slug-shader"
+  :description "Slug's per-pixel glyph coverage as shader functions."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luv/shader")
+  :serial t
+  :components ((:file "hal/shader/slug-package")
+               (:file "hal/shader/slug-shader")))
+
 (defsystem "luv/shaderc"
   :description "Ahead-of-time shader programs: MSL, HLSL, and their reflection."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/msl" "luv/hlsl")
+  :depends-on ("luv/msl" "luv/hlsl" "luv/slug-shader")
   :serial t
   :components ((:file "hal/shaderc/package")
                (:file "hal/shaderc/shaderc")
@@ -330,6 +339,7 @@ offsets and of headers."
   :author "Mikael Brockman"
   :depends-on ("luv/arithmetic"
                "luv/shader"
+               "luv/slug-shader"
                "luv/spir-v"
                "luv/msl"
                "luv/wgsl"
@@ -372,7 +382,6 @@ offsets and of headers."
       :serial t
       :components ((:file "analytic-package")
                    (:file "analytic")
-                   (:file "slug-package")
                    (:file "slug-outline")
                    (:file "slug-serialization")
                    (:file "slug-harfbuzz")
