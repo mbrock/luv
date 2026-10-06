@@ -219,15 +219,50 @@ never become an X window manager.
   cursor" mean?  Niri's answer, read in #RXH8EI, suggests declaring the
   window quad's own bounds as the constraint rectangle.
 
-* IDEA Run foot in Luvland through a nested socket
+* DONE Run foot in Luvland through a nested socket
 :PROPERTIES:
 :ID: LWMBMS
 :END:
 
-Develop nested first: Luvland (#Y1TBYB) as an ordinary window under niri,
-exposing its own =WAYLAND_DISPLAY=.  The first proof is =foot= drawing
-through =wl_shm= onto one quad, taking keyboard focus when the camera looks
-at it.  Then dmabuf import with a GPU client such as a
-Chromium-based application, then the same build on a console, where nothing
+Luvland (#Y1TBYB) runs as an ordinary window under niri and exposes its own
+=WAYLAND_DISPLAY=.  =./sly play luvland= opens it with one =foot=; more join
+with Control+Meta+Return, Control+Meta+arrows move focus along the strip,
+and a click focuses the window under the camera ray.
+
+[[file:images/luvland-two-foots.png]]
+
+The server is =luv/wayland= (#QYFVAF): libwayland-server over CFFI, every
+interface a set of Lisp methods reached through one dispatcher that decodes
+requests from the vendored protocol XML.  It runs on its own thread, copies
+each committed =wl_shm= buffer into the word array =write-texture= takes,
+and releases the buffer at once.  Luvland samples that copy on a quad whose
+camera follows focus on a closed-form critically damped spring (#MS2WHR),
+and sends frame callbacks after each frame.
+
+Its test serves a real =foot= headlessly and demands a 640 by 400 window
+whose shell output arrives only after host-driven frame callbacks.  Things
+learned on the way:
+
+- foot will not start without =wl_data_device_manager=, and draws its own
+  decorations with subsurfaces unless offered =xdg-decoration=; Luvland
+  asks for server-side decorations, since the compositor decorates a quad.
+- foot sizes a floating window in whole cells unless told
+  =resize-by-cells=no=, so a configured 640 by 400 arrives as 636 by 390.
+- Keys travel as physical evdev codes and mean what the keymap says: the
+  seat compiles the author's niri keymap (us, dvorak, =ctrl:nocaps=) with
+  libxkbcommon, and an =ls -l= typed by QWERTY habit arrived as =ls .l=.
+- A capture must sync windows itself; drawing the last uploaded textures
+  showed a frame from before the keys.
+
+* NEXT Import dmabufs from GPU clients, then run on a console
+:PROPERTIES:
+:ID: MG1LRT
+:END:
+
+The rest of the first plan for #LWMBMS.  Advertise =zwp_linux_dmabuf_v1=
+with feedback naming the Vulkan device's DRM node, import client buffers
+through =VK_EXT_external_memory_dma_buf= (#F1A8BL), and hold each commit
+until the dmabuf polls readable, as niri does (#8RQB6G).  A Chromium-based
+client is the proof.  Then the same build on a console, where nothing
 changes but the output.  Only after that does luvcraft host a surface on a
 terminal wall (#QYFVAF).

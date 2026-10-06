@@ -1292,8 +1292,16 @@ host is still present, Swash remains the only authority allowed to stop it."
           (viewer (and viewer-symbol
                        (boundp viewer-symbol)
                        (symbol-value viewer-symbol)))
+          (luvland-symbol
+            (and (find-package :luvland)
+                 (find-symbol \"*LUVLAND*\" :luvland)))
+          (luvland (and luvland-symbol
+                        (boundp luvland-symbol)
+                        (symbol-value luvland-symbol)))
           (canvas
             (cond
+              (luvland
+               (funcall (find-symbol \"LUVLAND-CANVAS\" :luvland) luvland))
               (session
                (funcall (find-symbol \"LUVCRAFT-SESSION-CANVAS\" :luvcraft)
                         session))
@@ -1305,7 +1313,7 @@ host is still present, Swash remains the only authority allowed to stop it."
              (when canvas
                (funcall (find-symbol \"CANVAS-HEALTH\" :luv)
                         canvas)))))
-     (princ (cond (session :luvcraft) (viewer :luft) (t :idle)))
+     (princ (cond (session :luvcraft) (viewer :luft) (luvland :luvland) (t :idle)))
      (when health (format t \" ~S\" health)))"
   "Read out of the image: which interactive target is playing and its health.
 
@@ -1370,7 +1378,9 @@ shows them.~%" failure-count))))))
                    "Luvcraft is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
                   ((search "LUFT" (string-upcase (princ-to-string answer)))
                    "LUFT is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
-                  (t "Nothing is playing: ./sly play [luvcraft|luft] starts it.")))
+                  ((search "LUVLAND" (string-upcase (princ-to-string answer)))
+                   "Luvland is serving Wayland clients: ./sly stop-playing closes it.")
+                  (t "Nothing is playing: ./sly play [luvcraft|luft|luvland] starts it.")))
     (when answer
       (print-canvas-health (princ-to-string answer)))))
 
@@ -1966,7 +1976,7 @@ shows them.~%" failure-count))))))
       (cond
         ((string= argument "--fullscreen")
          (setf fullscreen-p t))
-        ((member argument '("luvcraft" "luft") :test #'string-equal)
+        ((member argument '("luvcraft" "luft" "luvland") :test #'string-equal)
          (when target-specified-p
            (error "play accepts one target, not both ~A and ~A" target argument))
          (setf target (intern (string-upcase argument) :keyword)
@@ -1975,7 +1985,8 @@ shows them.~%" failure-count))))))
               (string= argument "--" :end1 2))
          (error "Unknown play option: ~A" argument))
         (t
-         (error "Unknown play target: ~A (expected luvcraft or luft)" argument))))
+         (error "Unknown play target: ~A (expected luvcraft, luft, or luvland)"
+                argument))))
     (values target fullscreen-p)))
 
 (defun run-play (arguments)
@@ -2010,6 +2021,18 @@ shows them.~%" failure-count))))))
                      (error \"LUFT is already playing; call STOP-PLAYING first.\"))
                    (luft.render:start-viewer~:[~; :fullscreen-p t~]))"
                 fullscreen-p)
+        "CL-USER"))
+      (:luvland
+       (evaluate
+        (format nil
+                "(progn
+                   (unless (find-package :luvland)
+                     (asdf:load-asd (merge-pathnames \"luvland.asd\" cl-user::*luv-project-root*))
+                     (asdf:load-system :luvland))
+                   (when (or luvcraft:*session* luft.render:*viewer*)
+                     (error \"Another game is playing; call STOP-PLAYING first.\"))
+                   (uiop:symbol-call :luvland :start-luvland~:[~; :fullscreen-p t~]))"
+                fullscreen-p)
         "CL-USER")))))
 
 (defun run-stop-playing (arguments)
@@ -2021,6 +2044,9 @@ shows them.~%" failure-count))))))
   (evaluate "(cond
                (luvcraft:*session* (luvcraft:stop-playing))
                (luft.render:*viewer* (luft.render:stop-viewer))
+               ((and (find-package :luvland)
+                     (symbol-value (find-symbol \"*LUVLAND*\" :luvland)))
+                (uiop:symbol-call :luvland :stop-luvland))
                (t (values)))"
             "CL-USER"))
 
