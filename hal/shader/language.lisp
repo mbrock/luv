@@ -1883,6 +1883,14 @@ conversion."
       (make-shader-typed-literal (second form) :int form)
       (call-next-method)))
 
+(defmethod parse-shader-operator-call ((operator (eql 'uint)) form environment)
+  "A non-negative integer literal names an unsigned constant directly, exact
+over all 32 bits (hash constants such as #x9E3779B9 do not survive a float);
+anything else is a conversion."
+  (if (and (= (length form) 2) (integerp (second form)))
+      (make-shader-typed-literal (second form) :uint form)
+      (call-next-method)))
+
 (defun require-integer-operands (operands source-form reason)
   "Two operands of one 32-bit integer scalar or vector type."
   (require-shader-types
@@ -2141,7 +2149,8 @@ never collides with a standard symbol's function documentation:
 (define-shader-operator derivative-y
   "Return the vertical screen-space derivative of a fragment value.")
 (define-shader-operator uint
-  "Convert one scalar float, integer, or boolean to a 32-bit unsigned integer.")
+  "Convert one scalar float, integer, or boolean to a 32-bit unsigned integer,
+or name an unsigned integer literal.")
 (define-shader-operator int
   "Convert one scalar to a 32-bit signed integer, or name an integer literal.")
 (define-shader-operator uint64

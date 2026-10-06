@@ -2579,6 +2579,13 @@ Return NIL on success or without the tool, else its report."
     (true (eql -3 (shader:shader-literal-value literal)))
     (true (eq :int (shader:shader-type-name
                     (shader:shader-expression-type literal)))))
+  ;; (UINT n) is an unsigned literal, exact over all 32 bits.
+  (let ((literal (shader::parse-shader-expression '(shader:uint #x9E3779B9)
+                                                  nil)))
+    (true (typep literal 'shader:shader-literal))
+    (true (eql #x9E3779B9 (shader:shader-literal-value literal)))
+    (true (eq :uint (shader:shader-type-name
+                     (shader:shader-expression-type literal)))))
   (true (eq :bool (shader:shader-type-name
                    (shader:shader-expression-type
                     (shader::parse-shader-expression t nil)))))
@@ -2611,6 +2618,8 @@ Return NIL on success or without the tool, else its report."
              (set-output color (vec4 uv (float (< t nil)) 1.0)))
     (rejects :literal-out-of-range
              (set-output color (vec4 uv (float (shader:int 3000000000)) 1.0)))
+    (rejects :literal-out-of-range
+             (set-output color (vec4 uv (float (shader:uint -1)) 1.0)))
     (rejects :invalid-vector-constituent
              (set-output color (vec4 (vec2 (shader:int 1) 1.0) 0.0 1.0)))
     (rejects :invalid-extended-math-type
