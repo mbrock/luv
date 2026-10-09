@@ -744,6 +744,10 @@ Modules whose expressions use no extended mathematics never acquire one."
     ((expression shader-function-call))
   (shader-object-name (shader-function-call-definition expression)))
 
+(defmethod shader-expression-provenance-name ((expression shader-let))
+  (declare (ignore expression))
+  'let)
+
 (defmethod shader-expression-provenance-name
     ((expression shader-conditional))
   (declare (ignore expression))

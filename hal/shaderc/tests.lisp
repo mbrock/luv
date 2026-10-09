@@ -719,3 +719,50 @@ bind COMPILED to it, and run BODY."
           (is eq nil (run-tool
                       (list "spirv-val" "--target-env" "vulkan1.0"
                             (uiop:native-namestring path)))))))))
+
+(define-test let-forms-bind-wherever-an-expression-goes
+  ;; LET* in expression position -- an argument, a conditional's arm, and
+  ;; two siblings reusing one local name, as abstractions expand to -- binds
+  ;; each local once, and nested forms never collide in any target.
+  (let ((specification
+          (stage-probe 'let-anywhere-fragment :fragment
+                       :inputs '((p :vec3 :location 0))
+                       :outputs '((color :vec4 :location 0))
+                       :body '(shader:set-output color
+                               (shader:vec4
+                                (+ (let* ((d (shader:dot p p))
+                                          (s (sqrt d)))
+                                     (* s s))
+                                   (let* ((d (shader:dot p (shader:vec3 1.0 0.0 0.0))))
+                                     d))
+                                (if (> (shader:swizzle p :x) 0.0)
+                                    (let* ((h (* 2.0 (shader:swizzle p :y))))
+                                      (+ h h))
+                                    0.0)
+                                (max (let* ((q (* p 0.5)))
+                                       (shader:swizzle q :z))
+                                     0.25)
+                                1.0)))))
+    (true (typep (shader:shader-assignment-value
+                  (first (shader:shader-specification-statements
+                          specification)))
+                 'shader:shader-expression))
+    (let ((msl (luv.msl:msl-document-source
+                (luv.msl:compile-msl specification)))
+          (hlsl (hlsl:hlsl-document-source (hlsl:compile-hlsl specification))))
+      (dolist (source (list msl hlsl))
+        ;; Two locals named D, renamed apart, each declared exactly once.
+        (true (search "let_1_1_d" source))
+        (true (search "let_" source))
+        (true (null (search "let_1_1_d =" source
+                            :start2 (1+ (or (search "let_1_1_d =" source)
+                                            0)))))))
+    (with-scratch-directory (directory)
+      (let ((path (ensure-directories-exist
+                   (merge-pathnames "let.spv" directory))))
+        (spv:write-spir-v (spv:assemble-shader-specification specification)
+                          path)
+        (when (tool-available-p "spirv-val" "--version")
+          (is eq nil (run-tool
+                      (list "spirv-val" "--target-env" "vulkan1.0"
+                            (uiop:native-namestring path)))))))))

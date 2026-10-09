@@ -664,6 +664,12 @@ leaves it again while retaining the semantic operand in the expression graph."))
   (:documentation
    "An inspectable typed call whose body is inlined during backend lowering."))
 
+(defclass shader-let (shader-function-call)
+  ()
+  (:documentation
+   "A LET* in expression position: an inline call with no parameters, whose
+lexical bindings and result lower exactly as an inlined function's do."))
+
 (defclass shader-conditional
     (shader-expression lang:arithmetic-conditional)
   ()
@@ -3478,6 +3484,29 @@ rather than the language."
            :quantity-layout (shader-expression-quantity-layout result)
            :source-form form))))))
 
+(defun parse-shader-let (form environment)
+  "Parse LET* where an expression is expected, as in an abstraction's
+expansion or an argument.  Each binding is renamed apart, so nested and
+repeated forms never collide in the lowered target."
+  (let ((let-index (incf *shader-function-call-counter*))
+        (local-index 0))
+    (multiple-value-bind (bindings result)
+        (parse-shader-expression-body
+         (list form) environment
+         :binding-name-function
+         (lambda (local-name)
+           (make-symbol (format nil "LET-~D-~D-~A" let-index
+                                (incf local-index)
+                                (symbol-name local-name)))))
+      (make-instance 'shader-let
+                     :definition nil :arguments nil
+                     :bindings bindings :result result
+                     :type (shader-expression-type result)
+                     :quantity-specification
+                     (shader-expression-quantity-specification result)
+                     :quantity-layout (shader-expression-quantity-layout result)
+                     :source-form form))))
+
 (defun parse-shader-counted-fold (form environment)
   (multiple-value-bind (index-name count-form state-name initial-form
                         update-form until-form valid-p)
@@ -3591,6 +3620,8 @@ loop header, so it may not itself fold."
                              operator)))))
     (cond ((eq operator 'counted-fold)
            (parse-shader-counted-fold form environment))
+          ((eq operator 'let*)
+           (parse-shader-let form environment))
           ((eq operator 'if)
            (parse-shader-conditional form environment))
           ((shader-struct-operation operator)

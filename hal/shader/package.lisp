@@ -153,6 +153,7 @@
            #:define-shader-function
            #:shader-function-call
            #:shader-function-call-definition
+           #:shader-let
            #:shader-function-call-arguments
            #:shader-function-call-bindings
            #:shader-function-call-result
