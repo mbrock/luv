@@ -9,10 +9,10 @@
 The mathematical shader language (#S4H8DR) now has a third textual lowering
 and a consumer outside the live image.  =luv/hlsl= lowers the same typed graph
 to HLSL for DXC, and =luv-shaderc= compiles named programs ahead of time into
-MSL, HLSL, SPIR-V, and the reflection a native C++ renderer builds its
+MSL, HLSL, SPIR-V, WGSL, and the reflection a native C++ renderer builds its
 pipelines from.  The first such renderer is moppe's NHAL: Metal 4 on Apple
 platforms, Direct3D 12 on an Xbox Series in Developer Mode (shader model 6.4
-at most), and Vulkan.
+at most), Vulkan, and WebGPU in a browser.
 
 #+begin_example
 shader source file (DEFINE-SHADER, DEFINE-SHADER-PROGRAM)
@@ -24,14 +24,16 @@ shader-program-linkage -- resources in binding families, stage interface
         +-- compile-msl  --> NAME.STAGE.metal
         +-- compile-hlsl --> NAME.STAGE.hlsl   (DXC: vs_6_0 / ps_6_0 / cs_6_0)
         +-- luv.spir-v   --> NAME.STAGE.spv    (families folded into set 0)
+        +-- compile-wgsl --> NAME.STAGE.wgsl   (a bind group per family)
         +-- program-json --> NAME.json
         `-- program-header -> NAME.hh          (moppe/nhal/reflection.hh)
 #+end_example
 
 #VH2TIP describes the lowering, #7A2ONF the program and its binding families,
 #1I6G0R the compiler and its package, #CPIOH5, #54MBHW, and #UABDNH the
-fragment, texture, and compute vocabulary moppe's renderer asked for, and
-#4TZZRS what a real-time renderer still cannot say in the language.
+fragment, texture, and compute vocabulary moppe's renderer asked for, #W9GQ3D
+the WGSL lowering for WebGPU, and #4TZZRS what a real-time renderer still
+cannot say in the language.
 
 * The HLSL lowering is a sibling of the MSL one
 :PROPERTIES:
@@ -239,13 +241,82 @@ indirect-draw argument record, whose five words Direct3D's
 =D3D12_DRAW_INDEXED_ARGUMENTS= and Metal's
 =MTLDrawIndexedPrimitivesIndirectArguments= order the same way.
 
+* The WGSL lowering says the same programs to WebGPU
+:PROPERTIES:
+:ID: W9GQ3D
+:END:
+
+[[file:../hal/webgpu/wgsl/lowering.lisp][=hal/webgpu/wgsl/=]] lowers vertex, fragment, and compute stages to standard
+WGSL with no extension enabled, as Chrome's Tint reads it.  WGSL converts
+nothing implicitly, and the language's own typing is as strict, so the
+operators are WGSL's as written; what differs from the other targets is
+declaration:
+
+- A uniform block is a =var<uniform>= of one structure, a storage buffer a
+  =var<storage, read>= or =var<storage, read_write>= of a runtime-sized
+  array, and a texture, storage texture, or sampler a handle variable.  Each
+  sits at the =@group= and =@binding= its declaration names, or where the
+  caller's =:resource-binding= function places it.  A group numbers its
+  bindings once, so declarations that number each family from zero must be
+  placed: =luv-shaderc= puts buffers in group 0 at their binding, sampled
+  textures in group 1, storage textures in group 1 from binding 16, and the
+  standard samplers in group 2, and the manifest records each place,
+  ="wgsl": "group 1, binding 16"=.
+- WGSL's layout rules are its own.  The lowering computes each uniform
+  block's member offsets and each storage element's stride by them and
+  signals =:wgsl-layout-differs-from-host= if they are not the language's,
+  which the host-shareable structures of #V16OXI never provoke.
+- A sampler is =sampler=, or =sampler_comparison= when the program compares
+  depth through it; =:comparison-samplers= says which, since one bind group
+  layout serves stages that never compare.  WebGPU also refuses, when the
+  pipeline is made, a depth texture sampled through a filtering sampler:
+  sample one through a nearest sampler, compare it, or =texel-load= it.
+- =sample= is =textureSample= in fragments and =textureSampleLevel(..., 0)=
+  elsewhere, and =sample-compare= always =textureSampleCompareLevel=.  A
+  depth texture yields one =f32=, widened to the language's vec4, and takes
+  an integer level.  Fragment modules begin with =diagnostic(off,
+  derivative_uniformity);=, because the language samples and differentiates
+  wherever its source does.
+- A storage texture is a =texture_storage_2d= of its format with the least
+  access the program needs: =write= when it only stores, which is WebGPU as
+  first shipped; =read= or, for =:r32f= and =:r32ui= alone, =read_write=,
+  which make the module =requires readonly_and_readwrite_storage_textures;=.
+  The manifest repeats the choice as ="wgsl_access"=, because a bind group
+  layout must.
+- A buffer or workgroup array that any atomic touches is =atomic<u32>=
+  throughout the module, as in MSL, so its plain reads and stores become
+  =atomicLoad= and =atomicStore=.  =atomicCompareExchangeWeak= may fail
+  spuriously; the lowering retries exactly those failures.
+- Integer varyings are =@interpolate(flat)= on both sides of the rasterizer.
+  Clip Y is negated at the position output as in MSL and HLSL, and the
+  fragment's =@builtin(position)= is =:frag-coord= as it stands.
+- A local takes a name of its own: WGSL forbids redeclaring a name in one
+  scope, a local that repeated a resource's name would hide it, and keywords,
+  reserved words, and the predeclared names the lowering calls gain an
+  underscore.
+
+Sixty-four-bit integers, wave operations, and task and mesh stages signal
+=:unsupported-wgsl-...= reasons: standard WGSL has none of them.  A source
+value named in =compile-wgsl='s =:overrides= stays a pipeline-overridable
+=override= constant instead of folding to its literal, which is how the body
+gallery's pages turn their knobs.
+
+[[file:../scripts/wgsl-validate.mjs][=scripts/wgsl-validate.mjs=]] checks WGSL with Dawn, Chrome's WebGPU, through the
+=webgpu= npm package: it compiles modules, or, given directories that
+=luv-shaderc= wrote, creates every program's pipeline against bind group
+layouts built from the manifests alone, which also checks the stage interface
+and which sampler meets which texture.  The claims in
+[[file:../hal/webgpu/wgsl/lowering-tests.lisp][=hal/webgpu/wgsl/lowering-tests.lisp=]] and the compiler's tests run it when node
+and the package are present (=LUV_WEBGPU= names a directory where =npm install
+webgpu= was run).
+
 * luv-shaderc writes stages, a manifest, and a C++ header
 :PROPERTIES:
 :ID: 1I6G0R
 :END:
 
 #+begin_example
-nix run github:mbrock/luv#luv-shaderc -- --out DIR [--target msl|hlsl|spirv]... FILE.lisp...
+nix run github:mbrock/luv#luv-shaderc -- --out DIR [--target msl|hlsl|spirv|wgsl]... FILE.lisp...
 #+end_example
 
 [[file:../hal/shaderc/shaderc.lisp][=hal/shaderc/=]] reads each file in =LUV.SHADER-USER= (Common Lisp plus the
@@ -254,7 +325,8 @@ checks moppe's binding contract (=docs/nhal.md= there): buffer and texture
 bindings below 16, descriptor set 0, the standard sampler set by number (3 is
 the comparison sampler), and no vertex attributes, since vertex stages pull
 from storage buffers.  For a program =NAME= it writes =NAME.STAGE.metal=,
-=NAME.STAGE.hlsl=, =NAME.STAGE.spv=, =NAME.json=, and =NAME.hh=; every entry
+=NAME.STAGE.hlsl=, =NAME.STAGE.spv=, =NAME.STAGE.wgsl=, =NAME.json=, and
+=NAME.hh=, or only the languages its =--target= options name; every entry
 point is =name_stage= in every language.  Errors name the file, the failing form's
 line, the program and stage, the language's reason, and the source form, and
 exit nonzero.  [[file:../hal/shaderc/examples/textured-instances.lisp][=examples/textured-instances.lisp=]] pulls vertices and
@@ -262,8 +334,8 @@ instances, samples a texture, and compares a shadow map;
 [[file:../hal/shaderc/examples/particle-advance.lisp][=examples/particle-advance.lisp=]] is a compute program, and
 [[file:../hal/shaderc/examples/particle-swarm.lisp][=examples/particle-swarm.lisp=]] one over structured particles with a mat4
 uniform, and [[file:../hal/shaderc/examples/instance-culling.lisp][=examples/instance-culling.lisp=]] culls instances on the GPU
-(#UABDNH).  The tests compile them with Metal, DXC, spirv-val, and the C++
-compiler.
+(#UABDNH).  The tests compile them with Metal, DXC, spirv-val, Dawn, and the
+C++ compiler.
 
 The resource kinds in the manifest and header are the enumerators of moppe's
 =ResourceKind=, among them =texture_2d_array=, =depth_texture_2d_array=,

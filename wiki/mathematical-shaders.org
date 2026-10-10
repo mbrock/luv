@@ -17,9 +17,10 @@ does not replace either backend.  The =luv/shader= system owns the typed graph
 and open lowering protocol.  Sibling =luv/spir-v= lowers it into the existing
 =spir-v-module=, =spir-v-function-definition=, =spir-v-basic-block=, and
 =instruction= objects, after which =lower-spir-v= and =assemble= emit binary;
-=luv/msl= lowers the same graph directly into a structured MSL document, and
-=luv/hlsl= into an HLSL one for DXC, which =luv-shaderc= writes ahead of time
-for renderers outside Luv (#LSVW2S).
+=luv/msl= lowers the same graph directly into a structured MSL document,
+=luv/hlsl= into an HLSL one for DXC, and =luv/wgsl= into a WGSL module for
+WebGPU (#W9GQ3D), which =luv-shaderc= writes ahead of time for renderers
+outside Luv (#LSVW2S).
 
 #+begin_example
 typed shader specification
