@@ -134,7 +134,19 @@
   :depends-on ("luv/shader")
   :serial t
   :components ((:file "hal/webgpu/wgsl/package")
-               (:file "hal/webgpu/wgsl/lowering")))
+               (:file "hal/webgpu/wgsl/lowering")
+               (:file "hal/webgpu/wgsl/effects"))
+  :in-order-to ((test-op (test-op "luv/wgsl/test"))))
+
+(defsystem "luv/wgsl/test"
+  :description "Executable claims for the WGSL lowering, checked by Dawn when present."
+  :version "0.0.1"
+  :depends-on ("luv/wgsl" "luv/test-support")
+  :components ((:file "hal/webgpu/wgsl/lowering-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luv.wgsl.tests)))
 
 (defsystem "luv/hlsl"
   :description "Structured HLSL lowering of luv's shader graph for DXC and Direct3D 12."

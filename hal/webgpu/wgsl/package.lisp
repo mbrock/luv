@@ -17,9 +17,12 @@
            #:wgsl-document
            #:wgsl-document-target
            #:wgsl-document-specification
+           #:wgsl-document-entry-point-name
            #:wgsl-document-source
            #:wgsl-document-overrides
            #:wgsl-document-expression-occurrences
            #:wgsl-document-occurrence-expression
+           #:wgsl-identifier
+           #:wgsl-storage-texture-access
            #:compile-wgsl
            #:write-wgsl))

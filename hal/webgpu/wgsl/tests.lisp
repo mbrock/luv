@@ -18,7 +18,7 @@
     (true (search "@builtin(position)" source))
     ;; The shared graph retains Vulkan's framebuffer-oriented clip Y. The
     ;; target ABI must undo that convention for WebGPU, as MSL does for Metal.
-    (true (search "vec4<f32>((stage_in.position).x, -(stage_in.position).y"
+    (true (search "(stage_in.position * vec4<f32>(1.0f, -1.0f, 1.0f, 1.0f))"
                   source))))
 
 (define-test native-agent-bodies-compile-to-webgpu-overrides
@@ -246,13 +246,51 @@
     (true (search "@builtin(front_facing) front: bool" source))
     (true (search "@builtin(frag_depth) depth: f32" source))
     (true (search "discard;" source))
-    (true (search "let shade_2: f32 = (shade * 2.0f);" source)))
-  ;; Textures and compute stay with the backends that have them.
-  (true (eq :unsupported-wgsl-resource
-            (effect-failure-reason
-             (lambda ()
-               (wgsl:compile-wgsl (texture-kinds-fragment-probe))))))
-  (true (eq :unsupported-wgsl-stage
-            (effect-failure-reason
-             (lambda ()
-               (wgsl:compile-wgsl (workgroup-effects-probe)))))))
+    (true (search "let shade_2: f32 = (shade * 2.0f);" source))))
+
+(define-test block-vertex-lowers-projective-map-to-wgsl
+  (let ((source (wgsl:wgsl-document-source
+                 (wgsl:compile-wgsl
+                  (shaders:block-world-vertex-specification)))))
+    (true (search "let shadow_projection: vec3<f32> =" source))
+    (true (search "dot(frame_state.shadow_row_x, vec4<f32>(stage_in.world_position, 1.0f))"
+                  source))
+    (true (search "vec3<f32>(0.5f, 0.5f, 1.0f)" source))
+    (true (search "vec3<f32>(0.5f, 0.5f, 0.0f)" source))
+    (true (search "result.clip_position = (clip * vec4<f32>(1.0f, -1.0f, 1.0f, 1.0f));"
+                  source))
+    (true (search "result.shadow_uv_output = shadow_projection.xy;" source))))
+
+(define-test wgsl-places-binding-families-and-refuses-what-it-lacks
+  (flet ((place (declaration)
+           ;; One bind group per binding family.
+           (values (position (shader:shader-resource-family declaration)
+                             '(:buffer :texture :storage-texture :sampler))
+                   (shader:shader-resource-binding declaration))))
+    (let ((source (wgsl:wgsl-document-source
+                   (wgsl:compile-wgsl (texture-kinds-fragment-probe)
+                                      :resource-binding #'place))))
+      (true (search "@group(1) @binding(1) var cascades: texture_depth_2d_array;"
+                    source))
+      (true (search "@group(3) @binding(3) var shadow: sampler_comparison;"
+                    source))
+      (true (search "textureSampleLevel(layers, linear_clamp, stage_in.uv, layer, 2.0f)"
+                    source))
+      (true (search "textureSampleCompareLevel(cascades, shadow, stage_in.uv, layer, 0.5f)"
+                    source)))
+    ;; A WebGPU group numbers its bindings once.  Declarations that number
+    ;; each family from zero need a caller to place them.
+    (true (eq :wgsl-binding-collision
+              (effect-failure-reason
+               (lambda ()
+                 (wgsl:compile-wgsl (texture-kinds-fragment-probe))))))
+    ;; Standard WGSL has neither waves nor task and mesh stages.
+    (true (eq :unsupported-wgsl-wave-operation
+              (effect-failure-reason
+               (lambda ()
+                 (wgsl:compile-wgsl (workgroup-effects-probe)
+                                    :resource-binding #'place)))))
+    (true (eq :unsupported-wgsl-stage
+              (effect-failure-reason
+               (lambda ()
+                 (wgsl:compile-wgsl (vulkan-task-probe))))))))
