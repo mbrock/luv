@@ -3,7 +3,7 @@
 (in-package #:luv.shaderc)
 
 (defparameter *usage*
-  "Usage: luv-shaderc --out DIR [--target msl|hlsl|spirv]... FILE.lisp...
+  "Usage: luv-shaderc --out DIR [--target msl|hlsl|spirv|wgsl]... FILE.lisp...
 
 Compile every DEFINE-SHADER-PROGRAM in the given files.  For a program NAME
 it writes, into DIR:
@@ -13,6 +13,9 @@ it writes, into DIR:
   NAME.STAGE.spv     one SPIR-V module per stage (Vulkan, every resource in
                      set 0: buffers from binding 0, textures from 16,
                      storage textures from 32, samplers from 48)
+  NAME.STAGE.wgsl    one WGSL module per stage (WebGPU: buffers in group 0,
+                     textures in group 1 with storage textures from binding
+                     16, samplers in group 2)
   NAME.json          stages, entry points, resources, and fragment outputs
   NAME.hh            the same reflection for C++ (moppe/nhal/reflection.hh)
 
@@ -40,8 +43,10 @@ language is written.
                      (cond ((equal target "msl") :msl)
                            ((equal target "hlsl") :hlsl)
                            ((equal target "spirv") :spir-v)
+                           ((equal target "wgsl") :wgsl)
                            (t (shaderc-fail "Unknown target ~S; expected ~
-                                             msl, hlsl, or spirv." target)))
+                                             msl, hlsl, spirv, or wgsl."
+                                            target)))
                      targets)))
                  ((and (plusp (length argument))
                        (char= #\- (char argument 0)))

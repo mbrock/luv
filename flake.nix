@@ -776,6 +776,7 @@
               ./hal/metal/msl
               ./hal/d3d12
               ./hal/vulkan/spir-v
+              ./hal/webgpu
               ./hal/shaderc
               ./scripts/build-luv-shaderc.lisp
             ];
@@ -817,7 +818,7 @@
             runHook postInstall
           '';
           meta = {
-            description = "Compile Luv shader programs to MSL, HLSL, and reflection";
+            description = "Compile Luv shader programs to MSL, HLSL, SPIR-V, WGSL, and reflection";
             mainProgram = "luv-shaderc";
             platforms = systems;
           };

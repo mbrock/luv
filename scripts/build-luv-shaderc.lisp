@@ -1,5 +1,5 @@
-;;;; Build build/luv-shaderc: the shader language, its MSL, HLSL, and
-;;;; SPIR-V lowerings, and their command line, as one executable.
+;;;; Build build/luv-shaderc: the shader language, its MSL, HLSL, SPIR-V,
+;;;; and WGSL lowerings, and their command line, as one executable.
 ;;;;
 ;;;; This runs both in the development shell and in the Nix package, whose
 ;;;; Lisp holds only Closer-MOP: nothing here loads SDL, Vulkan, Metal, or

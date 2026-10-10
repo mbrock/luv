@@ -12,10 +12,11 @@ plain DEFINE-SHADER and DEFINE-SHADER-PROGRAM forms."))
   (:local-nicknames (#:shader #:luv.shader)
                     (#:msl #:luv.msl)
                     (#:hlsl #:luv.hlsl)
-                    (#:spv #:luv.spir-v))
+                    (#:spv #:luv.spir-v)
+                    (#:wgsl #:luv.wgsl))
   (:documentation
-   "Ahead-of-time compilation of shader programs to MSL, HLSL, SPIR-V, and the
-reflection a native renderer builds its pipelines from.")
+   "Ahead-of-time compilation of shader programs to MSL, HLSL, SPIR-V, WGSL,
+and the reflection a renderer builds its pipelines from.")
   (:export #:*targets*
            #:shaderc-error
            #:compiled-program
@@ -28,6 +29,7 @@ reflection a native renderer builds its pipelines from.")
            #:compiled-stage-msl
            #:compiled-stage-hlsl
            #:compiled-stage-spir-v
+           #:compiled-stage-wgsl
            #:load-shader-source
            #:compile-shader-program
            #:write-compiled-program

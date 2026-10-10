@@ -179,10 +179,10 @@
                (:file "hal/shader/slug-shader")))
 
 (defsystem "luv/shaderc"
-  :description "Ahead-of-time shader programs: MSL, HLSL, SPIR-V, and their reflection."
+  :description "Ahead-of-time shader programs: MSL, HLSL, SPIR-V, WGSL, and their reflection."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/msl" "luv/hlsl" "luv/spir-v" "luv/slug-shader")
+  :depends-on ("luv/msl" "luv/hlsl" "luv/spir-v" "luv/wgsl" "luv/slug-shader")
   :serial t
   :components ((:file "hal/shaderc/package")
                (:file "hal/shaderc/shaderc")
@@ -202,9 +202,9 @@
   :entry-point "luv.shaderc:main")
 
 (defsystem "luv/shaderc/test"
-  :description "Executable claims for luv-shaderc, checked by Metal and DXC when present."
+  :description "Executable claims for luv-shaderc, checked by Metal, DXC, and Dawn when present."
   :version "0.0.1"
-  :depends-on ("luv/shaderc" "luv/spir-v" "luv/test-support")
+  :depends-on ("luv/shaderc" "luv/spir-v" "luv/wgsl" "luv/test-support")
   :components ((:file "hal/shaderc/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

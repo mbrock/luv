@@ -2,7 +2,8 @@
 ;;;;
 ;;;; The example program is compiled to every output; when the native tools
 ;;;; are present, its MSL goes through Apple's metal, its HLSL through DXC,
-;;;; and its header through the C++ compiler against a copy of moppe's
+;;;; its WGSL through Dawn, which also creates the program's pipeline, and
+;;;; its header through the C++ compiler against a copy of moppe's
 ;;;; reflection header.
 
 (defpackage #:luv.shaderc.tests
@@ -11,7 +12,8 @@
   (:local-nicknames (#:shader #:luv.shader)
                     (#:shaderc #:luv.shaderc)
                     (#:hlsl #:luv.hlsl)
-                    (#:spv #:luv.spir-v)))
+                    (#:spv #:luv.spir-v)
+                    (#:wgsl #:luv.wgsl)))
 
 (in-package #:luv.shaderc.tests)
 
@@ -42,6 +44,21 @@ point DEVELOPER_DIR at a bare SDK; Metal's compiler lives in Xcode's."
                                 :ignore-error-status t)
     (unless (zerop status)
       (format nil "~{~A~^ ~}~%~A~A" command output error-output))))
+
+(defparameter *wgsl-validator*
+  (merge-pathnames "scripts/wgsl-validate.mjs" *root*))
+
+(defun wgsl-program-diagnostics (directory)
+  "Compile every WGSL module luv-shaderc wrote into DIRECTORY with Dawn and
+create each program's pipeline against bind group layouts built from its
+manifest; NIL on success, or without node and the webgpu package that
+scripts/wgsl-validate.mjs describes."
+  (let ((command (list (or (uiop:getenv "LUV_NODE") "node")
+                       (uiop:native-namestring *wgsl-validator*))))
+    (when (apply #'tool-available-p (append command '("--probe")))
+      (run-tool (append command
+                        (list "--programs"
+                              (uiop:native-namestring directory)))))))
 
 (defun header-diagnostics (pathname)
   "Compile the generated header PATHNAME against the copy of moppe's
@@ -257,9 +274,11 @@ return their failures."
              (is equal '("textured_instances.vertex.metal"
                          "textured_instances.vertex.hlsl"
                          "textured_instances.vertex.spv"
+                         "textured_instances.vertex.wgsl"
                          "textured_instances.fragment.metal"
                          "textured_instances.fragment.hlsl"
                          "textured_instances.fragment.spv"
+                         "textured_instances.fragment.wgsl"
                          "textured_instances.json"
                          "textured_instances.hh")
                  (mapcar #'file-namestring written))
@@ -275,6 +294,13 @@ return their failures."
                    (fragment-hlsl (uiop:read-file-string
                                    (merge-pathnames
                                     "textured_instances.fragment.hlsl"
+                                    directory)))
+                   (vertex-wgsl (uiop:read-file-string
+                                 (merge-pathnames
+                                  "textured_instances.vertex.wgsl" directory)))
+                   (fragment-wgsl (uiop:read-file-string
+                                   (merge-pathnames
+                                    "textured_instances.fragment.wgsl"
                                     directory))))
                (true (search "\"entry\": \"textured_instances_vertex\"" json))
                (true (search "\"hlsl_profile\": \"ps_6_0\"" json))
@@ -299,7 +325,22 @@ return their failures."
                (true (search "constant Frame& frame [[buffer(0)]]" vertex-msl))
                (true (search "textured_instances_fragment(" fragment-hlsl))
                (true (search "SamplerComparisonState shadow_compare : register(s3);"
-                             fragment-hlsl)))
+                             fragment-hlsl))
+               ;; WebGPU binds a group at a time: buffers are group 0,
+               ;; textures group 1, and the standard samplers group 2.
+               (true (search "\"wgsl\": \"textured_instances.vertex.wgsl\""
+                             json))
+               (true (search "\"wgsl\": \"group 0, binding 1\"" json))
+               (true (search "\"wgsl\": \"group 1, binding 1\"" json))
+               (true (search "\"wgsl\": \"group 2, binding 3\"" json))
+               (true (search "fn textured_instances_vertex(" vertex-wgsl))
+               (true (search "@group(0) @binding(0) var<uniform> frame: Frame;"
+                             vertex-wgsl))
+               (true (search "@group(1) @binding(1) var shadow_map: texture_depth_2d;"
+                             fragment-wgsl))
+               (true (search "@group(2) @binding(3) var shadow_compare: sampler_comparison;"
+                             fragment-wgsl)))
+             (is eq nil (wgsl-program-diagnostics directory))
              (when (apply #'tool-available-p
                           (xcrun-command "-sdk" "macosx" "--find" "metal"))
                (dolist (stage '("vertex" "fragment"))
@@ -384,6 +425,7 @@ return their failures."
              (is equal '("particle_advance.compute.metal"
                          "particle_advance.compute.hlsl"
                          "particle_advance.compute.spv"
+                         "particle_advance.compute.wgsl"
                          "particle_advance.json"
                          "particle_advance.hh")
                  (mapcar #'file-namestring written))
@@ -408,6 +450,8 @@ return their failures."
                ;; Vulkan's module folds the families into set 0: the
                ;; read-write buffer keeps buffer binding 1.
                (true (search "\"spirv\": \"set 0, binding 1\"" json))
+               (true (search "\"wgsl\": \"group 0, binding 1\"" json))
+               (is eq nil (wgsl-program-diagnostics directory))
                (when (tool-available-p "spirv-val" "--version")
                  (is eq nil (run-tool
                              (list "spirv-val" "--target-env" "vulkan1.0"
@@ -568,6 +612,19 @@ bind COMPILED to it, and run BODY."
              (true (search "\"structs\": [" json))
              (true (search "\"alignment\": 16," json))
              (is equal nil (native-output-diagnostics compiled directory))
+             ;; WGSL's own alignment rules arrive at the host's layout.
+             (true (search "struct Particle {
+  position: vec4<f32>,
+  velocity: vec4<f32>,
+  orientation: mat4x4<f32>,
+  cell: vec2<i32>,
+  age: f32,
+  flags: u32,
+}"
+                           (uiop:read-file-string
+                            (merge-pathnames "particle_swarm.compute.wgsl"
+                                             directory))))
+             (is eq nil (wgsl-program-diagnostics directory))
              ;; Vulkan reads the same layout from the same source.
              (spv:write-spir-v (spv:assemble-shader-specification
                                 specification)
@@ -618,6 +675,9 @@ bind COMPILED to it, and run BODY."
            (hlsl (uiop:read-file-string
                   (merge-pathnames "instance_culling.compute.hlsl"
                                    directory)))
+           (wgsl (uiop:read-file-string
+                  (merge-pathnames "instance_culling.compute.wgsl"
+                                   directory)))
            (spir-v (merge-pathnames "instance_culling.spv" directory)))
       (true (search ".workgroup_size = {64, 1, 1}," header))
       (true (search "{\"arguments\", ResourceKind::read_write_storage_buffer, 3,"
@@ -626,6 +686,10 @@ bind COMPILED to it, and run BODY."
       (true (search "device atomic_uint* arguments [[buffer(3)]]" metal))
       (true (search "atomic_fetch_add_explicit(&arguments[" metal))
       (true (search "InterlockedAdd(arguments[" hlsl))
+      (true (search "var<storage, read_write> arguments: array<atomic<u32>>;"
+                    wgsl))
+      (true (search "atomicAdd(&arguments[" wgsl))
+      (is eq nil (wgsl-program-diagnostics directory))
       (is eq nil (header-diagnostics
                   (merge-pathnames "instance_culling.hh" directory)))
       (is equal nil (native-diagnostics directory "instance_culling"
@@ -681,7 +745,11 @@ bind COMPILED to it, and run BODY."
                     "\"family\": \"storage_texture\""
                     "\"format\": \"r32f\""
                     "\"msl\": \"[[texture(16)]]\""
-                    "\"hlsl\": \"u0, space1\""))
+                    "\"hlsl\": \"u0, space1\""
+                    ;; WGSL's storage textures follow the sampled ones in
+                    ;; group 1, each with the access the program needs.
+                    "\"wgsl\": \"group 1, binding 16\""
+                    "\"wgsl_access\": \"write\""))
       (true (search text json)))
     (dolist (text '("ResourceKind::texture_2d_array, 0,"
                     "ResourceKind::depth_texture_2d_array, 1,"
@@ -692,6 +760,9 @@ bind COMPILED to it, and run BODY."
     (true (search "RWTexture2D<float> heat : register(u0, space1);"
                   (hlsl:hlsl-document-source
                    (shaderc:compiled-stage-hlsl fragment))))
+    (true (search "@group(1) @binding(16) var heat: texture_storage_2d<r32float, write>;"
+                  (wgsl:wgsl-document-source
+                   (shaderc:compiled-stage-wgsl fragment))))
     (with-scratch-directory (directory)
       (shaderc:write-compiled-program compiled directory)
       (is eq nil (header-diagnostics

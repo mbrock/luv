@@ -4,13 +4,13 @@
 ;;; DEFINE-SHADER-PROGRAM forms.  Each program it defines is linked once
 ;;; (SHADER:LINK-SHADER-PROGRAM), checked against the binding contract the
 ;;; renderer's hardware layer expects, lowered to one MSL document, one HLSL
-;;; document, and one SPIR-V module per stage, and described twice for the
-;;; host: as a JSON manifest and as a C++ header of uniform structures and a
-;;; resource table.  #1I6G0R
+;;; document, one SPIR-V module, and one WGSL module per stage, and described
+;;; twice for the host: as a JSON manifest and as a C++ header of uniform
+;;; structures and a resource table.  #1I6G0R
 
 (in-package #:luv.shaderc)
 
-(defparameter *targets* '(:msl :hlsl :spir-v)
+(defparameter *targets* '(:msl :hlsl :spir-v :wgsl)
   "The shading languages written when a caller names none.")
 
 (define-condition shaderc-error (error)
@@ -141,6 +141,24 @@ every resource in set 0 at its family's base plus its binding number.")
   (values 0 (spir-v-binding (shader:shader-resource-family declaration)
                             (shader:shader-resource-binding declaration))))
 
+(defparameter *wgsl-family-places*
+  '((:buffer 0 0) (:texture 1 0) (:storage-texture 1 16) (:sampler 2 0))
+  "(FAMILY GROUP BASE): WebGPU binds a group at a time, so a WGSL module
+keeps each family in a bind group of its own -- buffers in group 0, textures
+in group 1 with the storage textures after the sampled ones, and the
+standard samplers in group 2 -- at its family's base plus its binding
+number.")
+
+(defun wgsl-binding (family binding)
+  "The group and binding of FAMILY's BINDING in a WGSL module."
+  (destructuring-bind (group base) (cdr (assoc family *wgsl-family-places*))
+    (values group (+ base binding))))
+
+(defun wgsl-resource-binding (declaration)
+  "The group and binding of DECLARATION in a WGSL module."
+  (wgsl-binding (shader:shader-resource-family declaration)
+                (shader:shader-resource-binding declaration)))
+
 (defparameter *standard-samplers*
   '((0 :sampler "linear filtering, clamp to edge")
     (1 :sampler "linear filtering, repeat")
@@ -194,7 +212,8 @@ every resource in set 0 at its family's base plus its binding number.")
    (msl :initarg :msl :initform nil :reader compiled-stage-msl)
    (hlsl :initarg :hlsl :initform nil :reader compiled-stage-hlsl)
    (spir-v :initarg :spir-v :initform nil :reader compiled-stage-spir-v
-           :documentation "The stage's assembled SPIR-V words.")))
+           :documentation "The stage's assembled SPIR-V words.")
+   (wgsl :initarg :wgsl :initform nil :reader compiled-stage-wgsl)))
 
 (defclass compiled-program ()
   ((name :initarg :name :reader compiled-program-name
@@ -213,7 +232,11 @@ and lower every stage to each of TARGETS."
     (with-compilation-context ("program ~(~A~)" (shader:shader-object-name program))
       (let* ((linkage (shader:link-shader-program program))
              (vertex (shader:shader-program-linkage-specification
-                      linkage :vertex)))
+                      linkage :vertex))
+             (specifications
+               (mapcar #'cdr
+                       (shader:shader-program-linkage-specifications
+                        linkage))))
         (check-binding-contract linkage)
         (make-instance
          'compiled-program
@@ -249,7 +272,22 @@ and lower every stage to each of TARGETS."
                                 specification
                                 :entry-point-name entry
                                 :resource-binding
-                                #'spir-v-resource-binding))))))))))
+                                #'spir-v-resource-binding))
+                  ;; One bind group layout serves every stage, so a sampler
+                  ;; or storage texture is declared as the whole program
+                  ;; uses it.
+                  :wgsl (and (member :wgsl targets)
+                             (wgsl:compile-wgsl
+                              specification
+                              :entry-point-name entry
+                              :resource-binding #'wgsl-resource-binding
+                              :comparison-samplers
+                              (shader:shader-program-linkage-comparison-samplers
+                               linkage)
+                              :storage-texture-access
+                              (lambda (texture)
+                                (apply #'wgsl:wgsl-storage-texture-access
+                                       texture specifications))))))))))))
 
 ;;; JSON, written by hand: the manifest is small and its shape is fixed.
 
@@ -348,7 +386,31 @@ the structures it contains.  #V16OXI"
   (format nil "~A.~A.~A" (compiled-program-name compiled) (stage-name stage)
           extension))
 
-(defun resource-json (resource)
+(defun compiled-program-wgsl-p (compiled)
+  (some #'compiled-stage-wgsl (compiled-program-stages compiled)))
+
+(defun resource-wgsl-json (compiled resource)
+  "RESOURCE's place in COMPILED's WGSL modules, and a storage texture's
+access there, which a bind group layout must repeat."
+  (let ((declaration (shader:shader-program-resource-declaration resource))
+        (family (shader:shader-program-resource-family resource)))
+    `(("wgsl" . ,(multiple-value-bind (group binding)
+                     (wgsl-binding
+                      family (shader:shader-program-resource-binding resource))
+                   (format nil "group ~D, binding ~D" group binding)))
+      ,@(when (eq family :storage-texture)
+          `(("wgsl_access"
+             . ,(substitute
+                 #\_ #\-
+                 (string-downcase
+                  (symbol-name
+                   (apply #'wgsl:wgsl-storage-texture-access declaration
+                          (mapcar #'compiled-stage-specification
+                                  (compiled-program-stages compiled))))))))))))
+
+(defun resource-json (resource &optional compiled)
+  "RESOURCE's manifest entry; with COMPILED, a program lowered to WGSL,
+its place there too."
   (let* ((declaration (shader:shader-program-resource-declaration resource))
          (binding (shader:shader-program-resource-binding resource))
          (kind (shader:shader-program-resource-kind resource)))
@@ -423,7 +485,9 @@ the structures it contains.  #V16OXI"
       ("spirv" . ,(format nil "set 0, binding ~D"
                           (spir-v-binding
                            (shader:shader-program-resource-family resource)
-                           binding))))))
+                           binding)))
+      ,@(when (and compiled (compiled-program-wgsl-p compiled))
+          (resource-wgsl-json compiled resource)))))
 
 (defun resource-msl-index (resource)
   "Metal numbers storage textures after the sampled ones: texture(16 + i)."
@@ -465,10 +529,14 @@ the structures it contains.  #V16OXI"
                              . ,(hlsl:hlsl-profile stage))))
                       ,@(when (compiled-stage-spir-v compiled-stage)
                           `(("spirv" . ,(stage-file-name compiled stage
-                                                         "spv")))))))
+                                                         "spv"))))
+                      ,@(when (compiled-stage-wgsl compiled-stage)
+                          `(("wgsl" . ,(stage-file-name compiled stage
+                                                        "wgsl")))))))
                 (compiled-program-stages compiled))))
          ("resources"
-          . (:array ,@(mapcar #'resource-json
+          . (:array ,@(mapcar (lambda (resource)
+                                (resource-json resource compiled))
                               (shader:shader-program-linkage-resources
                                linkage))))
          ("fragment_outputs"
@@ -677,7 +745,11 @@ Return the written pathnames."
                    (compiled-stage-spir-v compiled-stage)
                    (merge-pathnames (stage-file-name compiled stage "spv")
                                     directory))
-                  written))))
+                  written))
+          (when (compiled-stage-wgsl compiled-stage)
+            (output (stage-file-name compiled stage "wgsl")
+                    (wgsl:wgsl-document-source
+                     (compiled-stage-wgsl compiled-stage))))))
       (output (format nil "~A.json" (compiled-program-name compiled))
               (program-json compiled))
       (output (format nil "~A.hh" (compiled-program-name compiled))
