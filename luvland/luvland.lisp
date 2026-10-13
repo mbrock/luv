@@ -177,6 +177,9 @@ corners are rounded by RADIUS."
             :documentation "WINDOW records in strip order, oldest first.")
    (focus :initform nil :accessor luvland-focus)
    (camera :initform (make-spring 0.0) :reader luvland-camera)
+   (zoom :initform (make-spring 1.0) :reader luvland-zoom
+         :documentation "The camera's distance as a multiple of the one-to-one
+distance: 1 shows the focused window exactly, more pulls back over the strip.")
    (frame-states :initform (make-hash-table :test 'eq) :reader luvland-frame-states)
    (graveyard :initform '() :accessor luvland-graveyard
               :documentation "(done-p . thunk) pairs: work to do once the GPU has
@@ -449,6 +452,11 @@ or NIL when it cannot import dmabufs at all."
                                :server (luvland-server luvland) :wait nil))))
       t)))
 
+(defparameter *terminal* '("foot" "--override=pad=18x14 center")
+  "The terminal Luvland opens as a client, as a program and its arguments.
+Windows meet the compositor's frame edge to edge, so foot pads its own grid
+in its own background colour rather than setting text against the border.")
+
 (defparameter *window-margin* 28
   "Pixels between the focused window's border and the edge of the view.")
 (defparameter *border-width* 2.0)
@@ -494,11 +502,24 @@ boundaries."
                (pixel-alignment width (window-width window)))
             (pixel-alignment height (window-height window)))))
 
+(defparameter *overview-zoom* 2.4
+  "How far the overview pulls the camera back, in one-to-one distances.")
+
 (defun camera-position (luvland time)
   (let ((window (focused-window luvland)))
     (values (spring-state (luvland-camera luvland) time)
             (if window (nth-value 1 (camera-target luvland window)) 0.0)
-            (native-distance luvland))))
+            (* (native-distance luvland) (spring-state (luvland-zoom luvland) time)))))
+
+(defun overview-p (luvland)
+  (/= 1.0 (spring-target (luvland-zoom luvland))))
+
+(defun toggle-overview (luvland)
+  "Pull the camera back over the whole strip, as niri's overview does, or
+return to showing the focused window one to one."
+  (retarget-spring (luvland-zoom luvland)
+                   (if (overview-p luvland) 1.0 *overview-zoom*)
+                   (now luvland)))
 
 (defun aim-camera (luvland)
   (let ((window (focused-window luvland)))
@@ -759,7 +780,8 @@ Bindings are Control+Meta chords, since niri owns Super on the host."
     (case key-name
       (:left (focus-neighbor luvland -1) t)
       (:right (focus-neighbor luvland 1) t)
-      (:return (spawn-client luvland "foot") t)
+      (:return (apply #'spawn-client luvland *terminal*) t)
+      (:o (toggle-overview luvland) t)
       (:backspace (let ((toplevel (luvland-focus luvland)))
                     (when toplevel
                       (wl:call-in-server (lambda () (wl:close-toplevel toplevel))
@@ -829,11 +851,14 @@ where the camera ray through it meets the window's plane."
 (defun pointer-button (luvland event pressed-p)
   (let ((code (button-evdev-code (luv:canvas-pointer-event-button event))))
     (when pressed-p
-      ;; Clicking a window focuses it and brings the camera along.
+      ;; Clicking a window focuses it and brings the camera along; in the
+      ;; overview it also brings the camera back in to it.
       (let ((window (pick luvland (luv:canvas-pointer-event-x event)
                           (luv:canvas-pointer-event-y event))))
         (when (and window (not (eq (window-toplevel window) (luvland-focus luvland))))
-          (focus-window luvland (window-toplevel window)))))
+          (focus-window luvland (window-toplevel window)))
+        (when (and window (overview-p luvland))
+          (toggle-overview luvland))))
     (when code
       (wl:call-in-server (lambda () (wl:send-pointer-button code pressed-p))
                          :server (luvland-server luvland) :wait nil))))
@@ -890,7 +915,7 @@ swapchain encodes on write, so colors pass through unchanged."
       :bgra8-unorm))
 
 (defun start-luvland (&key (width 1600) (height 900) fullscreen-p
-                           (spawn '("foot")) (window-size '(1000 700)))
+                           (spawn *terminal*) (window-size '(1000 700)))
   "Open Luvland: a canvas, a Wayland server on its own socket, and SPAWN,
 a program run as the first client."
   (when *luvland*

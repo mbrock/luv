@@ -2,26 +2,25 @@
 
 ![The Luft sanctuary in isometric view: a wizard crossing a crystal-lit bridge](screenshots/luft-sanctuary.webp)
 
-Luv is an experimental Common Lisp GPU workshop: a small WebGPU-shaped
-hardware layer with hand-built Vulkan and native Metal 4 backends, an SDL3
-canvas host, a Lisp shader language that lowers to SPIR-V, MSL, HLSL, and WGSL,
-and a McCLIM backend for live tools on GPU surfaces. The aim is not a
-general-purpose engine; it is graphics machinery small enough to inspect and
-redefine while it is running.
+Luv is a graphics workshop written in Common Lisp. It draws with the GPU
+through its own small Vulkan and Metal 4 backends, has its own shader language,
+and runs inside a Lisp image that stays alive while you work on it: you can
+redefine a function, a class, or a shader and see the next frame change,
+without restarting anything.
 
-Three applications grow out of it:
+It isn't a general-purpose engine. It's a place to build graphics machinery
+that is small enough to read, poke at, and change while it runs, and three
+programs have grown up in it:
 
-- **Luvcraft**, the original procedural block world, with streaming,
-  simulation, persistence, and tools that live inside the world — including
-  terminals you build out of blocks.
-- **Luft**, the second-generation experiment: canonical cubical topology,
-  packed integer manifold-sheet meshes, and a playable McCLIM atelier.
-- **Luvland**, the newest: a Wayland compositor written in Lisp, whose world is
-  nothing but other programs' windows.
+- **Luvcraft**, a block world in the spirit of Minecraft, with terminals you
+  can build out of blocks and type into.
+- **Luft**, a second, more mathematical take on the block world, with carved,
+  bevelled terrain instead of textured cubes.
+- **Luvland**, a Wayland compositor: other programs open their windows in it.
 
 ## Try it with Nix
 
-Run any of them straight from GitHub, without cloning the repository:
+Run any of them straight from GitHub, without cloning:
 
 ```sh
 nix run --accept-flake-config github:mbrock/luv            # Luvcraft
@@ -30,81 +29,105 @@ nix run --accept-flake-config github:mbrock/luv#luvland    # Luvland (Linux)
 nix run --accept-flake-config github:mbrock/luv#luv-shaderc -- --help
 ```
 
-The flake supports x86-64 and ARM64 Linux and Apple Silicon macOS; Luvland
-is Linux only. The first run downloads or builds the program and its
-dependencies, and later runs reuse the Nix store. Luvcraft keeps its world
-under `$XDG_DATA_HOME/luvcraft` (or `~/.local/share/luvcraft`) rather than
-inside the immutable package.
+This works on x86-64 and ARM64 Linux and on Apple Silicon Macs; Luvland is
+Linux only. The first run downloads or builds everything it needs, and later
+runs start straight from the Nix store. Luvcraft saves its world under
+`~/.local/share/luvcraft` (or `$XDG_DATA_HOME/luvcraft`).
 
 ## Luvcraft
 
-![Morning in a generated Luvcraft meadow, sun breaking through the canopy](screenshots/luvcraft-meadow.webp)
+![Morning in a generated Luvcraft meadow, the sun breaking through the trees](screenshots/luvcraft-meadow.webp)
 
-A procedural block world with HDR sky and sun, shadows, fog, bloom, and light
-shafts; blocks that stream, simulate, and persist; and inhabitants you can
-talk to.
+Luvcraft is the original experiment, and the one most of the renderer grew
+out of. It has generated terrain, a day with a moving sun, shadows, fog, bloom
+and light shafts, blocks you can mine and place, simple physics, a world that
+is saved as you play, and a few inhabitants you can talk to.
+
+### Terminals made of blocks
+
+![Walking up to a terminal wall, running ls and opening a file in Vim](screenshots/luvcraft-terminal.gif)
+
+Terminal is a block material. Build a wall of it, look at the wall, and press
+`Tab`: the wall turns into one screen running a real Bash, and the camera
+settles in front of it so you can type. `Shift-Tab` steps back into the game.
+Everything above is live: `ls`, Vim and the shell are real programs talking to
+a real pseudo-terminal.
+
+The terminal emulation is [Ghostty](https://ghostty.org)'s, through its
+`libghostty-vt` library. Luvcraft draws the text itself, as glyph outlines
+rendered directly on the GPU, so the screen stays sharp from any distance and
+is part of the world rather than pasted over it: trees can stand in front of it
+and the light falls on its glass.
 
 <p>
+<img src="screenshots/luvcraft-terminal-vim.webp" width="49%" alt="Vim on a terminal wall, seen at an angle past a tree">
 <img src="screenshots/luvcraft-terminal-shelter.webp" width="49%" alt="A terminal wall glowing inside a stone-and-wood shelter">
-<img src="screenshots/luvcraft-terminal-closeup.webp" width="49%" alt="A styled shell session on the terminal wall, seen at an angle">
 </p>
-
-**Terminal walls.** Terminal is a placeable block material. Build a rectangle
-of it and the exposed faces join into one display; look at it and press `Tab`
-to start a real Bash in a PTY and step into it, `Shift-Tab` to step back out.
-[Ghostty](https://ghostty.org)'s `libghostty-vt` owns the terminal state, and
-every glyph is drawn as a resolution-independent Slug curve in world space,
-sharing the depth buffer with the terrain, so the screen stays sharp at any
-distance and snow can drift in front of it. The same display can play video
-or ride along in your hand as a phone.
-
 <p>
 <img src="screenshots/luvcraft-gnome.webp" width="49%" alt="A gnome in conversation in a sunny garden">
 <img src="screenshots/luvcraft-wall-cinema.webp" width="49%" alt="A cartoon playing on the terminal wall at dusk">
 </p>
 
+The same screens can play video, or come with you as a phone in your hand.
+
 ## Luft
 
+![First-person view from a mountainside over Luft's terraced valleys](screenshots/luft-overlook.webp)
+
+Luft starts the block world over. The world is still made of cells on a grid,
+but instead of drawing each block as a textured cube, Luft works out the actual
+surface of the solid shape and gives it rounded, bevelled edges and properly
+mitred corners. Cliffs read as carved stone and hills as terraces, and there
+are no textures at all: the colour comes from materials, sunlight, and the
+glow of torches and crystals.
+
 <p>
-<img src="screenshots/luft-bridge.webp" width="49%" alt="The Luft traveler on the sanctuary bridge, close up">
-<img src="screenshots/luft-highlands.webp" width="49%" alt="Streamed Luft highlands with terraced green valleys">
+<img src="screenshots/luft-canyon.webp" width="49%" alt="Walking down a sandy road between steep Luft cliffs">
+<img src="screenshots/luft-bridge.webp" width="49%" alt="The Luft traveller on the sanctuary bridge, in isometric view">
 </p>
 
-Luft treats a block world as algebra rather than as voxels with decorations.
-Every vertex, edge, face, and cell of the cubical lattice is one fixnum, and
-the surface falls out of chain arithmetic on those sites. The mesher turns
-occupancy into manifold sheets with exact integer bevels and miters, packed so
-that shaders draw them straight from a GPU buffer by vertex pulling; there are
-no textures. The atelier around it streams large highland regions, lights them
-with a stylized sun, voxel-propagated torch and crystal light, and a
-reconstructed temporal frame, and lets you walk, fly, edit, and inspect any
-site under the pointer.
+You can walk it in first person, or switch to an isometric view and click
+where the little traveller should go. You can fly, place and remove material,
+and point at any piece of the surface to see how it was built.
+
+Under the hood, every corner, edge, face and cell of the grid has a number, and
+the surface is computed from those numbers with exact integer arithmetic. The
+mesh is packed small enough that the shaders read it straight from GPU memory.
+The highlands stream in around you as you travel.
 
 ## Luvland
 
-![Two foot terminals on Luvland's window strip, mid-scroll](screenshots/luvland-strip.webp)
+![Luvland's overview: Vim, a shell, and htop side by side on the window strip](screenshots/luvland-overview.webp)
 
-Luvland speaks `libwayland-server` over CFFI, with every protocol interface —
-core, `xdg-shell`, the seat, `linux-dmabuf` — implemented in Lisp from the
-protocol XML. Clients draw through `wl_shm` or hand over dmabufs that are
-imported into Vulkan without a copy. Windows are quads on a strip in a
-perspective space, and a critically damped spring borrowed from
-[niri](https://github.com/YaLTeR/niri) carries the camera from one to the next,
-landing each focused window exactly one client pixel per screen pixel.
+Luvland is a Wayland compositor, written in Lisp, where the world is nothing
+but other programs' windows. Windows sit side by side on a long strip, like the
+columns of [niri](https://github.com/YaLTeR/niri), and the camera glides from
+one to the next on a spring. The window in focus is shown at exactly one of its
+pixels per pixel of your screen, so text is as sharp as it would be anywhere
+else.
 
-It runs as a window inside your current desktop and opens a
-[foot](https://codeberg.org/dnkl/foot) terminal as its first client; Wayland
-programs started from it join the strip, as far as the protocols implemented so
-far carry them. `Ctrl-Alt-←`/`→` move focus,
-`Ctrl-Alt-Return` opens another foot, and `Ctrl-Alt-Backspace` closes the
-focused window.
+It runs as a window in your current desktop and opens a
+[foot](https://codeberg.org/dnkl/foot) terminal to start with. Programs you
+launch from there open as new windows on the strip, as long as they make do with
+the parts of Wayland implemented so far.
+
+| Keys | |
+|---|---|
+| `Ctrl-Alt-←` / `Ctrl-Alt-→` | move focus along the strip |
+| `Ctrl-Alt-O` | pull back to see the whole strip, or come back in |
+| `Ctrl-Alt-Return` | open another terminal |
+| `Ctrl-Alt-Backspace` | close the focused window |
+
+The Wayland protocol itself is handled by the standard `libwayland-server`
+library; every part of the protocol on top of it — surfaces, toplevel windows,
+the keyboard and pointer, buffer sharing — is implemented in Lisp, read from
+the protocol's XML description. GPU clients like `vkcube` hand over their
+frames as dmabufs, which Luvland shows without copying.
 
 ## The shader language
 
-Shaders are written in Lisp as typed expression graphs, not strings. The same
-source lowers to SPIR-V for Vulkan, MSL for Metal, HLSL for Direct3D 12, and
-WGSL for WebGPU, and the lowering remembers which source expression each
-generated line came from. Here is a complete full-screen sky:
+Shaders in Luv are written in Lisp. Here is a complete program that fills the
+screen with a sky and a soft sun:
 
 ```lisp
 (define-shader sky-vertex
@@ -136,9 +159,14 @@ generated line came from. Here is a complete full-screen sky:
   :fragment sky-fragment)
 ```
 
-Inside Luv a shader is a live object: redefine it in the running image and the
-next frame uses it. Outside Luv, `luv-shaderc` compiles the same files ahead of
-time, so a renderer in any language can use them as portable shaders:
+A shader is not a string handed to a driver: it's a typed expression that Lisp
+checks and then translates for each GPU API — SPIR-V for Vulkan, MSL for Metal,
+HLSL for Direct3D 12, and WGSL for WebGPU. Inside a running Luv program a
+shader is a live object, and redefining it changes the next frame.
+
+The same shaders also work outside Luv. `luv-shaderc` is a small command-line
+compiler that turns these files into ready-to-load shaders for every target,
+plus a description of each program's inputs:
 
 ```text
 $ nix run github:mbrock/luv#luv-shaderc -- --out shaders hal/shaderc/examples/sky.lisp
@@ -148,9 +176,9 @@ sky.fragment.hlsl   sky.fragment.spv    sky.hh              sky.vertex.hlsl     
 sky.fragment.metal  sky.fragment.wgsl   sky.json            sky.vertex.metal    sky.vertex.wgsl
 ```
 
-Each stage comes out as one module per target, and the program's reflection
-comes out twice: as JSON, and as a C++ header with the uniform structures laid
-out and their sizes asserted. The fragment stage in WGSL:
+`sky.json` and the C++ header `sky.hh` describe the resources each program
+expects, with the uniform structures laid out and their sizes checked at
+compile time. Here is the fragment stage as WGSL:
 
 ```wgsl
 @fragment
@@ -165,65 +193,85 @@ fn sky_fragment(stage_in: SkyFragmentInput) -> SkyFragmentOutput {
 }
 ```
 
-[Moppe](https://github.com/mbrock/moppe), a C++ game, builds its renderer's
-pipelines this way: one Lisp source for Metal 4 on Apple platforms, Direct3D 12
-on an Xbox, Vulkan, and WebGPU in a browser. The language also covers compute
-stages, structured storage buffers, textures of every dimension, workgroup
-memory, atomics, and wave operations; see
-[`hal/shaderc/examples`](hal/shaderc/examples) and
+That makes the language useful as a portable shader language on its own.
+[Moppe](https://github.com/mbrock/moppe), a C++ game, writes its shaders this
+way and builds them for Metal 4 on Apple devices, Direct3D 12 on an Xbox,
+Vulkan, and WebGPU in a browser. Besides vertex and fragment stages the
+language has compute shaders, structured buffers, every kind of texture,
+shared workgroup memory, atomics, and wave operations; see the
+[examples](hal/shaderc/examples) and
 [HLSL, shader programs, and luv-shaderc](wiki/hlsl-and-shaderc.org).
+
+## Built from the ground up
+
+Most graphics code in high-level languages sits on large generated bindings
+that expose every function and structure of an API at once. Luv goes the other
+way. It binds exactly the parts of each platform it uses, by hand, and adds
+more only when a feature needs them:
+
+- **Vulkan** is roughly ninety hand-declared entry points over CFFI, each one
+  added for a concrete operation the backend performs.
+- **Metal 4** is reached through a small Objective-C bridge written in Lisp,
+  where every message Luv sends is declared with its exact calling convention.
+- **SPIR-V** is assembled in Lisp, instruction by instruction; there is no
+  external shader compiler in the loop. MSL, HLSL and WGSL are generated
+  the same way.
+- **Text** is drawn from font outlines on the GPU with an implementation of
+  the Slug algorithm, so glyphs stay crisp at any size and angle.
+- **Tools** inside the games are built with [McCLIM](https://mcclim.common-lisp.dev),
+  which Luv teaches to draw on GPU surfaces.
+
+The result is a codebase where you can follow a pixel from the game's logic to
+the exact GPU call that draws it, and change any step along the way while the
+program keeps running. SDL3 opens the windows and reads input; Ghostty handles
+terminal emulation, and FFmpeg decodes video.
 
 ## Develop in the live image
 
-Development happens in a durable SBCL image supervised by
-[Swash](https://github.com/lessrest/swash):
+Day-to-day work happens in a long-running SBCL image managed by
+[Swash](https://github.com/lessrest/swash). The `./sly` command talks to it:
 
 ```sh
-./sly play luft                     # start the image and open the Luft atelier
-./sly status                        # identify the image, target, and canvas health
-./sly screenshot build/frame.png    # capture the next rendered frame
-./sly stop-playing                  # close the window; keep the Lisp
+./sly play luft                     # start the image and open Luft
+./sly status                        # which image, what's playing, is it healthy
+./sly screenshot build/frame.png    # capture the next frame
+./sly stop-playing                  # close the window; keep the Lisp running
 ```
 
-`./sly play` opens Luvcraft, and `./sly play luvland` the compositor. The same
-command also provides `eval`, `inspect`, `describe`, `apropos`, `edit`, and
-`xref` against the live image. See [AGENTS.md](AGENTS.md) for the concise
-development workflow and concrete output examples.
+`./sly play` alone opens Luvcraft, and `./sly play luvland` the compositor.
+The same command can `eval`, `inspect`, `describe`, `apropos`, `edit`, and
+`xref` against the running program. [AGENTS.md](AGENTS.md) walks through the
+workflow with real output.
 
-`./sly` and `make` enter the checkout's Nix environment automatically. For an
-arbitrary command, use `./env COMMAND`; `./env --slim COMMAND` provides just
-SBCL, Sly/Swash, Python, and Bash. The slim managed image loads the `luft`
-mesher rather than the graphical workbench; use the full environment for
-rendering and game features.
+`./sly` and `make` enter the repository's Nix environment by themselves. To
+run anything else inside it, use `./env COMMAND`; `./env --slim COMMAND` is a
+smaller environment that is enough for the non-graphical parts of Luft.
 
-Standalone executables are available for release-style testing:
+To build standalone programs instead:
 
 ```sh
 make
-./build/luft-atelier                # Luft
-./build/luvcraft                    # Luvcraft
-make luvland && ./build/luvland     # Luvland (Linux)
+./build/luvcraft
+./build/luft-atelier
+make luvland && ./build/luvland     # Linux
 ```
 
-`make help` lists the build workflows. `make LUV_DEV_SHELL=slim` builds only
-non-graphical Luft; add `test` to run its checks. Specialized targets live in
-`make/graphics.mk`, `make/benchmarks.mk`, and `make/publishing.mk` and are
-invoked from the checkout root as usual. `scripts/captures list` names the
-source-defined camera recipes behind many of the pictures above.
+`make help` lists the other build targets. Most pictures in this README come
+from camera recipes in the source; `scripts/captures list` shows them.
 
-Metal 4 is used natively on macOS; Vulkan is used elsewhere and remains
-available on macOS for comparison.
+Luv uses Metal 4 natively on macOS and Vulkan everywhere else (Vulkan also
+works on macOS, for comparison).
 
 ## Explore
 
-- [The workshop wiki](https://mbrock.github.io/luv/) is the design notebook and
-  rendered source browser.
-- [Luft](wiki/luft.org), [Luft sites](wiki/luft-sites.org),
-  [Luvcraft](wiki/block-world.org), [world terminals](wiki/world-terminal.org),
-  and [Luvland](wiki/compositor.org) introduce the applications.
+- [The workshop wiki](https://mbrock.github.io/luv/) is the design notebook,
+  with a browsable, cross-linked view of the source.
+- [Luvcraft](wiki/block-world.org), [terminals in the world](wiki/world-terminal.org),
+  [Luft](wiki/luft.org), and [Luvland](wiki/compositor.org) describe the
+  programs.
 - [GPU architecture](wiki/gpu-architecture.org),
   [mathematical shaders](wiki/mathematical-shaders.org), and
   [quantities and measurement](wiki/quantities-and-measurement.org) describe
-  the machinery beneath them.
+  the machinery underneath.
 
-Everything here is experimental and under active construction.
+Everything here is an experiment and still being built.
