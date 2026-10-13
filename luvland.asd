@@ -13,6 +13,16 @@
                              (:file "luvland"))))
   :in-order-to ((test-op (test-op "luvland/test"))))
 
+(defsystem "luvland/program"
+  :description "The standalone Luvland executable."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvland")
+  :components ((:file "luvland/main"))
+  :build-operation "program-op"
+  :build-pathname "build/luvland"
+  :entry-point "luvland:main")
+
 (defsystem "luvland/test"
   :description "Luvland's zero-copy chain: a real Vulkan client's dmabufs, imported."
   :version "0.0.1"

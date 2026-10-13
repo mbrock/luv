@@ -18,7 +18,7 @@ else
 TEST_JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
 FASL_CACHE ?= $(HOME)/.cache/common-lisp
 
-.PHONY: all help sly-client sly-dependency-core luvcraft luft luft-core run \
+.PHONY: all help sly-client sly-dependency-core luvcraft luft luft-core luvland run \
 	test test-suite luft-test parinfer-check sly-build-lock-check clean clean-fasls
 
 # The slim environment builds and tests the non-graphical Luft system.
@@ -47,7 +47,8 @@ sly-dependency-core: sly-client $(BUILD_TARGETS)
 luvcraft: BUILD_SCRIPT = luvcraft/build.lisp
 luft: BUILD_SCRIPT = luft/build.lisp
 luft-core: BUILD_SCRIPT = luft/build-core.lisp
-luvcraft luft luft-core:
+luvland: BUILD_SCRIPT = luvland/build.lisp
+luvcraft luft luft-core luvland:
 	@./scripts/build-application $(BUILD_SCRIPT)
 
 run: luvcraft
@@ -78,6 +79,7 @@ help:
 	@printf '%s\n' \
 		'make                 Build applications and warm the Sly image' \
 		'make test            Run source checks and tests (TEST_JOBS=N)' \
+		'make luvland         Build the Wayland compositor (Linux)' \
 		'make LUV_DEV_SHELL=slim [test]  Build or test non-graphical Luft' \
 		'make clean           Remove generated programs and proof artifacts' \
 		'make clean-fasls     Remove this checkout’s compiled Lisp cache' \
@@ -99,7 +101,7 @@ CLEAN_PROOFS := analytic-roundrect slug-bezier slug-text
 
 clean:
 	rm -rf build/logs build/wiki build/wiki-cli
-	rm -f build/luvcraft build/luft-atelier build/mcluv \
+	rm -f build/luvcraft build/luft-atelier build/luvland build/mcluv \
 		build/luvcraft-smoke.png build/luvcraft-metal-smoke.png \
 		$(addprefix build/,$(addsuffix .metal,$(CLEAN_SHADERS))) \
 		$(addprefix build/,$(addsuffix .air,$(CLEAN_SHADERS))) \

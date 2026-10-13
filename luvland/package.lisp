@@ -15,4 +15,5 @@ in LUV.WAYLAND; this package supplies placement, picking, and focus.")
            #:spawn-client
            #:focus-window
            #:luvland-windows
-           #:capture-luvland-screenshot))
+           #:capture-luvland-screenshot
+           #:main))

@@ -1963,9 +1963,18 @@ shows them.~%" failure-count))))))
                            (list (namestring (truename ~S))
                                  (first extent) (second extent)
                                  (luv:canvas-format context))))
+                        ((let* ((package (find-package \"LUVLAND\"))
+                                (symbol (and package (find-symbol \"*LUVLAND*\" package))))
+                           (and symbol (boundp symbol) (symbol-value symbol)))
+                         (multiple-value-bind
+                               (pathname pixels width height format)
+                             (uiop:symbol-call :luvland :capture-luvland-screenshot ~S)
+                           (declare (ignore pixels))
+                           (list (namestring (truename pathname))
+                                 width height format)))
                         (t
-                         (error \"No luvcraft game or LUFT viewer is open.\"))))"
-                   pathname pathname pathname)))
+                         (error \"No luvcraft game, LUFT viewer, or Luvland is open.\"))))"
+                   pathname pathname pathname pathname)))
     (evaluate code "LUVCRAFT")))
 
 (defun parse-play-arguments (arguments)

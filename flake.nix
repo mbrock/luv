@@ -310,6 +310,8 @@
               lispPackages.cl-fad
               lispPackages.cl-who
               lispPackages.closer-mop
+              # luv/wayland reads its interfaces from the protocol XML.
+              lispPackages.cxml
               lispPackages.defclass-std
               lispPackages.eclector
               lispPackages.flexi-streams
@@ -653,11 +655,14 @@
               (variable: value:
                 "export ${variable}=${lib.escapeShellArg (toString value)}")
               runtimeEnvironment);
-          runtimePath = lib.makeBinPath [
+          runtimePath = lib.makeBinPath ([
             pkgs.bashInteractive
             pkgs.coreutils
             environment.ffmpeg
-          ];
+          ] ++ lib.optionals (name == "luvland") [
+            # Luvland opens a foot window as its first client.
+            pkgs.foot
+          ]);
         in
         pkgs.stdenv.mkDerivation (environment.applicationEnvironment // {
           pname = name;
@@ -745,11 +750,13 @@
           '';
 
           meta = {
-            description = if name == "luvcraft"
-              then "The original procedural block world"
-              else "The second-generation cubical atelier";
+            description = {
+              luvcraft = "The original procedural block world";
+              luft = "The second-generation cubical atelier";
+              luvland = "A Wayland compositor whose world is windows";
+            }.${name};
             mainProgram = name;
-            platforms = systems;
+            platforms = if name == "luvland" then lib.platforms.linux else systems;
           };
         });
       # luv-shaderc compiles shader programs ahead of time for a native
@@ -843,6 +850,11 @@
             executable = "luft-atelier";
           };
           luv-shaderc = shadercPackage system;
+          luvland = applicationPackage system {
+            name = "luvland";
+            buildScript = "luvland/build.lisp";
+            executable = "luvland";
+          };
         in {
           inherit luvcraft luft luv-shaderc;
           sbcl = env.sbcl;
@@ -857,6 +869,8 @@
           swash = env.swashPackage;
           default = luvcraft;
         } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.hostPlatform.isLinux {
+          # Wayland is a Linux protocol; Luvland has no Darwin build.
+          inherit luvland;
           # Reachable only by name, `nix build .#wpewebkit` on Linux: not in
           # `default`, not in the dev shell, not in any library path.
           wpewebkit = env.wpePkgs.wpewebkit;
@@ -936,6 +950,12 @@
         luv-shaderc = {
           type = "app";
           program = "${self.packages.${system}.luv-shaderc}/bin/luv-shaderc";
+        };
+      } // nixpkgs.lib.optionalAttrs
+        nixpkgs.legacyPackages.${system}.stdenv.hostPlatform.isLinux {
+        luvland = {
+          type = "app";
+          program = "${self.packages.${system}.luvland}/bin/luvland";
         };
       });
     };
