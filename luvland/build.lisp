@@ -12,6 +12,13 @@
 
 (load (merge-pathnames #P"luvcraft/build-progress.lisp" *project-root*))
 
+(let ((slynk-root (uiop:getenv "LUV_SLYNK_DIR")))
+  (unless slynk-root
+    (error "LUV_SLYNK_DIR is not set; build luvland through ./env."))
+  (asdf:load-asd
+   (merge-pathnames #P"slynk.asd"
+                    (uiop:ensure-directory-pathname slynk-root))))
+
 (asdf:load-asd (merge-pathnames #P"luvland.asd" *project-root*))
 
 (luv-build:start *project-root* :system :luvland/program)

@@ -733,16 +733,30 @@ the world will be at TIME."
 (defparameter *cursor-size* 12.0)
 (defparameter *cursor-color* '(0.97 0.95 0.90))
 
+(defun make-placeholder-texture (luvland)
+  "A written 1x1 texture for a bind group whose shader never samples it.
+The upload leaves it in the layout a pass samples from; an unwritten one
+would ask for a layout transition inside the render pass."
+  (let* ((device (luvland-device luvland))
+         (texture (luv:create device (luv:make-texture-descriptor
+                                      :label "Luvland placeholder"
+                                      :size '(1 1) :dimensions :2d
+                                      :format (luvland-texture-format luvland)
+                                      :usage '(:copy-dst :texture-binding)))))
+    (luv:write-texture (luv:device-queue device)
+                       (luv:make-texture-copy :texture texture)
+                       (make-array '(1 1) :element-type '(unsigned-byte 32)
+                                          :initial-element 0)
+                       (luv:make-texture-data-layout :bytes-per-row 4 :rows-per-image 1)
+                       '(1 1))
+    texture))
+
 (defun cursor-bindings (luvland state)
   (or (gethash :cursor state)
       (let* ((device (luvland-device luvland))
              (texture (or (luvland-cursor-texture luvland)
                           (setf (luvland-cursor-texture luvland)
-                                (luv:create device (luv:make-texture-descriptor
-                                                    :label "Luvland cursor placeholder"
-                                                    :size '(1 1) :dimensions :2d
-                                                    :format (luvland-texture-format luvland)
-                                                    :usage '(:texture-binding))))))
+                                (make-placeholder-texture luvland))))
              (view (luv:create device (luv:make-texture-view-descriptor :texture texture)))
              (buffer (luv:create device (luv:make-buffer-descriptor
                                          :label "Luvland cursor placement"

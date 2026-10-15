@@ -18,7 +18,7 @@
   :description "The standalone Luvland executable."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvland")
+  :depends-on ("luvland" "sb-posix" "slynk")
   :components ((:file "luvland/main"))
   :build-operation "program-op"
   :build-pathname "build/luvland"

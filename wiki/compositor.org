@@ -330,6 +330,36 @@ one to one.  Windows seen in perspective are minified, for which the honest
 answer is mipmaps; on a dense display the rule becomes one buffer pixel per
 physical pixel, through =wl_output.scale= or fractional scale.
 
+* Ratpoison's prefix key, on McCLIM commands
+:PROPERTIES:
+:ID: R5AU7M
+:END:
+
+Luvland is a conforming workbench atelier (#M9MI6Y).  Its commands are CLIM
+commands in one table, run inline on a headless application frame, so the
+shared status line, M-x, and keymap legend read the same vocabulary.  The
+interaction is StumpWM's (#PH31JN): keymaps that name each other by symbol,
+bindings that are command lines such as =select 3= parsed against the table
+(a final string argument takes the rest of the line), and missing arguments
+read at a prompt.  Sequences are read one event at a time, as Mahogany reads
+them (#BCG9SH), so nothing blocks the canvas thread.
+
+[[file:images/luvland-help.png]]
+
+Under =C-t=: =c= terminal, =!= run a program with completion over =PATH=,
+=;= a command line with completion, =:= evaluate Lisp in =LUVLAND-USER=,
+=C-t= the most recently used other window, =t= send =C-t= to the client,
+=n= =p= =0=-=9= move focus, =w= the numbered window list, =k= close and =K=
+kill, =RET= the overview, =a= the time, =m= the last message, =?= this
+legend, =x= M-x, =q= quit.  =~/.config/luvland/init.lisp= loads in
+=LUVLAND-USER= at start and on =loadrc=.
+
+The prompt and the message window are new workbench instruments, retained
+McCLIM GPU panes like M-x, so LUFT can use them too.  The prompt is state
+fed by key events whose continuation runs after it closes; it never waits.
+Whenever the shell takes the keyboard, Luvland releases every key and button
+its clients saw pressed, since the shell swallows their releases.
+
 * NEXT Run Luvland on a console
 :PROPERTIES:
 :ID: RRONLT
@@ -337,6 +367,16 @@ physical pixel, through =wl_output.scale= or fractional scale.
 
 The last step of the first plan: the same build on a virtual terminal,
 where SDL's KMSDRM driver owns the display (#P6721I) and nothing changes
-but the output.  Then luvcraft hosts a surface on a terminal wall
-(#QYFVAF).  A Chromium-based client, the other proof #MG1LRT named, is
-still to be tried.
+but the output.  What a console lacks is prepared: =C-t q= quits, since no
+window manager will ever send a close request; Luvland draws its own
+pointer when =SDL_VIDEODRIVER= is =kmsdrm=; the output clients are told of
+is the display's mode; and a direct display paces frames by presentation,
+as luvcraft's does.  The swash-managed image has no terminal to own, so on
+a console Luvland runs as =build/luvland= from the VT's own login, and
+=./sly --luvland= reaches it through the Slynk endpoint it publishes, as
+=./sly --luvcraft= does for the standalone game.
+
+Untried: the run itself, which needs a free VT rather than a session inside
+niri, and whether SDL's own VT switching on Ctrl+Alt+Fn gives up the display
+cleanly.  Then luvcraft hosts a surface on a terminal wall (#QYFVAF), and a
+Chromium-based client, the other proof #MG1LRT named, is still to be tried.
