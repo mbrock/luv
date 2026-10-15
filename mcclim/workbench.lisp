@@ -52,6 +52,14 @@
            (mcluv::keymap-legend-placement (clim:pane-frame child)
                                            width height)
          (clim:move-and-resize-sheet child left top pane-width pane-height)))
+      ((typep child 'mcluv:prompt-pane)
+       (multiple-value-bind (left top pane-width pane-height)
+           (mcluv:prompt-placement (clim:pane-frame child) width height)
+         (clim:move-and-resize-sheet child left top pane-width pane-height)))
+      ((typep child 'mcluv:message-pane)
+       (multiple-value-bind (left top pane-width pane-height)
+           (mcluv:message-placement (clim:pane-frame child) width height)
+         (clim:move-and-resize-sheet child left top pane-width pane-height)))
       ((typep child 'mcluv::mx-command-menu-pane)
        (clim:move-and-resize-sheet
         child
@@ -110,6 +118,8 @@
      mcluv::metabar-state
      mcluv::palette-state
      mcluv::keymap-legend-state
+     mcluv:prompt-state
+     mcluv:message-state
      luv.lobby.mcclim::lobby-hud-state)
   ((application :initarg :application :reader frame-workbench-application))
   (:menu-bar nil)
@@ -131,7 +141,13 @@
                               'mcluv::palette-pane
                               :background clim:+transparent-ink+
                               :width mcluv::+palette-caption-width+
-                              :height mcluv::+palette-height+))))
+                              :height mcluv::+palette-height+)
+                             ;; Painted empty until there is a message.
+                             (clim:make-pane
+                              'mcluv:message-pane
+                              :background clim:+transparent-ink+
+                              :width mcluv::+message-min-width+
+                              :height 60))))
    (modeless
     (clim:make-pane
      'workbench-layer-pane :kind :modeless
@@ -171,7 +187,12 @@
        'mcluv::keymap-legend-pane
        :background clim:+transparent-ink+
        :width mcluv::+keymap-legend-width+
-       :height mcluv::*keymap-legend-construction-height*)))))
+       :height mcluv::*keymap-legend-construction-height*)
+      (clim:make-pane
+       'mcluv:prompt-pane
+       :background clim:+transparent-ink+
+       :width mcluv::+prompt-width+
+       :height 80)))))
   (:layouts
    (default
     (clim:make-pane 'workbench-layout-pane
@@ -229,13 +250,15 @@
             (:command-menu 'mcluv::mx-command-menu-pane)
             (:source-update 'mcluv::source-update-pane)
             (:keymap 'mcluv::keymap-legend-pane)
+            (:prompt 'mcluv:prompt-pane)
+            (:message 'mcluv:message-pane)
             (:palette 'mcluv::palette-pane)
             (:metabar 'mcluv::metabar-pane)
             (:lobby 'luv.lobby.mcclim::lobby-hud-pane)))
         (kind
           (ecase tool
-            ((:command-menu :source-update :keymap) :modal)
-            (:palette :passive)
+            ((:command-menu :source-update :keymap :prompt) :modal)
+            ((:palette :message) :passive)
             (:metabar :transient)
             (:lobby :modeless))))
     (find-if
@@ -244,7 +267,7 @@
       (workbench-layer-pane (workbench-layer workbench kind))))))
 
 (defun set-workbench-tool-pane (workbench tool)
-  (dolist (candidate '(:command-menu :source-update :keymap))
+  (dolist (candidate '(:command-menu :source-update :keymap :prompt))
     (setf (clim:sheet-enabled-p (workbench-tool-pane workbench candidate))
           (eq candidate tool)))
   (setf (workbench-active-tool workbench) tool)
@@ -459,6 +482,95 @@
          (%close-workbench-keymap workbench)
          (%open-workbench-keymap workbench))))
   t)
+
+;;; The prompt: one typed line, read without blocking anything.  The
+;;; continuation runs after the modal surface has closed, on the canvas
+;;; thread, like a command chosen from M-x.
+
+(defun place-workbench-pane (workbench tool placement)
+  (let ((pane (workbench-tool-pane workbench tool)))
+    (multiple-value-bind (width height)
+        (luv:canvas-logical-size
+         (workbench-application-canvas (workbench-application workbench)))
+      (multiple-value-bind (left top pane-width pane-height)
+          (funcall placement (workbench-frame workbench) width height)
+        (clim:move-and-resize-sheet pane left top pane-width pane-height)))
+    pane))
+
+(defun %open-workbench-prompt (workbench &rest arguments)
+  (apply #'mcluv:open-prompt (workbench-frame workbench) arguments)
+  (place-workbench-pane workbench :prompt #'mcluv:prompt-placement)
+  (set-workbench-tool-pane workbench :prompt)
+  (show-workbench-layer workbench :modal)
+  (mcluv:prepare-prompt (workbench-frame workbench))
+  workbench)
+
+(defun open-workbench-prompt (workbench &key (label "") (initial "") completer function)
+  "Read a line with LABEL, starting from INITIAL, offering what COMPLETER
+returns for the text so far, and call FUNCTION with the submitted line once
+the prompt has closed.  Escape or C-g closes it without calling FUNCTION."
+  (call-with-workbench-frame-mutation
+   workbench
+   (lambda ()
+     (%open-workbench-prompt workbench :label label :initial initial
+                                       :completer completer :continuation function))))
+
+(defun %close-workbench-prompt (workbench)
+  (when (eq :prompt (workbench-active-tool workbench))
+    (hide-workbench-layer workbench :modal)
+    (set-workbench-tool-pane workbench nil)
+    (mcluv:repaint-gpu-mirror (workbench-mirror workbench)))
+  nil)
+
+(defun close-workbench-prompt (workbench)
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%close-workbench-prompt workbench)))
+  nil)
+
+(defun handle-workbench-prompt-key (workbench event)
+  (let ((frame (workbench-frame workbench)))
+    (multiple-value-bind (action text) (mcluv:handle-prompt-key-event frame event)
+      (case action
+        (:dismiss (%close-workbench-prompt workbench))
+        (:submit
+         (let ((continuation (mcluv:prompt-continuation frame)))
+           (%close-workbench-prompt workbench)
+           (when continuation (funcall continuation text))))
+        (t
+         ;; Candidates change the panel's height.
+         (place-workbench-pane workbench :prompt #'mcluv:prompt-placement))))))
+
+;;; Messages: passive text at the top right, as StumpWM's message window.
+
+(defun %show-workbench-message (workbench lines &key error-p (seconds 5))
+  (let ((frame (workbench-frame workbench))
+        (pane (workbench-tool-pane workbench :message)))
+    (mcluv:set-message frame pane lines :error-p error-p :seconds seconds)
+    (place-workbench-pane workbench :message #'mcluv:message-placement)
+    (setf (clim:sheet-enabled-p pane) t)
+    (mcluv:repaint-gpu-mirror (workbench-mirror workbench)))
+  workbench)
+
+(defun show-workbench-message (workbench lines &key error-p (seconds 5))
+  "Show LINES, a string or a list of strings, for SECONDS, or until replaced
+when SECONDS is NIL.  ERROR-P shows them as an error."
+  (call-with-workbench-frame-mutation
+   workbench
+   (lambda () (%show-workbench-message workbench lines :error-p error-p
+                                                     :seconds seconds))))
+
+(defun %clear-workbench-message (workbench)
+  (let ((frame (workbench-frame workbench))
+        (pane (workbench-tool-pane workbench :message)))
+    (when (clim:sheet-enabled-p pane)
+      (setf (mcluv:message-lines frame) nil
+            (clim:sheet-enabled-p pane) nil)
+      (mcluv:repaint-gpu-mirror (workbench-mirror workbench))))
+  nil)
+
+(defun clear-workbench-message (workbench)
+  (call-with-workbench-frame-mutation
+   workbench (lambda () (%clear-workbench-message workbench))))
 
 (defun refresh-workbench-palette (workbench width height)
   "Sample the application's palette and republish only when it changed."
@@ -679,6 +791,9 @@
                       :before-execute
                       (lambda ()
                         (%close-workbench-command-menu workbench))))))))))
+         (:prompt
+          (when (typep event 'luv:canvas-key-press-event)
+            (handle-workbench-prompt-key workbench event)))
          (:keymap
           (when (or (and (typep event 'luv:canvas-key-press-event)
                          (eq :dismiss
@@ -862,7 +977,11 @@ every key and pointer event."
     (when (workbench-layer-visible-p
            (workbench-layer workbench :modeless))
       (luv.lobby.mcclim:refresh-lobby-hud (workbench-frame workbench)))
+    (when (mcluv:message-expired-p (workbench-frame workbench))
+      (%clear-workbench-message workbench))
     (case (workbench-active-tool workbench)
+      (:prompt
+       (mcluv:prepare-prompt (workbench-frame workbench)))
       (:command-menu
        (mcluv:prepare-command-menu (workbench-frame workbench)))
       (:source-update

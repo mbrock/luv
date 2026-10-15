@@ -162,6 +162,24 @@
            #:palette-snapshot
            #:refresh-palette
            #:palette-dirty-p
+           #:prompt-pane
+           #:prompt-state
+           #:prompt-label
+           #:prompt-text
+           #:prompt-candidates
+           #:prompt-continuation
+           #:open-prompt
+           #:set-prompt-text
+           #:handle-prompt-key-event
+           #:prepare-prompt
+           #:prompt-placement
+           #:message-pane
+           #:message-state
+           #:message-lines
+           #:message-history
+           #:set-message
+           #:message-expired-p
+           #:message-placement
            #:keymap-legend-sections-for
            #:keymap-legend-command-label
            #:keymap-legend-sections

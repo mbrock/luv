@@ -370,3 +370,54 @@
            (false (car events)))
       (sb-thread:with-mutex (workbench::*application-workbenches-lock*)
         (remhash application workbench::*application-workbenches*)))))
+
+;;; The prompt reads a line as state fed by key events; nothing here paints.
+
+(defclass test-prompt (mcluv:prompt-state) ())
+
+(defun prompt-key (prompt key-name character &key modifiers (unshifted character))
+  (mcluv:handle-prompt-key-event
+   prompt (make-instance 'luv:canvas-key-press-event
+                         :timestamp 0 :key-name key-name :modifiers modifiers
+                         :character character :unshifted-character unshifted
+                         :repeat-p nil)))
+
+(defun prompt-type (prompt string)
+  (loop for character across string
+        do (prompt-key prompt :x character)))
+
+(define-test prompt-completes-submits-and-remembers
+  (let ((prompt (make-instance 'test-prompt))
+        (names '("select" "send-escape" "terminal")))
+    (flet ((complete (text)
+             (remove-if-not (lambda (name) (uiop:string-prefix-p text name)) names)))
+      (mcluv:open-prompt prompt :label ":" :completer #'complete)
+      (is equal names (mcluv:prompt-candidates prompt))
+      (prompt-type prompt "s")
+      (is equal '("select" "send-escape") (mcluv:prompt-candidates prompt))
+      ;; Tab extends to what the candidates share, then completes one.
+      (prompt-key prompt :tab nil)
+      (is string= "se" (mcluv:prompt-text prompt))
+      (prompt-type prompt "l")
+      (prompt-key prompt :tab nil)
+      (is string= "select" (mcluv:prompt-text prompt))
+      (prompt-type prompt " 3")
+      (prompt-key prompt :backspace nil)
+      (prompt-type prompt "4")
+      (is equal '(:submit "select 4")
+          (multiple-value-list (prompt-key prompt :return nil)))
+      ;; Reopened with the same label, Up recalls the line.
+      (mcluv:open-prompt prompt :label ":")
+      (prompt-key prompt :up nil)
+      (is string= "select 4" (mcluv:prompt-text prompt)))))
+
+(define-test prompt-dismisses-on-escape-and-control-g
+  (let ((prompt (make-instance 'test-prompt)))
+    (mcluv:open-prompt prompt :label "eval:")
+    (prompt-type prompt "(+ 1 2)")
+    (is eq :dismiss (prompt-key prompt :escape nil))
+    (is eq :dismiss (prompt-key prompt :g (code-char 7)
+                                :modifiers '(:control) :unshifted #\g))
+    ;; Control chords never type into the line.
+    (prompt-key prompt :u (code-char 21) :modifiers '(:control) :unshifted #\u)
+    (is string= "" (mcluv:prompt-text prompt))))

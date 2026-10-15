@@ -161,7 +161,7 @@ corners are rounded by RADIUS."
 
 ;;; The atelier.
 
-(defclass luvland ()
+(defclass luvland (luv.workbench:workbench-application luv:canvas-event-handler)
   ((canvas :initarg :canvas :reader luvland-canvas)
    (device :initarg :device :reader luvland-device)
    (context :initarg :context :reader luvland-context)
@@ -192,6 +192,24 @@ pushed by the server thread.")
    (processes :initform '() :accessor luvland-processes)
    (suppressed-keys :initform '() :accessor luvland-suppressed-keys)
    (running-p :initform t :accessor luvland-running-p)
+   (stop-controller :initarg :stop-controller :reader luvland-stop-controller)
+   (command-frame :initform nil :accessor luvland-command-frame
+                  :documentation "The headless CLIM frame Luvland's commands run on.")
+   (pending-keymaps :initform nil :accessor luvland-pending-keymaps
+                    :documentation "Keymaps a key sequence may continue in, or NIL.")
+   (key-sequence :initform nil :accessor luvland-key-sequence)
+   (prefix-key-name :initform nil :accessor luvland-prefix-key-name)
+   (help-sections :initform nil :accessor luvland-help-sections)
+   (history :initform '() :accessor luvland-history
+            :documentation "Toplevels, most recently focused first.")
+   (forwarded-keys :initform '() :accessor luvland-forwarded-keys
+                   :documentation "evdev keys pressed in clients and not yet released.")
+   (forwarded-buttons :initform '() :accessor luvland-forwarded-buttons)
+   (pointer :initform nil :accessor luvland-pointer
+            :documentation "The last pointer position, in logical canvas pixels.")
+   (software-cursor-p :initarg :software-cursor-p :initform nil
+                      :reader luvland-software-cursor-p)
+   (cursor-texture :initform nil :accessor luvland-cursor-texture)
    (frame-times :initform '() :accessor luvland-frame-times
                 :documentation "Recent frames, newest first, as plists of milliseconds.")))
 
@@ -211,6 +229,8 @@ pushed by the server thread.")
   ;; The dmabuf frame being shown, claimed from the server.
   (held-frame nil)
   (snapshot-serial -1)
+  ;; The window's number, the lowest free one when it appeared.
+  (number 0)
   ;; The (size states) last sent to the client, to configure only on change.
   (configured nil)
   (width 0)
@@ -317,10 +337,13 @@ fresh snapshots.  Runs on the canvas thread."
     (drop-dead-imports luvland)
     (dolist (toplevel toplevels)
       (unless (find toplevel kept :key #'window-toplevel)
-        (setf kept (append kept (list (make-window toplevel))))
+        (let ((window (make-window toplevel)))
+          (setf (window-number window)
+                (loop for number from 0
+                      unless (find number kept :key #'window-number) return number)
+                kept (append kept (list window))))
         ;; A new window takes focus, as it would on a desktop.
-        (setf (luvland-focus luvland) toplevel)
-        (focus-keyboard-later luvland toplevel)))
+        (focus-window luvland toplevel)))
     (setf (luvland-windows luvland) kept)
     (unless (and (luvland-focus luvland)
                  (find (luvland-focus luvland) kept :key #'window-toplevel))
@@ -494,13 +517,31 @@ twice the tangent of half the field of view."
 would put its edges between pixels; otherwise zero."
   (if (oddp (- view-pixels window-pixels)) (/ 0.5 *pixels-per-unit*) 0.0))
 
-(defun camera-target (luvland window)
-  "Where the camera looks to show WINDOW one to one, its edges on pixel
-boundaries."
+(defun top-reserve (luvland)
+  "Drawable pixels at the top kept for the workbench's status line."
+  (if (luvland-workbench luvland)
+      (round (* mcluv::+status-bar-height+ (display-scale luvland)))
+      0))
+
+(defun display-scale (luvland)
+  "Drawable pixels per logical pixel."
   (destructuring-bind (width height) (canvas-extent luvland)
-    (values (+ (window-x window) (/ (window-width window) *pixels-per-unit* 2)
-               (pixel-alignment width (window-width window)))
-            (pixel-alignment height (window-height window)))))
+    (declare (ignore height))
+    (multiple-value-bind (logical-width logical-height)
+        (luv:canvas-logical-size (luvland-canvas luvland))
+      (declare (ignore logical-height))
+      (/ width (max 1 logical-width)))))
+
+(defun camera-target (luvland window)
+  "Where the camera looks to show WINDOW one to one, centred in the view
+below the status line, its edges on pixel boundaries."
+  (destructuring-bind (width height) (canvas-extent luvland)
+    (let ((reserve (top-reserve luvland)))
+      (values (+ (window-x window) (/ (window-width window) *pixels-per-unit* 2)
+                 (pixel-alignment width (window-width window)))
+              ;; Raising the camera lowers the window by half the reserve.
+              (+ (/ reserve 2 *pixels-per-unit*)
+                 (pixel-alignment (- height reserve) (window-height window)))))))
 
 (defparameter *overview-zoom* 2.4
   "How far the overview pulls the camera back, in one-to-one distances.")
@@ -550,7 +591,7 @@ return to showing the focused window one to one."
 (defun fitted-window-size (luvland)
   (destructuring-bind (width height) (canvas-extent luvland)
     (list (max 64 (- width (* 2 *window-margin*)))
-          (max 64 (- height (* 2 *window-margin*))))))
+          (max 64 (- height (* 2 *window-margin*) (top-reserve luvland))))))
 
 (defun reconfigure-windows (luvland)
   "Send each window the size and states it should have, if they changed."
@@ -679,7 +720,70 @@ the world will be at TIME."
     (dolist (window windows)
       (luv:set-bind-group pass 0 (getf (gethash window state) :window-group))
       (luv:draw pass 4))
+    (when (and (luvland-software-cursor-p luvland) (luvland-pointer luvland))
+      (encode-cursor luvland pass state extent))
+    ;; The McCLIM shell is the last thing drawn, over every window.
+    (let ((workbench (luvland-workbench luvland)))
+      (when workbench (luv.workbench:encode-workbench workbench pass target)))
     (luv:end-pass pass)))
+
+;;; The software cursor: on a console nothing else draws the pointer.  It is
+;;; a frame without a window, a small disc in screen space.
+
+(defparameter *cursor-size* 12.0)
+(defparameter *cursor-color* '(0.97 0.95 0.90))
+
+(defun cursor-bindings (luvland state)
+  (or (gethash :cursor state)
+      (let* ((device (luvland-device luvland))
+             (texture (or (luvland-cursor-texture luvland)
+                          (setf (luvland-cursor-texture luvland)
+                                (luv:create device (luv:make-texture-descriptor
+                                                    :label "Luvland cursor placeholder"
+                                                    :size '(1 1) :dimensions :2d
+                                                    :format (luvland-texture-format luvland)
+                                                    :usage '(:texture-binding))))))
+             (view (luv:create device (luv:make-texture-view-descriptor :texture texture)))
+             (buffer (luv:create device (luv:make-buffer-descriptor
+                                         :label "Luvland cursor placement"
+                                         :size 128 :usage '(:uniform)))))
+        (setf (gethash :cursor state)
+              (list :view view :frame-buffer buffer
+                    :frame-group (luv:create device (luv:make-bind-group-descriptor
+                                                     :label "Luvland cursor"
+                                                     :layout (luvland-layout luvland)
+                                                     :entries `((:binding 0 :resource ,view)
+                                                                (:binding 1 :resource ,(luvland-sampler luvland))
+                                                                (:binding 2 :resource ,buffer)))))))))
+
+(defun encode-cursor (luvland pass state extent)
+  (destructuring-bind (width height) extent
+    (multiple-value-bind (logical-width logical-height)
+        (luv:canvas-logical-size (luvland-canvas luvland))
+      (destructuring-bind (x y) (luvland-pointer luvland)
+        (let* ((scale-x (/ width (max 1 logical-width)))
+               (scale-y (/ height (max 1 logical-height)))
+               (size *cursor-size*)
+               (left (- (* x scale-x) (/ size 2)))
+               (top (- (* y scale-y) (/ size 2)))
+               ;; Clip space with Y down, as Vulkan's is.
+               (matrix (mat4 (/ (* 2 size) width) 0 0 0
+                             0 (/ (* 2 size) height) 0 0
+                             0 0 1 0
+                             (- (/ (* 2 left) width) 1) (- (/ (* 2 top) height) 1) 0 1))
+               (entry (cursor-bindings luvland state))
+               (data (make-array 32 :element-type 'single-float :initial-element 0.0)))
+          (replace data matrix)
+          (replace data '(1.0 1.0 1.0 1.0) :start1 16)
+          (setf (aref data 20) size (aref data 21) size
+                (aref data 22) (/ size 2) (aref data 23) 8.0
+                (aref data 24) 0.0 (aref data 25) 6.0 (aref data 26) 0.5)
+          (replace data (mapcar (lambda (x) (float x 1.0)) *cursor-color*) :start1 28)
+          (setf (aref data 31) 1.0)
+          (luv:write-buffer (getf entry :frame-buffer) data)
+          (luv:set-pipeline pass (luvland-frame-pipeline luvland))
+          (luv:set-bind-group pass 0 (getf entry :frame-group))
+          (luv:draw pass 4))))))
 
 (defun milliseconds-since (start)
   (/ (- (get-internal-real-time) start)
@@ -701,6 +805,9 @@ the world will be at TIME."
     ;; later, or a client with three swapchain images starves.
     (bury-the-dead luvland)
     (aim-camera luvland)
+    ;; The shell samples and prepares outside the pass it is drawn in.
+    (let ((workbench (luvland-workbench luvland)))
+      (when workbench (luv.workbench:refresh-workbench workbench)))
     (setf synced (milliseconds-since start))
     (luv:call-with-canvas-frame
      (luvland-context luvland)
@@ -726,8 +833,11 @@ the world will be at TIME."
       (loop for key being the hash-keys of state using (hash-value value)
             do (if (eq key :target)
                    (luv:destroy value)
-                   (dolist (slot '(:frame-group :window-group :frame-buffer :window-buffer))
-                     (luv:destroy (getf value slot))))))))
+                   (dolist (slot '(:frame-group :window-group :frame-buffer :window-buffer :view))
+                     (let ((resource (getf value slot)))
+                       ;; A window's view belongs to the window, not this state.
+                       (when (and resource (or (not (eq slot :view)) (eq key :cursor)))
+                         (luv:destroy resource)))))))))
 
 ;;; Screenshots through luv's shared capture transaction.
 
@@ -763,38 +873,30 @@ the world will be at TIME."
                        :server (luvland-server luvland) :wait nil)))
 
 (defun focus-window (luvland toplevel)
-  (setf (luvland-focus luvland) toplevel)
+  (setf (luvland-focus luvland) toplevel
+        (luvland-history luvland)
+        (cons toplevel (remove toplevel (luvland-history luvland))))
   (focus-keyboard-later luvland toplevel))
 
-(defun focus-neighbor (luvland direction)
+(defun focus-neighbor (luvland direction &key wrap)
   (let* ((windows (luvland-windows luvland))
          (index (position (luvland-focus luvland) windows :key #'window-toplevel)))
     (when index
-      (let ((next (nth (max 0 (min (1- (length windows)) (+ index direction))) windows)))
+      (let* ((target (+ index direction))
+             (next (nth (if wrap
+                            (mod target (length windows))
+                            (max 0 (min (1- (length windows)) target)))
+                        windows)))
         (focus-window luvland (window-toplevel next))))))
-
-(defun compositor-binding (luvland key-name modifiers)
-  "Run the compositor's own binding for KEY-NAME, if any, and return true.
-Bindings are Control+Meta chords, since niri owns Super on the host."
-  (when (and (member :control modifiers) (member :meta modifiers))
-    (case key-name
-      (:left (focus-neighbor luvland -1) t)
-      (:right (focus-neighbor luvland 1) t)
-      (:return (apply #'spawn-client luvland *terminal*) t)
-      (:o (toggle-overview luvland) t)
-      (:backspace (let ((toplevel (luvland-focus luvland)))
-                    (when toplevel
-                      (wl:call-in-server (lambda () (wl:close-toplevel toplevel))
-                                         :server (luvland-server luvland) :wait nil)))
-                  t))))
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas (event luv:canvas-key-press-event))
   (declare (ignore canvas))
   (let ((key-name (luv:canvas-key-event-key-name event)))
     (cond
-      ((luv:canvas-key-event-repeat-p event))   ; clients repeat keys themselves
-      ((compositor-binding luvland key-name (luv:canvas-key-event-modifiers event))
+      ((handle-command-key luvland event)
+       ;; Its release belongs to Luvland too.
        (pushnew key-name (luvland-suppressed-keys luvland)))
+      ((luv:canvas-key-event-repeat-p event))   ; clients repeat keys themselves
       (t (forward-key luvland key-name t)))))
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas (event luv:canvas-key-release-event))
@@ -805,11 +907,28 @@ Bindings are Control+Meta chords, since niri owns Super on the host."
               (remove key-name (luvland-suppressed-keys luvland)))
         (forward-key luvland key-name nil))))
 
+(defun send-to-server (luvland function)
+  (wl:call-in-server function :server (luvland-server luvland) :wait nil))
+
 (defun forward-key (luvland key-name pressed-p)
   (let ((code (key-evdev-code key-name)))
     (when code
-      (wl:call-in-server (lambda () (wl:send-key code pressed-p))
-                         :server (luvland-server luvland) :wait nil))))
+      (if pressed-p
+          (pushnew code (luvland-forwarded-keys luvland))
+          (setf (luvland-forwarded-keys luvland)
+                (remove code (luvland-forwarded-keys luvland))))
+      (send-to-server luvland (lambda () (wl:send-key code pressed-p))))))
+
+(defun release-forwarded-input (luvland)
+  "Release every key and button a client saw pressed, so none sticks while
+the shell or a key sequence has the keyboard."
+  (let ((keys (shiftf (luvland-forwarded-keys luvland) '()))
+        (buttons (shiftf (luvland-forwarded-buttons luvland) '())))
+    (when (or keys buttons)
+      (send-to-server luvland
+                      (lambda ()
+                        (dolist (code keys) (wl:send-key code nil))
+                        (dolist (code buttons) (wl:send-pointer-button code nil)))))))
 
 (defun pick (luvland x y)
   "The window under logical canvas point X, Y and the surface-local point
@@ -839,6 +958,8 @@ where the camera ray through it meets the window's plane."
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas (event luv:canvas-pointer-motion-event))
   (declare (ignore canvas))
+  (setf (luvland-pointer luvland)
+        (list (luv:canvas-pointer-event-x event) (luv:canvas-pointer-event-y event)))
   (multiple-value-bind (window x y)
       (pick luvland (luv:canvas-pointer-event-x event) (luv:canvas-pointer-event-y event))
     (let ((surface (and window (wl:toplevel-surface (window-toplevel window)))))
@@ -860,8 +981,11 @@ where the camera ray through it meets the window's plane."
         (when (and window (overview-p luvland))
           (toggle-overview luvland))))
     (when code
-      (wl:call-in-server (lambda () (wl:send-pointer-button code pressed-p))
-                         :server (luvland-server luvland) :wait nil))))
+      (if pressed-p
+          (pushnew code (luvland-forwarded-buttons luvland))
+          (setf (luvland-forwarded-buttons luvland)
+                (remove code (luvland-forwarded-buttons luvland))))
+      (send-to-server luvland (lambda () (wl:send-pointer-button code pressed-p))))))
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas (event luv:canvas-pointer-button-press-event))
   (declare (ignore canvas))
@@ -880,7 +1004,7 @@ where the camera ray through it meets the window's plane."
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas (event luv:canvas-window-close-request-event))
   (declare (ignore canvas))
-  (sb-thread:make-thread (lambda () (stop-luvland luvland)) :name "Luvland stop")
+  (request-stop luvland)
   :defer-canvas-close)
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas event)
@@ -914,10 +1038,79 @@ swapchain encodes on write, so colors pass through unchanged."
       :bgra8-unorm-srgb
       :bgra8-unorm))
 
+;;; The workbench: Luvland is a conforming atelier, so the shared status
+;;; line, M-x, legend, prompt, and message window are McCLIM panes drawn by
+;;; Luvland's own final pass.
+
+(defmethod luv.workbench:workbench-application-name ((luvland luvland)) "Luvland")
+(defmethod luv.workbench:workbench-application-command-frame ((luvland luvland))
+  (luvland-command-frame luvland))
+(defmethod luv.workbench:workbench-application-canvas ((luvland luvland))
+  (luvland-canvas luvland))
+(defmethod luv.workbench:workbench-application-context ((luvland luvland))
+  (luvland-context luvland))
+(defmethod luv.workbench:workbench-application-stop-controller ((luvland luvland))
+  (luvland-stop-controller luvland))
+
+(defmethod luv.workbench:suspend-workbench-application-input ((luvland luvland))
+  ;; The shell swallows the releases of keys clients already saw pressed.
+  (release-forwarded-input luvland)
+  (reset-key-state luvland)
+  (setf (luvland-suppressed-keys luvland) nil)
+  (list :luvland-input-suspension luvland))
+
+(defmethod luv.workbench:resume-workbench-application-input ((luvland luvland) token)
+  (declare (ignore token))
+  nil)
+
+(defmethod mcluv:command-menu-tables-for ((luvland luvland))
+  (list (clim:find-command-table 'luvland-commands)))
+
+(defmethod mcluv:status-bar-application-name ((luvland luvland)) "Luvland")
+
+(defmethod mcluv:status-bar-channels-for ((luvland luvland))
+  (append (call-next-method) '(:display :windows :focus)))
+
+(defmethod mcluv:status-bar-channel-label ((channel (eql :display)) (luvland luvland))
+  "display")
+(defmethod mcluv:status-bar-channel-label ((channel (eql :windows)) (luvland luvland))
+  "windows")
+(defmethod mcluv:status-bar-channel-label ((channel (eql :focus)) (luvland luvland))
+  "focus")
+
+(defmethod mcluv:status-bar-channel-value ((channel (eql :display)) (luvland luvland) bar)
+  (declare (ignore bar))
+  (wl:server-socket-name (luvland-server luvland)))
+(defmethod mcluv:status-bar-channel-value ((channel (eql :windows)) (luvland luvland) bar)
+  (declare (ignore bar))
+  (length (luvland-windows luvland)))
+(defmethod mcluv:status-bar-channel-value ((channel (eql :focus)) (luvland luvland) bar)
+  (declare (ignore bar))
+  (let ((window (focused-window luvland)))
+    (and window (format nil "~D ~A" (window-number window) (window-title window)))))
+
+;;; Lifecycle.
+
+(defun default-software-cursor-p ()
+  "On a console nothing else draws the pointer."
+  (string-equal (uiop:getenv "SDL_VIDEODRIVER") "kmsdrm"))
+
+(defun make-frame-clock (luvland)
+  "A presentation clock on a direct display, where presenting paces frames;
+otherwise sixty frames a second."
+  (flet ((frame (canvas timestamp)
+           (declare (ignore canvas timestamp))
+           (render-frame luvland)))
+    (if (ignore-errors (luv::sdl-canvas-direct-display-p (luvland-canvas luvland)))
+        (luv:make-presentation-clock #'frame)
+        (luv:make-cadence-clock #'frame :frames-per-second 60))))
+
 (defun start-luvland (&key (width 1600) (height 900) fullscreen-p
-                           (spawn *terminal*) (window-size '(1000 700)))
-  "Open Luvland: a canvas, a Wayland server on its own socket, and SPAWN,
-a program run as the first client."
+                           (spawn *terminal*) (window-size '(1000 700))
+                           (software-cursor-p (default-software-cursor-p))
+                           (init-file-p t))
+  "Open Luvland: a canvas, a Wayland server on its own socket, the McCLIM
+workbench, the init file, and SPAWN, a program run as the first client."
   (when *luvland*
     (error "Luvland is already running: ~A" *luvland*))
   (let ((server nil)
@@ -943,40 +1136,71 @@ a program run as the first client."
                        :device device :usage '(:render-attachment :copy-src)))))
         (setf server (wl:start-server
                       :initargs `(:initial-toplevel-size ,window-size
-                                  :output-size ,(list width height)
+                                  ;; On a console the canvas is the display's mode.
+                                  :output-size ,(or (luv:canvas-extent context)
+                                                    (list width height))
                                   :dmabuf ,(dmabuf-description
                                             device (texture-format-for
                                                     (luv:canvas-format context))))))
         (setf luvland (make-instance 'luvland
                                      :canvas canvas :device device :context context
                                      :server server
+                                     :software-cursor-p software-cursor-p
+                                     :stop-controller (luv:make-canvas-stop-controller
+                                                       canvas :name "Luvland")
                                      :texture-format (texture-format-for
                                                       (luv:canvas-format context))))
         (create-pipeline luvland)
-        (setf (luv:canvas-event-handler canvas) luvland
-              (luv:canvas-clock canvas)
-              (luv:make-cadence-clock (lambda (canvas timestamp)
-                                        (declare (ignore canvas timestamp))
-                                        (render-frame luvland))
-                                      :frames-per-second 60))
+        (setf (luvland-command-frame luvland)
+              (clim:make-application-frame 'luvland-frame :luvland luvland))
+        ;; The workbench wraps whatever handles events now, so Luvland first.
+        (setf (luv:canvas-event-handler canvas) luvland)
+        (luv.workbench:start-workbench luvland)
+        (setf (luv:canvas-clock canvas) (make-frame-clock luvland))
         (setf *luvland* luvland)
+        (when init-file-p
+          (luv:request-canvas-frame canvas (lambda (timestamp)
+                                             (declare (ignore timestamp))
+                                             (load-init-file luvland))))
         (when spawn
           (apply #'spawn-client luvland spawn))
         luvland))))
 
+(defun %stop-luvland (luvland)
+  "Release LUVLAND in the workbench's order: quiesce, fence the last frame,
+detach the shell, then the application's resources, canvas, and device."
+  (setf (luvland-running-p luvland) nil)
+  (let ((canvas (luvland-canvas luvland))
+        (workbench (luvland-workbench luvland)))
+    (when workbench (luv.workbench:quiesce-workbench workbench))
+    (when (member (luv:canvas-state canvas) '(:opening :open))
+      (setf (luv:canvas-clock canvas) (luv:make-demand-clock))
+      (luv:request-canvas-frame canvas (lambda (timestamp) (declare (ignore timestamp)))))
+    (setf (luv:canvas-event-handler canvas) nil)
+    (when workbench (luv.workbench:stop-workbench workbench))
+    (let ((frame (luvland-command-frame luvland)))
+      (when (and frame (not (eq :disowned (clim:frame-state frame))))
+        (clim:destroy-frame frame)))
+    (dolist (process (luvland-processes luvland))
+      (when (sb-ext:process-alive-p process)
+        (sb-ext:process-kill process 15)))
+    (wl:stop-server (luvland-server luvland))
+    (when (member (luv:canvas-state canvas) '(:opening :open))
+      (luv:close-canvas canvas))
+    (luv:destroy (luvland-device luvland)))
+  (when (eq luvland *luvland*)
+    (setf *luvland* nil))
+  (values))
+
+(defun request-stop (luvland)
+  "Stop LUVLAND from any thread, the canvas thread included."
+  (luv:request-controlled-stop (luvland-stop-controller luvland)
+                               (lambda () (%stop-luvland luvland))
+                               :thread-name "Luvland stop"))
+
 (defun stop-luvland (&optional (luvland *luvland*))
-  "Close LUVLAND's canvas, its clients, and its server."
-  (when (and luvland (luvland-running-p luvland))
-    (setf (luvland-running-p luvland) nil)
-    (let ((canvas (luvland-canvas luvland)))
-      (when (eq :open (luv:canvas-state canvas))
-        (setf (luv:canvas-clock canvas) (luv:make-demand-clock)))
-      (dolist (process (luvland-processes luvland))
-        (when (sb-ext:process-alive-p process)
-          (sb-ext:process-kill process 15)))
-      (wl:stop-server (luvland-server luvland))
-      (luv:close-canvas canvas)
-      (luv:destroy (luvland-device luvland)))
-    (when (eq luvland *luvland*)
-      (setf *luvland* nil)))
+  "Close LUVLAND's workbench, clients, server, canvas, and device, once."
+  (when luvland
+    (luv:call-with-stop-controller (luvland-stop-controller luvland)
+                                   (lambda () (%stop-luvland luvland))))
   (values))

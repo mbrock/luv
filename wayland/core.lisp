@@ -361,3 +361,7 @@ Call on the server thread, after a frame that showed those surfaces."
   (declare (ignore actions)))
 (define-request (device data-device :set-selection) (source serial)
   (declare (ignore source serial)))
+
+(defun destroy-client (client)
+  "Disconnect CLIENT, as kill does.  Call on the server thread."
+  (%client-destroy (client-pointer client)))

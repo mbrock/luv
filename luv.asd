@@ -563,6 +563,7 @@ offsets and of headers."
                              (:file "metabar")
                              (:file "palette")
                              (:file "keymap-legend")
+                             (:file "prompt")
                              (:file "application-status-bar")
                              (:file "widget-lab")
                              (:file "workbench-backend-proof")

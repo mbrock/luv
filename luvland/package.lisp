@@ -16,4 +16,27 @@ in LUV.WAYLAND; this package supplies placement, picking, and focus.")
            #:focus-window
            #:luvland-windows
            #:capture-luvland-screenshot
+           ;; Ratpoison's vocabulary, for the init file and the eval prompt.
+           #:kbd
+           #:define-key
+           #:lookup-key
+           #:make-sparse-keymap
+           #:*top-map*
+           #:*root-map*
+           #:*prefix-key*
+           #:set-prefix-key
+           #:define-luvland-command
+           #:run-command
+           #:message
+           #:*terminal*
+           #:*window-margin*
+           #:*border-width*
+           #:*corner-radius*
+           #:*shadow-blur*
+           #:*shadow-alpha*
+           #:*focused-border-color*
+           #:*border-color*
+           #:*overview-zoom*
+           #:*cursor-size*
+           #:*cursor-color*
            #:main))

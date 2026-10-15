@@ -46,6 +46,7 @@ supplies placement, picking, and focus.")
    #:post-event
    #:client
    #:client-pid
+   #:destroy-client
    ;; Surfaces and their contents.
    #:surface
    #:surface-snapshot

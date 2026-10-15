@@ -37,6 +37,10 @@
    #:open-workbench-lobby
    #:close-workbench-lobby
    #:toggle-workbench-lobby
+   #:open-workbench-prompt
+   #:close-workbench-prompt
+   #:show-workbench-message
+   #:clear-workbench-message
    #:open-workbench-keymap
    #:close-workbench-keymap
    #:toggle-workbench-keymap
