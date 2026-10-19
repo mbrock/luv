@@ -513,7 +513,11 @@ walks straight to the farthest same-level waypoint whose swept footprint is
 standable (a cell is met exactly when the segment meets that cell grown by the
 half-width); and the acceleration bound is on the velocity vector.  An idle
 gnome also turns toward a near or focused player, and a spawned gnome faces
-whoever spawned it rather than away.
+whoever spawned it rather than away.  Worst of all, a gnome's first thought froze the
+game: the native-resolution painter sort read each world panel's depth before
+encoding, but a bubble was placed only when encoded, so its centre was NIL and
+the frame parked -- with it the Move To motor, which is why tool calls hung.
+A bubble is now placed at birth and on every refresh.
 
 * NEXT Parameterized M-x prompts through presentation types
 :PROPERTIES:

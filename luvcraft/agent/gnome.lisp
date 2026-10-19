@@ -1201,10 +1201,11 @@ candidate that loses to release or another publication is detached and closed."
     (setf (bubble-visible-state overlay) (bubble-state frame))))
 
 (defmethod luvcraft:refresh-luvcraft-overlay ((overlay gnome-bubble-overlay) session)
-  (declare (ignore session))
   ;; Ease toward the stack position the newer bubbles have pushed it to.
   (let ((lift (bubble-lift overlay)) (target (bubble-target-lift overlay)))
     (setf (bubble-lift overlay) (+ lift (* 0.18 (- target lift)))))
+  ;; Painter order reads every world panel's depth before any is encoded.
+  (place-bubble overlay session)
   (let ((frame (mcluv:widget-overlay-frame overlay)))
     (unless (equal (bubble-state frame) (bubble-visible-state overlay))
       (repaint-bubble overlay)))
@@ -1222,6 +1223,9 @@ candidate that loses to release or another publication is detached and closed."
           (mcluv:mirror-compositor mirror) overlay
           (bubble-lift overlay) (- *bubble-lift* 0.3)
           (bubble-target-lift overlay) *bubble-lift*)
+    ;; A world panel has a place from birth: the frame's painter sort asks
+    ;; for its depth before its first encoding would have placed it.
+    (place-bubble overlay session)
     (luvcraft:add-luvcraft-overlay session overlay)
     ;; The gnome's semantic stack contains only application-owned overlays.
     ;; A terminal rejection releases OVERLAY before this publication point.
