@@ -1287,6 +1287,28 @@ candidate that loses to release or another publication is detached and closed."
       (clear-gnome-bubbles gnome)))
   gnome)
 
+(defparameter *embodied-agent-turn-speed* 5d0
+  "How fast an idle agent turns to face the player, in radians per second.")
+
+(defparameter *embodied-agent-attention-distance* 6d0
+  "How near the player must be for an idle agent to turn to face them.")
+
+(defun turn-embodied-agent-toward-player (agent session seconds)
+  "Turn idle AGENT a little toward the player when focused or near."
+  (let* ((player (luvcraft:luvcraft-session-player session))
+         (dx (- (luvcraft:player-x player) (luvcraft::body-x agent)))
+         (dz (- (luvcraft:player-z player) (luvcraft::body-z agent)))
+         (distance (sqrt (+ (* dx dx) (* dz dz)))))
+    (when (and (> distance 0.25d0)
+               (or (eq agent (luvcraft:luvcraft-session-modal-focus session))
+                   (< distance *embodied-agent-attention-distance*)))
+      (let* ((yaw (embodied-agent-facing-yaw agent))
+             ;; The signed difference, in (-pi, pi].
+             (turn (- (mod (+ (- (atan dx dz) yaw) pi) (* 2 pi)) pi))
+             (step (* *embodied-agent-turn-speed* seconds)))
+        (setf (embodied-agent-facing-yaw agent)
+              (+ yaw (max (- step) (min step turn))))))))
+
 (defmethod luvcraft:advance-luvcraft-overlay
     ((agent embodied-agent) session seconds)
   "Run AGENT's Move To motor at the same fixed step as the player."
@@ -1300,10 +1322,12 @@ candidate that loses to release or another publication is detached and closed."
              (let* ((velocity (luvcraft:body-velocity agent))
                     (x (luvcraft::vec3-x velocity))
                     (z (luvcraft::vec3-z velocity)))
-               (when (> (+ (* x x) (* z z)) 1d-4)
+               (when (> (+ (* x x) (* z z)) 0.09d0)
                  (setf (embodied-agent-facing-yaw agent) (atan x z)))))
            (decf (embodied-agent-movement-accumulator agent)
                  luvcraft::+player-physics-step+))
+  (unless (luvcraft:body-movement-action agent)
+    (turn-embodied-agent-toward-player agent session seconds))
   ;; The public place follows the continuous base as it crosses cell bounds.
   (multiple-value-bind (x y z) (luvcraft:body-cell agent)
     (setf (gnome-x agent) x (gnome-y agent) y (gnome-z agent) z))
@@ -1346,7 +1370,8 @@ places."
       (cond ((null existing)
              (attach-embodied-agent
               class session x y z
-              :facing-yaw (luvcraft:camera-yaw camera)))
+              ;; Facing back along the camera: toward whoever spawned it.
+              :facing-yaw (+ (luvcraft:camera-yaw camera) pi)))
             ((typep existing class) existing)
             (t (error "Cell (~D ~D ~D) is occupied by ~A."
                       x y z (embodied-agent-name existing)))))))

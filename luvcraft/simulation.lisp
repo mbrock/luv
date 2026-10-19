@@ -529,10 +529,18 @@ caller decides where to go; the body accelerates, collides, steps, and falls."
          (maximum-change (* acceleration seconds))
          (grounded-p (body-grounded-p body))
          (velocity (body-velocity body)))
-    (setf (vec3-x velocity)
-          (move-toward (vec3-x velocity) target-x maximum-change)
-          (vec3-z velocity)
-          (move-toward (vec3-z velocity) target-z maximum-change))
+    ;; The acceleration bound is on the horizontal velocity vector.  Bounding
+    ;; each axis separately would let the smaller component reach its target
+    ;; first, so a body slowing from a diagonal would end moving along an axis.
+    (let* ((change-x (- target-x (vec3-x velocity)))
+           (change-z (- target-z (vec3-z velocity)))
+           (change (sqrt (+ (* change-x change-x) (* change-z change-z)))))
+      (if (<= change maximum-change)
+          (setf (vec3-x velocity) target-x
+                (vec3-z velocity) target-z)
+          (let ((scale (/ maximum-change change)))
+            (incf (vec3-x velocity) (* change-x scale))
+            (incf (vec3-z velocity) (* change-z scale)))))
     (when (and jump-p grounded-p)
       (setf (vec3-y velocity) (body-jump-speed body)
             (body-grounded-p body) nil))

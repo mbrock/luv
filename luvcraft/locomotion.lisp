@@ -196,6 +196,64 @@ frame.  A provider/tool thread may wait here without stalling rendering."
             *body-movement-arrival-radius*)
          (< (abs (- y (body-y body))) 0.16d0))))
 
+(defun segment-meets-box-p (x0 z0 x1 z1 minimum-x maximum-x minimum-z maximum-z)
+  "Whether the closed segment X0,Z0--X1,Z1 meets the closed box, by slabs."
+  (let ((enter 0d0) (leave 1d0))
+    (flet ((slab (start delta minimum maximum)
+             (if (zerop delta)
+                 (unless (<= minimum start maximum)
+                   (setf leave -1d0))
+                 (let* ((a (/ (- minimum start) delta))
+                        (b (/ (- maximum start) delta)))
+                   (setf enter (max enter (min a b))
+                         leave (min leave (max a b)))))))
+      (slab x0 (- x1 x0) minimum-x maximum-x)
+      (slab z0 (- z1 z0) minimum-z maximum-z)
+      (<= enter leave))))
+
+(defun body-straight-walk-clear-p (body world y x0 z0 x1 z1)
+  "Whether BODY can walk straight on floor level Y from X0,Z0 to X1,Z1.
+
+The square footprint swept along the segment is the segment grown by the
+half-width, so it overlaps cell C exactly when the segment meets C grown by
+the half-width.  Every such cell must itself be standable: clear for the whole
+body, with resident solid support.  The body then never meets a wall, nor
+stands over a hole, anywhere on the way."
+  (let ((h (body-half-width body)))
+    (loop for cx from (floor (- (min x0 x1) h)) to (floor (+ (max x0 x1) h))
+          always
+          (loop for cz from (floor (- (min z0 z1) h)) to (floor (+ (max z0 z1) h))
+                always (or (not (segment-meets-box-p x0 z0 x1 z1
+                                                     (- cx h) (+ cx 1 h)
+                                                     (- cz h) (+ cz 1 h)))
+                           (body-standable-at-p body world cx y cz))))))
+
+(defun skip-visible-body-waypoints (action world)
+  "Drop leading waypoints made redundant by a straight walk to a later one.
+
+Only the run of waypoints on the grounded body's own floor level is
+considered; a step up or down is still taken waypoint by waypoint, through
+the step motor."
+  (let ((body (body-move-action-body action)))
+    (when (body-grounded-p body)
+      (let* ((y (nth-value 1 (body-cell body)))
+             (path (body-move-action-path action))
+             (farthest
+               (loop with farthest = nil
+                     for tail on path
+                     for (x cell-y z) = (first tail)
+                     while (= y cell-y)
+                     when (body-straight-walk-clear-p
+                           body world y (body-x body) (body-z body)
+                           (+ x 0.5d0) (+ z 0.5d0))
+                       do (setf farthest tail)
+                     finally (return farthest))))
+        (when (and farthest (not (eq farthest path)))
+          (setf (body-move-action-path action) farthest
+                (body-move-action-best-distance action)
+                most-positive-double-float
+                (body-move-action-stuck-seconds action) 0d0))))))
+
 (defun replan-body-move-action (action world)
   (multiple-value-bind (path found-p failure)
       (find-body-path (body-move-action-body action) world
@@ -227,6 +285,7 @@ frame.  A provider/tool thread may wait here without stalling rendering."
              (setf (body-move-action-best-distance action)
                    most-positive-double-float
                    (body-move-action-stuck-seconds action) 0d0))
+    (skip-visible-body-waypoints action world)
     (let ((waypoint (first (body-move-action-path action))))
       (if (null waypoint)
           (progn
@@ -242,7 +301,11 @@ frame.  A provider/tool thread may wait here without stalling rendering."
             (let* ((dx (- (+ x 0.5d0) (body-x body)))
                    (dz (- (+ z 0.5d0) (body-z body)))
                    (distance (max 1d-9 (sqrt (+ (* dx dx) (* dz dz)))))
-                   (speed (min (body-walk-speed body) (* 5d0 distance))))
+                   ;; Only the destination is braked for; a waypoint on
+                   ;; the way is walked through, not stopped at.
+                   (speed (if (rest (body-move-action-path action))
+                              (body-walk-speed body)
+                              (min (body-walk-speed body) (* 5d0 distance)))))
               (step-walking-body body world
                                  (* speed (/ dx distance))
                                  (* speed (/ dz distance))

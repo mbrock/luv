@@ -504,6 +504,17 @@ continuous route; its tool call waits without parking rendering; the same
 primitive moves a player body; manual player input takes authority back; and
 terrain routing and invalid destinations have tests.
 
+/Correction, 2026-10-19./ Gnomes looked glitchy.  They braked into every
+cell centre (speed was =min(walk, 5·distance)= toward each waypoint), walked
+the search's L-shaped staircases with 90° snaps, and ended a diagonal walk
+facing sideways, because acceleration was bounded per axis and the smaller
+component stopped first.  Now only the destination is braked for; each step
+walks straight to the farthest same-level waypoint whose swept footprint is
+standable (a cell is met exactly when the segment meets that cell grown by the
+half-width); and the acceleration bound is on the velocity vector.  An idle
+gnome also turns toward a near or focused player, and a spawned gnome faces
+whoever spawned it rather than away.
+
 * NEXT Parameterized M-x prompts through presentation types
 :PROPERTIES:
 :ID: OL2JZ1

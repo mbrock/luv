@@ -2856,6 +2856,88 @@
     (true (< (abs (- (player-z player) 1.5d0)) 0.12d0))
     (true (null (body-movement-action player)))))
 
+(define-test destinational-body-walks-straight-through-open-ground
+  ;; Open floor needs no staircase: the body walks the straight diagonal at
+  ;; full speed, brakes only for the destination, and holds its heading
+  ;; while stopping instead of ending along an axis.
+  (let* ((world (make-block-world :chunk-width 16
+                                  :chunk-height 4
+                                  :chunk-depth 16))
+         (player (make-instance 'block-world-player
+                                :position (make-vec3 1.5d0 1d0 1.5d0)
+                                :grounded-p t))
+         (action nil)
+         (slowest-mid-speed most-positive-double-float)
+         (widest-deviation 0d0)
+         (last-heading nil)
+         (heading-change 0d0))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 16 do
+      (loop for z below 16 do
+        (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
+    (setf action (start-body-move-to player world 7 1 4))
+    (loop repeat 2400
+          while (eq :running (body-move-action-status action))
+          do (advance-body-movement player world (/ 1d0 120d0))
+             (let* ((x (player-x player))
+                    (z (player-z player))
+                    (velocity (body-velocity player))
+                    (vx (vec3-x velocity))
+                    (vz (vec3-z velocity))
+                    (speed (sqrt (+ (* vx vx) (* vz vz)))))
+               ;; Distance from the line through (1.5,1.5) and (7.5,4.5).
+               (setf widest-deviation
+                     (max widest-deviation
+                          (/ (abs (- (* 3d0 (- x 1.5d0)) (* 6d0 (- z 1.5d0))))
+                             (sqrt 45d0))))
+               (when (< 3d0 x 5.5d0)
+                 (setf slowest-mid-speed (min slowest-mid-speed speed)))
+               (when (> speed 0.05d0)
+                 (let ((heading (atan vx vz)))
+                   (when last-heading
+                     (setf heading-change
+                           (max heading-change (abs (- heading last-heading)))))
+                   (setf last-heading heading)))))
+    (true (eq :arrived (body-move-action-status action)))
+    (true (equal '(7 1 4) (body-cell-list player)))
+    (true (< widest-deviation 0.05d0)
+          "the body walks the straight line, not a staircase")
+    (true (> slowest-mid-speed (* 0.95d0 (body-walk-speed player)))
+          "intermediate cells are walked through, not stopped at")
+    (true (< heading-change 0.01d0)
+          "braking keeps the direction of travel")))
+
+(define-test destinational-body-straight-walk-respects-the-swept-footprint
+  ;; A pillar beside the diagonal is missed by the line itself but met by
+  ;; the body's square footprint swept along it; so is a hole in the floor.
+  (let* ((world (make-block-world :chunk-width 8
+                                  :chunk-height 4
+                                  :chunk-depth 8))
+         (body (make-instance 'block-world-player
+                              :position (make-vec3 0.5d0 1d0 0.5d0)
+                              :grounded-p t)))
+    (ensure-world-chunk world 0 0 0)
+    (loop for x below 8 do
+      (loop for z below 8 do
+        (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
+    (flet ((clear-p ()
+             ;; The line x - 2z + 1/2 = 0, from cell (0,0) to cell (6,3).
+             (luvcraft::body-straight-walk-clear-p
+              body world 1 0.5d0 0.5d0 6.5d0 3.5d0)))
+      (true (clear-p))
+      ;; Over x in [2,3] the line keeps z below 1.75, so it misses cell
+      ;; (2,2); but that cell's corner (3,2) is 0.5/sqrt 5 = 0.22 from it,
+      ;; inside the 0.28 half-width.
+      (setf (world-block-at world 2 1 2) luvcraft::*stone-block*)
+      (false (clear-p))
+      (setf (world-block-at world 2 1 2) nil
+            (world-block-at world 2 0 2) nil)
+      (false (clear-p))
+      ;; Cell (1,2)'s nearest corner (2,2) is 1.5/sqrt 5 = 0.67 away.
+      (setf (world-block-at world 2 0 2) luvcraft::*stone-block*
+            (world-block-at world 1 1 2) luvcraft::*stone-block*)
+      (true (clear-p)))))
+
 (define-test destinational-body-reports-an-unstandable-place-immediately
   (let* ((world (make-block-world :chunk-width 4
                                   :chunk-height 4
