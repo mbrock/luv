@@ -1171,7 +1171,9 @@ the frames after CODE failed, else 0."
 
 (defun swash-session-running-p (instance)
   (find (lisp-instance-id instance)
-        (split-lines (run-swash-output "-a"))
+        ;; The pinned Swash lists running sessions with no arguments. -a is
+        ;; not supported, and prevented retirement of dead registry entries.
+        (split-lines (run-swash-output))
         :key #'first-whitespace-delimited-field
         :test #'string=))
 

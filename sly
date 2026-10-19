@@ -3,6 +3,10 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$project_root/scripts/require-dev-environment"
+
+# Enter the environment before consuming options: re-execution must preserve
+# --luvcraft/--luvland and --lisp as well as the command itself.
 attach_only=
 
 # A standalone program (build/luvcraft, or build/luvland on a console)
@@ -51,8 +55,6 @@ if [ -z "$attach_only" ]; then
     shift 2
   fi
 fi
-
-. "$project_root/scripts/require-dev-environment"
 
 sly_client="$project_root/build/sly-client"
 sly_client_stamp="$project_root/build/sly-client.environment"

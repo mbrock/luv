@@ -4,7 +4,7 @@
 LUV_DEV_SHELL ?= default
 .DEFAULT_GOAL := all
 
-ifneq ($(LUV_DEV_ENVIRONMENT_MODE),nix-develop)
+ifneq ($(LUV_DEV_ENVIRONMENT_MODE):$(shell command -v sbcl),nix-develop:$(LUV_SBCL))
 
 .PHONY: all $(MAKECMDGOALS)
 all:
@@ -19,7 +19,7 @@ TEST_JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 
 FASL_CACHE ?= $(HOME)/.cache/common-lisp
 
 .PHONY: all help sly-client sly-dependency-core luvcraft luft luft-core luvland run \
-	test test-suite luft-test parinfer-check sly-build-lock-check clean clean-fasls
+	test test-suite luft-test parinfer-check sly-build-lock-check dev-environment-check clean clean-fasls
 
 # The slim environment builds and tests the non-graphical Luft system.
 ifeq ($(LUV_DEV_SHELL),slim)
@@ -55,7 +55,7 @@ run: luvcraft
 	./build/luvcraft
 
 test: sly-client
-	+@$(MAKE) --no-print-directory -j4 parinfer-check sly-build-lock-check typst-prty-test $(TEST_TARGET)
+	+@$(MAKE) --no-print-directory -j4 parinfer-check sly-build-lock-check dev-environment-check typst-prty-test $(TEST_TARGET)
 
 test-suite:
 	@./scripts/build-sly-dependency-core
@@ -70,6 +70,9 @@ parinfer-check:
 
 sly-build-lock-check:
 	@python3 scripts/with-build-lock-tests.py
+
+dev-environment-check:
+	@python3 scripts/dev-environment-tests.py
 
 include make/graphics.mk
 include make/benchmarks.mk

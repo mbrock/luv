@@ -479,6 +479,7 @@
             else null;
           developmentEnvironment = {
             LUV_DEV_ENVIRONMENT = "1";
+            LUV_SBCL = "${lisp}/bin/sbcl";
             # Entering the checkout must not alter the ELF loader for unrelated
             # host tools (notably an orb's own git).  Luv launchers promote this
             # path to LD_LIBRARY_PATH only for their process trees.
@@ -509,6 +510,7 @@
           };
           slimDevelopmentEnvironment = {
             LUV_DEV_ENVIRONMENT = "1";
+            LUV_SBCL = "${lisp}/bin/sbcl";
             LUV_NATIVE_LIBRARY_PATH = slimNativeLibraryPath;
             LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";

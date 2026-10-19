@@ -123,6 +123,20 @@
         :instances (list stale) :allow-explicit-stale t)
        'error))))
 
+(define-test swash-running-probe-uses-the-supported-list-command
+  (uiop:with-temporary-file (:stream stream :pathname script)
+    (write-string "#!/bin/sh
+test \"$#\" -eq 0 || exit 2
+printf 'ID       STATUS\\nLIVE123  running\\n'
+" stream)
+    (finish-output stream)
+    (sb-posix:chmod script #o700)
+    (let ((sly-client::*swash* (namestring script)))
+      (true (sly-client::swash-session-running-p
+             (sly-client::make-lisp-instance :id "LIVE123")))
+      (false (sly-client::swash-session-running-p
+              (sly-client::make-lisp-instance :id "DEAD123"))))))
+
 (define-test dead-stale-lisp-retires-without-signalling-a-reused-process
   (let* ((instance
            (sly-client::make-lisp-instance
