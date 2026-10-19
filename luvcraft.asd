@@ -259,7 +259,8 @@
                 :components ((:file "package")
                              (:file "surroundings")
                              (:file "construction")
-                             (:file "opening"))))
+                             (:file "opening")
+                             (:file "conversation"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package

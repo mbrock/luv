@@ -439,27 +439,43 @@ The visible bodies are analytic SDFs launched from conservative scene
 proxies: a red-hatted gnome and an orange tabby cat, each with its own live
 metabar vocabulary.  Their world-space fields follow continuous body
 positions, so focus rays, lighting, and silhouettes move with the same body
-that collides with terrain.  Focusing one with TAB steps the camera back to a
-conversational distance, aims it at the face with the focused field of view,
-and turns the keys into a prompt line; RET asks.  Speech bubbles remain
-retained McCLIM world widgets above that analytic body.
+that collides with terrain.  Focusing one with TAB frames it for a
+conversation: a level camera, at the figure's own eye line, whose distance and
+height are solved so that the band from its feet to the top of a typical
+thought cloud lands exactly between the status bar and the conversation card
+(=solve-level-framing=; two linear equations in a pinhole projection).  It
+approaches from the player's side, and swings round in thirty-degree steps
+until six sight lines through the world's own voxel ray cast -- face and
+feet, middle and either side -- all reach the agent, so a wall it has just
+built never fills the view.  The keys become the card's input line; RET
+asks.
 
-What the gnome shows is the transcript in three registers:
+What the gnome shows is the transcript in three registers, each for a
+different reader:
 
-- /Bubbles./ Its thinking and each tool call are =gnome-bubble= frames --
-  McCLIM world widgets of the same family as the paper sheet (direct
-  replay into the scene pass, a =relief-design= slab), billboarded above the
-  hat every frame, content-fitted, and stacked: a new bubble appears low and
-  eases the older ones upward; past four they are taken down, and a finished
-  turn's bubbles linger a few seconds.  A pane that paints nothing is what
-  makes them float: the pane and the frame's top-level sheet take
-  =never-repaint-background-mixin=, since McCLIM otherwise composes every
-  background over black.
-- /The line./ =say= is a tool like any other, and the only way the gnome is
-  heard: the dialogue HUD at the bottom of the view titles what it said,
-  the way an NPC line is subtitled, and shows the prompt being typed while
-  the gnome is focused.  =say= reaches its gnome through =*current-agent*=,
-  bound around the command by =call-tool=.
+- /The cloud./ While it works, one cut-paper thought cloud stands above the
+  hat: cream, scalloped from an uneven sequence of circles so it reads as a
+  cloud rather than a crown, with a darker rim for the paper's thickness and
+  a trail of puffs down to the hat.  It says what the agent is thinking about
+  -- the title of its latest reasoning summary, which the provider writes as
+  a short heading -- and the last three things it did, as sentences
+  (=call-phrase=, one method per command: "checking the block at -677, 8,
+  -581 · grass").  A run of calls to one command is one line with a count.
+  Handles, timings, and raw output are for the model and the agent HUD, not
+  for someone standing in the garden.  The cloud is fitted to its text, rises
+  out of the hat as it appears, and lingers a few seconds after the turn.  It
+  is a McCLIM world widget of the paper sheet's family, placed at birth and
+  on every refresh because painter order reads its depth before encoding.
+- /The card./ =say= is a tool like any other, and the only way the gnome is
+  heard.  The conversation card at the bottom of the view is a dark warm
+  panel with the agent's name on a tab in its hat colour; it shows the
+  player's last question quietly, the answer in a book face (DejaVu Serif),
+  breathing dots while the agent thinks, and an input field with a caret and
+  key hints.  Unfocused, a fresh line still shows as a subtitle.  Inks are
+  chosen as display colours and decoded with =display-color=, because the
+  canvas is an sRGB target and McCLIM inks there are linear light.
+  =say= reaches its gnome through =*current-agent*=, bound around the command
+  by =call-tool=.
 - /The record./ The same turn is on =transcript-lines= for a windowless
   session, and on an agent terminal wall if one is open.
 

@@ -128,6 +128,11 @@ GPU medium spells as a fully transparent fill.")
    (draft :initform "" :accessor gnome-draft)
    (said :initform nil :accessor gnome-said
          :documentation "The gnome's last line, or NIL.")
+   (asked :initform nil :accessor gnome-asked
+          :documentation "What the player last asked, or NIL.")
+   (asked-at :initform 0 :accessor gnome-asked-at)
+   (current-turn :initform nil :accessor gnome-current-turn
+                 :documentation "The turn the agent is on or last finished.")
    (said-at :initform 0 :accessor gnome-said-at)
    (observer :initform nil :accessor gnome-observer)
    (notes :initform (sb-concurrency:make-mailbox :name "gnome notes")
@@ -384,33 +389,13 @@ taller hat pushes them up rather than growing through them."
   (declare (ignore gnome))
   *gnome-audience-distance*)
 
-(defmethod luvcraft:luvcraft-focus-camera-pose ((gnome embodied-agent) session)
-  "Step back to a conversational distance, look the gnome in the face, and
-leave room above its hat for the bubbles."
-  (or (alexandria:when-let ((approval (embodied-agent-pending-approval gnome)))
-        (tool-approval-focus-camera-pose approval gnome session))
-      (let* ((camera (luvcraft:luvcraft-session-camera session))
-             (eye (luvcraft:camera-position camera))
-             (face (embodied-agent-face-position gnome))
-             (dx (- (luvcraft::vec3-x face) (luvcraft::vec3-x eye)))
-             (dz (- (luvcraft::vec3-z face) (luvcraft::vec3-z eye)))
-             (flat (max (sqrt (+ (* dx dx) (* dz dz))) 0.001))
-             (ux (/ dx flat)) (uz (/ dz flat))
-             (distance (embodied-agent-audience-distance gnome))
-             (position (luvcraft::make-vec3
-                        (- (luvcraft::vec3-x face) (* ux distance))
-                        (+ (luvcraft::vec3-y face) 0.10)
-                        (- (luvcraft::vec3-z face) (* uz distance))))
-             (target (embodied-agent-face-position gnome 0.02))
-             (tdx (- (luvcraft::vec3-x target) (luvcraft::vec3-x position)))
-             (tdy (- (luvcraft::vec3-y target) (luvcraft::vec3-y position)))
-             (tdz (- (luvcraft::vec3-z target) (luvcraft::vec3-z position)))
-             (tflat (max (sqrt (+ (* tdx tdx) (* tdz tdz))) 0.001)))
-        (luvcraft::make-camera-pose
-         position
-         (atan tdx tdz)
-         (atan tdy tflat)
-         luvcraft::+luvcraft-camera-focused-vertical-field-of-view+))))
+(defparameter *conversation-cloud-room* 0.8
+  "How much of the thought cloud's pane height the conversation camera keeps
+in view above the hat: a heading and three actions, with the scallops.")
+
+(defparameter *conversation-card-inset* 330
+  "How many logical pixels at the bottom of the view the conversation card
+may cover, from the viewport's bottom edge to the top of a two-line answer.")
 
 (defmethod luvcraft:luvcraft-focus-entered ((gnome embodied-agent) session)
   (ensure-gnome-dialogue gnome)
@@ -431,6 +416,8 @@ In particular, first contact never performs DNS, TLS, or a WebSocket handshake
 on the canvas thread.  It returns GNOME while opening, and a TURN when the
 provider was already installed."
   (check-type text string)
+  (setf (gnome-asked gnome) text
+        (gnome-asked-at gnome) (get-internal-real-time))
   (multiple-value-bind (agent opening-owner)
       (sb-thread:with-mutex ((embodied-agent-agent-lock gnome))
         (when (embodied-agent-agent-released-p gnome)
@@ -760,12 +747,57 @@ candidate that loses to release or another publication is detached and closed."
 ;;; ---------------------------------------------------------------------
 ;;; The dialogue line: a HUD title at the bottom of the view.
 
+;;; The canvas is an sRGB target, so an ink's components are linear light.
+;;; The colours below were chosen as display colours, the way a designer
+;;; picks them, and are decoded here once.
+
+(defun display-color (red green blue)
+  "The ink that shows on screen as the sRGB colour RED GREEN BLUE."
+  (flet ((decode (value)
+           (if (<= value 0.04045)
+               (/ value 12.92)
+               (expt (/ (+ value 0.055) 1.055) 2.4))))
+    (make-rgb-color (decode red) (decode green) (decode blue))))
+
+;;; The conversation card: what was asked, what the gnome answers, and the
+;;; line being typed, at the bottom of the view.  It is a dark warm card so
+;;; the world stays the brightest thing on screen; the agent's name hangs off
+;;; its upper edge as a tab in the colour of its hat, and the answer is set in
+;;; a book face, because it is something said rather than something logged.
+
 (defparameter *dialogue-width* 1100)
-(defparameter *dialogue-height* 150)
-(defparameter *dialogue-columns* 70)
+(defparameter *dialogue-height* 300)
+
+(defparameter *dialogue-card-ink*
+  (compose-in (display-color 0.075 0.068 0.060) (make-opacity 0.92)))
+(defparameter *dialogue-field-ink* (display-color 0.155 0.143 0.128))
+(defparameter *dialogue-said-ink* (display-color 0.97 0.93 0.84))
+(defparameter *dialogue-asked-ink* (display-color 0.66 0.63 0.57))
+(defparameter *dialogue-hint-ink* (display-color 0.47 0.45 0.41))
+(defparameter *dialogue-proposal-ink* (display-color 0.45 0.90 0.95))
+
+(defparameter *dialogue-said-style* (make-text-style :serif :roman 25))
+(defparameter *dialogue-asked-style* (make-text-style :sans-serif :italic 17))
+(defparameter *dialogue-draft-style* (make-text-style :sans-serif :roman 20))
+(defparameter *dialogue-hint-style* (make-text-style :sans-serif :roman 14))
+(defparameter *dialogue-name-style* (make-text-style :sans-serif :bold 16))
+
+(defparameter *dialogue-said-lines* 5
+  "The most lines of an answer the card shows; a longer one keeps its end.")
+
+(defparameter *dialogue-linger-seconds* 20
+  "How long an unfocused agent's last line stays up.")
+
+(defgeneric embodied-agent-accent-ink (agent)
+  (:documentation "The colour AGENT's name tab and thought marks are drawn in.")
+  (:method ((agent t)) (display-color 0.80 0.52 0.22)))
+
+(defmethod embodied-agent-accent-ink ((gnome gnome))
+  ;; The hat.
+  (display-color 0.78 0.15 0.11))
 
 (defclass gnome-dialogue-pane (mcluv:transparent-gpu-application-pane) ()
-  (:documentation "A pane that paints nothing but its text: the view shows through."))
+  (:documentation "A pane that paints nothing but its card: the view shows through."))
 
 (define-application-frame gnome-dialogue ()
   ((gnome :initarg :gnome :reader dialogue-gnome))
@@ -778,50 +810,212 @@ candidate that loses to release or another publication is detached and closed."
                             :max-width *dialogue-width* :max-height *dialogue-height*)))
   (:layouts (default sheet)))
 
-(defun dialogue-lines (gnome)
-  "What the line shows: (SPEAKER TEXT INK) or NIL."
+(defun seconds-since (internal-time)
+  (/ (- (get-internal-real-time) internal-time)
+     (float internal-time-units-per-second 1.0)))
+
+(defun animation-phase (period count)
+  "Which of COUNT steps, each PERIOD seconds long, the clock is on."
+  (mod (floor (get-internal-real-time)
+              (* period internal-time-units-per-second))
+       count))
+
+(defun embodied-agent-thinking-p (agent)
+  "Whether AGENT is working on something the player asked and has not answered."
+  (or (embodied-agent-pending-agent-prompts agent)
+      (alexandria:when-let ((turn (gnome-current-turn agent)))
+        (and (member (turn-status turn) '(:queued :working :thinking))
+             (not (and (gnome-said agent)
+                       (> (gnome-said-at agent) (turn-started turn))))))))
+
+(defun dialogue-view (gnome)
+  "What the card shows, as a plist that is also its repaint key, or NIL."
   (let* ((session (gnome-session gnome))
          (focused-p (eq gnome (luvcraft:luvcraft-session-modal-focus session)))
          (draft (gnome-draft gnome))
          (said (gnome-said gnome))
-         (said-age (/ (- (get-internal-real-time) (gnome-said-at gnome))
-                      (float internal-time-units-per-second 1.0))))
-    (cond ((and focused-p (embodied-agent-pending-approval gnome)
-                (zerop (length draft)))
-           (list "proposal"
-                 "possible world · Ctrl-Y approve · Ctrl-N deny · type feedback + Enter"
-                 (make-rgb-color 0.45 0.95 1.0)))
-          ((and focused-p (or (plusp (length draft)) (null said) (> said-age 20)))
-           (list "you" (concatenate 'string draft "_") *hud-text-ink*))
-          ((and said (or focused-p (< said-age 20)))
-           (list (embodied-agent-name gnome) said
-                 (make-rgb-color 0.97 0.93 0.80)))
-          (t nil))))
+         (said-fresh-p (and said (< (seconds-since (gnome-said-at gnome))
+                                    *dialogue-linger-seconds*)))
+         (thinking-p (embodied-agent-thinking-p gnome))
+         (asked (gnome-asked gnome))
+         ;; An answer belongs under the question it answers; a line said
+         ;; before the latest question is history, not a reply.
+         (answer (and said (or (null asked)
+                               (>= (gnome-said-at gnome) (gnome-asked-at gnome)))
+                      said))
+         (proposal-p (and focused-p (embodied-agent-pending-approval gnome) t)))
+    (cond
+      (focused-p
+       (list :focused t
+             :name (embodied-agent-name gnome)
+             :asked (and asked (or thinking-p answer) asked)
+             :said (if thinking-p nil answer)
+             :thinking (and thinking-p (animation-phase 0.35 4))
+             :proposal proposal-p
+             :draft draft
+             :caret (animation-phase 0.53 2)))
+      ;; Walked away, the player still hears a fresh line as a subtitle;
+      ;; thinking shows only in the cloud over the agent's head.
+      ((and said-fresh-p (not thinking-p))
+       (list :focused nil :name (embodied-agent-name gnome) :said said))
+      (t nil))))
+
+(defun dialogue-words (text)
+  (remove "" (uiop:split-string (substitute #\Space #\Newline text)
+                                :separator '(#\Space))
+          :test #'string=))
+
+(defun wrap-to-width (stream text style width)
+  "TEXT broken on spaces into lines no wider than WIDTH set in STYLE."
+  (let ((lines '()) (line nil))
+    (dolist (word (dialogue-words text))
+      (let ((candidate (if line (concatenate 'string line " " word) word)))
+        (if (or (null line)
+                (<= (text-size stream candidate :text-style style) width))
+            (setf line candidate)
+            (progn (push line lines)
+                   (setf line word)))))
+    (when line (push line lines))
+    (nreverse lines)))
+
+(defun fit-to-width (stream text style width)
+  "TEXT on one line, cut with an ellipsis when it is wider than WIDTH."
+  (let ((text (substitute #\Space #\Newline text)))
+    (if (<= (text-size stream text :text-style style) width)
+        text
+        (loop for end downfrom (length text) above 0
+              for candidate = (concatenate 'string
+                                           (string-right-trim " " (subseq text 0 end))
+                                           "…")
+              when (<= (text-size stream candidate :text-style style) width)
+                return candidate
+              finally (return "…")))))
+
+(defun draw-styled-text (stream text x y style ink &rest options)
+  (multiple-value-bind (family face size) (text-style-components style)
+    (apply #'draw-text* stream text x y
+           :text-family family :text-face face :text-size size :ink ink
+           :align-y :baseline options)))
+
+(defun draw-thinking-dots (stream x y phase ink &key (radius 4.5) (spacing 15))
+  "Three dots, the PHASE-th of them raised and bright."
+  (dotimes (index 3)
+    (let ((lit-p (= index (mod phase 4))))
+      (draw-circle* stream (+ x (* index spacing)) (if lit-p (- y 3) y)
+                    radius
+                    :ink (if lit-p ink (compose-in ink (make-opacity 0.35)))))))
+
+(defparameter *dialogue-margin* 36
+  "The card's inner margin, left and right.")
 
 (defmethod handle-repaint ((pane gnome-dialogue-pane) region)
   (declare (ignore region))
-  (let* ((frame (pane-frame pane))
-         (gnome (dialogue-gnome frame))
-         (line (dialogue-lines gnome)))
-    (when line
-      (destructuring-bind (speaker text ink) line
-        (let* ((lines (wrap-words text *dialogue-columns*))
-               (lines (if (> (length lines) 4) (last lines 4) lines))
-               (line-height 30)
-               (height (+ 18 (* line-height (length lines)) 14))
-               (top (- *dialogue-height* height))
-               (left 40) (right (- *dialogue-width* 40)))
-          (mcluv:draw-analytic-rounded-rectangle* pane left top right *dialogue-height*
-                                            :radius 10
-                                            :ink (make-rgb-color 0.06 0.06 0.06))
-          (draw-text* pane speaker (+ left 24) (+ top 22)
-                      :align-y :center :text-size 15 :text-face :bold
-                      :ink (if (string= speaker "you") *hud-muted-ink* (command-ink 'com-say)))
-          (let ((y (+ top 18 14)))
-            (dolist (text-line lines)
-              (draw-text* pane text-line (+ left 24 70) (+ y 2)
-                          :align-y :center :text-size 22 :ink ink)
-              (incf y line-height))))))))
+  (let* ((gnome (dialogue-gnome (pane-frame pane)))
+         (view (dialogue-view gnome)))
+    (when view
+      (destructuring-bind (&key focused name asked said thinking proposal
+                             draft caret)
+          view
+        (let* ((accent (embodied-agent-accent-ink gnome))
+               (card-left 30)
+               (card-right (- *dialogue-width* 30))
+               (text-left (+ card-left *dialogue-margin*))
+               (text-width (- card-right card-left (* 2 *dialogue-margin*)))
+               (said-lines
+                 (and said
+                      (let ((lines (wrap-to-width pane said *dialogue-said-style*
+                                                  text-width)))
+                        (if (> (length lines) *dialogue-said-lines*)
+                            (cons "…" (last lines (1- *dialogue-said-lines*)))
+                            lines))))
+               (said-height (cond (said-lines (* 34 (length said-lines)))
+                                  (thinking 34)
+                                  (t 0)))
+               (asked-height (if asked 30 0))
+               (field-height (if focused 54 0))
+               (card-height (+ 30 asked-height said-height
+                               (if (and focused (plusp said-height)) 18 0)
+                               field-height 22))
+               (card-bottom (- *dialogue-height* 4))
+               (card-top (- card-bottom card-height))
+               (y (+ card-top 30)))
+          ;; The card, and the name tab on its upper edge.
+          (mcluv:draw-analytic-rounded-rectangle*
+           pane card-left card-top card-right card-bottom
+           :radius 22 :ink *dialogue-card-ink*)
+          (let* ((label (if proposal "proposal" name))
+                 (label-width (text-size pane label :text-style *dialogue-name-style*))
+                 (tab-left (+ card-left 26))
+                 (tab-right (+ tab-left label-width 30)))
+            (mcluv:draw-analytic-rounded-rectangle*
+             pane tab-left (- card-top 15) tab-right (+ card-top 15)
+             :radius 15 :ink (if proposal *dialogue-proposal-ink* accent))
+            (draw-styled-text pane label (+ tab-left 15) (+ card-top 6)
+                              *dialogue-name-style*
+                              (if proposal +black+ (display-color 1.0 0.97 0.92))))
+          ;; What the player asked, quietly.
+          (when asked
+            (draw-styled-text pane (fit-to-width pane (format nil "you: ~A" asked)
+                                                 *dialogue-asked-style* text-width)
+                              text-left (+ y 14) *dialogue-asked-style*
+                              *dialogue-asked-ink*)
+            (incf y asked-height))
+          ;; The answer, or the agent thinking about one.
+          (cond (said-lines
+                 (dolist (line said-lines)
+                   (draw-styled-text pane line text-left (+ y 24)
+                                     *dialogue-said-style* *dialogue-said-ink*)
+                   (incf y 34)))
+                (thinking
+                 (draw-thinking-dots pane (+ text-left 6) (+ y 16) thinking accent)
+                 (incf y 34)))
+          (when (and focused (plusp said-height))
+            (incf y 18))
+          ;; The line being typed.
+          (when focused
+            (let* ((field-top y)
+                   (field-bottom (+ y 46))
+                   (middle (+ field-top 23))
+                   (inner-left (+ card-left 18))
+                   (inner-right (- card-right 18))
+                   (hint (if proposal
+                             "ctrl-y approve · ctrl-n deny · enter sends feedback"
+                             "enter to ask · esc to leave"))
+                   (hint-width (text-size pane hint :text-style *dialogue-hint-style*))
+                   (typing-left (+ inner-left 20))
+                   (typing-width (- inner-right 20 hint-width 24 typing-left)))
+              (mcluv:draw-analytic-rounded-rectangle*
+               pane inner-left field-top inner-right field-bottom
+               :radius 23 :ink *dialogue-field-ink*)
+              (draw-styled-text pane hint (- inner-right 20) (+ middle 5)
+                                *dialogue-hint-style* *dialogue-hint-ink*
+                                :align-x :right)
+              (if (string= draft "")
+                  (draw-styled-text pane (if proposal
+                                             "or say what to change…"
+                                             (format nil "say something to the ~A…" name))
+                                    typing-left (+ middle 7)
+                                    (make-text-style :sans-serif :italic 20)
+                                    *dialogue-hint-ink*)
+                  ;; Long drafts scroll: the end, where the caret is, stays.
+                  (let* ((shown (loop for start from 0 below (length draft)
+                                      for text = (subseq draft start)
+                                      when (<= (text-size pane text
+                                                          :text-style *dialogue-draft-style*)
+                                               typing-width)
+                                        return text
+                                      finally (return ""))))
+                    (draw-styled-text pane shown typing-left (+ middle 7)
+                                      *dialogue-draft-style* *dialogue-said-ink*)))
+              (when (zerop caret)
+                (let ((caret-x (+ typing-left 1
+                                  (if (string= draft "")
+                                      0
+                                      (min typing-width
+                                           (text-size pane draft
+                                                      :text-style *dialogue-draft-style*))))))
+                  (draw-rectangle* pane caret-x (- middle 12) (+ caret-x 2) (+ middle 12)
+                                   :ink accent))))))))))
 
 (defclass gnome-dialogue-overlay (mcluv:luvcraft-hud-widget-overlay)
   ((gnome :initarg :gnome :reader dialogue-overlay-gnome)
@@ -833,8 +1027,17 @@ candidate that loses to release or another publication is detached and closed."
 (defmethod luvcraft:luvcraft-focus-score ((overlay gnome-dialogue-overlay) session)
   (declare (ignore overlay session)) nil)
 
+(defmethod luvcraft:luvcraft-overlay-focus-insets
+    ((overlay gnome-dialogue-overlay) session)
+  ;; The card is up for good once made; it covers the view only while its
+  ;; agent is the one being talked to.
+  (if (eq (dialogue-overlay-gnome overlay)
+          (luvcraft:luvcraft-session-modal-focus session))
+      (values 0.0 0.0 0.0 (float *conversation-card-inset*))
+      (values 0.0 0.0 0.0 0.0)))
+
 (defun dialogue-screen-state (overlay)
-  "Centred at the bottom of the viewport."
+  "Centred at the bottom of the viewport, just above the hotbar."
   (let* ((source-size (mcluv:widget-overlay-logical-size overlay))
          (viewport-size
            (multiple-value-list
@@ -849,7 +1052,7 @@ candidate that loses to release or another publication is detached and closed."
          (half-width (/ (* source-width scale) viewport-width))
          (half-height (/ (* source-height scale) viewport-height))
          ;; NDC spans two units over the viewport, so this is half the pixels.
-         (bottom-margin (/ 300.0 viewport-height))
+         (bottom-margin (/ 260.0 viewport-height))
          (center-y (- 1.0 bottom-margin half-height)))
     (make-array 12 :element-type 'single-float
                    :initial-contents
@@ -870,11 +1073,11 @@ candidate that loses to release or another publication is detached and closed."
     (let* ((frame (mcluv:widget-overlay-frame overlay))
            (mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
       (mcluv:repaint-gpu-mirror mirror)
-      (setf (dialogue-visible-state overlay) (dialogue-lines gnome)))))
+      (setf (dialogue-visible-state overlay) (dialogue-view gnome)))))
 
 (defmethod luvcraft:refresh-luvcraft-overlay ((overlay gnome-dialogue-overlay) session)
   (declare (ignore session))
-  (unless (equal (dialogue-lines (dialogue-overlay-gnome overlay))
+  (unless (equal (dialogue-view (dialogue-overlay-gnome overlay))
                  (dialogue-visible-state overlay))
     (repaint-gnome-dialogue (dialogue-overlay-gnome overlay)))
   overlay)
@@ -1079,25 +1282,178 @@ candidate that loses to release or another publication is detached and closed."
 ;;; ---------------------------------------------------------------------
 ;;; Bubbles: cassettes in the world above the gnome's head.
 
-(defparameter *bubble-width* 520)
-(defparameter *bubble-height* 150)
-(defparameter *bubble-world-width* 1.7
-  "How wide a bubble is in blocks.")
-(defparameter *bubble-lift* 0.55
-  "How far above the hat the newest bubble's centre floats, in blocks.")
-(defparameter *bubble-spacing* 0.52
-  "The vertical distance between stacked bubbles, in blocks.")
-(defparameter *bubble-count* 4
-  "How many bubbles stay up before the oldest is dropped.")
-(defparameter *bubble-linger-seconds* 14
-  "How long after a turn ends its bubbles stay.")
+;;; The thought cloud: one per agent, above its head, while it works.
+;;;
+;;; It is a cut-paper cloud -- cream, scalloped, with a darker rim below for
+;;; the paper's thickness and a trail of puffs down to the hat -- and it says
+;;; two things in plain words.  On top, what the agent is thinking about: the
+;;; heading of its latest reasoning summary, which the provider writes as a
+;;; short title ("Calculating movement toward player").  Below, the last few
+;;; things it did, as a sentence each ("checking the block at -677, 8, -581 ·
+;;; grass") with a dot for whether that is under way, done, or failed.  The
+;;; full record, handles and timings included, stays in the transcript and the
+;;; agent HUD; this is what a player standing in the garden should see.
+
+(defparameter *bubble-width* 620)
+(defparameter *bubble-height* 330)
+(defparameter *bubble-world-width* 1.9
+  "How wide the cloud's pane is in blocks.")
+(defparameter *bubble-gap* 0.06
+  "How far above the hat the bottom of the cloud's pane floats, in blocks.")
+(defparameter *bubble-linger-seconds* 8
+  "How long after a turn ends its cloud stays.")
+(defparameter *bubble-actions* 3
+  "How many of the latest actions the cloud lists.")
+
+(defparameter *cloud-paper-ink* (display-color 0.985 0.962 0.905))
+(defparameter *cloud-rim-ink* (display-color 0.66 0.57 0.45))
+(defparameter *cloud-thought-ink* (display-color 0.30 0.20 0.13))
+(defparameter *cloud-action-ink* (display-color 0.24 0.21 0.18))
+(defparameter *cloud-muted-ink* (display-color 0.56 0.50 0.43))
+(defparameter *cloud-running-ink* (display-color 0.91 0.62 0.16))
+(defparameter *cloud-done-ink* (display-color 0.47 0.62 0.38))
+(defparameter *cloud-error-ink* (display-color 0.80 0.27 0.21))
+
+(defparameter *cloud-thought-style* (make-text-style :serif :italic 25))
+(defparameter *cloud-action-style* (make-text-style :sans-serif :roman 18))
+
+(defparameter *cloud-rim-depth* 5
+  "How far below the paper its rim shows, in pane pixels.")
+
+(defparameter *cloud-trail-height* 64
+  "Pane pixels below the cloud reserved for the puffs leading to the hat.")
+
+;;; ---------------------------------------------------------------------
+;;; What the cloud says
+
+(defun thought-heading (thought)
+  "The last **heading** in THOUGHT, else its last sentence, or NIL."
+  (let* ((text (string-trim '(#\Space #\Newline) (or thought "")))
+         (close (search "**" text :from-end t))
+         (open (and close (search "**" text :from-end t :end2 close))))
+    (cond ((string= text "") nil)
+          ((and open (< (+ open 2) close))
+           (string-trim " " (subseq text (+ open 2) close)))
+          (t
+           (let* ((text (remove #\* text))
+                  (end (or (position-if (lambda (c) (find c ".!?")) text
+                                        :from-end t :end (max 0 (1- (length text))))
+                           -1)))
+             (string-trim '(#\Space #\Newline) (subseq text (1+ end))))))))
+
+(defun call-argument (call key)
+  (cdr (assoc key (tool-call-arguments call))))
+
+(defun call-place (call)
+  "The cell CALL's arguments name, as the player would write it."
+  (format nil "~D, ~D, ~D"
+          (call-argument call :x) (call-argument call :y) (call-argument call :z)))
+
+(defun strip-handles (text)
+  "TEXT without the #ABCD handles that are for the model, not the player."
+  (string-trim " "
+               (format nil "~{~A~^ ~}"
+                       (remove-if (lambda (word)
+                                    (and (> (length word) 1)
+                                         (char= #\# (char word 0))
+                                         (every #'upper-case-p (subseq word 1))))
+                                  (dialogue-words text)))))
+
+(defgeneric call-phrase (command call)
+  (:documentation
+   "What CALL to COMMAND is doing, in words, and a short gist of its result.
+
+Returns the phrase and the gist (or NIL).  The phrase reads with the call's
+status: under way while it runs, done once it is.")
+  (:method ((command t) call)
+    (values (substitute #\Space #\- (tool-call-name call)) nil)))
+
+(defun call-running-p (call)
+  (eq :running (tool-call-status call)))
+
+(defmethod call-phrase ((command (eql 'com-where-am-i)) call)
+  (let* ((output (tool-call-output call))
+         (facing (search "facing " output)))
+    (values "getting my bearings"
+            (and facing (strip-handles (subseq output facing))))))
+
+(defmethod call-phrase ((command (eql 'com-view-surroundings)) call)
+  (values (if (call-running-p call) "having a look around" "had a look around")
+          nil))
+
+(defmethod call-phrase ((command (eql 'com-move-to)) call)
+  (values (format nil (if (call-running-p call) "walking to ~A" "walked to ~A")
+                  (call-place call))
+          nil))
+
+(defmethod call-phrase ((command (eql 'com-block-at)) call)
+  (let ((output (tool-call-output call)))
+    (values (format nil "checking the block at ~A" (call-place call))
+            (and (not (call-running-p call))
+                 (plusp (length output))
+                 (subseq output 0 (position #\Space output))))))
+
+(defmethod call-phrase ((command (eql 'com-place-block-at)) call)
+  (values (format nil (if (call-running-p call) "placing ~(~A~) at ~A" "placed ~(~A~) at ~A")
+                  (substitute #\Space #\- (princ-to-string (call-argument call :kind)))
+                  (call-place call))
+          nil))
+
+(defmethod call-phrase ((command (eql 'com-propose-block-box)) call)
+  (values (format nil "sketching a ~(~A~) build for you"
+                  (substitute #\Space #\- (princ-to-string (call-argument call :kind))))
+          nil))
+
+(defmethod call-phrase ((command (eql 'com-describe-handle)) call)
+  (declare (ignore call))
+  (values "taking a closer look" nil))
+
+(defmethod call-phrase ((command (eql 'com-eval)) call)
+  (declare (ignore call))
+  (values "muttering some Lisp" nil))
+
+(defun call-line (call)
+  "CALL as (STATUS PHRASE GIST)."
+  (multiple-value-bind (phrase gist)
+      (call-phrase (command-tool-command (tool-call-tool call)) call)
+    (list (tool-call-status call)
+          phrase
+          (if (eq :error (tool-call-status call))
+              (let ((output (strip-handles (tool-call-output call))))
+                (if (string= output "") "that didn't work" output))
+              gist))))
+
+(defun call-command (call)
+  (command-tool-command (tool-call-tool call)))
+
+(defun cloud-actions (turn)
+  "The cloud's action lines for TURN, oldest first: not SAY, which is heard.
+
+A run of calls to one command is one line, the latest, with its count: four
+blocks placed in a row read as one action done four times."
+  (let ((runs '()))
+    (dolist (call (remove 'com-say (turn-calls-in-order turn) :key #'call-command))
+      (if (and runs (eq (call-command call) (call-command (car (first runs)))))
+          (push call (first runs))
+          (push (list call) runs)))
+    (mapcar (lambda (run)
+              (destructuring-bind (status phrase gist) (call-line (first run))
+                (list (if (find :running run :key #'tool-call-status) :running status)
+                      (if (rest run)
+                          (format nil "~A ×~D" phrase (length run))
+                          phrase)
+                      gist)))
+            (reverse (subseq runs 0 (min (length runs) *bubble-actions*))))))
+
+;;; ---------------------------------------------------------------------
+;;; The frame and its drawing
 
 (defclass gnome-bubble-pane (mcluv:transparent-gpu-application-pane) ())
 
 (define-application-frame gnome-bubble ()
   ((gnome :initarg :gnome :reader bubble-gnome)
    (item :initarg :item :accessor bubble-item
-         :documentation "A TURN (its thought) or a TOOL-CALL."))
+         :documentation "The TURN this cloud thinks about."))
   (:menu-bar nil)
   (:panes (sheet (make-pane 'gnome-bubble-pane :background +clear-ink+
                             :width *bubble-width* :height *bubble-height*
@@ -1106,69 +1462,158 @@ candidate that loses to release or another publication is detached and closed."
   (:layouts (default sheet)))
 
 (defun bubble-state (frame)
-  "What the bubble shows, as a key: repaint when it changes."
-  (let ((item (bubble-item frame)))
-    (etypecase item
-      (turn (list :thought (length (turn-thought item))))
-      (tool-call (list (tool-call-status item)
-                       (round (tool-call-elapsed-seconds item) 0.5)
-                       (length (tool-call-output item)))))))
+  "What the cloud shows, as a key: repaint when it changes."
+  (let* ((turn (bubble-item frame))
+         (heading (thought-heading (turn-thought turn)))
+         (actions (cloud-actions turn)))
+    (list heading actions
+          ;; Dots breathe while there is nothing yet to say, and a running
+          ;; action's mark pulses.
+          (and (or (null heading) (find :running actions :key #'first))
+               (member (turn-status turn) '(:queued :working :thinking))
+               (animation-phase 0.35 4)))))
 
-(defparameter *bubble-margin* 20)
-(defparameter *bubble-columns* 48)
+(defparameter *cloud-scallops*
+  '((0.00 0.62) (0.17 0.92) (0.36 1.00) (0.55 0.80) (0.73 0.95) (0.90 0.72) (1.00 0.58))
+  "Top scallops as (POSITION SIZE): where along the top edge, from 0 at the
+left to 1 at the right, and how large, as a fraction of the largest.  An
+uneven sequence, so the outline reads as a cloud rather than a crown.")
 
-(defun bubble-thought-lines (turn)
-  (let ((lines (wrap-words (remove #\* (turn-thought turn)) *bubble-columns*)))
-    (or (if (> (length lines) 4) (last lines 4) lines) (list "..."))))
+(defun draw-cloud (pane left top right bottom ink &key (dy 0))
+  "A scalloped cloud over LEFT TOP RIGHT BOTTOM, shifted DY down, in INK.
 
-(defun bubble-content-height (item)
-  "How tall the slab must be for ITEM."
-  (let ((*cassette-output-lines* 3))
-    (etypecase item
-      (turn (+ 8 (* *cassette-line-height* (length (bubble-thought-lines item)))))
-      (tool-call (tool-call-cassette-height item (- *bubble-columns* 2))))))
+The body is one rounded rectangle; the scallops are circles centred inside
+its edges, so every shape is the same opaque ink and the outline is their
+union."
+  (let* ((top (+ top dy)) (bottom (+ bottom dy))
+         (inset 30)
+         (span (- right left (* 2 inset)))
+         (largest (min 40 (* 0.5 (- bottom top)))))
+    (mcluv:draw-analytic-rounded-rectangle* pane left top right bottom
+                                            :radius 34 :ink ink)
+    (loop for (position size) in *cloud-scallops*
+          for radius = (* size largest)
+          do (draw-circle* pane (+ left inset (* position span))
+                           (+ top (* 0.45 radius)) radius :ink ink))
+    ;; Fewer and flatter underneath, between the top ones.
+    (loop for (position size) in '((0.12 0.55) (0.40 0.65) (0.68 0.58) (0.92 0.50))
+          for radius = (* size largest)
+          do (draw-circle* pane (+ left inset (* position span))
+                           (- bottom (* 0.45 radius)) radius :ink ink))
+    (let ((middle (/ (+ top bottom) 2))
+          (radius (min 32 (/ (- bottom top) 2.4))))
+      (draw-circle* pane (+ left 8) middle radius :ink ink)
+      (draw-circle* pane (- right 8) middle radius :ink ink))))
+
+(defun draw-cloud-trail (pane x top ink &key (dy 0))
+  "The puffs from the cloud down to the hat, from TOP."
+  (loop for (dx down radius) in '((-10 16 13) (-26 40 8) (-36 57 5))
+        do (draw-circle* pane (+ x dx) (+ top down dy) radius :ink ink)))
+
+(defun draw-action-mark (pane x y status phase)
+  "A sage dot for a done action, a pulsing amber ring while it runs, red on error."
+  (ecase status
+    (:ok (draw-circle* pane x y 6 :ink *cloud-done-ink*))
+    (:error (draw-circle* pane x y 6 :ink *cloud-error-ink*))
+    (:running
+     (draw-circle* pane x y (if (and phase (oddp phase)) 8 7) :ink *cloud-running-ink*)
+     (draw-circle* pane x y 4 :ink *cloud-paper-ink*))))
 
 (defmethod handle-repaint ((pane gnome-bubble-pane) region)
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
-         (item (bubble-item frame))
-         (*cassette-output-lines* 3)
-         (*agent-hud-margin* *bubble-margin*)
-         (*agent-hud-columns* *bubble-columns*)
-         (height (+ (* 2 *bubble-margin*) (bubble-content-height item)))
-         (top (max 2 (- *bubble-height* height))))
-    ;; The cassette: a matte rounded slab standing off the world, as tall as
-    ;; its contents and sitting at the bottom of the pane, nearest the head.
-    (mcluv:draw-analytic-rounded-rectangle*
-     pane 2 top (- *bubble-width* 2) (- *bubble-height* 2) :radius 18
-     :ink (mcluv:make-relief-design *hud-panel-ink* 2.0))
-    (setf (stream-cursor-position pane) (values *bubble-margin* (+ top *bubble-margin*)))
-    (etypecase item
-      (turn
-       (draw-cassette-lines pane (bubble-thought-lines item) (+ top *bubble-margin* 2)
-                            :ink *hud-thought-ink* :face :italic))
-      (tool-call
-       (funcall-presentation-generic-function
-        present item 'tool-call pane +cassette-view+)))))
+         (turn (bubble-item frame))
+         (heading (thought-heading (turn-thought turn)))
+         (actions (cloud-actions turn))
+         (phase (third (bubble-state frame)))
+         (text-width (- *bubble-width* 132))
+         (thought-lines
+           (and heading
+                (let ((lines (wrap-to-width pane (format nil "~A…" heading)
+                                            *cloud-thought-style* text-width)))
+                  (if (> (length lines) 2)
+                      (list (first lines)
+                            (fit-to-width pane (format nil "~{~A~^ ~}" (rest lines))
+                                          *cloud-thought-style* text-width))
+                      lines))))
+         ;; The cloud is as wide as what it says, centred over the hat.
+         (widest (max 220
+                      (reduce #'max thought-lines :initial-value 0
+                              :key (lambda (line)
+                                     (text-size pane line
+                                                :text-style *cloud-thought-style*)))
+                      (reduce #'max actions :initial-value 0
+                              :key (lambda (action)
+                                     (+ 24 (text-size
+                                            pane (format nil "~A · ~@[~A~]"
+                                                         (second action) (third action))
+                                            :text-style *cloud-action-style*))))))
+         (cloud-width (+ 88 (min text-width widest)))
+         (left (/ (- *bubble-width* cloud-width) 2))
+         (right (+ left cloud-width))
+         (text-left (+ left 44))
+         (content-height (+ (* 32 (max 1 (length thought-lines)))
+                            (if actions (+ 10 (* 28 (length actions))) 0)))
+         (bottom (- *bubble-height* *cloud-trail-height*))
+         (top (- bottom content-height 34))
+         (trail-x (/ *bubble-width* 2)))
+    ;; Rim first, then paper over it, so the rim shows only along the bottom.
+    (draw-cloud pane left top right bottom *cloud-rim-ink* :dy *cloud-rim-depth*)
+    (draw-cloud-trail pane trail-x bottom *cloud-rim-ink* :dy 3)
+    (draw-cloud pane left top right bottom *cloud-paper-ink*)
+    (draw-cloud-trail pane trail-x bottom *cloud-paper-ink*)
+    (let ((y (+ top 20)))
+      (if thought-lines
+          (dolist (line thought-lines)
+            (draw-styled-text pane line text-left (+ y 22)
+                              *cloud-thought-style* *cloud-thought-ink*)
+            (incf y 32))
+          (progn
+            (draw-thinking-dots pane (+ text-left 8) (+ y 15) (or phase 0)
+                                *cloud-thought-ink* :radius 5 :spacing 17)
+            (incf y 32)))
+      (when actions
+        (incf y 10)
+        (dolist (action actions)
+          (destructuring-bind (status phrase gist) action
+            (draw-action-mark pane (+ text-left 7) (+ y 13) status phase)
+            (let* ((phrase-left (+ text-left 24))
+                   (available (- (+ text-left text-width) phrase-left))
+                   (phrase-text (fit-to-width pane phrase *cloud-action-style* available))
+                   (phrase-width (text-size pane phrase-text
+                                            :text-style *cloud-action-style*)))
+              (draw-styled-text pane phrase-text phrase-left (+ y 19)
+                                *cloud-action-style* *cloud-action-ink*)
+              (when (and gist (< (+ phrase-width 60) available))
+                (draw-styled-text pane
+                                  (fit-to-width pane (format nil " · ~A" gist)
+                                                *cloud-action-style*
+                                                (- available phrase-width))
+                                  (+ phrase-left phrase-width) (+ y 19)
+                                  *cloud-action-style*
+                                  (if (eq status :error) *cloud-error-ink* *cloud-muted-ink*)))))
+          (incf y 28))))))
 
 (defclass gnome-bubble-overlay (mcluv:luvcraft-world-widget-overlay)
   ((gnome :initarg :gnome :reader bubble-overlay-gnome)
    (lift :initform 0.0 :accessor bubble-lift
-         :documentation "Where the bubble floats now, in blocks above the hat.")
-   (target-lift :initform 0.0 :accessor bubble-target-lift)
+         :documentation "Where the cloud floats now, in blocks above its rest.")
    (visible-state :initform nil :accessor bubble-visible-state)))
 
 (defmethod luvcraft:luvcraft-focus-score ((overlay gnome-bubble-overlay) session)
   (declare (ignore overlay session)) nil)
 
+(defun bubble-world-height ()
+  (* *bubble-world-width* (/ *bubble-height* *bubble-width*)))
+
 (defun place-bubble (overlay session)
-  "Face the camera from above the gnome, at the bubble's current lift."
+  "Face the camera, the pane's bottom edge just above the agent's head."
   (let* ((gnome (bubble-overlay-gnome overlay))
          (camera (luvcraft:luvcraft-session-camera session))
-         (center (embodied-agent-head-position gnome (bubble-lift overlay)))
-         (aspect (/ *bubble-width* *bubble-height*))
          (half-width (/ *bubble-world-width* 2.0))
-         (half-height (/ half-width aspect)))
+         (half-height (/ (bubble-world-height) 2.0))
+         (center (embodied-agent-head-position
+                  gnome (+ *bubble-gap* half-height (bubble-lift overlay)))))
     (multiple-value-bind (right up forward) (luvcraft:camera-basis camera)
       (declare (ignore up))
       (let ((flat-right (luvcraft::make-vec3 (luvcraft::vec3-x right) 0.0
@@ -1183,7 +1628,7 @@ candidate that loses to release or another publication is detached and closed."
 
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay gnome-bubble-overlay) session pass surface-texture)
-  "Draw the bubble flat, in the scene, facing the player."
+  "Draw the cloud flat, in the scene, facing the player."
   (declare (ignore pass))
   (place-bubble overlay session)
   (let ((viewport-size
@@ -1201,9 +1646,8 @@ candidate that loses to release or another publication is detached and closed."
     (setf (bubble-visible-state overlay) (bubble-state frame))))
 
 (defmethod luvcraft:refresh-luvcraft-overlay ((overlay gnome-bubble-overlay) session)
-  ;; Ease toward the stack position the newer bubbles have pushed it to.
-  (let ((lift (bubble-lift overlay)) (target (bubble-target-lift overlay)))
-    (setf (bubble-lift overlay) (+ lift (* 0.18 (- target lift)))))
+  ;; Rise into place from just below: the cloud puffs out of the hat.
+  (setf (bubble-lift overlay) (* 0.8 (bubble-lift overlay)))
   ;; Painter order reads every world panel's depth before any is encoded.
   (place-bubble overlay session)
   (let ((frame (mcluv:widget-overlay-frame overlay)))
@@ -1211,48 +1655,152 @@ candidate that loses to release or another publication is detached and closed."
       (repaint-bubble overlay)))
   overlay)
 
-(defun add-gnome-bubble (gnome item)
-  "Put a new bubble for ITEM above GNOME's head, pushing the others up."
-  (let* ((session (gnome-session gnome))
-         (frame (make-embedded-frame session 'gnome-bubble :gnome gnome :item item))
-         (mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
-         (overlay (make-instance 'gnome-bubble-overlay
-                                 :session session :frame frame :mirror mirror
-                                 :gnome gnome)))
-    (setf (frame-pretty-name frame) "gnome bubble"
-          (mcluv:mirror-compositor mirror) overlay
-          (bubble-lift overlay) (- *bubble-lift* 0.3)
-          (bubble-target-lift overlay) *bubble-lift*)
-    ;; A world panel has a place from birth: the frame's painter sort asks
-    ;; for its depth before its first encoding would have placed it.
-    (place-bubble overlay session)
-    (luvcraft:add-luvcraft-overlay session overlay)
-    ;; The gnome's semantic stack contains only application-owned overlays.
-    ;; A terminal rejection releases OVERLAY before this publication point.
-    (push overlay (gnome-bubbles gnome))
-    (restack-gnome-bubbles gnome)
-    (repaint-bubble overlay)
-    overlay))
-
-(defun restack-gnome-bubbles (gnome)
-  "Newest lowest; the ones past the count are taken down."
-  (loop for overlay in (gnome-bubbles gnome)
-        for index from 0
-        do (setf (bubble-target-lift overlay)
-                 (+ *bubble-lift* (* index *bubble-spacing*))))
-  (loop while (> (length (gnome-bubbles gnome)) *bubble-count*)
-        do (let ((oldest (car (last (gnome-bubbles gnome)))))
-             (setf (gnome-bubbles gnome) (butlast (gnome-bubbles gnome)))
-             (luvcraft:remove-luvcraft-overlay (gnome-session gnome) oldest))))
+(defun ensure-gnome-cloud (gnome turn)
+  "Return GNOME's cloud for TURN, putting one up above its head if needed."
+  (or (find turn (gnome-bubbles gnome)
+            :key (lambda (overlay) (bubble-item (mcluv:widget-overlay-frame overlay))))
+      (let* ((session (gnome-session gnome))
+             (frame (make-embedded-frame session 'gnome-bubble :gnome gnome :item turn))
+             (mirror (sheet-direct-mirror (frame-top-level-sheet frame)))
+             (overlay (make-instance 'gnome-bubble-overlay
+                                     :session session :frame frame :mirror mirror
+                                     :gnome gnome)))
+        (clear-gnome-bubbles gnome)
+        (setf (frame-pretty-name frame) "thought cloud"
+              (mcluv:mirror-compositor mirror) overlay
+              (bubble-lift overlay) -0.25)
+        ;; A world panel has a place from birth: the frame's painter sort asks
+        ;; for its depth before its first encoding would have placed it.
+        (place-bubble overlay session)
+        (luvcraft:add-luvcraft-overlay session overlay)
+        ;; A terminal rejection releases OVERLAY before this publication point.
+        (push overlay (gnome-bubbles gnome))
+        (repaint-bubble overlay)
+        overlay)))
 
 (defun clear-gnome-bubbles (gnome)
   (dolist (overlay (gnome-bubbles gnome))
     (luvcraft:remove-luvcraft-overlay (gnome-session gnome) overlay))
   (setf (gnome-bubbles gnome) '()))
 
-(defun bubble-for-item (gnome item)
-  (find item (gnome-bubbles gnome)
-        :key (lambda (overlay) (bubble-item (mcluv:widget-overlay-frame overlay)))))
+;;; ---------------------------------------------------------------------
+;;; The conversation camera
+
+(defun conversation-band (agent)
+  "The heights the conversation camera must show: AGENT's feet to cloud top."
+  (values (- (luvcraft::body-y agent) 0.05d0)
+          (luvcraft::vec3-y
+           (embodied-agent-head-position
+            agent (+ *bubble-gap*
+                     (* *conversation-cloud-room* (bubble-world-height)))))))
+
+(defun solve-level-framing (band-bottom band-top rows row-top row-bottom fov)
+  "The distance and height of a level camera showing a vertical band exactly.
+
+With a level pinhole camera at distance D and height H, a height Y lands at
+screen row  R(Y) = C - (Y - H) K,  where C is the middle row and
+K = C / (D tan(fov/2)) the pixels per block.  Asking that the band's bottom B
+and top T land on rows R_B and R_T gives two linear equations, solved by
+K = (R_B - R_T) / (T - B),  D = C / (K tan(fov/2)),  H = T - (C - R_T) / K."
+  (let* ((middle (/ rows 2d0))
+         (scale (/ (- row-bottom row-top) (- band-top band-bottom))))
+    (values (/ middle (* scale (tan (/ fov 2d0))))
+            (- band-top (/ (- middle row-top) scale)))))
+
+(defun sight-clear-p (world from to)
+  "Whether nothing solid lies on the segment from FROM to TO.
+
+A ray through the world's own lattice: a non-resident chunk counts as not
+clear, and so does FROM being inside a block."
+  (let* ((dx (- (luvcraft::vec3-x to) (luvcraft::vec3-x from)))
+         (dy (- (luvcraft::vec3-y to) (luvcraft::vec3-y from)))
+         (dz (- (luvcraft::vec3-z to) (luvcraft::vec3-z from)))
+         (length (sqrt (+ (* dx dx) (* dy dy) (* dz dz)))))
+    (or (< length 1d-6)
+        (eq :miss
+            (nth-value 1
+                       (luvcraft::raycast-block-world
+                        world from
+                        (luvcraft::make-vec3 (/ dx length) (/ dy length) (/ dz length))
+                        (lambda (block) (and block (luvcraft::block-solid-p block)))
+                        :max-distance length))))))
+
+(defparameter *conversation-approach-turns*
+  (list 0 (/ pi 6) (- (/ pi 6)) (/ pi 3) (- (/ pi 3)) (/ pi 2) (- (/ pi 2))
+        (* 2/3 pi) (* -2/3 pi) (* 5/6 pi) (* -5/6 pi) pi)
+  "Turns from the player's own approach tried, in order, for a clear view.")
+
+(defparameter *conversation-sight-half-width* 0.4
+  "How far either side of the agent's middle the camera must see, in blocks.")
+
+(defun conversation-yaw (agent world preferred distance height)
+  "The first approach yaw from PREFERRED whose camera sees all of AGENT.
+
+All of it means six sight lines: to the face and to just above the feet, each
+at the middle and at either side, across the view."
+  (let ((x (luvcraft::body-x agent))
+        (z (luvcraft::body-z agent))
+        (heights (list (+ (luvcraft::body-y agent) 0.2d0)
+                       (luvcraft::vec3-y (embodied-agent-face-position agent)))))
+    (or (loop for turn in *conversation-approach-turns*
+              for yaw = (+ preferred turn)
+              for eye = (luvcraft::make-vec3 (- x (* (sin yaw) distance))
+                                             height
+                                             (- z (* (cos yaw) distance)))
+              ;; Across the view is the yaw turned a quarter: (cos, -sin).
+              when (loop for side in (list 0d0 (- *conversation-sight-half-width*)
+                                           *conversation-sight-half-width*)
+                         always (loop for y in heights
+                                      always (sight-clear-p
+                                              world eye
+                                              (luvcraft::make-vec3
+                                               (+ x (* side (cos yaw)))
+                                               y
+                                               (- z (* side (sin yaw)))))))
+                return yaw)
+        preferred)))
+
+(defmethod luvcraft:luvcraft-focus-camera-pose ((gnome embodied-agent) session)
+  "Frame the agent and the cloud above it between the HUD's top and the card.
+
+The camera is level, at a height SOLVE-LEVEL-FRAMING chooses, so the figure
+is seen from its own eye line."
+  (or (alexandria:when-let ((approval (embodied-agent-pending-approval gnome)))
+        (tool-approval-focus-camera-pose approval gnome session))
+      (multiple-value-bind (inset-left inset-top inset-right inset-bottom)
+          (luvcraft:luvcraft-session-focus-insets session)
+        (declare (ignore inset-left inset-right))
+        (multiple-value-bind (band-bottom band-top) (conversation-band gnome)
+          (let* ((rows (nth-value 1 (luv:canvas-logical-size
+                                     (luvcraft:luvcraft-session-canvas session))))
+                 (fov luvcraft::+luvcraft-camera-focused-vertical-field-of-view+)
+                 (camera (luvcraft:luvcraft-session-camera session))
+                 (eye (luvcraft:camera-position camera))
+                 (x (luvcraft::body-x gnome))
+                 (z (luvcraft::body-z gnome))
+                 (dx (- x (luvcraft::vec3-x eye)))
+                 (dz (- z (luvcraft::vec3-z eye)))
+                 (flat (sqrt (+ (* dx dx) (* dz dz))))
+                 ;; Approach from where the player stands; straight on to the
+                 ;; agent's face if the player is on top of it.
+                 (yaw (if (> flat 1d-3)
+                          (atan dx dz)
+                          (+ (embodied-agent-facing-yaw gnome) pi))))
+            (multiple-value-bind (distance height)
+                (solve-level-framing
+                 band-bottom band-top rows
+                 (+ inset-top 28d0)
+                 (- rows (max inset-bottom *conversation-card-inset*) 12d0)
+                 fov)
+              ;; Walls and builds come between: swing round to a clear view.
+              (let ((yaw (conversation-yaw
+                          gnome (luvcraft:luvcraft-session-world session)
+                          yaw distance height)))
+                (luvcraft::make-camera-pose
+                 (luvcraft::make-vec3 (- x (* (sin yaw) distance))
+                                      height
+                                      (- z (* (cos yaw) distance)))
+                 yaw 0d0 fov))))))))
 
 ;;; ---------------------------------------------------------------------
 ;;; Realizing the transcript, on the canvas thread, once a frame.
@@ -1260,11 +1808,15 @@ candidate that loses to release or another publication is detached and closed."
 (defun realize-gnome-note (gnome note)
   (destructuring-bind (kind object) note
     (ecase kind
-      (:turn (clear-gnome-bubbles gnome))
-      (:thought
-       (unless (bubble-for-item gnome object)
-         (add-gnome-bubble gnome object)))
-      (:call (add-gnome-bubble gnome object))
+      (:turn
+       (clear-gnome-bubbles gnome)
+       (setf (gnome-current-turn gnome) object))
+      ((:thought :call)
+       ;; A thought note carries its turn; a call note, the call.
+       (alexandria:when-let ((turn (if (typep object 'turn)
+                                       object
+                                       (gnome-current-turn gnome))))
+         (ensure-gnome-cloud gnome turn)))
       (:call-finished nil)
       (:agent-failed
        (gnome-say gnome (format nil "(~A)" object)))
