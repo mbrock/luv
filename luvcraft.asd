@@ -247,6 +247,7 @@
                              (:file "gnome")
                              (:file "construction")
                              (:file "cat")
+                             (:file "residence")
                              (:file "surroundings"))))
   :in-order-to ((test-op (test-op "luvcraft/agent/test"))))
 
@@ -260,7 +261,8 @@
                              (:file "surroundings")
                              (:file "construction")
                              (:file "opening")
-                             (:file "conversation"))))
+                             (:file "conversation")
+                             (:file "residence"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package

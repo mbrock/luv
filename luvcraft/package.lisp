@@ -452,6 +452,11 @@
            #:make-empty-little-block-world
            #:make-little-block-world
            #:make-luvcraft-save-description
+           #:*inhabitant-describers*
+           #:restore-luvcraft-inhabitant
+           #:restore-luvcraft-inhabitants
+           #:luvcraft-session-inhabitant-descriptions
+           #:luvcraft-session-retained-inhabitants
            #:make-player-for-camera
            #:make-sky-keyframe
            #:make-sky-profile

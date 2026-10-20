@@ -120,6 +120,11 @@ GPU medium spells as a fully transparent fill.")
                           :accessor embodied-agent-pending-agent-prompts)
    (agent-released-p :initform nil
                      :accessor embodied-agent-agent-released-p)
+   (saved-conversation :initform nil
+                       :accessor embodied-agent-saved-conversation
+                       :documentation
+                       "The provider response a restored agent's conversation
+continues from, until its provider opens and takes it over (#9AONMH).")
    (body :initform nil :accessor gnome-body)
    (bubbles :initform '() :accessor gnome-bubbles
             :documentation "Bubble overlays, newest first.")
@@ -268,18 +273,26 @@ them from this registry.")
                   (= z (gnome-z agent))))
            *agents*))
 
+(defun make-embodied-agent (class session x y z &key (facing-yaw 0d0))
+  "Make one CLASS standing at X,Y,Z of SESSION, not yet in its world."
+  (make-instance class :session session :x x :y y :z z
+                       :facing-yaw (coerce facing-yaw 'double-float)
+                       :position
+                       (luvcraft::make-vec3 (+ x 0.5d0)
+                                            (coerce y 'double-float)
+                                            (+ z 0.5d0))))
+
+(defun install-embodied-agent (agent)
+  "Attach AGENT's semantic and render overlays to its session."
+  (ensure-embodied-agent-body agent)
+  (push agent *agents*)
+  (luvcraft:add-luvcraft-overlay (gnome-session agent) agent)
+  agent)
+
 (defun attach-embodied-agent (class session x y z &key (facing-yaw 0d0))
   "Make one CLASS at X,Y,Z and attach its semantic and render overlays."
-  (let ((agent (make-instance class :session session :x x :y y :z z
-                              :facing-yaw (coerce facing-yaw 'double-float)
-                              :position
-                              (luvcraft::make-vec3 (+ x 0.5d0)
-                                                   (coerce y 'double-float)
-                                                   (+ z 0.5d0)))))
-    (ensure-embodied-agent-body agent)
-    (push agent *agents*)
-    (luvcraft:add-luvcraft-overlay session agent)
-    agent))
+  (install-embodied-agent
+   (make-embodied-agent class session x y z :facing-yaw facing-yaw)))
 
 (defun find-agent (session x y z &optional (make-p t))
   "Find the embodied agent occupying integer cell X,Y,Z in SESSION.
@@ -592,6 +605,10 @@ candidate that loses to release or another publication is detached and closed."
            ;; Keep validation inside the cleanup extent: a buggy opener can
            ;; still have returned a live provider object of the wrong class.
            (check-type candidate world-agent)
+           ;; A restored agent picks its conversation up where it was saved.
+           (unless (openai:agent-response-id candidate)
+             (setf (openai:agent-response-id candidate)
+                   (embodied-agent-saved-conversation presence)))
            (setf (world-agent-presence candidate) presence
                  observer (make-gnome-observer presence))
            (add-agent-observer candidate observer)
@@ -1825,7 +1842,10 @@ is seen from its own eye line."
          ;; A gnome that forgot to SAY still gets heard.
          (unless (and (gnome-said gnome)
                       (> (gnome-said-at gnome) (turn-started object)))
-           (gnome-say gnome (turn-text object))))))))
+           (gnome-say gnome (turn-text object))))
+       ;; The conversation moved on; so should the saved world.
+       (alexandria:when-let ((session (gnome-session gnome)))
+         (luvcraft:request-luvcraft-session-checkpoint session))))))
 
 (defmethod luvcraft:refresh-luvcraft-overlay ((gnome embodied-agent) session)
   (declare (ignore session))
@@ -1924,10 +1944,11 @@ places."
       (error "Cell (~D ~D ~D) is occupied by terrain." x y z))
     (let ((existing (agent-at session x y z)))
       (cond ((null existing)
-             (attach-embodied-agent
-              class session x y z
-              ;; Facing back along the camera: toward whoever spawned it.
-              :facing-yaw (+ (luvcraft:camera-yaw camera) pi)))
+             (prog1 (attach-embodied-agent
+                     class session x y z
+                     ;; Facing back along the camera: toward whoever spawned it.
+                     :facing-yaw (+ (luvcraft:camera-yaw camera) pi))
+               (luvcraft:request-luvcraft-session-checkpoint session)))
             ((typep existing class) existing)
             (t (error "Cell (~D ~D ~D) is occupied by ~A."
                       x y z (embodied-agent-name existing)))))))

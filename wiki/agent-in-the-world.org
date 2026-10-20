@@ -256,6 +256,31 @@ functions by name, so a redefinition reaches agents already standing in the
 world; the stranded gnome was revived in place and recalled its plank square
 and the flowers it meant to grow there.
 
+* Gnomes and cats are inhabitants of the saved world
+:PROPERTIES:
+:ID: 9AONMH
+:END:
+
+A save (#TR2JNQ) now carries an optional =:inhabitants= list beside its
+world and resume state.  The core knows no inhabitant kinds: a system
+registers a describer on =*inhabitant-describers*= and specializes
+=restore-luvcraft-inhabitant= on its own keywords.  A gnome or cat is
+written as its cell, its heading, the response its conversation continues
+from (#PNGT18), and the last thing asked and said, which the card shows
+again on return.  The provider keeps the history; the save keeps only the
+name of where it stopped, so a gnome brought back in a later game is the
+same gnome mid-conversation.
+
+A description no loaded system restores -- because the agent system is not
+loaded, or restoring it failed -- is kept as written and saved again, never
+dropped; a failure is also reported.  Spawning and every finished turn
+request a checkpoint, so the conversation's place is durable as soon as it
+moves.  Old saves have no inhabitants and read as before.
+
+/Evidence./ 2026-10-20.  The gnome that built the plank square was written
+into the default world, the game was closed and played again, and asked
+whether it remembered, said what it had last been asked and what they built.
+
 * A proposal is a temporary possible world
 :PROPERTIES:
 :ID: Y7X7WK

@@ -248,13 +248,43 @@ per-instance ones such as films, which no palette would give back."
           :carried (mapcar #'block-save-description carried))))
 
 (defun make-luvcraft-save-description
-    (world &key camera player selected-block carried)
-  "Capture one immutable, printable checkpoint description.  See #TR2JNQ."
-  (list :luvcraft-world
-        :format-version +luvcraft-save-format-version+
-        :world (world-save-description world)
-        :resume (luvcraft-resume-save-description
-                 camera player selected-block carried)))
+    (world &key camera player selected-block carried inhabitants)
+  "Capture one immutable, printable checkpoint description.  See #TR2JNQ.
+
+INHABITANTS are the tagged descriptions of individuals living in the world,
+such as gnomes, written only when there are some."
+  (append
+   (list :luvcraft-world
+         :format-version +luvcraft-save-format-version+
+         :world (world-save-description world)
+         :resume (luvcraft-resume-save-description
+                  camera player selected-block carried))
+   (when inhabitants
+     (list :inhabitants inhabitants))))
+
+;;; Inhabitants are individuals living in the world that the core does not
+;;; know: gnomes and cats belong to the agent system.  Each system registers
+;;; a describer and specializes the restorer on its own kinds.  A description
+;;; no loaded system restores is kept as written and saved again, so playing
+;;; without a system never loses its inhabitants (#9AONMH).
+
+(defvar *inhabitant-describers* '()
+  "Functions of a session returning tagged descriptions of its inhabitants.")
+
+(defgeneric restore-luvcraft-inhabitant (kind session description)
+  (:documentation
+   "Bring back the inhabitant of keyword KIND from DESCRIPTION into SESSION.
+Return true if it was restored, or NIL to keep DESCRIPTION as written."))
+
+(defmethod restore-luvcraft-inhabitant ((kind t) session description)
+  (declare (ignore session description))
+  nil)
+
+(defun validate-inhabitant-descriptions (inhabitants)
+  (unless (listp inhabitants)
+    (invalid-luvcraft-save "Inhabitants must be a list, not ~S." inhabitants))
+  (dolist (inhabitant inhabitants inhabitants)
+    (tagged-description-values inhabitant "inhabitant")))
 
 (defun restore-luvcraft-resume-save-description (description)
   "Return CAMERA, PLAYER, selected block, and carried blocks restored from
@@ -299,7 +329,8 @@ DESCRIPTION."
            (mapcar #'restore-block-value carried))))))
 
 (defun restore-luvcraft-save-description (description)
-  "Return the world and resume description represented by DESCRIPTION."
+  "Return the world, resume description, and inhabitant descriptions
+represented by DESCRIPTION."
   (multiple-value-bind (kind fields)
       (tagged-description-values description "luvcraft save")
     (unless (eq kind :luvcraft-world)
@@ -310,7 +341,11 @@ DESCRIPTION."
             (description-value fields :world "luvcraft save"))
           (resume-description
             (description-value fields :resume "luvcraft save"
-                               :optional t :default nil)))
+                               :optional t :default nil))
+          (inhabitants
+            (validate-inhabitant-descriptions
+             (description-value fields :inhabitants "luvcraft save"
+                                :optional t :default nil))))
       (unless (eql version +luvcraft-save-format-version+)
         (invalid-luvcraft-save
          "Format version ~S is unsupported; expected ~D."
@@ -318,12 +353,14 @@ DESCRIPTION."
       (multiple-value-bind (world-kind world-fields)
           (tagged-description-values world-description "saved world")
         (values (restore-world-save-description world-kind world-fields)
-                resume-description)))))
+                resume-description
+                inhabitants)))))
 
 (defun read-luvcraft-save (pathname)
   "Read and validate one luvcraft save from PATHNAME.
 
-Return the restored world and its still-portable resume description."
+Return the restored world, its still-portable resume description, and its
+inhabitant descriptions."
   (with-open-file (stream pathname :direction :input :external-format :utf-8)
     (let ((*read-eval* nil)
           (*readtable* (copy-readtable nil))

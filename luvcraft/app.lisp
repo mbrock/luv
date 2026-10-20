@@ -35,6 +35,11 @@
    (world :initarg :world :reader luvcraft-session-world)
    (checkpoint-writer :initarg :checkpoint-writer :initform nil
                       :reader luvcraft-session-checkpoint-writer)
+   (retained-inhabitants :initform '()
+                         :accessor luvcraft-session-retained-inhabitants
+                         :documentation
+                         "Saved inhabitants no loaded system restored, kept
+as written so the next checkpoint saves them again.")
    (mesher :initarg :mesher :reader luvcraft-session-mesher)
    (production-system :initarg :production-system :initform nil
                       :reader luvcraft-session-production-system)
@@ -987,7 +992,30 @@ that path may run inside a frame whose command stream still borrows OVERLAY."
         :player (luvcraft-session-player session)
         :selected-block (luvcraft-session-selected-block session)
         :carried (block-inventory-carried-blocks
-                  (luvcraft-session-inventory session)))))))
+                  (luvcraft-session-inventory session))
+        :inhabitants (luvcraft-session-inhabitant-descriptions session))))))
+
+(defun luvcraft-session-inhabitant-descriptions (session)
+  "The tagged descriptions of everyone living in SESSION's world."
+  (append (luvcraft-session-retained-inhabitants session)
+          (loop for describer in *inhabitant-describers*
+                append (funcall describer session))))
+
+(defun restore-luvcraft-inhabitants (session inhabitants)
+  "Bring back saved INHABITANTS into SESSION, keeping those nobody restores.
+
+A failed restoration is reported and its description kept, never dropped."
+  (dolist (inhabitant inhabitants session)
+    (unless (handler-case
+                (restore-luvcraft-inhabitant
+                 (first inhabitant) session (rest inhabitant))
+              (error (condition)
+                (warn "Could not restore the ~(~A~) ~S: ~A"
+                      (first inhabitant) (rest inhabitant) condition)
+                nil))
+      (setf (luvcraft-session-retained-inhabitants session)
+            (append (luvcraft-session-retained-inhabitants session)
+                    (list inhabitant))))))
 
 (defun luvcraft-session-pipeline (session)
   (live-shader-pipeline-native-pipeline

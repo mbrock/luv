@@ -44,7 +44,7 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
     (error "A game is already playing; call STOP-PLAYING first."))
   (when tracy-p
     (start-luvcraft-tracy))
-  (multiple-value-bind (world resume-description)
+  (multiple-value-bind (world resume-description inhabitants)
       (load-or-make-luvcraft-world world-pathname)
     (multiple-value-bind (camera player selected-block carried)
         (restore-luvcraft-resume-save-description resume-description)
@@ -91,6 +91,8 @@ game for later SLY evaluations.  STOP-PLAYING checkpoints and closes it."
         (dolist (block carried)
           (add-block-to-inventory (luvcraft-session-inventory session) block 1))
         (relight-world-films session)
+        ;; Gnomes and cats come back where they stood, mid-conversation.
+        (restore-luvcraft-inhabitants session inhabitants)
         (setf *checkpoint-writer* writer
               *session* session)))))
 
