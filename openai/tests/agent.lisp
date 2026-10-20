@@ -81,3 +81,54 @@
                             (declare (ignore condition))
                             (invoke-restart 'openai:retry))))
                      (openai::ensure-api-key (openai:default-api-key)))))))
+
+;;; A scripted connection: each request is answered with the next canned
+;;; response from SCRIPT, so a turn's bookkeeping runs without a network.
+
+(defclass scripted-agent (openai:agent)
+  ((script :initarg :script :accessor scripted-agent-script)
+   (requests :initform '() :accessor scripted-agent-requests)))
+
+(defmethod openai::ensure-agent-connection ((agent scripted-agent))
+  agent)
+
+(defmethod openai::send-json ((agent scripted-agent) object)
+  (push object (scripted-agent-requests agent))
+  (dolist (event (pop (scripted-agent-script agent)))
+    (openai::enqueue-agent-event agent event)))
+
+(defun scripted-completion (id)
+  `((:type . "response.completed") (:response (:id . ,id))))
+
+(defun scripted-call (call-id)
+  `((:type . "response.output_item.done")
+    (:item (:type . "function_call") (:call-id . ,call-id)
+           (:name . "echo") (:arguments . "{}"))))
+
+(defun request-previous (request)
+  (cdr (assoc "previous_response_id" request :test #'string=)))
+
+(define-test failed-turn-keeps-the-conversation
+  (let ((agent (make-instance 'scripted-agent
+                              :model "gpt-5.6-terra" :socket nil
+                              :tools (list (make-instance 'echo-tool :name "echo"))
+                              :script '())))
+    ;; A finished turn becomes the conversation.
+    (setf (scripted-agent-script agent)
+          (list (list (scripted-completion "resp_1"))))
+    (openai:agent-turn agent "hello")
+    (true (string= "resp_1" (openai:agent-response-id agent)))
+    ;; A turn that calls a tool and then loses its connection must not leave
+    ;; the conversation at a response whose call has no output.
+    (setf (scripted-agent-script agent)
+          (list (list (scripted-call "call_1") (scripted-completion "resp_2"))
+                (list '(:closed 1006 "gone"))))
+    (fail (openai:agent-turn agent "build something") 'openai:agent-closed)
+    (true (string= "resp_2" (request-previous (first (scripted-agent-requests agent)))))
+    (true (string= "resp_1" (openai:agent-response-id agent)))
+    ;; The next turn continues from the last finished one.
+    (setf (scripted-agent-script agent)
+          (list (list (scripted-completion "resp_3"))))
+    (openai:agent-turn agent "what did I just ask?")
+    (true (string= "resp_1" (request-previous (first (scripted-agent-requests agent)))))
+    (true (string= "resp_3" (openai:agent-response-id agent)))))

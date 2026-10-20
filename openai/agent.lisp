@@ -75,7 +75,10 @@ object represented as a CL-JSON alist.  Specialize CALL-TOOL for behavior."))
                      :reader agent-reasoning-effort)
    (reasoning-summary :initarg :reasoning-summary :initform nil
                       :reader agent-reasoning-summary)
-   (socket :initarg :socket :reader agent-socket)
+   (socket :initarg :socket :initform nil :accessor agent-socket)
+   (url :initarg :url :initform nil :reader agent-url)
+   (api-key :initarg :api-key :initform nil :reader agent-api-key)
+   (connected-at :initform nil :accessor agent-connected-at)
    (events :initform '() :accessor agent-events)
    (event-lock :initform (sb-thread:make-mutex :name "OpenAI agent events")
                :reader agent-event-lock)
@@ -87,8 +90,11 @@ object represented as a CL-JSON alist.  Specialize CALL-TOOL for behavior."))
    (closed-p :initform nil :accessor agent-closed-p)
    (response-id :initform nil :accessor agent-response-id))
   (:documentation
-   "One persistent Responses WebSocket connection.  Turns are serialized;
-the websocket reader only queues events, so tools run in the caller's thread."))
+   "One persistent Responses conversation over a WebSocket connection.  Turns
+are serialized; the websocket reader only queues events, so tools run in the
+caller's thread.  The conversation outlives its connection: RESPONSE-ID names
+the last cleanly finished turn, and a turn that finds the connection gone or
+old opens a fresh one and continues from there."))
 
 (defgeneric handle-agent-event (agent event)
   (:documentation
@@ -148,30 +154,74 @@ HANDLE-AGENT-EVENT and CALL-TOOL on its own agent."
   (setf api-key (ensure-api-key api-key))
   (unless model
     (error 'openai-error :detail ":MODEL is required"))
-  (let* ((socket (websocket-driver:make-client
-                  url :additional-headers
-                  `(("authorization" . ,(format nil "Bearer ~A" api-key))
-                    ("content-type" . "application/json"))))
-         (agent (apply #'make-instance class
-                       :model model :instructions (or instructions "")
-                       :tools tools :reasoning-effort reasoning-effort
-                       :reasoning-summary reasoning-summary :socket socket
-                       initargs)))
-    (websocket-driver:on :message socket
-                         (lambda (message)
-                           (handler-case
-                               (enqueue-agent-event agent (decode-json message))
-                             (error (condition)
-                               (enqueue-agent-event agent
-                                                    (list :transport-error condition))))))
-    (websocket-driver:on :error socket
-                         (lambda (detail) (enqueue-agent-event agent
-                                                                 (list :transport-error detail))))
-    (websocket-driver:on :close socket
-                         (lambda (&key code reason)
-                           (enqueue-agent-event agent (list :closed code reason))))
+  (connect-agent
+   (apply #'make-instance class
+          :model model :instructions (or instructions "")
+          :tools tools :reasoning-effort reasoning-effort
+          :reasoning-summary reasoning-summary :url url :api-key api-key
+          initargs)))
+
+(defparameter *connection-lifetime* (* 55 60)
+  "Seconds after which a turn opens a fresh connection before starting.  The
+server ends Responses WebSockets at 60 minutes, which would otherwise land in
+the middle of some turn.")
+
+(defun connect-agent (agent)
+  "Open a fresh WebSocket for AGENT, replacing any previous one.
+
+Events from a replaced socket are dropped, so a late close or error from the
+old connection cannot end a turn on the new one."
+  (let ((socket (websocket-driver:make-client
+                 (agent-url agent)
+                 :additional-headers
+                 `(("authorization" . ,(format nil "Bearer ~A" (agent-api-key agent)))
+                   ("content-type" . "application/json")))))
+    (flet ((enqueue (event)
+             (when (eq socket (agent-socket agent))
+               (enqueue-agent-event agent event))))
+      (websocket-driver:on :message socket
+                           (lambda (message)
+                             (handler-case (enqueue (decode-json message))
+                               (error (condition)
+                                 (enqueue (list :transport-error condition))))))
+      (websocket-driver:on :error socket
+                           (lambda (detail) (enqueue (list :transport-error detail))))
+      (websocket-driver:on :close socket
+                           (lambda (&key code reason)
+                             (enqueue (list :closed code reason)))))
+    (let ((old (agent-socket agent)))
+      (sb-thread:with-mutex ((agent-event-lock agent))
+        (setf (agent-socket agent) socket
+              (agent-events agent) '()))
+      (when (and old (eq :open (websocket-driver:ready-state old)))
+        (ignore-errors
+         (websocket-driver:send old "" :type :close :code 1000))))
     (websocket-driver:start-connection socket)
+    (setf (agent-connected-at agent) (get-universal-time))
     agent))
+
+(defgeneric ensure-agent-connection (agent)
+  (:documentation "Prepare AGENT's connection for a new turn."))
+
+(defmethod ensure-agent-connection ((agent agent))
+  "Prepare AGENT's connection for a new turn.
+
+Nothing is in flight between turns, so anything queued since the last one --
+typically the server's connection-limit error and the close that follows -- is
+stale and discarded.  A connection that is gone or near its lifetime is
+replaced; the conversation continues under RESPONSE-ID either way."
+  (when (agent-closed-p agent)
+    (error 'agent-closed :detail "already closed"))
+  (sb-thread:with-mutex ((agent-event-lock agent))
+    (setf (agent-events agent) '()))
+  (let ((socket (agent-socket agent))
+        (connected-at (agent-connected-at agent)))
+    (unless (and socket
+                 (eq :open (websocket-driver:ready-state socket))
+                 connected-at
+                 (< (- (get-universal-time) connected-at) *connection-lifetime*))
+      (connect-agent agent)))
+  agent)
 
 (defun close-agent (agent)
   "Begin AGENT's normal WebSocket close handshake.
@@ -238,17 +288,16 @@ hyphens), so compare keys in their punctuation-free spelling."
                          "strict" t))
           tools))
 
-(defun response-create (agent input)
-  "A response.create event for INPUT, continuing from the agent's last
-response when it has one: the server keeps the conversation under the
+(defun response-create (agent input &optional (previous (agent-response-id agent)))
+  "A response.create event for INPUT, continuing from PREVIOUS, by default the
+agent's last finished turn: the server keeps the conversation under the
 previous response id, so each event carries only what is new."
   (append
    (list (cons "type" "response.create")
          (cons "model" (agent-model agent))
          (cons "instructions" (agent-instructions agent))
          (cons "input" input))
-   (let ((previous (agent-response-id agent)))
-     (if previous (list (cons "previous_response_id" previous)) '()))
+   (if previous (list (cons "previous_response_id" previous)) '())
    (list
          (cons "tools" (encoded-tools (agent-tools agent)))
          (cons "tool_choice" "auto")
@@ -266,7 +315,10 @@ previous response id, so each event carries only what is new."
                 (list (cons "type" "input_text")
                       (cons "text" text)))))))
 
-(defun send-json (agent object)
+(defgeneric send-json (agent object)
+  (:documentation "Send OBJECT as one JSON message on AGENT's connection."))
+
+(defmethod send-json ((agent agent) object)
   (when (agent-closed-p agent)
     (error 'agent-closed :detail "already closed"))
   (websocket-driver:send (agent-socket agent) (json-string object)))
@@ -330,12 +382,19 @@ Text and reasoning deltas reach HANDLE-AGENT-EVENT immediately in this
 calling thread.  Function calls run their TOOL here too, as their items
 complete; when the response completes with calls outstanding, a further
 response.create carries every function_call_output under the previous
-response id, and the loop continues until a response completes with none."
+response id, and the loop continues until a response completes with none.
+
+Only then does the turn become the agent's RESPONSE-ID.  A turn that fails
+part way, perhaps with function calls still unanswered, leaves the
+conversation where the last finished turn left it, so the next turn can
+still continue it."
   (sb-thread:with-mutex ((agent-turn-lock agent))
+    (ensure-agent-connection agent)
     (let ((text-output "") (reasoning-output "") (usage nil) (done nil)
+          (previous (agent-response-id agent))
           (items-with-text-deltas (make-hash-table :test #'equal))
           (outputs '()))
-      (send-json agent (response-create agent (user-input text)))
+      (send-json agent (response-create agent (user-input text) previous))
       (setf (agent-created-p agent) t)
       (loop until done
             for event = (next-agent-event agent)
@@ -343,7 +402,7 @@ response id, and the loop continues until a response completes with none."
                  ((and (consp event) (eq (first event) :transport-error))
                   (error 'agent-failed :detail (second event)))
                  ((and (consp event) (eq (first event) :closed))
-                  (setf (agent-closed-p agent) t)
+                  ;; The next turn reconnects unless CLOSE-AGENT ended AGENT.
                   (error 'agent-closed :detail (third event)))
                  (t
                   (handle-agent-event agent event)
@@ -377,13 +436,15 @@ response id, and the loop continues until a response completes with none."
                       (let ((response (json-value event :response)))
                         (when response
                           (let ((id (json-value response :id)))
-                            (when id (setf (agent-response-id agent) id)))
+                            (when id (setf previous id)))
                           (setf usage (json-value response :usage))))
                       (if outputs
                           (progn
-                            (send-json agent (response-create agent (reverse outputs)))
+                            (send-json agent (response-create
+                                              agent (reverse outputs) previous))
                             (setf outputs '()))
-                          (setf done t)))
+                          (setf done t
+                                (agent-response-id agent) previous)))
                      ((string= type "response.failed")
                       (error 'agent-failed :detail (json-value event :response)))
                      ((string= type "error")

@@ -234,6 +234,28 @@ version while the canvas never is.  A later duration bound can return a
 handle to the same action without changing either the command or movement
 protocol.
 
+* A conversation outlives its connection
+:PROPERTIES:
+:ID: PNGT18
+:END:
+
+Each gnome or cat keeps one provider agent for as long as it is in the
+world, so talking to the same figure again continues the same conversation:
+every turn is a =response.create= under =previous_response_id=, and the
+server holds the history.  The connection is not that durable.  The server
+ends a Responses WebSocket after sixty minutes, and the first gnome to stand
+in the world that long went mute: the limit error and the close sat queued,
+and every later question failed on them.
+
+So =response-id= names the last turn that /finished/ -- one that dies with a
+function call still unanswered would otherwise poison every continuation --
+and a turn begins by discarding anything queued since the last one and
+opening a fresh socket when the old one is gone or near its hour.  Events
+from a replaced socket are dropped.  The harness holds its turn and close
+functions by name, so a redefinition reaches agents already standing in the
+world; the stranded gnome was revived in place and recalled its plank square
+and the flowers it meant to grow there.
+
 * A proposal is a temporary possible world
 :PROPERTIES:
 :ID: Y7X7WK

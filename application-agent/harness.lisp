@@ -51,9 +51,9 @@
                 (sb-thread:make-waitqueue
                  :name "application agent provider closed")
                 :reader application-agent-close-ready)
-   (turn-function :initarg :turn-function :initform #'openai:agent-turn
+   (turn-function :initarg :turn-function :initform 'openai:agent-turn
                   :reader application-agent-turn-function)
-   (close-function :initarg :close-function :initform #'openai:close-agent
+   (close-function :initarg :close-function :initform 'openai:close-agent
                    :reader application-agent-close-function)
    (close-failure-function
     :initarg :close-failure-function :initform #'warn
