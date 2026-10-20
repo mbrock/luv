@@ -570,7 +570,9 @@ rendering beside the photos at matching views and changing one thing.
   sits on the same side in both eyes.  The upper lids are a felt shell cut
   along a nearly level line and joined to the face; a hard-edged shell read
   as a visor, a line tipped down at the outer corner read as sorrow, and a
-  low line read as boredom.
+  low line read as boredom.  The eyeballs are upright ovals,
+  =fantus-eye-oval= tall (1.25 by default), with iris and pupil taken on the
+  unit sphere the oval is stretched from so they stretch with it.
 - The ears are paddles, not discs, tilted 34 degrees with the broad top
   outward and the narrow bottom tucked against the cheek.  The cup pressed
   into each must not be cut with the usual ellipsoid approximation, whose
@@ -586,11 +588,13 @@ rendering beside the photos at matching views and changing one thing.
 
 Everything above the neck is drawn in =fantus-head-point='s frame, so the
 =fantus-head-size= knob grows face, mask, and ears together.  The =:fantus=
-metabar group also has ear size and spread, the lid line, and how far the
-smile is parted.  Because the shader language inlines every call, the
+metabar group also has ear size and spread, eye shape, the lid line, and how
+far the smile is parted.  Because the shader language inlines every call, the
 fragment program is about 2.4 times the cat's in WGSL; Dawn accepts it.
 
 [[file:images/fantus-orbit.webp]]
+
+[[file:images/fantus-face.webp]]
 
 * DONE Discrete destinations, continuously embodied
 :PROPERTIES:

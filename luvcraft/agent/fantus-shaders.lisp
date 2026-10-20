@@ -20,6 +20,9 @@
 (defparameter *fantus-ear-spread* 0.45
   "How far the ears' cups turn from straight forward toward the sides.")
 
+(defparameter *fantus-eye-oval* 1.25
+  "How much taller than wide Fantus's eyes are; 1 is round.")
+
 (defparameter *fantus-eyelid* 0.74
   "Where the peach upper lid's edge crosses the eye, in eye radii above its
 centre; lower is sleepier, and the puppet's own look is near 0.1.")
@@ -52,6 +55,9 @@ centre; lower is sleepier, and the puppet's own look is near 0.1.")
   (define-fantus-knob fantus-ear-spread *fantus-ear-spread*
     :figure-proportion 0.0 1.20 0.01
     "How far the ear cups turn outward from facing forward, in radians.")
+  (define-fantus-knob fantus-eye-oval *fantus-eye-oval*
+    :figure-proportion 0.85 1.60 0.01
+    "How much taller than wide Fantus's eyes are; 1 is round.")
   (define-fantus-knob fantus-eyelid *fantus-eyelid*
     :figure-proportion -0.60 0.90 0.01
     "The eyelid line on the eye, in eye radii; lower is sleepier.")
@@ -196,10 +202,14 @@ vertical miss divided by its slope's secant, a lower bound near the curve."
 
 (define-shader-function fantus-eye-center () (vec3 0.188 1.050 0.205))
 
+(define-shader-function fantus-eye-radii ()
+  "The eyeball's half-extents: upright ovals, FANTUS-EYE-OVAL tall."
+  (vec3 0.076 (* 0.076 fantus-eye-oval) 0.076))
+
 (define-shader-function fantus-eye-distance (point)
-  "Two large eyeballs set into the mask, protruding a third of their radius."
-  (* (gnome-sphere-distance (fantus-mirrored (fantus-head-point point))
-                            (fantus-eye-center) 0.082)
+  "Two large upright oval eyeballs set into the mask, protruding a third."
+  (* (gnome-ellipsoid-distance (fantus-mirrored (fantus-head-point point))
+                               (fantus-eye-center) (fantus-eye-radii))
      fantus-head-size))
 
 (define-shader-function fantus-lid-distance (point)
@@ -210,9 +220,11 @@ little toward the outer corner -- tipped the other way it reads as sorrow --
 and the shell is joined to the face so the lid is skin, not a visor."
   (let* ((eye (- (fantus-mirrored (fantus-head-point point))
                  (fantus-eye-center)))
-         (shell (- (gnome-length eye) 0.0875))
+         (shell (gnome-ellipsoid-distance
+                 eye (vec3 0.0 0.0 0.0)
+                 (+ (fantus-eye-radii) (vec3 0.0055 0.0055 0.0055))))
          (line (- (- (swizzle eye :y) (* 0.05 (swizzle eye :x)))
-                  (* fantus-eyelid 0.082))))
+                  (* fantus-eyelid (swizzle (fantus-eye-radii) :y)))))
     (* (fantus-smooth-intersection shell (- line) 0.012) fantus-head-size)))
 
 (define-shader-function fantus-head-distance (point)
@@ -397,7 +409,11 @@ drawn in the head frame, projected along Z, so they hold at any head size."
          (band (fantus-inside-ellipse (- face-xy (vec2 0.0 1.100))
                                       (vec2 0.322 0.160) 0.025))
          (lobe (fantus-inside-ellipse (- face-xy (vec2 0.188 1.044))
-                                      (vec2 0.145 0.135) 0.03))
+                                      (vec2 0.142
+                                            (+ 0.135
+                                               (* 0.076
+                                                  (- fantus-eye-oval 1.0))))
+                                      0.03))
          (arch (fantus-inside-ellipse (- face-xy (vec2 0.0 0.935))
                                       (vec2 0.108 0.178) 0.04))
          (mask (* front (* (max band lobe) (- 1.0 arch))))
@@ -421,7 +437,10 @@ one studio key light would put it in both eyes -- the eyes are folded onto
 one side, so the light's side is unfolded by the sign of X -- and keeps the
 eyes alive under any sun."
   (let* ((head (fantus-head-point point))
-         (eye (normalize (- (fantus-mirrored head) (fantus-eye-center))))
+         ;; Directions are taken on the unit sphere the oval eye is stretched
+         ;; from, so iris and pupil stretch with it.
+         (eye (normalize (/ (- (fantus-mirrored head) (fantus-eye-center))
+                            (fantus-eye-radii))))
          (side (- (* 2.0 (step 0.0 (swizzle head :x))) 1.0))
          (gaze (normalize (vec3 0.10 -0.04 1.0)))
          (away (gnome-length (- eye gaze)))
