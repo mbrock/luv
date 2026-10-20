@@ -16,6 +16,9 @@
    (extent :initform nil :accessor canvas-extent)
    (format :initform nil :accessor canvas-format)
    (current-texture :initform nil :accessor metal-canvas-current-texture)
+   (residency-queue :initform nil :accessor metal-canvas-residency-queue
+                    :documentation
+                    "The queue holding the layer's drawable residency set.")
    (state :initform :unconfigured :accessor canvas-context-state)))
 
 (defmethod context-device ((context metal-canvas-context))
@@ -89,6 +92,15 @@
            (native-format
              (metal-pixel-format (canvas-configuration-format configuration))))
       (luv.metal:set-layer-device layer (metal-native-object device))
+      ;; A Metal 4 queue makes nothing resident on its own, drawables
+      ;; included; the layer keeps them in a set of its own for the queue to
+      ;; hold.  Without it a composited window still happens to show its
+      ;; frames, but full screen scans drawables out directly and freezes on
+      ;; whichever two or three it last managed to show.
+      (let ((queue (metal-native-object (device-queue device))))
+        (luv.metal:add-metal-queue-residency-set
+         queue (luv.metal:layer-residency-set layer))
+        (setf (metal-canvas-residency-queue context) queue))
       (luv.metal:set-layer-pixel-format layer native-format)
       ;; A render-only drawable can remain framebuffer-only. Copies need the
       ;; broader CAMetalLayer texture contract used by captures and luvcraft.
@@ -120,6 +132,10 @@
   (when (eq :in-frame (canvas-context-state context))
     (ensure-metal-canvas-state context :unconfigure :configured))
   (unless (member (canvas-context-state context) '(:unconfigured :destroyed))
+    (let ((queue (shiftf (metal-canvas-residency-queue context) nil)))
+      (when queue
+        (luv.metal:remove-metal-queue-residency-set
+         queue (luv.metal:layer-residency-set (metal-canvas-layer context)))))
     (luv.metal:set-layer-device (metal-canvas-layer context) nil)
     (setf (metal-canvas-current-texture context) nil
           (canvas-context-configuration context) nil

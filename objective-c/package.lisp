@@ -136,6 +136,7 @@
            #:signal-drawable
            #:present-drawable
            #:set-layer-device
+           #:layer-residency-set
            #:set-layer-pixel-format
            #:set-layer-framebuffer-only
            #:layer-pixel-format

@@ -1265,6 +1265,9 @@ entry per color attachment, as for COMPILE-METAL-4-RENDER-PIPELINE."
     ("setDevice:" :void)
   (device :object))
 
+(objc:define-objective-c-message layer-residency-set
+    ("residencySet" :object :ownership :borrowed :class "MTLResidencySet"))
+
 (objc:define-objective-c-message set-layer-pixel-format
     ("setPixelFormat:" :void)
   (pixel-format :uint64))
