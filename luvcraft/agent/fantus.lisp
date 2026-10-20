@@ -6,7 +6,7 @@
 
 (defparameter *fantus-name* "Fantus")
 (defparameter *fantus-body-centre* 0.66)
-(defparameter *fantus-face-height* 1.00)
+(defparameter *fantus-face-height* 1.04)
 (defparameter *fantus-audience-distance* 2.6)
 
 (defclass fantus (embodied-agent) ()
@@ -25,7 +25,7 @@
 
 (defun fantus-figure-height ()
   "The top of Fantus's head in figure space."
-  (+ 1.04 (* 0.285 (fantus-head-scale))))
+  (+ 1.00 (* 0.32 (fantus-head-scale))))
 
 (defun fantus-figure-radius ()
   "A conservative sphere about the body centre following the head and ear knobs.
@@ -34,14 +34,16 @@ The ear's farthest felt is bounded by its hinge plus its long radius, which
 holds whatever way the spread and roll turn it."
   (let* ((head (fantus-head-scale))
          (ear (float luvcraft.shaders::*fantus-ear-size* 1.0))
-         (ear-reach-x (* head (+ 0.235 (* 0.18 ear) (* 0.24 ear))))
-         (ear-reach-y (+ (- 1.04 *fantus-body-centre*)
-                         (* head (+ 0.04 (* 0.24 ear))))))
+         ;; Hinge and centre from FANTUS-EAR-POINT, plus the ear's longest
+         ;; radius after the paddle widening.
+         (ear-reach-x (* head (+ 0.290 (* 0.200 ear) (* 0.33 ear))))
+         (ear-reach-y (+ (- 1.00 *fantus-body-centre*)
+                         (* head (+ 0.045 (* 0.33 ear))))))
     (+ 0.05
        (max (- (fantus-figure-height) *fantus-body-centre*)
             (sqrt (+ (* ear-reach-x ear-reach-x)
                      (* ear-reach-y ear-reach-y)))
-            ;; Hooves at the end of the legs.
+            ;; Feet at the end of the legs.
             0.80))))
 
 (defmethod embodied-agent-name ((fantus fantus))

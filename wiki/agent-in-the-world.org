@@ -540,27 +540,55 @@ faults; every repaint here happens at the frame boundary.
 =fantus= is NRK's purple felt toddler, Fantorangen's little sibling, as a
 third embodied kind beside the gnome and the cat (#V9DHV5).  It shares their
 conversation, travel, and save surface (#9AONMH, as =:fantus=) and brings its
-own fragment program, =:fantus-sdf=.  The reference was the NRK puppet as
-Sceneweb photographs it: a big round head under a peach eye mask, a snout
-ending in a peach dot, an open smile with a tongue, two enormous cupped ears,
-a thin neck, a peach chest, a white nappy hemmed in green, a yellow dummy,
-three-fingered hands, and hooves.  It sits as a toddler does, legs out along
-the ground.
+own fragment program, =:fantus-sdf=.  Every part is an ellipsoid, capsule,
+round cone, or ring, so an SDF suits it better than a loaded mesh would.
 
-Every part is an ellipsoid, capsule, or ring, so SDF suits it better than a
-loaded mesh would; nothing here wanted Blender.  Two lessons came out of the
-first renders.  The ears are paddles, not discs: the ear frame divides its
-width by a factor that grows with height, so the felt is narrow where it is
-sewn on and broad where it flops.  And the cup pressed into each ear must not
-be cut with the usual ellipsoid approximation, whose value goes to zero at
-the ellipsoid's centre: subtracted, that made phantom specks in the middle of
-the cup.  =fantus-scaled-ellipsoid-distance= scales the unit-sphere distance
-by the smallest radius, a lower bound inside as well as out.
+/References./  The character exists as a felt TV puppet, a licensed plush,
+and NRK's 3D animated figure.  The first model followed the puppet photos on
+Sceneweb and came out as a small round head on a long neck; the puppet's
+neck is a puppeteer's convenience.  The plush and the 3D figure agree with
+each other and became the reference.  Measured on the seated plush, with the
+ground at 0 and the top of the head at 1.32: the head is nearly half the
+figure and a fifth wider than it is tall, the ears together span twice its
+width and reach from its crown to its chin, the arms are long enough to rest
+the hands on the ground, and the nappy comes up to 0.41.  The puppet keeps
+one thing: the yellow dummy.
+
+/What the comparison taught, part by part./  Each item was found by
+rendering beside the photos at matching views and changing one thing.
+
+- The mask is a broad band across the upper face with a lobe round each eye;
+  the purple of the trunk rises into it as an arch.  Projected along Z it
+  wrapped over the crown, so it is cut sharply where the face turns away.
+- The trunk is a ringed round cone along a tilted axis, cut flat, with a
+  peach oval inset in a purple hem at its end -- the plush's peach tip and
+  the puppet's peach dot are the same mark at different sizes.
+- The smile is a cavity, not paint: a slot along a parabola under the trunk,
+  parted in the middle by =fantus-smile=.  Opened as wide as the puppet's
+  mouth it read as a shout; the plush and 3D figure only part their lips.
+- The eyes are white with olive-hazel irises and a painted catchlight that
+  sits on the same side in both eyes.  The upper lids are a felt shell cut
+  along a nearly level line and joined to the face; a hard-edged shell read
+  as a visor, a line tipped down at the outer corner read as sorrow, and a
+  low line read as boredom.
+- The ears are paddles, not discs, tilted 34 degrees with the broad top
+  outward and the narrow bottom tucked against the cheek.  The cup pressed
+  into each must not be cut with the usual ellipsoid approximation, whose
+  value goes to zero at the centre: subtracted, that made phantom specks in
+  the cup.  =fantus-scaled-ellipsoid-distance= is a lower bound inside too.
+- The cheeks under the mask are narrower than the skull; full width made a bun.
+- The nappy's waistband is green where the nappy's distance is close to the
+  body's, not at a fixed height, because its top is buried in the torso.  A
+  green-edged tab with a button sits on each front hip.
+- The soles carry the plush's cream cloven print: two toe ellipses leaning
+  together so they close to a point below and part in a notch above.  Side by
+  side and upright they looked like a pair of eyes.
 
 Everything above the neck is drawn in =fantus-head-point='s frame, so the
-=fantus-head-size= knob grows the face, mask, and ears together.  The
-=:fantus= metabar group also has ear size and spread, the sleepy eyelid line,
-and the width of the smile.
+=fantus-head-size= knob grows face, mask, and ears together.  The =:fantus=
+metabar group also has ear size and spread, the lid line, and how far the
+smile is parted.  Because the shader language inlines every call, the
+fragment program is about 2.4 times the cat's in WGSL; Dawn accepts it.
 
 [[file:images/fantus-orbit.webp]]
 

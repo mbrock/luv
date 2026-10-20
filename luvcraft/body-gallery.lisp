@@ -32,7 +32,7 @@
                        :id "fantus" :label "Fantus" :role :fantus-sdf
                        ;; Covers FANTUS-FIGURE-RADIUS at the largest head and
                        ;; ear knobs.
-                       :knob-group :fantus :center-height 0.66 :radius 1.25)))
+                       :knob-group :fantus :center-height 0.66 :radius 1.60)))
 
 (defun web-body-types ()
   "The ordered body catalog shown by the web gallery."
