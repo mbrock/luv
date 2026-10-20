@@ -387,70 +387,94 @@ response id, and the loop continues until a response completes with none.
 Only then does the turn become the agent's RESPONSE-ID.  A turn that fails
 part way, perhaps with function calls still unanswered, leaves the
 conversation where the last finished turn left it, so the next turn can
-still continue it."
+still continue it.
+
+A conversation the server no longer has -- a response id saved with the
+world and offered to a new connection, which unstored responses do not
+survive -- cannot be continued at all.  The turn then forgets it and starts
+the conversation afresh, rather than failing on the same id forever."
   (sb-thread:with-mutex ((agent-turn-lock agent))
-    (ensure-agent-connection agent)
-    (let ((text-output "") (reasoning-output "") (usage nil) (done nil)
-          (previous (agent-response-id agent))
-          (items-with-text-deltas (make-hash-table :test #'equal))
-          (outputs '()))
-      (send-json agent (response-create agent (user-input text) previous))
-      (setf (agent-created-p agent) t)
-      (loop until done
-            for event = (next-agent-event agent)
-            do (cond
-                 ((and (consp event) (eq (first event) :transport-error))
-                  (error 'agent-failed :detail (second event)))
-                 ((and (consp event) (eq (first event) :closed))
-                  ;; The next turn reconnects unless CLOSE-AGENT ended AGENT.
-                  (error 'agent-closed :detail (third event)))
-                 (t
-                  (handle-agent-event agent event)
-                  (let ((type (json-value event :type)))
-                    (cond
-                     ((string= type "response.output_text.delta")
-                      (setf (gethash (json-value event :item-id)
-                                     items-with-text-deltas)
-                            t)
-                      (setf text-output
-                            (append-string text-output (json-value event :delta))))
-                     ((or (string= type "response.reasoning_summary_text.delta")
-                          (string= type "response.reasoning_text.delta"))
-                      (setf reasoning-output
-                            (append-string reasoning-output (json-value event :delta))))
-                     ((and (string= type "response.output_item.done")
-                           (let ((item (json-value event :item)))
-                             (and item (string= (json-value item :type) "function_call"))))
-                      (push (tool-result agent (json-value event :item)) outputs))
-                     ((and (string= type "response.output_item.done")
-                           (let ((item (json-value event :item)))
-                             (and item (string= (json-value item :type) "message"))))
-                      (setf text-output
-                            (let ((item (json-value event :item)))
-                              (if (gethash (json-value item :id)
-                                           items-with-text-deltas)
-                                  text-output
-                                  (append-string text-output
-                                                 (output-item-text item))))))
-                     ((member type '("response.completed" "response.done") :test #'string=)
-                      (let ((response (json-value event :response)))
-                        (when response
-                          (let ((id (json-value response :id)))
-                            (when id (setf previous id)))
-                          (setf usage (json-value response :usage))))
-                      (if outputs
-                          (progn
-                            (send-json agent (response-create
-                                              agent (reverse outputs) previous))
-                            (setf outputs '()))
-                          (setf done t
-                                (agent-response-id agent) previous)))
-                     ((string= type "response.failed")
-                      (error 'agent-failed :detail (json-value event :response)))
-                     ((string= type "error")
-                      (error 'agent-failed :detail (or (json-value event :error) event))))))))
-      (make-instance 'agent-response :text text-output :reasoning reasoning-output
-                     :id (agent-response-id agent) :usage usage))))
+    (loop
+      (block attempt
+        (handler-bind
+            ((agent-failed
+               (lambda (condition)
+                 (when (and (agent-response-id agent)
+                            (previous-response-missing-p condition))
+                   (setf (agent-response-id agent) nil)
+                   (return-from attempt)))))
+          (return (run-agent-turn agent text)))))))
+
+(defun previous-response-missing-p (condition)
+  "Whether CONDITION is the server saying the turn's previous response is gone."
+  (let ((detail (openai-error-detail condition)))
+    (and (consp detail)
+         (equal (json-value detail :code) "previous_response_not_found"))))
+
+(defun run-agent-turn (agent text)
+  "Run one turn of AGENT-TURN, holding AGENT's turn lock."
+  (ensure-agent-connection agent)
+  (let ((text-output "") (reasoning-output "") (usage nil) (done nil)
+        (previous (agent-response-id agent))
+        (items-with-text-deltas (make-hash-table :test #'equal))
+        (outputs '()))
+    (send-json agent (response-create agent (user-input text) previous))
+    (setf (agent-created-p agent) t)
+    (loop until done
+          for event = (next-agent-event agent)
+          do (cond
+               ((and (consp event) (eq (first event) :transport-error))
+                (error 'agent-failed :detail (second event)))
+               ((and (consp event) (eq (first event) :closed))
+                ;; The next turn reconnects unless CLOSE-AGENT ended AGENT.
+                (error 'agent-closed :detail (third event)))
+               (t
+                (handle-agent-event agent event)
+                (let ((type (json-value event :type)))
+                  (cond
+                   ((string= type "response.output_text.delta")
+                    (setf (gethash (json-value event :item-id)
+                                   items-with-text-deltas)
+                          t)
+                    (setf text-output
+                          (append-string text-output (json-value event :delta))))
+                   ((or (string= type "response.reasoning_summary_text.delta")
+                        (string= type "response.reasoning_text.delta"))
+                    (setf reasoning-output
+                          (append-string reasoning-output (json-value event :delta))))
+                   ((and (string= type "response.output_item.done")
+                         (let ((item (json-value event :item)))
+                           (and item (string= (json-value item :type) "function_call"))))
+                    (push (tool-result agent (json-value event :item)) outputs))
+                   ((and (string= type "response.output_item.done")
+                         (let ((item (json-value event :item)))
+                           (and item (string= (json-value item :type) "message"))))
+                    (setf text-output
+                          (let ((item (json-value event :item)))
+                            (if (gethash (json-value item :id)
+                                         items-with-text-deltas)
+                                text-output
+                                (append-string text-output
+                                               (output-item-text item))))))
+                   ((member type '("response.completed" "response.done") :test #'string=)
+                    (let ((response (json-value event :response)))
+                      (when response
+                        (let ((id (json-value response :id)))
+                          (when id (setf previous id)))
+                        (setf usage (json-value response :usage))))
+                    (if outputs
+                        (progn
+                          (send-json agent (response-create
+                                            agent (reverse outputs) previous))
+                          (setf outputs '()))
+                        (setf done t
+                              (agent-response-id agent) previous)))
+                   ((string= type "response.failed")
+                    (error 'agent-failed :detail (json-value event :response)))
+                   ((string= type "error")
+                    (error 'agent-failed :detail (or (json-value event :error) event))))))))
+    (make-instance 'agent-response :text text-output :reasoning reasoning-output
+                   :id (agent-response-id agent) :usage usage)))
 
 (defun append-string (string suffix)
   (if suffix

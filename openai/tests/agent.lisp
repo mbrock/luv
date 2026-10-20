@@ -132,3 +132,26 @@
     (openai:agent-turn agent "what did I just ask?")
     (true (string= "resp_1" (request-previous (first (scripted-agent-requests agent)))))
     (true (string= "resp_3" (openai:agent-response-id agent)))))
+
+(define-test missing-conversation-starts-afresh
+  ;; A response id saved with the world outlives the server's memory of it.
+  (let ((agent (make-instance 'scripted-agent
+                              :model "gpt-5.6-terra" :socket nil
+                              :script
+                              (list (list '((:type . "error")
+                                            (:error
+                                             (:type . "invalid_request_error")
+                                             (:code . "previous_response_not_found"))))
+                                    (list (scripted-completion "resp_9"))))))
+    (setf (openai:agent-response-id agent) "resp_gone")
+    (openai:agent-turn agent "hello again")
+    (destructuring-bind (fresh stale) (scripted-agent-requests agent)
+      (true (string= "resp_gone" (request-previous stale)))
+      (false (request-previous fresh)))
+    (true (string= "resp_9" (openai:agent-response-id agent)))
+    ;; Any other failure still ends the turn and keeps the conversation.
+    (setf (scripted-agent-script agent)
+          (list (list '((:type . "error")
+                        (:error (:type . "server_error") (:code . "overloaded"))))))
+    (fail (openai:agent-turn agent "again") 'openai:agent-failed)
+    (true (string= "resp_9" (openai:agent-response-id agent)))))
