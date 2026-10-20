@@ -570,9 +570,10 @@ rendering beside the photos at matching views and changing one thing.
   sits on the same side in both eyes.  The upper lids are a felt shell cut
   along a nearly level line and joined to the face; a hard-edged shell read
   as a visor, a line tipped down at the outer corner read as sorrow, and a
-  low line read as boredom.  The eyeballs are upright ovals,
-  =fantus-eye-oval= tall (1.25 by default), with iris and pupil taken on the
-  unit sphere the oval is stretched from so they stretch with it.
+  low line read as boredom.  The eyeballs are wide ovals,
+  =fantus-eye-oval= as tall as they are wide (0.78 by default); upright
+  ovals were tried first and looked startled.  Iris and pupil are taken on
+  the unit sphere the oval is stretched from, so they stretch with it.
 - The ears are paddles, not discs, tilted 34 degrees with the broad top
   outward and the narrow bottom tucked against the cheek.  The cup pressed
   into each must not be cut with the usual ellipsoid approximation, whose

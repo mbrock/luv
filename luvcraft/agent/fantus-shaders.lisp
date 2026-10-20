@@ -20,8 +20,8 @@
 (defparameter *fantus-ear-spread* 0.45
   "How far the ears' cups turn from straight forward toward the sides.")
 
-(defparameter *fantus-eye-oval* 1.25
-  "How much taller than wide Fantus's eyes are; 1 is round.")
+(defparameter *fantus-eye-oval* 0.78
+  "Fantus's eye height over its width; below 1 the eyes are wide ovals.")
 
 (defparameter *fantus-eyelid* 0.74
   "Where the peach upper lid's edge crosses the eye, in eye radii above its
@@ -56,8 +56,8 @@ centre; lower is sleepier, and the puppet's own look is near 0.1.")
     :figure-proportion 0.0 1.20 0.01
     "How far the ear cups turn outward from facing forward, in radians.")
   (define-fantus-knob fantus-eye-oval *fantus-eye-oval*
-    :figure-proportion 0.85 1.60 0.01
-    "How much taller than wide Fantus's eyes are; 1 is round.")
+    :figure-proportion 0.55 1.40 0.01
+    "Fantus's eye height over its width; 1 is round, below 1 wide.")
   (define-fantus-knob fantus-eyelid *fantus-eyelid*
     :figure-proportion -0.60 0.90 0.01
     "The eyelid line on the eye, in eye radii; lower is sleepier.")
@@ -203,11 +203,11 @@ vertical miss divided by its slope's secant, a lower bound near the curve."
 (define-shader-function fantus-eye-center () (vec3 0.188 1.050 0.205))
 
 (define-shader-function fantus-eye-radii ()
-  "The eyeball's half-extents: upright ovals, FANTUS-EYE-OVAL tall."
-  (vec3 0.076 (* 0.076 fantus-eye-oval) 0.076))
+  "The eyeball's half-extents: wide ovals, FANTUS-EYE-OVAL as tall as wide."
+  (vec3 0.086 (* 0.086 fantus-eye-oval) 0.076))
 
 (define-shader-function fantus-eye-distance (point)
-  "Two large upright oval eyeballs set into the mask, protruding a third."
+  "Two large wide oval eyeballs set into the mask, protruding a third."
   (* (gnome-ellipsoid-distance (fantus-mirrored (fantus-head-point point))
                                (fantus-eye-center) (fantus-eye-radii))
      fantus-head-size))
@@ -409,10 +409,8 @@ drawn in the head frame, projected along Z, so they hold at any head size."
          (band (fantus-inside-ellipse (- face-xy (vec2 0.0 1.100))
                                       (vec2 0.322 0.160) 0.025))
          (lobe (fantus-inside-ellipse (- face-xy (vec2 0.188 1.044))
-                                      (vec2 0.142
-                                            (+ 0.135
-                                               (* 0.076
-                                                  (- fantus-eye-oval 1.0))))
+                                      (+ (vec2 0.066 0.059)
+                                         (swizzle (fantus-eye-radii) :xy))
                                       0.03))
          (arch (fantus-inside-ellipse (- face-xy (vec2 0.0 0.935))
                                       (vec2 0.108 0.178) 0.04))
