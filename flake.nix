@@ -557,6 +557,15 @@
             # includes the Lisp compiler; source paths remain distinct below it.
             export ASDF_OUTPUT_TRANSLATIONS="/:''${XDG_CACHE_HOME:-$HOME/.cache}/common-lisp/luv/$LUV_ASDF_CACHE_KEY/:"
 
+            # Without XDG_RUNTIME_DIR (macOS), Swash keeps its live sessions
+            # under $TMPDIR, and every `nix develop` gets a fresh TMPDIR.  A
+            # Lisp started by one launcher would be invisible to the next
+            # one's stop or restart, so give them all one stable directory.
+            if [ -z "''${SWASH_RUNTIME_DIR:-}" ] \
+              && [ -z "''${XDG_RUNTIME_DIR:-}" ]; then
+              export SWASH_RUNTIME_DIR="/tmp/swash-$(${pkgs.coreutils}/bin/id -un)"
+            fi
+
             if [ -n "''${LUV_PROJECT_ROOT:-}" ]; then
               case ":''${CL_SOURCE_REGISTRY:-}:" in
                 *:"$LUV_PROJECT_ROOT/":*) ;;
