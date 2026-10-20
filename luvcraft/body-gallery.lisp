@@ -27,7 +27,12 @@
         (make-instance 'web-body-type
                        :id "cat" :label "Cat" :role :cat-sdf
                        ;; Covers CAT-FIGURE-RADIUS throughout its knob ranges.
-                       :knob-group :cat :center-height 0.64 :radius 1.16)))
+                       :knob-group :cat :center-height 0.64 :radius 1.16)
+        (make-instance 'web-body-type
+                       :id "fantus" :label "Fantus" :role :fantus-sdf
+                       ;; Covers FANTUS-FIGURE-RADIUS at the largest head and
+                       ;; ear knobs.
+                       :knob-group :fantus :center-height 0.66 :radius 1.25)))
 
 (defun web-body-types ()
   "The ordered body catalog shown by the web gallery."

@@ -76,10 +76,10 @@
    #:agent-terminal-display #:open-agent-wall #:com-open-agent-wall
    #:ansi-view #:+ansi-view+
    ;; Embodied agents
-   #:embodied-agent #:gnome #:cat
+   #:embodied-agent #:gnome #:cat #:fantus
    #:embodied-agent-pending-approval
    #:*agents* #:agents-in-session #:find-agent #:spawn-agent
-   #:find-cat #:spawn-cat
+   #:find-cat #:spawn-cat #:find-fantus #:spawn-fantus
    #:gnome-say #:gnome-agent #:com-say
-   #:com-spawn-agent #:com-spawn-cat
+   #:com-spawn-agent #:com-spawn-cat #:com-spawn-fantus
    #:*current-agent* #:world-agent-presence))

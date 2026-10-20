@@ -532,6 +532,38 @@ observer posts notes to the gnome's mailbox; the gnome's own
 and lines.  Repainting a mirror from any other thread races the frame and
 faults; every repaint here happens at the frame boundary.
 
+* Fantus is a third body, sewn from felt
+:PROPERTIES:
+:ID: JGEQ4U
+:END:
+
+=fantus= is NRK's purple felt toddler, Fantorangen's little sibling, as a
+third embodied kind beside the gnome and the cat (#V9DHV5).  It shares their
+conversation, travel, and save surface (#9AONMH, as =:fantus=) and brings its
+own fragment program, =:fantus-sdf=.  The reference was the NRK puppet as
+Sceneweb photographs it: a big round head under a peach eye mask, a snout
+ending in a peach dot, an open smile with a tongue, two enormous cupped ears,
+a thin neck, a peach chest, a white nappy hemmed in green, a yellow dummy,
+three-fingered hands, and hooves.  It sits as a toddler does, legs out along
+the ground.
+
+Every part is an ellipsoid, capsule, or ring, so SDF suits it better than a
+loaded mesh would; nothing here wanted Blender.  Two lessons came out of the
+first renders.  The ears are paddles, not discs: the ear frame divides its
+width by a factor that grows with height, so the felt is narrow where it is
+sewn on and broad where it flops.  And the cup pressed into each ear must not
+be cut with the usual ellipsoid approximation, whose value goes to zero at
+the ellipsoid's centre: subtracted, that made phantom specks in the middle of
+the cup.  =fantus-scaled-ellipsoid-distance= scales the unit-sphere distance
+by the smallest radius, a lower bound inside as well as out.
+
+Everything above the neck is drawn in =fantus-head-point='s frame, so the
+=fantus-head-size= knob grows the face, mask, and ears together.  The
+=:fantus= metabar group also has ear size and spread, the sleepy eyelid line,
+and the width of the smile.
+
+[[file:images/fantus-orbit.webp]]
+
 * DONE Discrete destinations, continuously embodied
 :PROPERTIES:
 :ID: YPGXKI

@@ -106,13 +106,14 @@
   :components ((:file "luvcraft/light-reference")))
 
 (defsystem "luvcraft/agent-bodies"
-  :description "The analytic gnome and cat body shaders and their live knobs."
+  :description "The analytic gnome, cat, and Fantus body shaders and their live knobs."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/core")
   :serial t
   :components ((:file "luvcraft/agent/shaders")
-               (:file "luvcraft/agent/cat-shaders")))
+               (:file "luvcraft/agent/cat-shaders")
+               (:file "luvcraft/agent/fantus-shaders")))
 
 (defsystem "luvcraft/web"
   :description "Luvcraft's showcase and WebGPU body pages in the workshop wiki."
@@ -247,6 +248,7 @@
                              (:file "gnome")
                              (:file "construction")
                              (:file "cat")
+                             (:file "fantus")
                              (:file "residence")
                              (:file "surroundings"))))
   :in-order-to ((test-op (test-op "luvcraft/agent/test"))))

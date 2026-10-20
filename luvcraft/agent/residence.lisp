@@ -1,6 +1,6 @@
 (in-package #:luvcraft.agent)
 
-;;; Gnomes and cats are inhabitants of the saved world (#9AONMH).  Each is
+;;; Gnomes, cats, and Fantus are inhabitants of the saved world (#9AONMH).  Each is
 ;;; written as its place, its heading, and the provider response its
 ;;; conversation continues from; the provider keeps the history itself, so a
 ;;; gnome brought back in a later game remembers what was said to it.
@@ -15,6 +15,10 @@
 (defmethod embodied-agent-save-kind ((agent cat))
   (declare (ignore agent))
   :cat)
+
+(defmethod embodied-agent-save-kind ((agent fantus))
+  (declare (ignore agent))
+  :fantus)
 
 (defun embodied-agent-conversation-id (agent)
   "The provider response AGENT's conversation continues from, or NIL."
@@ -91,3 +95,7 @@
 (defmethod luvcraft:restore-luvcraft-inhabitant
     ((kind (eql :cat)) session description)
   (restore-embodied-agent 'cat session description))
+
+(defmethod luvcraft:restore-luvcraft-inhabitant
+    ((kind (eql :fantus)) session description)
+  (restore-embodied-agent 'fantus session description))

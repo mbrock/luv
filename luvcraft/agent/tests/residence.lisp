@@ -10,7 +10,8 @@
                        collect (agent::described-embodied-agent
                                 (ecase (first description)
                                   (:gnome 'agent:gnome)
-                                  (:cat 'agent:cat))
+                                  (:cat 'agent:cat)
+                                  (:fantus 'agent:fantus))
                                 session (rest description))))
          (agent::*agents* (reverse agents)))
     (funcall function session agents)))
@@ -28,15 +29,17 @@
 (defparameter *saved-inhabitants*
   '((:gnome :cell (2 3 4) :facing-yaw 1.5d0 :conversation "resp_garden"
             :asked "What will you grow?" :said "Flowers.")
-    (:cat :cell (5 3 4) :facing-yaw 0d0)))
+    (:cat :cell (5 3 4) :facing-yaw 0d0)
+    (:fantus :cell (7 3 4) :facing-yaw -0.5d0 :said "Maskin!")))
 
 (define-test gnomes-and-cats-are-saved-mid-conversation
   (call-with-described-agents
    *saved-inhabitants*
    (lambda (session agents)
-     (destructuring-bind (gnome cat) agents
+     (destructuring-bind (gnome cat fantus) agents
        (true (typep gnome 'agent:gnome))
        (true (typep cat 'agent:cat))
+       (true (typep fantus 'agent:fantus))
        (true (string= "resp_garden"
                       (agent::embodied-agent-conversation-id gnome)))
        (true (string= "Flowers." (agent::gnome-said gnome))))

@@ -68,6 +68,9 @@
 (defun spawn-capture-cat (session)
   (agent:spawn-cat :session session :x 8 :y 2 :z 8))
 
+(defun spawn-capture-fantus (session)
+  (agent:spawn-fantus :session session :x 8 :y 2 :z 8))
+
 (defun film-character-focus-pull (session pathname target-pose label)
   "Film the real focused character while the camera eases to TARGET-POSE."
   (let* ((camera (luvcraft:luvcraft-session-camera session))
@@ -157,6 +160,26 @@
    :title "cat in the sun focus pull"
    :width +gallery-portrait-width+ :height +gallery-portrait-height+
    :day-fraction 0.38))
+
+;;; FANTUS is the third embodied kind: the same conversation protocol, its
+;;; own felt body and face height. #W7T2IT
+
+(luv:define-capture fantus-in-the-meadow-conversation
+    (:figure W7T2IT :kind :image :extension "png" :layout :portrait
+     :description
+     "Fantus seated in the meadow, using its real focused dialogue surface.")
+    (pathname)
+  (call-with-focused-character
+   (lambda (session fantus pose)
+     (declare (ignore fantus))
+     (luvcraft:capture-luvcraft-screenshot
+      session pathname :camera-pose pose
+      :include-hud-p t :include-viewmodel-p nil))
+   #'spawn-capture-fantus
+   "Blomst!  Blomst!"
+   :title "fantus in the meadow conversation"
+   :width +gallery-portrait-width+ :height +gallery-portrait-height+
+   :day-fraction 0.40))
 
 ;;; Player instruments remain live McCLIM frames composited into the one game
 ;;; canvas.  The fixtures below configure those owners directly. #DYJZBK
