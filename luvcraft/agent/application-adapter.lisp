@@ -34,7 +34,8 @@ player standing in front of it is worth; NIL uses the account default.")
 
 (defparameter *default-agent-tools*
   '(com-where-am-i com-move-to com-block-at com-place-block-at
-    com-propose-block-box com-describe-handle com-eval))
+    com-propose-block-box com-describe-handle com-eval
+    com-describe-symbol com-apropos com-xref com-source))
 
 (defparameter *default-instructions*
   "You are an agent standing inside Luvcraft, a small block world running

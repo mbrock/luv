@@ -522,7 +522,8 @@ one back to describe-handle to read more.")
 (defparameter *gnome-tools*
   '(com-say com-where-am-i com-view-surroundings
     com-move-to com-block-at com-place-block-at com-propose-block-box
-    com-describe-handle com-eval))
+    com-describe-handle com-eval
+    com-describe-symbol com-apropos com-xref com-source))
 
 (defmethod open-embodied-agent-agent ((gnome gnome))
   (make-world-agent

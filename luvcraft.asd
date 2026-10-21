@@ -236,13 +236,15 @@
   :author "Mikael Brockman"
   :depends-on ("luvcraft" "luvcraft/agent-bodies"
                "luv/application-agent"
-               "openai" "alexandria" "sb-concurrency")
+               "openai" "alexandria" "sb-concurrency" "sb-introspect"
+               "closer-mop")
   :serial t
   :components ((:module "luvcraft/agent"
                 :serial t
                 :components ((:file "package")
                              (:file "application-adapter")
                              (:file "commands")
+                             (:file "introspection")
                              (:file "approval")
                              (:file "hud")
                              (:file "wall")
@@ -265,7 +267,8 @@
                              (:file "construction")
                              (:file "opening")
                              (:file "conversation")
-                             (:file "residence"))))
+                             (:file "residence")
+                             (:file "introspection"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package

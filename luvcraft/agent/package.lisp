@@ -68,6 +68,7 @@
    ;; Commands
    #:luvcraft-agent #:com-where-am-i #:com-view-surroundings
    #:com-move-to #:com-place-block-at #:com-eval
+   #:com-describe-symbol #:com-apropos #:com-xref #:com-source
    #:com-propose-block-box
    #:com-describe-handle #:com-block-at
    ;; The HUD
