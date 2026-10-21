@@ -512,6 +512,7 @@
            #:select-luvcraft-block
            #:cycle-luvcraft-block
            #:put-luvcraft-block-on-quickbar
+           #:assign-luvcraft-quickbar-slot
            #:arrange-luvcraft-quickbar
            #:smash-block-particles
            #:sky-clock

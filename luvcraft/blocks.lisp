@@ -205,10 +205,10 @@ definition."
    :categories '(:natural) :display-color '(0.48 0.31 0.18))
   (*stone-block* :stone
    :face-tiles '(:all :stone)
-   :categories '(:building) :display-color '(0.49 0.52 0.54))
+   :categories '(:building :masonry) :display-color '(0.49 0.52 0.54))
   (*wood-block* :wood
    :face-tiles '(:top :wood-end :bottom :wood-end :side :wood-side)
-   :categories '(:building) :display-color '(0.57 0.36 0.17))
+   :categories '(:building :woodwork) :display-color '(0.57 0.36 0.17))
   (*leaf-block* :leaves
    :face-tiles '(:all :leaves)
    :categories '(:natural) :display-color '(0.19 0.50 0.22))
@@ -250,22 +250,22 @@ Urbit application was retired.  It is absent from the building palette."
    :categories '(:natural) :display-color '(0.20 0.49 0.24))
   (*cobblestone-block* :cobblestone
    :face-tiles '(:all :cobblestone)
-   :categories '(:building) :display-color '(0.42 0.43 0.41))
+   :categories '(:building :masonry) :display-color '(0.42 0.43 0.41))
   (*stone-bricks-block* :stone-bricks
    :face-tiles '(:all :stone-bricks)
-   :categories '(:building) :display-color '(0.53 0.54 0.51))
+   :categories '(:building :masonry) :display-color '(0.53 0.54 0.51))
   (*bricks-block* :bricks
    :face-tiles '(:all :bricks)
-   :categories '(:building) :display-color '(0.63 0.28 0.19))
+   :categories '(:building :masonry) :display-color '(0.63 0.28 0.19))
   (*planks-block* :planks
    :face-tiles '(:all :planks)
-   :categories '(:building) :display-color '(0.66 0.45 0.23))
+   :categories '(:building :woodwork) :display-color '(0.66 0.45 0.23))
   (*sandstone-block* :sandstone
    :face-tiles '(:all :sandstone)
-   :categories '(:building) :display-color '(0.79 0.68 0.43))
+   :categories '(:building :masonry) :display-color '(0.79 0.68 0.43))
   (*slate-block* :slate
    :face-tiles '(:all :slate)
-   :categories '(:building) :display-color '(0.25 0.29 0.32))
+   :categories '(:building :masonry :roofing) :display-color '(0.25 0.29 0.32))
   (*tape-block* :tape
    "A blank film reel.  Focus it and it asks for a YouTube code; when the
 download lands it has become a film, which is a block that can be picked up
@@ -339,7 +339,127 @@ flowers.  The birthday meadow freckles its lawns with these."
   (*black-wool-block* :black-wool
    :face-tiles '(:all :wool-black)
    :categories '(:colors :building)
-   :display-color '(0.12 0.12 0.14)))
+   :display-color '(0.12 0.12 0.14))
+  ;; Architecture: dressed stone, timber, roofs, and the things a room is
+  ;; furnished with.  Every one is still a whole cube; what makes a cornice
+  ;; or a floor is which face of which material meets which.  The painters
+  ;; live in luvcraft/architecture.lisp.
+  (*polished-stone-block* :polished-stone
+   :face-tiles '(:all :polished-stone)
+   :categories '(:building :masonry) :display-color '(0.60 0.62 0.63))
+  (*chiseled-stone-block* :chiseled-stone
+   :face-tiles '(:all :chiseled-stone)
+   :categories '(:building :masonry :decor) :display-color '(0.56 0.57 0.55))
+  (*marble-block* :marble
+   :face-tiles '(:all :marble)
+   :categories '(:building :masonry) :display-color '(0.90 0.89 0.86))
+  (*marble-tiles-block* :marble-tiles
+   :face-tiles '(:all :marble-tiles)
+   :categories '(:building :masonry) :display-color '(0.82 0.81 0.79))
+  (*granite-block* :granite
+   :face-tiles '(:all :granite)
+   :categories '(:building :masonry) :display-color '(0.64 0.47 0.42))
+  (*basalt-block* :basalt
+   :face-tiles '(:top :basalt-top :bottom :basalt-top :side :basalt-side)
+   :categories '(:building :masonry) :display-color '(0.22 0.22 0.24))
+  (*limestone-block* :limestone
+   :face-tiles '(:all :limestone)
+   :categories '(:building :masonry) :display-color '(0.85 0.80 0.67))
+  (*mossy-stone-bricks-block* :mossy-stone-bricks
+   :face-tiles '(:all :mossy-stone-bricks)
+   :categories '(:building :masonry) :display-color '(0.45 0.52 0.40))
+  (*cracked-stone-bricks-block* :cracked-stone-bricks
+   :face-tiles '(:all :cracked-stone-bricks)
+   :categories '(:building :masonry) :display-color '(0.50 0.51 0.48))
+  (*terracotta-block* :terracotta
+   :face-tiles '(:all :terracotta)
+   :categories '(:building :masonry) :display-color '(0.69 0.40 0.27))
+  (*plaster-block* :plaster
+   :face-tiles '(:all :plaster)
+   :categories '(:building :masonry) :display-color '(0.90 0.87 0.80))
+  (*concrete-block* :concrete
+   :face-tiles '(:all :concrete)
+   :categories '(:building :masonry) :display-color '(0.58 0.58 0.56))
+  (*checker-floor-block* :checker-floor
+   :face-tiles '(:all :checker-floor)
+   :categories '(:building :decor) :display-color '(0.50 0.50 0.50))
+  (*mosaic-block* :mosaic
+   :face-tiles '(:all :mosaic)
+   :categories '(:building :decor) :display-color '(0.55 0.52 0.62))
+  (*blue-tiles-block* :blue-tiles
+   :face-tiles '(:all :blue-tiles)
+   :categories '(:building :decor) :display-color '(0.62 0.70 0.86))
+  (*obsidian-block* :obsidian
+   :face-tiles '(:all :obsidian)
+   :categories '(:building :masonry) :display-color '(0.10 0.07 0.14))
+  (*roof-tiles-block* :roof-tiles
+   :face-tiles '(:all :roof-tiles)
+   :categories '(:building :roofing) :display-color '(0.66 0.27 0.18))
+  (*slate-shingles-block* :slate-shingles
+   :face-tiles '(:all :slate-shingles)
+   :categories '(:building :roofing) :display-color '(0.24 0.28 0.33))
+  (*thatch-block* :thatch
+   :face-tiles '(:all :thatch)
+   :categories '(:building :roofing) :display-color '(0.76 0.63 0.33))
+  (*dark-planks-block* :dark-planks
+   :face-tiles '(:all :dark-planks)
+   :categories '(:building :woodwork) :display-color '(0.33 0.21 0.12))
+  (*birch-planks-block* :birch-planks
+   :face-tiles '(:all :birch-planks)
+   :categories '(:building :woodwork) :display-color '(0.84 0.75 0.55))
+  (*parquet-block* :parquet
+   :face-tiles '(:all :parquet)
+   :categories '(:building :woodwork :decor) :display-color '(0.62 0.42 0.22))
+  (*timber-block* :timber
+   "A square-hewn beam: the grain runs along it, and its ends show the
+heart of the tree inside a chamfered edge."
+   :face-tiles '(:top :timber-end :bottom :timber-end :side :timber-side)
+   :categories '(:building :woodwork) :display-color '(0.48 0.32 0.18))
+  (*wainscot-block* :wainscot
+   :face-tiles '(:all :wainscot)
+   :categories '(:building :woodwork :decor) :display-color '(0.50 0.31 0.17))
+  (*half-timber-block* :half-timber
+   :face-tiles '(:all :half-timber)
+   :categories '(:building :woodwork) :display-color '(0.76 0.70 0.60))
+  (*bookshelf-block* :bookshelf
+   :face-tiles '(:top :planks :bottom :planks :side :bookshelf)
+   :categories '(:woodwork :decor) :display-color '(0.52 0.33 0.20))
+  (*crate-block* :crate
+   :face-tiles '(:all :crate)
+   :categories '(:woodwork :decor) :display-color '(0.70 0.53 0.31))
+  (*barrel-block* :barrel
+   :face-tiles '(:top :barrel-top :bottom :barrel-top :side :barrel-side)
+   :categories '(:woodwork :decor) :display-color '(0.50 0.33 0.18))
+  (*hay-bale-block* :hay-bale
+   :face-tiles '(:top :hay-top :bottom :hay-top :side :hay-side)
+   :categories '(:natural :decor) :display-color '(0.82 0.70 0.30))
+  (*copper-block* :copper
+   :face-tiles '(:all :copper)
+   :categories '(:building :decor) :display-color '(0.78 0.47 0.28))
+  (*verdigris-block* :verdigris
+   :face-tiles '(:all :verdigris)
+   :categories '(:building :decor) :display-color '(0.33 0.62 0.53))
+  (*gold-block* :gold
+   :face-tiles '(:all :gold)
+   :categories '(:decor) :display-color '(0.93 0.74 0.27))
+  (*iron-plate-block* :iron-plate
+   :face-tiles '(:all :iron-plate)
+   :categories '(:building :decor) :display-color '(0.47 0.49 0.52))
+  (*tapestry-block* :tapestry
+   :face-tiles '(:all :tapestry)
+   :categories '(:decor :colors) :display-color '(0.58 0.14 0.13))
+  (*lantern-block* :lantern
+   "Warm glass in a black iron cage: the lamp to hang in a doorway."
+   :face-tiles '(:all :lantern)
+   :categories '(:decor :luminous) :display-color '(0.98 0.72 0.34)
+   :light-emission 14 :surface-emission 1.1)
+  (*lit-window-block* :lit-window
+   "A mullioned window with the lamps lit behind it.  It is an opaque block
+that glows rather than glass to see through; the world has no transparent
+cells."
+   :face-tiles '(:all :lit-window)
+   :categories '(:building :decor :luminous) :display-color '(0.92 0.76 0.42)
+   :light-emission 9 :surface-emission 0.55))
 
 (eval-when (:load-toplevel :execute)
   ;; ENSURE-BLOCK-KIND preserves identities across live redefinition, so
@@ -367,7 +487,7 @@ kinds through this vocabulary instead of printing CLOS object identities."
 ;;; Painted tiles fill a prefix of a renderer-owned atlas.  Capacity is a live
 ;;; policy rather than mesh meaning: REFRESH-BLOCK-ATLAS replaces textures when
 ;;; this changes, while vertices retain their mapping-scoped tile offsets.
-(defparameter *block-atlas-tile-capacity* 64
+(defparameter *block-atlas-tile-capacity* 128
   "How many tiles wide a newly materialized block atlas texture is.")
 
 (defparameter *block-atlas-tile-domain*
@@ -380,7 +500,15 @@ kinds through this vocabulary instead of printing CLOS object identities."
      :tape-flange :reel-rim :film-flange :ball :water :lava
      :flowers-top
      :wool-red :wool-orange :wool-yellow :wool-lime :wool-light-blue
-     :wool-blue :wool-purple :wool-pink :wool-white :wool-black))
+     :wool-blue :wool-purple :wool-pink :wool-white :wool-black
+     :polished-stone :chiseled-stone :marble :marble-tiles :granite
+     :basalt-top :basalt-side :limestone :mossy-stone-bricks
+     :cracked-stone-bricks :terracotta :plaster :concrete :checker-floor
+     :mosaic :blue-tiles :obsidian :roof-tiles :slate-shingles :thatch
+     :dark-planks :birch-planks :parquet :timber-side :timber-end :wainscot
+     :half-timber :bookshelf :crate :barrel-side :barrel-top :hay-top
+     :hay-side :copper :verdigris :gold :iron-plate :tapestry :lantern
+     :lit-window))
   "The replaceable interpretation of atlas tile identities as dense offsets.
 
 Re-evaluating this definition constructs a new domain.  Existing offsets stay

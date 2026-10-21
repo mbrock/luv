@@ -57,6 +57,7 @@
                  (:file "player-body-shaders")
                  (:file "fields")
                  (:file "blocks")
+                 (:file "architecture")
                  (:file "inventory")
                  (:file "terrain")
                  (:file "light")

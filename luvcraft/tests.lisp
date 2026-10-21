@@ -2298,7 +2298,15 @@
                    :slate :tape :fountain :lava-spring :flowers
                    :red-wool :orange-wool :yellow-wool :lime-wool
                    :light-blue-wool :blue-wool :purple-wool :pink-wool
-                   :white-wool :black-wool))))
+                   :white-wool :black-wool
+                   :polished-stone :chiseled-stone :marble :marble-tiles
+                   :granite :basalt :limestone :mossy-stone-bricks
+                   :cracked-stone-bricks :terracotta :plaster :concrete
+                   :checker-floor :mosaic :blue-tiles :obsidian :roof-tiles
+                   :slate-shingles :thatch :dark-planks :birch-planks
+                   :parquet :timber :wainscot :half-timber :bookshelf
+                   :crate :barrel :hay-bale :copper :verdigris :gold
+                   :iron-plate :tapestry :lantern :lit-window))))
   (let* ((world (make-block-world :chunk-width 2
                                   :chunk-height 2
                                   :chunk-depth 2))
@@ -2309,6 +2317,39 @@
       (true (= (length (block-mesh-vertices mesh))
                (* luvcraft::+block-mesh-floats-per-vertex+
                   (block-mesh-vertex-count mesh)))))))
+
+(define-test every-block-face-paints-a-distinct-atlas-tile
+  ;; A new material is only as real as its tiles: each face it names must be
+  ;; in the atlas domain, paint opaque texels and in-range relief, and the
+  ;; architecture palette must not quietly reuse another material's look.
+  (dolist (block luvcraft::*block-kinds*)
+    (loop for (nil tile) on (block-kind-face-tiles block) by #'cddr
+          do (true (block-atlas-tile-offset tile))
+             (dotimes (y luvcraft::+block-atlas-tile-size+)
+               (dotimes (x luvcraft::+block-atlas-tile-size+)
+                 (true (= #xff (ldb (byte 8 24)
+                                    (luvcraft::paint-block-atlas-tile
+                                     tile x y))))
+                 (true (<= 0 (luvcraft::paint-block-atlas-relief tile x y)
+                           255))))))
+  (let ((tiles '(:polished-stone :chiseled-stone :marble :marble-tiles
+                 :granite :basalt-top :basalt-side :limestone
+                 :mossy-stone-bricks :cracked-stone-bricks :terracotta
+                 :plaster :concrete :checker-floor :mosaic :blue-tiles
+                 :obsidian :roof-tiles :slate-shingles :thatch :dark-planks
+                 :birch-planks :parquet :timber-side :timber-end :wainscot
+                 :half-timber :bookshelf :crate :barrel-side :barrel-top
+                 :hay-top :hay-side :copper :verdigris :gold :iron-plate
+                 :tapestry :lantern :lit-window)))
+    (flet ((texels (tile)
+             (let ((words (make-array 256)))
+               (dotimes (i 256 words)
+                 (setf (aref words i)
+                       (luvcraft::paint-block-atlas-tile
+                        tile (mod i 16) (floor i 16)))))))
+      (let ((images (mapcar #'texels tiles)))
+        (true (= (length tiles)
+                 (length (remove-duplicates images :test #'equalp))))))))
 
 (define-test block-atlas-capacity-is-a-live-materialization-policy
   (let ((old-capacity luvcraft::*block-atlas-tile-capacity*))
@@ -2569,6 +2610,25 @@
                          (subseq (block-inventory-blocks inventory) 0 3))))
     (true (= (length (placeable-block-kinds))
              (length (block-inventory-blocks inventory))))))
+
+(define-test inventory-number-key-assigns-a-quickbar-slot
+  ;; Hovering a material deep in the inventory and pressing 3 makes it the 3
+  ;; key's; the block that was there trades places rather than vanishing.
+  (let* ((session (make-instance
+                   'luvcraft-session
+                   :canvas (make-instance 'title-canvas :title "slot test")
+                   :selected-block luvcraft::*grass-block*))
+         (inventory (luvcraft-session-inventory session))
+         (third (third (block-inventory-blocks inventory)))
+         (lantern (block-kind-named :lantern)))
+    (true (eq lantern (assign-luvcraft-quickbar-slot session lantern 3)))
+    (true (eq lantern (third (block-inventory-quickbar-blocks inventory))))
+    (true (eq lantern (luvcraft-session-selected-block session)))
+    (true (member third (block-inventory-blocks inventory)))
+    (false (member third (block-inventory-quickbar-blocks inventory)))
+    (true (= (length (placeable-block-kinds))
+             (length (block-inventory-blocks inventory))))
+    (false (assign-luvcraft-quickbar-slot session lantern 11))))
 
 (defclass sized-test-canvas ()
   ((width :initarg :width) (height :initarg :height)

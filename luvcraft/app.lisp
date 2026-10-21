@@ -1156,6 +1156,25 @@ to where BLOCK was.  Every other number key keeps its material."
         (setf index slot))
       (select-luvcraft-block session (1+ index)))))
 
+(defun assign-luvcraft-quickbar-slot (session block slot)
+  "Put BLOCK on one-based quickbar SLOT and select it.
+
+The inventory's number keys: hover a material, press 3, and it is the 3 key's.
+Whatever SLOT held trades places with BLOCK, so nothing leaves the inventory
+and every other number key keeps its material.  Returns BLOCK, or NIL when
+BLOCK is not in the inventory or SLOT is past the end of the bar."
+  (check-type slot (integer 1))
+  (let* ((inventory (luvcraft-session-inventory session))
+         (entries (block-inventory-entries inventory))
+         (index (position block entries
+                          :key #'block-inventory-entry-block :test #'eq))
+         (target (1- slot)))
+    (when (and index
+               (< target (length (block-inventory-quickbar-entries inventory))))
+      (rotatef (nth index (block-inventory-entries inventory))
+               (nth target (block-inventory-entries inventory)))
+      (select-luvcraft-block session slot))))
+
 (defparameter *luvcraft-starting-quickbar*
   '(:grass :dirt :planks :bricks :red-wool :yellow-wool :blue-wool
     :crystal :flowers :terminal)

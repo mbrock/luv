@@ -191,8 +191,11 @@
              (allocate-instance
               (find-class 'mcluv:luvcraft-inventory-overlay)))))
   (true (= 0 (mcluv::inventory-slot-at 0.21 0.12 9)))
-  (true (= 2 (mcluv::inventory-slot-at 0.50 0.12 9)))
-  (true (= 8 (mcluv::inventory-slot-at 0.61 0.36 9)))
+  ;; Eight columns by three rows: a page holds twenty-four materials.
+  (true (= 3 (mcluv::inventory-slot-at 0.45 0.12 9)))
+  (true (= 9 (mcluv::inventory-slot-at 0.31 0.31 24)))
+  (true (null (mcluv::inventory-slot-at 0.31 0.31 9)))
+  (true (= 23 (mcluv::inventory-slot-at 0.76 0.50 24)))
   (true (null (mcluv::inventory-slot-at 0.01 0.20 9)))
   (true (null (mcluv::inventory-slot-at 0.50 0.95 9)))
   (true (eq :all (mcluv::inventory-category-at 0.05 0.12)))
@@ -200,8 +203,12 @@
   (true (= -1 (mcluv::inventory-page-direction-at 0.22 0.05)))
   (true (= 1 (mcluv::inventory-page-direction-at 0.75 0.05)))
   (true (null (mcluv::inventory-page-direction-at 0.50 0.05)))
-  (true (= 0 (mcluv::inventory-quickbar-slot-at 0.20 0.56 9)))
-  (true (= 8 (mcluv::inventory-quickbar-slot-at 0.76 0.56 9)))
+  (true (eq :masonry (mcluv::inventory-category-at 0.05 0.33)))
+  (true (eq :colors (mcluv::inventory-category-at 0.05 0.68)))
+  (true (= 0 (mcluv::inventory-quickbar-slot-at 0.20 0.64 9)))
+  (true (= 8 (mcluv::inventory-quickbar-slot-at 0.76 0.64 9)))
+  (true (mcluv::inventory-category-block-p
+         :roofing (luvcraft:block-kind-named :thatch)))
   (true (mcluv::inventory-category-block-p
          :natural luvcraft::*grass-block*))
   (true (not (mcluv::inventory-category-block-p
