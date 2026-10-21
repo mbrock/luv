@@ -17,6 +17,19 @@
                                  (openai::response-create agent (openai::user-input "again"))
                                  :test #'string=)))))))
 
+(define-test response-create-carries-tier-and-effort-only-when-asked
+  (flet ((request (&rest initargs)
+           (openai::response-create
+            (apply #'make-instance 'openai:agent :model "gpt-6.1-sol"
+                   :tools '() :socket nil initargs)
+            (openai::user-input "hello"))))
+    (let ((plain (request))
+          (fast (request :service-tier "fast" :reasoning-effort "medium")))
+      (true (null (assoc "service_tier" plain :test #'string=)))
+      (true (null (assoc "reasoning" plain :test #'string=)))
+      (true (string= "fast" (cdr (assoc "service_tier" fast :test #'string=))))
+      (true (search "\"effort\":\"medium\"" (openai::json-string fast))))))
+
 (defclass echo-tool (openai:tool) ())
 
 (defmethod openai:call-tool ((tool echo-tool) arguments agent)

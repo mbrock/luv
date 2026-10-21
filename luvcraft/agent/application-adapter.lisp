@@ -23,7 +23,14 @@
 (defvar *agent* nil
   "The most recently made Luvcraft WORLD-AGENT for REPL convenience.")
 
-(defparameter *default-agent-model* "gpt-6-luna")
+(defparameter *default-agent-model* "gpt-6.1-sol")
+
+(defparameter *default-agent-reasoning-effort* "medium")
+
+(defparameter *default-agent-service-tier* "fast"
+  "The Responses processing tier world agents ask for.  \"fast\" costs twice
+the standard rate for roughly twice the speed, which a character answering a
+player standing in front of it is worth; NIL uses the account default.")
 
 (defparameter *default-agent-tools*
   '(com-where-am-i com-move-to com-block-at com-place-block-at
@@ -51,7 +58,8 @@ to inspect the same object again. Keep answers short; act rather than narrate.")
                            (commands *default-agent-tools*)
                            (instructions *default-instructions*)
                            (reasoning-summary "auto")
-                           reasoning-effort
+                           (reasoning-effort *default-agent-reasoning-effort*)
+                           (service-tier *default-agent-service-tier*)
                            (api-key (openai:default-api-key)))
   "Open Luvcraft's thin WORLD-AGENT specialization for SESSION.
 
@@ -64,7 +72,8 @@ never from the canvas thread.  Once open, ASK itself always returns at once."
          :class 'world-agent :application session
          :model model :commands commands :instructions instructions
          :reasoning-summary reasoning-summary
-         :reasoning-effort reasoning-effort :api-key api-key)))
+         :reasoning-effort reasoning-effort :service-tier service-tier
+         :api-key api-key)))
 
 (defun ask (text &key (agent (or *agent*
                                  (error "No Luvcraft agent is open."))))

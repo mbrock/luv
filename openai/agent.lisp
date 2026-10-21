@@ -75,6 +75,10 @@ object represented as a CL-JSON alist.  Specialize CALL-TOOL for behavior."))
                      :reader agent-reasoning-effort)
    (reasoning-summary :initarg :reasoning-summary :initform nil
                       :reader agent-reasoning-summary)
+   ;; "fast" asks for the faster, dearer processing tier where the model
+   ;; offers one; NIL leaves the request on the account's default tier.
+   (service-tier :initarg :service-tier :initform nil
+                 :reader agent-service-tier)
    (socket :initarg :socket :initform nil :accessor agent-socket)
    (url :initarg :url :initform nil :reader agent-url)
    (api-key :initarg :api-key :initform nil :reader agent-api-key)
@@ -141,6 +145,7 @@ answer."
         (setf key value)))))
 
 (defun make-agent (&key model instructions tools reasoning-effort reasoning-summary
+                     service-tier
                      (url "wss://api.openai.com/v1/responses")
                      (api-key (default-api-key))
                      (class 'agent) initargs)
@@ -158,7 +163,8 @@ HANDLE-AGENT-EVENT and CALL-TOOL on its own agent."
    (apply #'make-instance class
           :model model :instructions (or instructions "")
           :tools tools :reasoning-effort reasoning-effort
-          :reasoning-summary reasoning-summary :url url :api-key api-key
+          :reasoning-summary reasoning-summary :service-tier service-tier
+          :url url :api-key api-key
           initargs)))
 
 (defparameter *connection-lifetime* (* 55 60)
@@ -303,6 +309,9 @@ previous response id, so each event carries only what is new."
          (cons "tool_choice" "auto")
          (cons "parallel_tool_calls" t)
          (cons "stream" t))
+   (if (agent-service-tier agent)
+       (list (cons "service_tier" (agent-service-tier agent)))
+       '())
    (let ((reasoning (json-object "effort" (agent-reasoning-effort agent)
                                  "summary" (agent-reasoning-summary agent))))
      (if reasoning (list (cons "reasoning" reasoning)) '()))))

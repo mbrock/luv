@@ -271,7 +271,7 @@
 
 (defun make-application-agent
     (&key application model commands instructions reasoning-summary
-       reasoning-effort (api-key (openai:default-api-key))
+       reasoning-effort service-tier (api-key (openai:default-api-key))
        (class 'application-agent) initargs)
   "Open a provider-backed CLASS attached to APPLICATION and COMMANDS."
   (unless application
@@ -281,4 +281,5 @@
    :initargs (append (list :application application) initargs)
    :model model :instructions instructions
    :reasoning-summary reasoning-summary :reasoning-effort reasoning-effort
+   :service-tier service-tier
    :api-key api-key :tools (mapcar #'make-command-tool commands)))
