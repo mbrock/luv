@@ -726,17 +726,23 @@ the frame uniform cannot silently diverge between shader and host."
 ;;; agree on formats and usages without either one drifting.
 
 (defun make-luvcraft-frame-attachments
-    (device context render-extent presentation-extent)
+    (device context render-extent presentation-extent &optional output-extent)
   "Create the scene and presentation attachments as one GPU-object cohort.
 
 The scene is drawn at RENDER-EXTENT into a linear HDR colour attachment with
 its own depth buffer and reduced lens chain.  World-space application panels
 draw analytically into a transparent colour/depth pair at PRESENTATION-EXTENT;
 the presentation shader depth-composes that pair over the scaled scene before
-native-density HUD and the complete surface copy."
-  (let ((bloom-extent (luvcraft-bloom-extent render-extent))
-        (made nil)
-        (completed-p nil))
+native-density HUD and the complete surface copy.
+
+With OUTPUT-EXTENT the scene is temporal: it is drawn jittered into a separate
+image at RENDER-EXTENT, and the colour image presentation reads is the
+resolve's, at OUTPUT-EXTENT, beside its history and the resolve's inputs."
+  (let* ((color-extent (or output-extent render-extent))
+         (bloom-extent (luvcraft-bloom-extent color-extent))
+         (made nil)
+         (temporal nil)
+         (completed-p nil))
     (flet ((texture (label size format usage)
              (let ((texture
                      (create device
@@ -752,9 +758,28 @@ native-density HUD and the complete surface copy."
                  (values texture view)))))
       (unwind-protect
            (multiple-value-bind (color-texture color-view)
-               (texture "block world color" render-extent
+               (texture "block world color" color-extent
                         +luvcraft-scene-color-format+
                         '(:render-attachment :texture-binding :copy-src))
+             (when output-extent
+               (flet ((image (key label size usage)
+                        (multiple-value-bind (texture view)
+                            (texture label size +luvcraft-scene-color-format+ usage)
+                          (setf temporal
+                                (list* (intern (format nil "~A-TEXTURE" key) :keyword)
+                                       texture
+                                       (intern (format nil "~A-VIEW" key) :keyword)
+                                       view temporal)))))
+                 (image :scene "block world jittered scene" render-extent
+                        '(:render-attachment :texture-binding :copy-src))
+                 (image :world "block world world-only scene" render-extent
+                        '(:texture-binding :copy-dst))
+                 (image :bounds-low "block world temporal low bounds" render-extent
+                        '(:render-attachment :texture-binding))
+                 (image :bounds-high "block world temporal high bounds" render-extent
+                        '(:render-attachment :texture-binding))
+                 (image :history "block world temporal history" output-extent
+                        '(:render-attachment :texture-binding :copy-dst))))
              (multiple-value-bind (depth-texture depth-view)
                  (texture "block world depth" render-extent :depth32-float
                           '(:render-attachment :texture-binding))
@@ -785,8 +810,9 @@ native-density HUD and the complete surface copy."
                                     (canvas-format context)
                                     '(:render-attachment :copy-src))
                          (setf completed-p t)
-                         (list :render-extent render-extent
+                         (list* :render-extent render-extent
                                :presentation-extent presentation-extent
+                               :output-extent color-extent
                                :color-texture color-texture
                                :color-view color-view
                                :depth-texture depth-texture
@@ -802,7 +828,8 @@ native-density HUD and the complete surface copy."
                                :bloom-secondary-texture bloom-secondary-texture
                                :bloom-secondary-view bloom-secondary-view
                                :presentation-texture presentation-texture
-                               :presentation-view presentation-view))))))))
+                               :presentation-view presentation-view
+                               temporal))))))))
         (unless completed-p
           ;; Preserve the originating creation failure and make a best effort
           ;; to retire every partial candidate, even if one DESTROY also errs.
@@ -845,7 +872,7 @@ native-density HUD and the complete surface copy."
 (defun luvcraft-frame-attachment-resources (attachments)
   "Return the GPU objects in an attachment candidate, excluding its extents."
   (loop for (key value) on attachments by #'cddr
-        unless (member key '(:render-extent :presentation-extent))
+        unless (member key '(:render-extent :presentation-extent :output-extent))
           collect value))
 
 (defun make-luvcraft-lens-pipeline (device layout role label)
@@ -1243,7 +1270,8 @@ attachments the renderer actually holds."
            (make-luvcraft-frame-attachments
             (luvcraft-renderer-device renderer)
             (luvcraft-renderer-context renderer)
-            render-extent presentation-extent))
+            render-extent presentation-extent
+            (luvcraft-frame-extents-output extents)))
          (old-attachments
            (luvcraft-renderer-frame-attachment-resources renderer))
          (installed-p nil))
@@ -1308,11 +1336,22 @@ completes."
          (render-extent (luvcraft-scene-extent
                          canvas (luvcraft-scene-scale session)))
          (presentation-extent
-           (canvas-extent (luvcraft-session-context session))))
+           (canvas-extent (luvcraft-session-context session)))
+         ;; A temporal scene resolves to the size the pacer would draw at
+         ;; full allowance, whatever share of it this frame renders.
+         (output-extent
+           (and *luvcraft-temporal-p* (luvcraft-session-temporal session)
+                (luvcraft-scene-extent canvas)))
+         (attachments (luvcraft-renderer-frame-attachments
+                       (luvcraft-session-renderer session))))
     (unless (and (equal render-extent
                         (luvcraft-session-render-extent session))
                  (equal presentation-extent
-                        (luvcraft-session-presentation-extent session)))
+                        (luvcraft-session-presentation-extent session))
+                 (equal (or output-extent render-extent)
+                        (getf attachments :output-extent))
+                 (eq (not output-extent)
+                     (not (getf attachments :scene-view))))
       (log-event :luvcraft
                  "reframing scene ~{~D~^x~}, presentation ~{~D~^x~}"
                  render-extent presentation-extent)
@@ -1322,7 +1361,8 @@ completes."
       (setf (luvcraft-session-pointer-dirty-p session) t)
       (resize-luvcraft-component
        (luvcraft-session-renderer session)
-       (make-luvcraft-frame-extents render-extent presentation-extent)))
+       (make-luvcraft-frame-extents render-extent presentation-extent
+                                    output-extent)))
     (values render-extent presentation-extent)))
 
 (defun luvcraft-world-panels-back-to-front (session)
@@ -1458,12 +1498,21 @@ completes."
                 :luvcraft/uniform-update)
       (write-buffer
        (luvcraft-frame-uniform-buffer frame)
-       (frame-uniform-data session (first extent) (second extent)))
-      (write-buffer
-       (luvcraft-frame-post-uniform-buffer frame)
-       (luvcraft-post-uniform-data
+       (frame-uniform-data
         session (first extent) (second extent)
-        (first presentation-extent) (second presentation-extent)))
+        :camera-lanes (and (luvcraft-temporal-active-p session)
+                           (luvcraft-temporal-camera-lanes
+                            session (first extent) (second extent)))))
+      ;; Presentation reads the colour image, which a temporal resolve
+      ;; reconstructs at the output extent rather than the render extent.
+      (let ((color-extent (getf (luvcraft-renderer-frame-attachments
+                                 (luvcraft-session-renderer session))
+                                :output-extent extent)))
+        (write-buffer
+         (luvcraft-frame-post-uniform-buffer frame)
+         (luvcraft-post-uniform-data
+          session (first color-extent) (second color-extent)
+          (first presentation-extent) (second presentation-extent))))
       (when (plusp target-vertex-count)
         (write-buffer (luvcraft-frame-crosshair-vertex-buffer frame)
                       target-vertices
@@ -1528,119 +1577,143 @@ completes."
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-scene-encode-seconds
                 :luvcraft/scene-pass)
-      (let ((pass
-              (begin-render-pass
-               encoder
-               (make-render-pass-descriptor
-                :color-attachments
-                `((:view ,(luvcraft-session-color-view session)
-                   :load-op :clear :store-op :store
-                   :clear-value #(0.43 0.68 0.92 1.0)))
-                :depth-stencil-attachment
-                `(:view ,(luvcraft-session-depth-view session)
-                  :depth-load-op :clear :depth-store-op :store
-                  :depth-clear-value 1.0)))))
-        ;; The sky triangle fills the frame before block geometry, with depth
-        ;; writes disabled; the clear value remains only a safe fallback.
-        (set-pipeline pass (luvcraft-session-sky-native-pipeline session))
-        (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
-        (set-vertex-buffer
-         pass 0 (luvcraft-session-sky-vertex-buffer session))
-        (draw pass 3)
-        (set-pipeline pass (luvcraft-session-pipeline session))
-        (dolist (product products)
-          (let ((mesh (luvcraft-chunk-product-mesh product)))
-            (when (plusp (block-mesh-vertex-count mesh))
-              (set-vertex-buffer
-               pass 0 (luvcraft-chunk-product-vertex-buffer product))
-              (draw pass (block-mesh-vertex-count mesh)))))
-        (when (plusp critter-vertex-count)
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-critter-vertex-buffer frame))
-          (draw pass critter-vertex-count))
-        ;; The physics bodies, as ray-traced spheres: one instanced draw of
-        ;; camera-facing quads, records already ordered farthest first
-        ;; because the sphere pipeline blends without writing depth.  The
-        ;; block pipeline and its bindings are restored afterwards for the
-        ;; player body and the particles, which expect them.
-        (when (plusp physics-body-count)
-          (let ((drawer (luvcraft-session-physics-sphere-drawer session)))
-            (when drawer
-              (set-pipeline
-               pass (live-shader-pipeline-native-pipeline
-                     (physics-sphere-drawer-pipeline drawer)))
-              (set-vertex-buffer
-               pass 0 (physics-sphere-drawer-quad-buffer drawer))
-              (set-vertex-buffer
-               pass 1 (luvcraft-frame-physics-instance-buffer frame))
-              (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
-              (draw pass 6 physics-body-count)
-              (set-pipeline pass (luvcraft-session-pipeline session))
-              (set-bind-group
-               pass 0 (luvcraft-frame-scene-bind-group frame)))))
-        (when (plusp particle-vertex-count)
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-particle-vertex-buffer frame))
-          (draw pass particle-vertex-count))
-        ;; Before the text, so a caption drawn over the screen wins.
-        (when (luvcraft-session-video-screen session)
-          (let* ((screen (luvcraft-session-video-screen session))
-                 (group
-                   (refresh-video-screen-bind-group
-                    screen (luvcraft-session-device session)
-                    (luvcraft-frame-uniform-buffer frame))))
-            (set-pipeline pass (video-screen-native-pipeline screen))
-            (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
-            (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
-            (set-bind-group pass 0 group)
-            (draw pass 6 1)))
-        (when (luvcraft-session-world-text session)
-          (let ((text (luvcraft-session-world-text session)))
-            (set-pipeline pass (world-text-run-native-pipeline text))
-            (set-vertex-buffer pass 0 (world-text-run-vertex-buffer text))
-            (set-vertex-buffer pass 1 (world-text-run-instance-buffer text))
-            (set-bind-group
-             pass 0 (aref (luvcraft-frame-world-text-bind-groups frame) 0))
-            (draw pass 6 (length (world-text-run-glyphs text)))))
-        (dolist (overlay (reverse (luvcraft-session-overlays session)))
-          (when (eq :scene (luvcraft-overlay-stage overlay))
-            (guarding-luvcraft-overlay (session overlay :overlay-encode)
-              (encode-luvcraft-overlay overlay session pass surface-texture))))
-        ;; First-person geometry is above every world participant regardless
-        ;; of overlay attachment order.  It still lives in the scene texture
-        ;; (and therefore the lens/grade chain), unlike the later HUD pass.
-        (when include-viewmodel-p
-          (dolist (overlay (reverse (luvcraft-session-overlays session)))
-            (when (eq :viewmodel (luvcraft-overlay-stage overlay))
-              (guarding-luvcraft-overlay (session overlay :overlay-encode)
-                (encode-luvcraft-overlay overlay session pass surface-texture)))))
-        ;; A held item's own geometry follows the analytic hands so glass,
-        ;; buttons, and live displays remain legible in the grip; neither body
-        ;; nor item enters the shadow map.
-        (when (and include-viewmodel-p (plusp body-vertex-count))
-          (set-pipeline pass (luvcraft-session-pipeline session))
-          (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-body-vertex-buffer frame))
-          (draw pass body-vertex-count))
-        ;; A held item's live face goes on its slab, not under it: glass and
-        ;; text write no depth, so only drawing after the slab keeps them.
-        (when include-viewmodel-p
-          (dolist (overlay (reverse (luvcraft-session-overlays session)))
-            (when (eq :held-display (luvcraft-overlay-stage overlay))
-              (guarding-luvcraft-overlay (session overlay :overlay-encode)
-                (encode-luvcraft-overlay overlay session pass surface-texture)))))
-        (unless (or (not include-viewmodel-p)
-                    (luvcraft-session-modal-focus session)
-                    (not *luvcraft-crosshair-p*))
-          (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
-          (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-crosshair-vertex-buffer frame))
-          (when (plusp target-vertex-count)
-            (draw pass target-vertex-count 1 +block-world-crosshair-vertex-count+))
-          (draw pass +block-world-crosshair-vertex-count+))
-        (end-pass pass))
+      (let* ((temporal-p (luvcraft-temporal-active-p session))
+             (attachments (luvcraft-renderer-frame-attachments
+                           (luvcraft-session-renderer session))))
+        (flet ((scene-pass (load-op)
+                 ;; A temporal scene is drawn jittered into its own image,
+                 ;; which the resolve then reconstructs into the colour image.
+                 (begin-render-pass
+                  encoder
+                  (make-render-pass-descriptor
+                   :color-attachments
+                   `((:view ,(if temporal-p
+                                 (getf attachments :scene-view)
+                                 (luvcraft-session-color-view session))
+                      :load-op ,load-op :store-op :store
+                      :clear-value #(0.43 0.68 0.92 1.0)))
+                   :depth-stencil-attachment
+                   `(:view ,(luvcraft-session-depth-view session)
+                     :depth-load-op ,load-op :depth-store-op :store
+                     :depth-clear-value 1.0))))
+               (draw-world (pass)
+                 ;; The sky triangle fills the frame before block geometry, with depth
+                 ;; writes disabled; the clear value remains only a safe fallback.
+                 (set-pipeline pass (luvcraft-session-sky-native-pipeline session))
+                 (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+                 (set-vertex-buffer
+                  pass 0 (luvcraft-session-sky-vertex-buffer session))
+                 (draw pass 3)
+                 (set-pipeline pass (luvcraft-session-pipeline session))
+                 (dolist (product products)
+                   (let ((mesh (luvcraft-chunk-product-mesh product)))
+                     (when (plusp (block-mesh-vertex-count mesh))
+                       (set-vertex-buffer
+                        pass 0 (luvcraft-chunk-product-vertex-buffer product))
+                       (draw pass (block-mesh-vertex-count mesh)))))
+                 (when (plusp critter-vertex-count)
+                   (set-vertex-buffer
+                    pass 0 (luvcraft-frame-critter-vertex-buffer frame))
+                   (draw pass critter-vertex-count))
+                 ;; The physics bodies, as ray-traced spheres: one instanced draw of
+                 ;; camera-facing quads, records already ordered farthest first
+                 ;; because the sphere pipeline blends without writing depth.  The
+                 ;; block pipeline and its bindings are restored afterwards for the
+                 ;; player body and the particles, which expect them.
+                 (when (plusp physics-body-count)
+                   (let ((drawer (luvcraft-session-physics-sphere-drawer session)))
+                     (when drawer
+                       (set-pipeline
+                        pass (live-shader-pipeline-native-pipeline
+                              (physics-sphere-drawer-pipeline drawer)))
+                       (set-vertex-buffer
+                        pass 0 (physics-sphere-drawer-quad-buffer drawer))
+                       (set-vertex-buffer
+                        pass 1 (luvcraft-frame-physics-instance-buffer frame))
+                       (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+                       (draw pass 6 physics-body-count)
+                       (set-pipeline pass (luvcraft-session-pipeline session))
+                       (set-bind-group
+                        pass 0 (luvcraft-frame-scene-bind-group frame)))))
+                 (when (plusp particle-vertex-count)
+                   (set-vertex-buffer
+                    pass 0 (luvcraft-frame-particle-vertex-buffer frame))
+                   (draw pass particle-vertex-count))
+                 ;; Before the text, so a caption drawn over the screen wins.
+                 (when (luvcraft-session-video-screen session)
+                   (let* ((screen (luvcraft-session-video-screen session))
+                          (group
+                            (refresh-video-screen-bind-group
+                             screen (luvcraft-session-device session)
+                             (luvcraft-frame-uniform-buffer frame))))
+                     (set-pipeline pass (video-screen-native-pipeline screen))
+                     (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
+                     (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
+                     (set-bind-group pass 0 group)
+                     (draw pass 6 1)))
+                 (when (luvcraft-session-world-text session)
+                   (let ((text (luvcraft-session-world-text session)))
+                     (set-pipeline pass (world-text-run-native-pipeline text))
+                     (set-vertex-buffer pass 0 (world-text-run-vertex-buffer text))
+                     (set-vertex-buffer pass 1 (world-text-run-instance-buffer text))
+                     (set-bind-group
+                      pass 0 (aref (luvcraft-frame-world-text-bind-groups frame) 0))
+                     (draw pass 6 (length (world-text-run-glyphs text)))))
+                 (dolist (overlay (reverse (luvcraft-session-overlays session)))
+                   (when (eq :scene (luvcraft-overlay-stage overlay))
+                     (guarding-luvcraft-overlay (session overlay :overlay-encode)
+                       (encode-luvcraft-overlay overlay session pass surface-texture)))))
+               (draw-first-person (pass)
+                 ;; First-person geometry is above every world participant regardless
+                 ;; of overlay attachment order.  It still lives in the scene texture
+                 ;; (and therefore the lens/grade chain), unlike the later HUD pass.
+                 (when include-viewmodel-p
+                   (dolist (overlay (reverse (luvcraft-session-overlays session)))
+                     (when (eq :viewmodel (luvcraft-overlay-stage overlay))
+                       (guarding-luvcraft-overlay (session overlay :overlay-encode)
+                         (encode-luvcraft-overlay overlay session pass surface-texture)))))
+                 ;; A held item's own geometry follows the analytic hands so glass,
+                 ;; buttons, and live displays remain legible in the grip; neither body
+                 ;; nor item enters the shadow map.
+                 (when (and include-viewmodel-p (plusp body-vertex-count))
+                   (set-pipeline pass (luvcraft-session-pipeline session))
+                   (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+                   (set-vertex-buffer
+                    pass 0 (luvcraft-frame-body-vertex-buffer frame))
+                   (draw pass body-vertex-count))
+                 ;; A held item's live face goes on its slab, not under it: glass and
+                 ;; text write no depth, so only drawing after the slab keeps them.
+                 (when include-viewmodel-p
+                   (dolist (overlay (reverse (luvcraft-session-overlays session)))
+                     (when (eq :held-display (luvcraft-overlay-stage overlay))
+                       (guarding-luvcraft-overlay (session overlay :overlay-encode)
+                         (encode-luvcraft-overlay overlay session pass surface-texture)))))
+                 (unless (or (not include-viewmodel-p)
+                             (luvcraft-session-modal-focus session)
+                             (not *luvcraft-crosshair-p*))
+                   (set-pipeline pass (luvcraft-session-crosshair-native-pipeline session))
+                   (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+                   (set-vertex-buffer
+                    pass 0 (luvcraft-frame-crosshair-vertex-buffer frame))
+                   (when (plusp target-vertex-count)
+                     (draw pass target-vertex-count 1 +block-world-crosshair-vertex-count+))
+                   (draw pass +block-world-crosshair-vertex-count+))))
+          (let ((pass (scene-pass :clear)))
+            (draw-world pass)
+            ;; First-person geometry is fixed to the screen, not the world,
+            ;; so the resolve must not reproject it with the camera.  The
+            ;; world-only colour, copied before it is drawn, tells it where.
+            (when temporal-p
+              (end-pass pass)
+              (encode encoder
+                      (make-gpu-copy-texture-command
+                       :source (getf attachments :scene-texture)
+                       :destination (getf attachments :world-texture)))
+              (setf pass (scene-pass :load)))
+            (draw-first-person pass)
+            (end-pass pass)))
+        (when temporal-p
+          (encode-luvcraft-temporal-resolve session encoder surface-texture)))
       (prepare-texture encoder (luvcraft-session-color-texture session)
                        :texture-binding)
       (prepare-texture encoder (luvcraft-session-depth-texture session)
@@ -2986,6 +3059,7 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
                (update-luvcraft-session-title session)
                (attach-player-body-sdf session)
                (attach-physics-sphere-drawer session)
+               (attach-luvcraft-temporal session)
                (start-luvcraft-lobby session)
                (attach-luvcraft-hud session)
                (maintain-luvcraft-residency session)

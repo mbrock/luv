@@ -11,10 +11,13 @@ rather than reproducing its private resource inventory."))
 
 (defstruct (luvcraft-frame-extents
             (:constructor make-luvcraft-frame-extents
-                (render presentation)))
-  "The two resolution domains installed together at a frame boundary."
+                (render presentation &optional output)))
+  "The resolution domains installed together at a frame boundary.
+
+OUTPUT, when present, is where a temporal resolve reconstructs the scene."
   render
-  presentation)
+  presentation
+  output)
 
 (defgeneric resize-luvcraft-component (component extents)
   (:documentation

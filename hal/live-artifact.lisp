@@ -255,10 +255,14 @@ GPU creation, publication, and retirement happen here, outside MOP locks."))
                       (live-shader-pipeline-candidate-fragment-module
                        candidate)))
                 (when module
+                  ;; A list of formats names several colour targets,
+                  ;; in location order, sharing one blend.
                   `(:module ,module
                     :targets
-                    ((:format ,(live-shader-pipeline-target-format artifact)
-                      :blend ,(live-shader-pipeline-target-blend artifact))))))
+                    ,(loop with blend = (live-shader-pipeline-target-blend artifact)
+                           with formats = (live-shader-pipeline-target-format artifact)
+                           for format in (if (listp formats) formats (list formats))
+                           collect `(:format ,format :blend ,blend)))))
               :primitive (live-shader-pipeline-primitive artifact)
               :depth-stencil (live-shader-pipeline-depth-stencil artifact)))
             (live-shader-pipeline-candidate-source-values candidate)
