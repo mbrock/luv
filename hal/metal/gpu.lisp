@@ -65,7 +65,11 @@
                       :reader metal-queue-retirement-ledger)
    (lock :initform (sb-thread:make-mutex
                     :name "luv Metal submission queue")
-         :reader metal-queue-lock)))
+         :reader metal-queue-lock)
+   ;; GPU start and end of recent submissions, written by Metal's feedback
+   ;; handlers.  Deliberately never freed: a late handler may still write.
+   (timing-ring :initform (luv.metal:make-metal-gpu-timing-ring)
+                :reader metal-queue-timing-ring)))
 
 (defgeneric metal-admission-closed-p (object)
   (:method ((object t)) nil))
@@ -651,6 +655,11 @@ the submission's value, or NIL when nothing had been recorded."
     (lambda ()
       (>= (luv.metal:metal-shared-event-signaled-value event) value))))
 
+(defmethod queue-gpu-time-reader ((queue metal-gpu-queue))
+  (let ((ring (metal-queue-timing-ring queue)))
+    (lambda (value)
+      (luv.metal:metal-gpu-time ring value))))
+
 (defmethod queue-progress-reader ((queue metal-gpu-queue))
   (let ((event (metal-queue-completion-event queue)))
     (lambda ()
@@ -680,8 +689,13 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
     (let* ((resources (collect-metal-submission-resources command-buffers))
            (native-command-buffers
              (map 'vector #'metal-native-object command-buffers)))
-      (luv.metal:commit-command-buffers
-       (metal-native-object queue) native-command-buffers)
+      (let ((options (luv.metal:metal-timed-commit-options
+                      (metal-queue-timing-ring queue)
+                      (1+ (metal-queue-submitted-value queue)))))
+        (unwind-protect
+             (luv.metal:commit-command-buffers
+              (metal-native-object queue) native-command-buffers options)
+          (luv.metal:release-metal-commit-options options)))
       (let ((value (incf (metal-queue-submitted-value queue))))
         (loop for command-buffer across command-buffers
               do (setf (metal-command-buffer-state command-buffer) :submitted

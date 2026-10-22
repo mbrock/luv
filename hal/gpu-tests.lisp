@@ -481,3 +481,33 @@
                              (sb-thread:join-thread thread)))))))))
     (true (every #'identity
                  (mapcar #'sb-thread:join-thread creators)))))
+
+(define-test dynamic-resolution-sheds-steps-and-settles-in-its-band
+  (let ((controller (luv:make-dynamic-resolution))
+        (period (/ 1d0 60)))
+    (true (= 1.0 (luv:dynamic-resolution-share controller)))
+    ;; Eight frames over budget shrink the scene; samples taken before the
+    ;; new size can show are passed over.
+    (dotimes (i 7)
+      (false (luv:observe-dynamic-resolution controller 0.025d0 period)))
+    (true (luv:observe-dynamic-resolution controller 0.025d0 period))
+    (let ((shed (luv:dynamic-resolution-share controller)))
+      (true (< 0.5 shed 1.0))
+      (dotimes (i 4)
+        (false (luv:observe-dynamic-resolution controller 0.001d0 period)))
+      (true (= shed (luv:dynamic-resolution-share controller)))
+      ;; Time inside the quiet band changes nothing.
+      (dotimes (i 16)
+        (false (luv:observe-dynamic-resolution
+                controller (* 0.88d0 0.9d0 period) period)))
+      (true (= shed (luv:dynamic-resolution-share controller))))
+    ;; However slow the GPU, the scene never falls below half its size.
+    (dotimes (i 200)
+      (luv:observe-dynamic-resolution controller 1d0 period))
+    (true (= 0.5 (luv:dynamic-resolution-share controller)))
+    ;; Easy frames grow it back, gently, to the whole.
+    (dotimes (i 2000)
+      (luv:observe-dynamic-resolution controller 0.001d0 period))
+    (true (= 1.0 (luv:dynamic-resolution-share controller)))
+    (luv:reset-dynamic-resolution controller)
+    (true (= 1.0 (luv:dynamic-resolution-share controller)))))

@@ -133,6 +133,10 @@
            #:wait-for-drawable
            #:commit-command-buffer
            #:commit-command-buffers
+           #:make-metal-gpu-timing-ring
+           #:metal-timed-commit-options
+           #:metal-gpu-time
+           #:release-metal-commit-options
            #:signal-drawable
            #:present-drawable
            #:set-layer-device

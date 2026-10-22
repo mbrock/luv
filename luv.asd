@@ -414,6 +414,7 @@ offsets and of headers."
      (:file "canvas")
      (:file "application-lifecycle")
      (:file "frame-resources")
+     (:file "dynamic-resolution")
      (:file "live-artifact")
      (:file "png")
      (:file "video")
@@ -461,6 +462,7 @@ offsets and of headers."
       :components
       ((:file "probe")
        (:file "ffi")
+       (:file "gpu-timing")
        (:file "iosurface")
        (:file "gpu")
        (:file "canvas")))

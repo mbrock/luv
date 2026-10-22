@@ -441,6 +441,13 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:submitted-work-done
            #:queue-completion-watch
            #:queue-progress-reader
+           #:queue-gpu-time-reader
+           #:start-gpu-work-stopwatch
+           #:dynamic-resolution
+           #:make-dynamic-resolution
+           #:dynamic-resolution-share
+           #:observe-dynamic-resolution
+           #:reset-dynamic-resolution
            #:write-buffer
            #:read-buffer
            #:read-buffer-if-ready
@@ -802,6 +809,8 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:call-with-lazy-clock-time
            #:canvas-time
            #:canvas-time-unadjusted
+           #:canvas-refresh-rate
+           #:canvas-watched-p
            #:canvas-presentation-time
            #:make-presentation-clock
            #:make-canvas-context

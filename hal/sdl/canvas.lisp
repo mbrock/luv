@@ -429,6 +429,16 @@ arbitrary window dimensions commonly fail in SDL_Vulkan_CreateSurface."
         (refresh-rate)
         (call-on-sdl-canvas-thread canvas #'refresh-rate))))
 
+(defmethod canvas-refresh-rate ((canvas sdl-canvas))
+  (ignore-errors (sdl-canvas-refresh-rate canvas)))
+
+(defmethod canvas-watched-p ((canvas sdl-canvas))
+  (let ((flags (ignore-errors
+                (sdl3:get-window-flags (sdl-canvas-window canvas)))))
+    (or (null flags)
+        (and (member :input-focus flags)
+             (not (intersection '(:occluded :hidden :minimized) flags))))))
+
 (defmethod canvas-presentation-time ((canvas sdl-canvas))
   ;; Drawable acquisition has already happened when this is queried.  A
   ;; cadence frame is intended for its following beat; direct display is

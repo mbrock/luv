@@ -791,6 +791,17 @@ A backend that cannot answer so cheaply returns NIL.")
     (declare (ignore queue))
     nil))
 
+(defgeneric queue-gpu-time-reader (queue)
+  (:documentation "Return a function answering how long the GPU ran a submission.
+
+The function takes a submission number, counted as QUEUE-PROGRESS-READER counts
+them, and returns the seconds between the GPU starting and finishing that
+submission's work once it is known, or NIL.  It may be called from any thread.
+A backend without GPU timestamps returns NIL instead of a function.")
+  (:method (queue)
+    (declare (ignore queue))
+    nil))
+
 (defgeneric queue-progress-reader (queue)
   (:documentation "Return a function answering how far QUEUE has come.
 

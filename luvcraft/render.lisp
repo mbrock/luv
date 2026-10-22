@@ -2026,8 +2026,7 @@ first.  Each step is a fifth fewer pixels, about a tenth off each side.")
 
 (defun luvcraft-frame-pacing-rates (canvas)
   "Return the cadences CANVAS's display divides evenly, fastest first."
-  (let ((refresh (or (ignore-errors (luv::sdl-canvas-refresh-rate canvas))
-                     60d0)))
+  (let ((refresh (or (canvas-refresh-rate canvas) 60d0)))
     (loop for divisor from 1 to 8
           for rate = (/ refresh divisor)
           when (<= rate (+ *luvcraft-maximum-frames-per-second* 0.5d0))
@@ -2041,67 +2040,18 @@ first.  Each step is a fifth fewer pixels, about a tenth off each side.")
         (car (last rates)))))
 
 (defun luvcraft-canvas-watched-p (canvas)
-  "Whether CANVAS's window has focus and is not hidden.
-
-macOS throttles a window nobody can see -- its timers, its drawables, and the
-GPU's clock -- so timings taken then say nothing about play."
-  (let ((flags (ignore-errors
-                (sdl3:get-window-flags (luv::sdl-canvas-window canvas)))))
-    (or (null flags)
-        (and (member :input-focus flags)
-             (not (intersection '(:occluded :hidden :minimized) flags))))))
+  "Whether CANVAS's window has focus and is not hidden; see CANVAS-WATCHED-P."
+  (canvas-watched-p canvas))
 
 (defun time-luvcraft-frame-gpu-work (pacer queue)
-  "Start a stopwatch on the frame about to be recorded for QUEUE.
+  "Start timing the frame about to be recorded for QUEUE into PACER.
 
-Returns a function to call once the frame is submitted; the frame's GPU time
-then arrives in PACER.  That time runs from when the GPU could start the
-frame -- its first submission, or the previous frame's completion if that
-came later -- to its work completing.  A frame may be submitted in parts:
-the Metal canvas hands over the frame's work before it waits for a drawable,
-and only the final copy into that drawable is submitted after.  That copy
-waits on the GPU for the drawable too, which is presentation, not work, so
-a split frame's clock stops at its next-to-last submission.  The clock
-starts before recording and watches the queue's counters.  A helper thread polls them without the queue lock, so
-the canvas thread keeps its beat.  Waiting there instead made every sampled
-frame miss the next one: a hitch a second, caused by the instrument."
-  (let ((progress (queue-progress-reader queue))
-        (target nil))
-    (when progress
-      (multiple-value-bind (before completed) (funcall progress)
-        (let ((start (get-internal-real-time)))
-          (flet ((now () (get-internal-real-time)))
-            (sb-thread:make-thread
-             (lambda ()
-               (let ((submitted-at nil)
-                     (previous-done-at (and (>= completed before) start)))
-                 (loop repeat 2000
-                       do (multiple-value-bind (submitted done)
-                              (funcall progress)
-                            (when (and (null submitted-at) (> submitted before))
-                              (setf submitted-at (now)))
-                            (when (and (null previous-done-at) (>= done before))
-                              (setf previous-done-at (now)))
-                            (let ((last target))
-                              (when (and last submitted-at (>= done last))
-                                (let ((seconds
-                                        (/ (- (now)
-                                              (max submitted-at
-                                                   (or previous-done-at start)))
-                                           (float internal-time-units-per-second
-                                                  1d0))))
-                                  (sb-thread:with-mutex
-                                      ((frame-pacer-lock pacer))
-                                    (push seconds
-                                          (frame-pacer-arrivals pacer))))
-                                (return))))
-                          (sleep 0.0005))))
-             :name "luvcraft frame pacing stopwatch")
-            (lambda ()
-              (let ((submitted (funcall progress)))
-                (setf target (if (>= (- submitted before) 2)
-                                 (1- submitted)
-                                 submitted))))))))))
+Returns the finisher START-GPU-WORK-STOPWATCH describes."
+  (start-gpu-work-stopwatch
+   queue
+   (lambda (seconds)
+     (sb-thread:with-mutex ((frame-pacer-lock pacer))
+       (push seconds (frame-pacer-arrivals pacer))))))
 
 (defun change-luvcraft-pacing (session pacer clock now
                                &key (level (frame-pacer-scale-level pacer))

@@ -1232,6 +1232,12 @@ entry per color attachment, as for COMPILE-METAL-4-RENDER-PIPELINE."
   (command-buffers :pointer)
   (count :uint64))
 
+(objc:define-objective-c-message %commit-command-buffers-with-options
+    ("commit:count:options:" :void)
+  (command-buffers :pointer)
+  (count :uint64)
+  (options :pointer))
+
 (objc:define-objective-c-message signal-drawable
     ("signalDrawable:" :void)
   (drawable :object))
@@ -1239,8 +1245,10 @@ entry per color attachment, as for COMPILE-METAL-4-RENDER-PIPELINE."
 (objc:define-objective-c-message present-drawable
     ("present" :void))
 
-(defun commit-command-buffers (queue command-buffers)
-  "Commit a non-empty vector of ended Metal 4 command buffers to QUEUE."
+(defun commit-command-buffers (queue command-buffers &optional options)
+  "Commit a non-empty vector of ended Metal 4 command buffers to QUEUE.
+
+OPTIONS, when given and not null, is an MTL4CommitOptions pointer."
   (unless (and (vectorp command-buffers) (plusp (length command-buffers)))
     (error "Expected a non-empty vector of Metal command buffers, got ~S."
            command-buffers))
@@ -1250,8 +1258,11 @@ entry per color attachment, as for COMPILE-METAL-4-RENDER-PIPELINE."
           for index from 0
           do (setf (cffi:mem-aref native-command-buffers :pointer index)
                    (objc:objective-c-pointer command-buffer)))
-    (%commit-command-buffers
-     queue native-command-buffers (length command-buffers)))
+    (if (and options (not (cffi:null-pointer-p options)))
+        (%commit-command-buffers-with-options
+         queue native-command-buffers (length command-buffers) options)
+        (%commit-command-buffers
+         queue native-command-buffers (length command-buffers))))
   (values))
 
 (defun commit-command-buffer (queue command-buffer)

@@ -267,6 +267,22 @@ independent host timer competes with the display's cadence."))
 (defmethod canvas-presentation-time ((canvas canvas))
   (canvas-time canvas))
 
+(defgeneric canvas-refresh-rate (canvas)
+  (:documentation "Return CANVAS's display refresh rate in hertz, or NIL.")
+  (:method (canvas)
+    (declare (ignore canvas))
+    nil))
+
+(defgeneric canvas-watched-p (canvas)
+  (:documentation
+   "Whether CANVAS is focused and visible, so its timings describe play.
+
+macOS throttles a window nobody can see -- its timers, its drawables, and the
+GPU's clock -- so measurements taken then say nothing about the frame rate.")
+  (:method (canvas)
+    (declare (ignore canvas))
+    t))
+
 (defmethod (setf canvas-clock) :before (clock (canvas canvas))
   (declare (ignore canvas))
   (unless (typep clock 'canvas-clock)
