@@ -325,3 +325,41 @@
              (true (eq (first outputs) (third outputs)))
              (true (eq (first outputs) (second histories))))
         (render:destroy-renderer renderer)))))
+
+(define-test scene-only-resize-keeps-the-output-images-and-their-history
+  (let* ((render::*temporal-reconstruction* :shader)
+         (device (make-instance 'gpu-test-device))
+         (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
+         (frame (test-renderer-frame renderer))
+         (pass (make-instance 'gpu-test-encoder)))
+    (unwind-protect
+         (let ((history (render::renderer-history-texture renderer))
+               (composite (render::renderer-composite-texture renderer))
+               (scene (render::renderer-scene-texture renderer))
+               (old (render::renderer-target-generation renderer)))
+           (render::encode-renderer-scene renderer frame pass nil nil)
+           (render::encode-renderer-reconstruction renderer frame pass #(0.1 -0.2) :view)
+           (true (render::renderer-history-valid-p renderer))
+           ;; The GPU fell behind: draw three quarters of the ordinary size.
+           (setf (luv::%dynamic-resolution-step
+                  (render::renderer-dynamic-resolution renderer))
+                 24)
+           (render::ensure-renderer-extent renderer '(640 480))
+           (true (equal '(360 270) (render::renderer-render-extent renderer)))
+           (true (not (eq scene (render::renderer-scene-texture renderer))))
+           (true (eq history (render::renderer-history-texture renderer)))
+           (true (eq composite (render::renderer-composite-texture renderer)))
+           (true (render::renderer-history-valid-p renderer))
+           ;; Custody moved with the images: the retired generation no longer
+           ;; owns them, so they were not released with it.
+           (true (null (intersection (list history composite)
+                                     (render::owned-gpu-resources old))))
+           (true (zerop (test-gpu-release-attempts history)))
+           (true (plusp (test-gpu-release-attempts scene)))
+           ;; A new output size starts over.
+           (render::ensure-renderer-extent renderer '(800 600))
+           (true (not (render::renderer-history-valid-p renderer)))
+           (true (= 1 (test-gpu-release-attempts history))))
+      (render:destroy-renderer renderer))
+    (dolist (resource (test-gpu-resources device))
+      (true (= 1 (test-gpu-release-attempts resource))))))

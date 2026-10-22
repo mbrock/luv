@@ -1202,16 +1202,26 @@ before the operation boundary, or it would encode through resources which the
     (when-let
         ((workbench (luv.workbench:application-workbench viewer)))
       (luv.workbench:refresh-workbench workbench))
-    (present-canvas-frame
-     (viewer-context viewer)
-     (lambda (surface-texture encoder presentation-time)
-       (multiple-value-bind (dt first-frame-p)
-           (advance-viewer-world viewer presentation-time)
-         (advance-viewer-camera viewer dt first-frame-p))
-       (let ((extent (canvas-extent (viewer-context viewer))))
-         (encode-viewer-frame viewer encoder surface-texture extent)
-         (encode-viewer-frame-recording
-          viewer encoder surface-texture extent timestamp))))))
+    (let* ((canvas (viewer-canvas viewer))
+           (renderer (viewer-renderer viewer))
+           (finish-timing
+             (and renderer
+                  (start-renderer-gpu-timing
+                   renderer canvas (canvas-time-unadjusted canvas)))))
+      (present-canvas-frame
+       (viewer-context viewer)
+       (lambda (surface-texture encoder presentation-time)
+         (multiple-value-bind (dt first-frame-p)
+             (advance-viewer-world viewer presentation-time)
+           (advance-viewer-camera viewer dt first-frame-p))
+         (let ((extent (canvas-extent (viewer-context viewer))))
+           (encode-viewer-frame viewer encoder surface-texture extent)
+           (encode-viewer-frame-recording
+            viewer encoder surface-texture extent timestamp))))
+      ;; The stopwatch's sample reaches dynamic resolution a frame or so
+      ;; later; the share it chooses applies at the next frame boundary.
+      (when finish-timing (funcall finish-timing))
+      (when renderer (pace-renderer-resolution renderer canvas)))))
 
 (defun viewer-command-viewer ()
   "Return the LUFT application receiving the current McCLIM command."

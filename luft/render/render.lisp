@@ -27,7 +27,15 @@
    (target-generation :initform (%make-empty-renderer-target-generation)
                       :accessor renderer-target-generation)
    (frame-resources :initform (make-canvas-frame-resource-cache) :reader renderer-frame-resources)
-   (frame-index :initform 0 :accessor renderer-frame-index)))
+   (frame-index :initform 0 :accessor renderer-frame-index)
+   ;; Dynamic resolution: the controller choosing the scene's share, and the
+   ;; GPU times a stopwatch thread delivers for it at frame boundaries.
+   (dynamic-resolution :initform (make-dynamic-resolution)
+                       :reader renderer-dynamic-resolution)
+   (gpu-times :initform nil :accessor renderer-gpu-times)
+   (gpu-times-lock :initform (sb-thread:make-mutex :name "luft GPU times")
+                   :reader renderer-gpu-times-lock)
+   (next-gpu-sample-time :initform 0d0 :accessor renderer-next-gpu-sample-time)))
 
 (defun make-renderer (device color-format extent
                       &key (terrain-factory 'make-terrain-drawing)
@@ -167,6 +175,36 @@ choices. Resident geometry and resized targets are published independently."
 
 (defun renderer-shader-temporal-p (renderer)
   (eq :shader (renderer-temporal-resolve-kind renderer)))
+
+(defun renderer-scene-share (renderer)
+  "The share of *RENDER-SCALE* dynamic resolution currently draws."
+  (if *dynamic-resolution-frame-rate*
+      (dynamic-resolution-share (renderer-dynamic-resolution renderer))
+      1.0))
+
+(defun start-renderer-gpu-timing (renderer canvas now)
+  "Start timing the coming frame when a sample is due; return its finisher."
+  (when (and *dynamic-resolution-frame-rate*
+             (>= now (renderer-next-gpu-sample-time renderer))
+             (canvas-watched-p canvas))
+    (setf (renderer-next-gpu-sample-time renderer)
+          (+ now *dynamic-resolution-sample-interval*))
+    (start-gpu-work-stopwatch
+     (device-queue (renderer-device renderer))
+     (lambda (seconds)
+       (sb-thread:with-mutex ((renderer-gpu-times-lock renderer))
+         (push seconds (renderer-gpu-times renderer)))))))
+
+(defun pace-renderer-resolution (renderer canvas)
+  "Give the GPU times delivered since the last frame to dynamic resolution."
+  (let ((times (sb-thread:with-mutex ((renderer-gpu-times-lock renderer))
+                 (shiftf (renderer-gpu-times renderer) nil))))
+    (when (and times *dynamic-resolution-frame-rate*)
+      (let ((period (max (/ 1d0 *dynamic-resolution-frame-rate*)
+                         (/ 1d0 (or (canvas-refresh-rate canvas) 60d0)))))
+        (dolist (seconds (reverse times))
+          (observe-dynamic-resolution (renderer-dynamic-resolution renderer)
+                                      seconds period))))))
 
 (defun renderer-scene-sample-count (renderer)
   "Temporal scenes rasterize one sample per pixel; see *SCENE-SAMPLE-COUNT*."

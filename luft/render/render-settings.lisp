@@ -6,7 +6,18 @@
   "Global construction-edge strength.  The atelier toggles it between 0 and 1.")
 
 (defparameter *render-scale* 0.75
-  "Linear internal resolution of the LUFT scene before temporal upscaling.")
+  "Linear internal resolution of the LUFT scene before temporal upscaling.
+
+This is the ordinary size; dynamic resolution draws a share of it.")
+
+(defparameter *dynamic-resolution-frame-rate* 60
+  "The frame rate LUFT holds by drawing its scene smaller, or NIL for never.
+
+Frames are due at this rate or the display's, whichever is slower; the
+scene's share of *RENDER-SCALE* falls to a half while the GPU cannot keep up.")
+
+(defparameter *dynamic-resolution-sample-interval* 0.1d0
+  "Seconds between the GPU time samples dynamic resolution observes.")
 
 (defparameter *scene-sample-count* 4
   "Raster samples for Luft's scene pass when temporal reconstruction is off.

@@ -429,7 +429,8 @@ held items, and the crosshair are drawn.  Wherever the finished scene differs
 from that copy the texel sorts nearest and its motion is zero.
 
 The resolve writes the colour image presentation already read, at the
-extent the frame pacer would draw at full allowance.  When the pacer sheds
+extent the frame pacer would draw at full allowance (#MAC668 would move that
+pacer onto #IKWHEW's controller).  When the pacer sheds
 resolution, the resolve upscales; the post, lens, and readback paths do not
 know the difference.  =*luvcraft-temporal-p*= takes effect at the next
 reframing.
@@ -446,3 +447,51 @@ logical points, since the scene is already stretched there by presentation.
 /Done when./ A matched benchmark gives the TAA passes' GPU time, and a
 native-density resolve is kept or rejected on that evidence.
 
+
+* Dynamic resolution holds the frame rate from GPU timestamps
+:PROPERTIES:
+:ID: IKWHEW
+:END:
+
+Luft draws its scene at a share of =*render-scale*= chosen by Moppe's
+controller ([[lisp:luv:observe-dynamic-resolution]]).  Every few samples it
+compares the mean GPU time with 90% of the frame period -- the requested rate
+or the display's, whichever is slower -- and moves the share in steps of one
+in thirty-two between a half and the whole: sharply down when over, gently up
+under a quiet band, and not at all inside it, so a steady view settles on a
+step instead of hunting.  The samples taken while a new size reaches the GPU
+are passed over.
+
+A scene-only resize keeps the output-sized images.  The new target generation
+borrows the resolved, history, composite, and lens images from the one it
+replaces and takes custody of them at publication, so the shader resolve's
+history survives every step; only MetalFX, whose scaler fixes its input size,
+starts over.
+
+The times are the GPU's own.  Metal 4 commits carry a feedback handler,
+attached by a small native helper because Lisp cannot make blocks, that
+writes each submission's =GPUStartTime= and =GPUEndTime= into a ring Lisp
+polls ([[lisp:luv:queue-gpu-time-reader]]).  The CPU stopwatch it replaces
+had become a measure of latency: with drawables fetched late from a ring of
+frame slots, a frame waits behind those ahead of it, and it read about 14.5 ms
+at any scene size.  Apple GPUs still lower their clock until light work
+nearly fills the frame, so 12 to 14 ms at 60 Hz is normal and the controller
+correctly holds the whole scene there; it sheds only when the clock is
+exhausted.  Live on an M-series Mac, a 2.4× scene measured 26.7 ms, stepped
+down to a half, held history throughout, and grew back step by step to the
+whole when the load was removed.
+
+** TODO Move Luvcraft's scene pacing onto the shared controller
+:PROPERTIES:
+:ID: MAC668
+:END:
+
+/Intent./ Luvcraft's pacer now reads the same GPU timestamps, but its own
+rule grows the scene only when the next size is predicted under 72% of a
+beat.  With the clock following the load that is rarely true, and it settles
+at 40% after one heavy startup sample.  Use the shared controller for the
+scene share, keep the pacer's cadence fallback, and let a scene-only resize
+keep Luvcraft's temporal history as Luft's now does.
+
+/Done when./ Luvcraft returns to full size after a startup spike on a machine
+that holds 60 Hz, and its history survives a pacing step.
