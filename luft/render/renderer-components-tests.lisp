@@ -384,13 +384,14 @@
                             (luft:star-atlas-flat-owned-appearance-masks star)))
                  (corners (loop for triangle in triangles append triangle))
                  (range (aref ranges star)))
-            ;; Both index lists replay the triangles corner for corner.
-            (true (= (length corners) (aref range 1) (aref range 3)))
+            ;; Both index lists replay their triangles corner for corner.
+            (true (= (length corners) (aref range 1)))
             (true (equal corners
                          (loop for i from (aref range 0)
                                repeat (aref range 1)
                                collect (point scene-words (aref scene-indices i)))))
-            (true (equal corners
+            (true (equal (loop for triangle in (render::star-shadow-triangles star bevels-p)
+                               append triangle)
                          (loop for i from (aref range 2)
                                repeat (aref range 3)
                                collect (point shadow-words (aref shadow-indices i)))))
@@ -458,3 +459,38 @@
         (true (outside-p (box 700 -1 -1 701 1 1) camera)) ; beyond the far plane
         (true (not (outside-p (box 10 10 0 20 20 30) sun)))
         (true (outside-p (box 60 0 0 70 10 30) sun))))))
+
+(define-test bevelled-terrain-casts-shrunk-plain-faces
+  (let ((cube (make-hash-table :test #'equal))
+        (shadow-points nil)
+        (bevel-points nil)
+        (shadow-count 0))
+    (setf (gethash '(0 0 0) cube) t)
+    (maphash
+     (lambda (site star)
+       (flet ((global (point)
+                (mapcar (lambda (c s) (+ c (* luft:+mesh-cell-size+ s))) point site)))
+         (let ((shadow (render::star-shadow-triangles star t))
+               (flat (luft:star-atlas-flat-owned-triangles star)))
+           (true (= (length flat) (length shadow)))
+           (incf shadow-count (length shadow))
+           ;; Each cast triangle is its plain face moved one tick inward.
+           (loop for cast in shadow
+                 for face in flat
+                 for inward = (mapcar #'- (render::star-triangle-normal-key face))
+                 do (true (equal cast (loop for point in face
+                                            collect (mapcar #'+ point inward))))
+                    (dolist (point cast) (push (global point) shadow-points)))
+           (dolist (triangle (luft:star-atlas-owned-triangles star))
+             (dolist (point triangle) (push (global point) bevel-points))))))
+     (luft::star-surface-sites cube))
+    (true (= 12 shadow-count))
+    ;; Each cast face lies one tick inside its cell's plane, at tick 1 or 7,
+    ;; while still reaching the cell's edges along the face ...
+    (dolist (point shadow-points)
+      (true (some (lambda (c) (or (= c 1) (= c 7))) point))
+      (true (every (lambda (c) (<= 0 c 8)) point)))
+    ;; ... so the closed cube those planes bound is ticks 1..7, and no
+    ;; bevelled vertex lies strictly inside it.
+    (dolist (point bevel-points)
+      (true (some (lambda (c) (or (<= c 1) (>= c 7))) point)))))

@@ -17,6 +17,12 @@ The scene pass tests a chunk's box against the camera's clip volume, the
 shadow pass against the sun's.  A box is skipped only when all eight
 corners lie outside one clip plane, so nothing visible is ever lost.")
 
+(defparameter *bevelled-shadows-p* nil
+  "Whether bevelled terrain casts its bevels into the shadow map.
+
+By default it casts its plain faces, shrunk one tick into the solid, for a
+seventh of the triangles.  A new renderer reads it.")
+
 (defparameter *terrain-bevels-p* t
   "Whether terrain draws the bevelled star atlas or plain cube faces.
 

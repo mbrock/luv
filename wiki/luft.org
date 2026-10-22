@@ -1406,12 +1406,36 @@ pass 1, since the sun's volume deliberately keeps off-screen casters:
 | Shadow pass | 1.07--1.14 | 0.96--1.10 |
 
 Bevelled terrain now costs less than the mesh stage's flat terrain did, and
-about twice Luvcraft's plain cubes.  The shadow pass is the larger share
-left: a caster matters only if its shadow can fall inside the view, so
-testing chunks against the view volume extruded along the light, rather
-than the whole light volume, is the next cut.  Finer granularity than a
-64-column chunk, and per-site culling by a compute pass writing indirect
-draws, wait on that measurement.
+about twice Luvcraft's plain cubes.
+
+Culling shadow casters to those whose shadow can fall on a drawn chunk was
+tried next and kept nothing more out: in a four-by-four world of 64-column
+chunks every chunk borders a visible one, so it was withdrawn rather than
+kept unmeasured.  It belongs with larger worlds or finer boxes.
+
+****** Bevelled terrain casts plain shadows
+:PROPERTIES:
+:ID: A4ZWDZ
+:END:
+
+The shadow pass is depth only, and six-sevenths of a bevelled patch is bands
+and junctions that hardly move a shadow's outline at shadow-map resolution.
+So bevelled terrain casts its plain faces instead
+([[lisp:luft.render::star-shadow-triangles]]), each moved one tick into the
+solid.  The faces still reach their cells' edges, so at an edge two shrunk
+faces overshoot rather than part and nothing leaks; and every bevelled
+surface, bands and junctions included, stays outside the shrunk cube, so
+nothing shades itself.  =*bevelled-shadows-p*= casts the bevels again.
+
+| Bevelled terrain GPU ms | Bevelled shadows | Plain shadows |
+|-
+| Shadow pass | 0.57--1.16 | 0.00--0.34 |
+| Both passes | 2.12--2.42 | 1.48--1.97 |
+
+Captures of the same view differ no more than two captures with the same
+setting, except inside the tree's shadow, where the canopy's bevels had let
+through a faint grid of light about a tenth as bright as the shadow around
+it.
 
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:

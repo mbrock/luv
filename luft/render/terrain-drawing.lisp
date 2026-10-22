@@ -72,6 +72,25 @@
            (g (max 1 (reduce #'gcd n))))
       (mapcar (lambda (x) (/ x g)) n))))
 
+(defun star-shadow-triangles (star bevels-p)
+  "The triangles STAR casts into the sun's depth map.
+
+Bevelled terrain casts from its plain faces, each moved one tick into the
+solid: a seventh of the triangles, and the bands and junctions barely move a
+shadow's outline at shadow-map resolution.  Every face still reaches its
+cell's edges, so neighbouring faces overshoot one another at an edge rather
+than parting.  The shrink keeps every bevelled surface, bands and junctions
+included, outside its own caster, so nothing shades itself.
+*BEVELLED-SHADOWS-P* casts the bevels themselves."
+  (if (and bevels-p (not *bevelled-shadows-p*))
+      (loop for triangle in (luft:star-atlas-flat-owned-triangles star)
+            for inward = (mapcar #'- (star-triangle-normal-key triangle))
+            collect (loop for point in triangle
+                          collect (mapcar #'+ point inward)))
+      (if bevels-p
+          (luft:star-atlas-owned-triangles star)
+          (luft:star-atlas-flat-owned-triangles star))))
+
 (defun star-patch-tables (bevels-p)
   "Index each star's owned triangles into shared scene and shadow tables.
 
@@ -80,7 +99,7 @@ shadow vertex words, the shadow indices, and a 256-vector of per-star
 (scene-first scene-count shadow-first shadow-count) ranges.  A scene vertex
 is shared only between triangles with the same normal and material mask, so
 flat per-triangle shading is unchanged; a shadow vertex wherever positions
-meet."
+meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
   (let ((scene-keys (make-hash-table :test #'equal))
         (scene-words (make-array 0 :element-type '(unsigned-byte 32)
                                    :adjustable t :fill-pointer 0))
@@ -124,18 +143,20 @@ meet."
                                            (star-triangle-normal-key triangle))
                                           16))
                 do (dolist (point triangle)
-                     (let ((scene-key (list star point fourth))
-                           (shadow-key (list star point)))
+                     (let ((scene-key (list star point fourth)))
                        (vector-push-extend
                         (or (gethash scene-key scene-keys)
                             (setf (gethash scene-key scene-keys)
                                   (record scene-words point fourth)))
-                        scene-indices)
-                       (vector-push-extend
-                        (or (gethash shadow-key shadow-keys)
-                            (setf (gethash shadow-key shadow-keys)
-                                  (record shadow-words point 0)))
-                        shadow-indices))))
+                        scene-indices))))
+          (dolist (triangle (star-shadow-triangles star bevels-p))
+            (dolist (point triangle)
+              (let ((shadow-key (list star point)))
+                (vector-push-extend
+                 (or (gethash shadow-key shadow-keys)
+                     (setf (gethash shadow-key shadow-keys)
+                           (record shadow-words point 0)))
+                 shadow-indices))))
           (setf (aref ranges star)
                 (vector scene-first (- (fill-pointer scene-indices) scene-first)
                         shadow-first (- (fill-pointer shadow-indices) shadow-first))))))
