@@ -962,7 +962,10 @@
            (true (= 1 (luv::metal-object-last-submission texture)))
            (fail (submit queue command-buffer)
                  'gpu-invalid-state-error)
-           (true (= 1 (length (luv::metal-queue-pending-submissions queue))))
+           ;; The submission owns frontier 1.  Whether it is still pending is
+           ;; a race with the GPU and the retirement custodian, not a claim.
+           (true (= 1 (luv::metal-queue-submitted-value queue)))
+           (true (<= (length (luv::metal-queue-pending-submissions queue)) 1))
            ;; Logical invalidation is immediate. Native retirement follows the
            ;; shared-event completion frontier without blocking DESTROY.
            (destroy command-buffer)
@@ -1001,7 +1004,10 @@
              queue (vector command-buffer)
              :after-commit (lambda () (error "presentation probe")))
             'simple-error)
-           (true (= 1 (length (luv::metal-queue-pending-submissions queue))))
+           ;; The submission owns frontier 1.  Whether it is still pending is
+           ;; a race with the GPU and the retirement custodian, not a claim.
+           (true (= 1 (luv::metal-queue-submitted-value queue)))
+           (true (<= (length (luv::metal-queue-pending-submissions queue)) 1))
            (destroy command-buffer)
            (setf command-buffer nil)
            (submitted-work-done queue)

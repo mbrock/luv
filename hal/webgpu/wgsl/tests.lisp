@@ -29,7 +29,10 @@
            (luvcraft.web:body-gallery-bundle-fragment gnome))
          (cat-fragment
            (luvcraft.web:body-gallery-bundle-fragment cat)))
-    (true (= 2 (length bundles)))
+    (true (= 3 (length bundles)))
+    (true (string= "fantus"
+                   (luvcraft.web:web-body-id
+                    (luvcraft.web:body-gallery-bundle-body (third bundles)))))
     (true (string= "gnome"
                    (luvcraft.web:web-body-id
                     (luvcraft.web:body-gallery-bundle-body gnome))))

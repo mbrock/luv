@@ -41,6 +41,10 @@
        :arguments
        (list "-c"
              "printf 'term:%s\\r\\nready\\r\\n' \"$TERM\"; IFS= read -r line; printf 'got:%s\\r\\n' \"$line\""))
+    ;; Answer only once the child has asked, as a person at the keyboard would;
+    ;; input typed earlier is echoed among its output in whatever order the
+    ;; scheduler chose.
+    (true (wait-for-terminal-text device "ready" :timeout 3.0))
     (terminal:send-pty-device-text device (format nil "hello~%"))
     (true (eq :exited (terminal:wait-for-pty-device device :timeout 3.0)))
     (let ((text (pty-terminal-text device)))

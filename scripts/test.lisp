@@ -24,10 +24,10 @@
   name system package shard-index shard-count weight)
 
 (defstruct test-worker
-  id tasks pid stream thread status)
+  id tasks process stream thread status)
 
 (defmethod asdf:perform :around ((operation asdf:compile-op)
-                                 (component asdf:component))
+                                 (component asdf:cl-source-file))
   (if *worker-mode*
       (error "Parallel test worker attempted to compile ~A; preparation is incomplete."
              component)
@@ -295,33 +295,74 @@
            (get-universal-time) (sb-posix:getpid))
    *project-root*))
 
-(defun fork-worker (id tasks directory)
-  (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
-    (finish-output *standard-output*)
-    (finish-output *error-output*)
-    (let ((pid (sb-posix:fork)))
-      (if (zerop pid)
-          (progn
-            (sb-posix:close read-fd)
-            (sb-posix:dup2 write-fd 1)
-            (sb-posix:dup2 write-fd 2)
-            (sb-posix:close write-fd)
-            (let ((status
-                    (handler-case (run-worker directory tasks)
-                      (error (condition)
-                        (uiop:print-condition-backtrace
-                         condition :stream *standard-output* :count 30)
-                        2))))
-              (finish-output *standard-output*)
-              (sb-posix:_exit status)))
-          (progn
-            (sb-posix:close write-fd)
-            (make-test-worker
-             :id id :tasks tasks :pid pid
-             :stream (sb-sys:make-fd-stream
-                      read-fd :input t :buffering :line :auto-close t
-                      :external-format :utf-8
-                      :name (format nil "test worker ~D output" id))))))))
+(defun worker-task-form (task)
+  (list (test-task-name task) (test-task-system task) (test-task-package task)
+        (test-task-shard-index task) (test-task-shard-count task)))
+
+(defun task-from-form (form)
+  (destructuring-bind (name system package shard-index shard-count) form
+    (make-test-task :name name :system system :package package
+                    :shard-index shard-index :shard-count shard-count
+                    :weight 0)))
+
+;;; Workers are fresh processes started from the same prepared core, not
+;;; forks of the coordinator.  A fork of a multithreaded process cannot
+;;; safely initialize Objective-C classes or open a Metal device on macOS,
+;;; and several suites do both.  Each worker only loads what preparation
+;;; already compiled.
+(defun spawn-worker (id tasks directory)
+  (let ((task-file (merge-pathnames (format nil "worker-~D.tasks" id) directory)))
+    (ensure-directories-exist task-file)
+    (with-open-file (stream task-file :direction :output :if-exists :supersede)
+      (with-standard-io-syntax
+        (let ((*print-readably* nil))
+          (prin1 (mapcar #'worker-task-form tasks) stream))))
+    (let ((process
+            (sb-ext:run-program
+             sb-ext:*runtime-pathname*
+             ;; The runtime is spawned directly, past any wrapper that chose
+             ;; the coordinator's heap; give each worker the same heap.
+             (list "--dynamic-space-size"
+                   (format nil "~DMB" (floor (sb-ext:dynamic-space-size)
+                                             (* 1024 1024)))
+                   "--core" (uiop:native-namestring sb-ext:*core-pathname*)
+                   "--noinform" "--script"
+                   (uiop:native-namestring
+                    (merge-pathnames #P"scripts/test.lisp" *project-root*))
+                   "--worker" (uiop:native-namestring directory)
+                   (uiop:native-namestring task-file))
+             :directory (uiop:native-namestring *project-root*)
+             :input nil :output :stream :error :output :wait nil
+             :external-format :utf-8)))
+      (make-test-worker :id id :tasks tasks :process process
+                        :stream (sb-ext:process-output process)))))
+
+(defun run-worker-process (directory task-file)
+  "Load the prepared suites named in TASK-FILE, then run them."
+  (let* ((tasks (mapcar #'task-from-form
+                        (with-open-file (stream task-file)
+                          (with-standard-io-syntax
+                            (let ((*read-eval* nil)) (read stream))))))
+         (directory (uiop:ensure-directory-pathname directory))
+         (status 0))
+    (call-with-fd-output-to
+     (merge-pathnames (format nil "~A.load.log" (pathname-name task-file))
+                      directory)
+     (lambda ()
+       (handler-case
+           (let ((*worker-mode* t))
+             (handler-bind ((warning #'muffle-warning))
+               (dolist (system (remove-duplicates (mapcar #'test-task-system tasks)
+                                                  :test #'string=))
+                 (asdf:load-system system))))
+         (error (condition)
+           (format t "~&Worker could not load its suites: ~A~%" condition)
+           (uiop:print-condition-backtrace
+            condition :stream *standard-output* :count 30)
+           (setf status 2)))))
+    (if (zerop status)
+        (run-worker directory tasks)
+        status)))
 
 (defun start-worker-reader (worker mailbox)
   (setf (test-worker-thread worker)
@@ -331,13 +372,12 @@
   worker)
 
 (defun wait-worker (worker)
-  (multiple-value-bind (pid status) (sb-posix:waitpid (test-worker-pid worker) 0)
-    (declare (ignore pid))
+  (let ((process (test-worker-process worker)))
+    (sb-ext:process-wait process)
     (setf (test-worker-status worker)
-          (cond ((sb-posix:wifexited status) (sb-posix:wexitstatus status))
-                ((sb-posix:wifsignaled status)
-                 (+ 128 (sb-posix:wtermsig status)))
-                (t status)))))
+          (if (eq :signaled (sb-ext:process-status process))
+              (+ 128 (sb-ext:process-exit-code process))
+              (sb-ext:process-exit-code process)))))
 
 (defun read-worker-events (worker mailbox)
   (let ((stream (test-worker-stream worker)))
@@ -383,7 +423,8 @@
 (defun stop-workers (workers)
   (dolist (worker workers)
     (unless (test-worker-status worker)
-      (ignore-errors (sb-posix:kill (test-worker-pid worker) sb-posix:sigterm))))
+      (ignore-errors (sb-ext:process-kill (test-worker-process worker)
+                                          sb-posix:sigterm))))
   (dolist (worker workers)
     (if (test-worker-thread worker)
         (ignore-errors (sb-thread:join-thread (test-worker-thread worker)
@@ -450,7 +491,7 @@
          (progn
            (loop for assignment in assignments
                  for id from 1
-                 do (push (fork-worker id assignment directory) workers))
+                 do (push (spawn-worker id assignment directory) workers))
            ;; SB-POSIX:FORK requires a single Lisp thread. Start readers only
            ;; after every worker has inherited the quiescent prepared image.
            (dolist (worker workers)
@@ -574,7 +615,7 @@
       (return-from run-coordinator 1))
     (let* ((tasks (make-test-tasks suites jobs timings))
            (worker-count (min jobs (length tasks))))
-      (format t "Forking ~D prepared SBCL workers for ~D test tasks...~%"
+      (format t "Starting ~D prepared SBCL workers for ~D test tasks...~%"
               worker-count (length tasks))
       (finish-output)
       (multiple-value-bind (failures new-timings durations)
@@ -597,6 +638,9 @@
 
 (defun main ()
   (let ((arguments (uiop:command-line-arguments)))
+    (when (and (= (length arguments) 3)
+               (string= (first arguments) "--worker"))
+      (uiop:quit (run-worker-process (second arguments) (third arguments))))
     (unless (and (= (length arguments) 2)
                  (string= (first arguments) "--jobs"))
       (error "Expected --jobs N."))
