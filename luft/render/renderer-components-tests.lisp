@@ -32,14 +32,16 @@
 
 (defmethod render::make-terrain-binding
     ((drawing replacement-terrain) device sites camera
-     &key appearances descriptors shadow-map shadow-sampler shadow-p)
-  (declare (ignore sites camera appearances descriptors shadow-map shadow-sampler shadow-p))
+     &key appearances descriptors triangles shadow-map shadow-sampler shadow-p)
+  (declare (ignore sites camera appearances descriptors triangles shadow-map
+                   shadow-sampler shadow-p))
   (luv:create device (luv:make-bind-group-descriptor :label "replacement terrain")))
 
 (defmethod render::encode-terrain
-    ((drawing replacement-terrain) pass binding workgroups &key shadow-p)
+    ((drawing replacement-terrain) pass binding resident &key shadow-p)
   (true binding)
-  (true (plusp workgroups))
+  (true (plusp (render::render-population-mesh-workgroup-count
+                (render::resident-population-population resident))))
   (luv:encode pass (if shadow-p :replacement-shadow :replacement-scene)))
 
 (define-test renderer-composes-replacement-terrain-without-a-built-in-atlas-or-program

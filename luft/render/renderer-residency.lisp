@@ -191,7 +191,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   ((population :initarg :population :reader resident-population-population)
    (instance-buffer :accessor resident-population-instance-buffer)
    (appearance-buffer :accessor resident-population-appearance-buffer)
-   (descriptor-buffer :accessor resident-population-descriptor-buffer)))
+   (descriptor-buffer :accessor resident-population-descriptor-buffer)
+   (triangle-buffer :initform nil :accessor resident-population-triangle-buffer)
+   (triangle-count :initform 0 :accessor resident-population-triangle-count)))
 
 (defstruct (prepared-render-mesh
              (:constructor %make-prepared-render-mesh (mesh population))
@@ -357,6 +359,27 @@ cohort untouched. No frame can interleave with the owner-thread publication."
             (own-gpu-object slot (%upload-render-population
                                   renderer (prepared-render-mesh-population prepared)))))))
 
+(defun terrain-triangle-words (instance-words counts)
+  "One word per triangle: its site's index above five bits of triangle number.
+
+COUNTS gives each star's triangles in the table the renderer drew."
+  (declare (type (simple-array (unsigned-byte 32) (*)) instance-words)
+           (type (simple-array (unsigned-byte 8) (256)) counts)
+           (optimize (speed 3) (safety 1)))
+  (let* ((sites (floor (length instance-words) 4))
+         (total (loop for site fixnum below sites
+                      sum (aref counts (logand #xff (aref instance-words
+                                                          (+ 3 (* 4 site)))))
+                        fixnum))
+         (words (make-array total :element-type '(unsigned-byte 32)))
+         (next 0))
+    (declare (fixnum next))
+    (dotimes (site sites words)
+      (dotimes (triangle (aref counts (logand #xff (aref instance-words
+                                                         (+ 3 (* 4 site))))))
+        (setf (aref words next) (logior (ash site 5) triangle))
+        (incf next)))))
+
 (zdefun (%upload-render-population :zone :luft/upload-slot) (renderer population)
   "Own each buffer before uploading, so even a failed write rolls back."
   (let ((resident (make-instance 'resident-population :population population)))
@@ -373,7 +396,15 @@ cohort untouched. No frame can interleave with the owner-thread publication."
               (resident-population-appearance-buffer resident)
               (upload "luft active-star appearance sidecars" (render-population-appearance-words population))
               (resident-population-descriptor-buffer resident)
-              (upload "luft terrain material descriptors" (render-population-descriptor-words population)))))))
+              (upload "luft terrain material descriptors" (render-population-descriptor-words population)))
+        (let ((counts (terrain-star-triangle-counts (renderer-terrain renderer))))
+          (when counts
+            (let ((words (terrain-triangle-words
+                          (render-population-instance-words population) counts)))
+              (setf (resident-population-triangle-buffer resident)
+                    (upload "luft terrain triangle list" words)
+                    (resident-population-triangle-count resident)
+                    (length words)))))))))
 
 (defun prospective-renderer-slot-entries (renderer candidates removed-keys)
   "Return the sorted slot population after applying one candidate cohort."

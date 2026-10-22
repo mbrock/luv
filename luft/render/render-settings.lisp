@@ -10,6 +10,12 @@
 
 This is the ordinary size; dynamic resolution draws a share of it.")
 
+(defparameter *terrain-mesh-shaders-p* nil
+  "Whether terrain runs the earlier one-mesh-workgroup-per-site stages.
+
+The default pulls vertices from a plain draw over each chunk's triangle list.
+A new renderer reads it.")
+
 (defparameter *terrain-bevels-p* t
   "Whether terrain draws the bevelled star atlas or plain cube faces.
 

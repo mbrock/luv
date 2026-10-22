@@ -1,60 +1,99 @@
 (in-package #:luft.render)
 
 ;;; Terrain contributes the same resident sites to the scene and the sun's
-;;; shadow pass. It owns the immutable star atlas and those two mesh programs;
-;;; resident owners supply sites and appearance, frames supply the camera.
+;;; shadow pass. It owns the immutable star atlas and those two programs;
+;;; resident owners supply sites, appearance, and the triangle list, frames
+;;; supply the camera.  The programs pull vertices from a plain draw of
+;;; three vertices per listed triangle, or, with *TERRAIN-MESH-SHADERS-P*,
+;;; run the earlier one-workgroup-per-site mesh stages.
 
 (defclass terrain-drawing (gpu-resource-owner)
   ((templates :accessor terrain-templates)
+   (star-triangle-counts :initform nil :accessor %terrain-star-triangle-counts)
+   (mesh-shaders-p :initform nil :accessor terrain-mesh-shaders-p)
    (scene-program :accessor terrain-scene-program)
    (shadow-program :accessor terrain-shadow-program)))
 
 (defgeneric make-terrain-binding
-    (drawing device sites camera &key appearances descriptors shadow-map shadow-sampler shadow-p))
-(defgeneric encode-terrain (drawing pass binding workgroups &key shadow-p))
+    (drawing device sites camera
+     &key appearances descriptors triangles shadow-map shadow-sampler shadow-p))
+(defgeneric encode-terrain (drawing pass binding resident &key shadow-p))
+(defgeneric terrain-star-triangle-counts (drawing)
+  (:documentation "Triangles per star for a triangle list, or NIL for none.")
+  (:method (drawing)
+    (declare (ignore drawing))
+    nil))
+
+(defmethod terrain-star-triangle-counts ((drawing terrain-drawing))
+  (unless (terrain-mesh-shaders-p drawing)
+    (%terrain-star-triangle-counts drawing)))
 
 (defmethod make-terrain-binding
     ((drawing terrain-drawing) device sites camera
-     &key appearances descriptors shadow-map shadow-sampler shadow-p)
+     &key appearances descriptors triangles shadow-map shadow-sampler shadow-p)
   (apply #'make-program-binding
          (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))
          device :sites sites :star-templates (terrain-templates drawing) :camera-state camera
-         (unless shadow-p
-           (list :terrain-appearances appearances :material-descriptors descriptors
-                 :shadow-map shadow-map :shadow-sampler shadow-sampler))))
+         (append
+          (unless (terrain-mesh-shaders-p drawing)
+            (list :terrain-triangles triangles))
+          (unless shadow-p
+            (list :terrain-appearances appearances :material-descriptors descriptors
+                  :shadow-map shadow-map :shadow-sampler shadow-sampler)))))
 
-(defmethod encode-terrain ((drawing terrain-drawing) pass binding workgroups &key shadow-p)
-  (when (plusp workgroups)
-    (encode-program (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))
-                    pass binding (make-gpu-draw-mesh-command :x workgroups))))
+(defmethod encode-terrain ((drawing terrain-drawing) pass binding resident &key shadow-p)
+  (let ((program (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))))
+    (if (terrain-mesh-shaders-p drawing)
+        (let ((workgroups (render-population-mesh-workgroup-count
+                           (resident-population-population resident))))
+          (when (plusp workgroups)
+            (encode-program program pass binding
+                            (make-gpu-draw-mesh-command :x workgroups))))
+        (let ((triangles (resident-population-triangle-count resident)))
+          (when (plusp triangles)
+            (encode-program program pass binding
+                            (make-gpu-draw-command :vertex-count (* 3 triangles))))))))
 
 (defun make-terrain-drawing (device target-formats sample-count)
   (let ((drawing (make-instance 'terrain-drawing)))
     (with-gpu-construction (drawing)
+      (setf (terrain-mesh-shaders-p drawing) *terrain-mesh-shaders-p*)
       (let ((words (star-meshlet-template-words)))
+        (setf (%terrain-star-triangle-counts drawing)
+              (let ((counts (make-array 256 :element-type '(unsigned-byte 8))))
+                (dotimes (star 256 counts)
+                  (setf (aref counts star)
+                        (aref words (* star +star-meshlet-record-count+ 4))))))
         (setf (terrain-templates drawing)
               (own-gpu-resource drawing device
                                 (make-buffer-descriptor :label "luft 256 star meshlets"
                                                         :size (* 4 (length words))
                                                         :usage '(:storage :copy-dst))))
         (write-buffer (terrain-templates drawing) words))
-      (setf (terrain-scene-program drawing)
-            (own-gpu-object drawing
-                            (make-drawing-program
-                             device :label "luft site streams"
-                             :mesh (shaders:terrain-mesh-specification)
-                             :fragment (shaders:star-fragment-specification)
-                             :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
-                             :sample-count sample-count
-                             :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                              :depth-compare :less)))
-            (terrain-shadow-program drawing)
-            (own-gpu-object drawing
-                            (make-drawing-program
-                             device :label "luft sun shadow sites"
-                             :mesh (shaders:terrain-shadow-mesh-specification)
-                             :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                              :depth-compare :less)))))))
+      (let ((mesh-p (terrain-mesh-shaders-p drawing)))
+        (setf (terrain-scene-program drawing)
+              (own-gpu-object
+               drawing
+               (apply #'make-drawing-program
+                      device :label "luft site streams"
+                      :fragment (shaders:star-fragment-specification)
+                      :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
+                      :sample-count sample-count
+                      :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                                       :depth-compare :less)
+                      (if mesh-p
+                          (list :mesh (shaders:terrain-mesh-specification))
+                          (list :vertex (shaders:terrain-vertex-specification)))))
+              (terrain-shadow-program drawing)
+              (own-gpu-object
+               drawing
+               (apply #'make-drawing-program
+                      device :label "luft sun shadow sites"
+                      :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                                       :depth-compare :less)
+                      (if mesh-p
+                          (list :mesh (shaders:terrain-shadow-mesh-specification))
+                          (list :vertex (shaders:terrain-shadow-vertex-specification))))))))))
 
 
 

@@ -87,6 +87,8 @@
            #:star-fragment-specification
            #:terrain-mesh-specification
            #:terrain-shadow-mesh-specification
+           #:terrain-vertex-specification
+           #:terrain-shadow-vertex-specification
            #:sky-fragment-specification
            #:sky-temporal-fragment-specification
            #:temporal-neighbourhood-fragment-specification

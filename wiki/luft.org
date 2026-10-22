@@ -1348,6 +1348,32 @@ least -- is the experiment this earns, and a flat Luft with that cache is a
 plausible foundation for Luvcraft's world.  The materials and time of day
 differ between the games, and it is one view on one machine.
 
+**** Vertex pulling replaces the mesh stage for plain cubes
+:PROPERTIES:
+:ID: 8TUEPF
+:END:
+
+Moppe dropped its mesh shaders for instanced vertex pulling after measuring
+each path against the other.  Luft's terrain now does the same by default
+(=*terrain-mesh-shaders-p*= nil): each resident chunk carries a triangle
+list, one word per triangle naming its site and its triangle within the
+site's star, and one plain draw of three vertices per word reads the site,
+the star table, and the appearance as the mesh stage did.  On the exported
+world, with 12 and 36 repetitions so the cheap path also saturates:
+
+| Terrain GPU ms | Mesh stage | Vertex pulling | Triangles |
+|-
+| Flat | 2.57 | 0.56 | 435,134 |
+| Bevelled | 4.78 | 6.96 | 3,147,820 |
+
+Flat cubes drawn this way cost half of Luvcraft's prebuilt chunks on the
+same faces.  Bevels are seven times the triangles, unshared between the
+three corners of each and unculled, and there the mesh stage's per-site
+rejection still wins.  Their sensible path is the one Moppe took for trees
+and boulders: an index buffer per star and an instanced draw per star, so
+a bevelled patch's shared corners are transformed once.
+
+
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:
 :ID: PGRM80

@@ -6,6 +6,8 @@
   '(terrain-mesh-specification
     star-fragment-specification
     terrain-shadow-mesh-specification
+    terrain-vertex-specification
+    terrain-shadow-vertex-specification
     player-sdf-vertex-specification
     player-sdf-fragment-specification
     lattice-point-vertex-specification
