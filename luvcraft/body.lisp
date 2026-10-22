@@ -175,18 +175,27 @@ the default hand holds things but does nothing with them."))
   (when (player-body-sdf-pipeline body)
     (list (player-body-sdf-pipeline body))))
 
+(defconstant +player-body-sdf-instance-floats+ 16
+  "Two proxy instances, one per arm, each carrying both palms.")
+
 (defun place-player-body-sdf (body)
-  "Pack BODY's current view-local palms into its CPU instance data."
+  "Pack BODY's current view-local palms into its CPU instance data.
+
+Both instances carry both palms, since each arm's proxy marches the whole
+field; the left palm's last lane says which arm the instance covers."
   (let ((data (player-body-sdf-instance-data body)))
-    (loop for pose in (list (player-body-hand-pose body :left)
-                            (player-body-hand-pose body :right))
-          for offset in '(0 4)
-          do (destructuring-bind (x y z pitch yaw roll) pose
-               (declare (ignore pitch yaw roll))
-               (setf (aref data offset) (coerce x 'single-float)
-                     (aref data (+ offset 1)) (coerce y 'single-float)
-                     (aref data (+ offset 2)) (coerce z 'single-float)
-                     (aref data (+ offset 3)) 1.0)))
+    (loop for instance-offset in '(0 8)
+          for side in '(-1.0 1.0)
+          do (loop for pose in (list (player-body-hand-pose body :left)
+                                     (player-body-hand-pose body :right))
+                   for offset in (list instance-offset (+ instance-offset 4))
+                   for lane in (list side 1.0)
+                   do (destructuring-bind (x y z pitch yaw roll) pose
+                        (declare (ignore pitch yaw roll))
+                        (setf (aref data offset) (coerce x 'single-float)
+                              (aref data (+ offset 1)) (coerce y 'single-float)
+                              (aref data (+ offset 2)) (coerce z 'single-float)
+                              (aref data (+ offset 3)) lane))))
     data)
   body)
 
@@ -214,7 +223,7 @@ the default hand holds things but does nothing with them."))
       (set-vertex-buffer pass 0 (player-body-sdf-vertex-buffer body))
       (set-vertex-buffer pass 1 instance-buffer)
       (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
-      (draw pass 6 1)))
+      (draw pass 6 2)))
   body)
 
 (defmethod release-luvcraft-overlay ((body player-body))
@@ -236,7 +245,8 @@ the default hand holds things but does nothing with them."))
       (return-from attach-player-body-sdf body))
     (let* ((device (luvcraft-session-device session))
            (vertex-data (make-world-text-quad-vertices))
-           (instance-data (make-array 8 :element-type 'single-float))
+           (instance-data (make-array +player-body-sdf-instance-floats+
+                                      :element-type 'single-float))
            (vertex-buffer nil)
            (pipeline nil)
            (transferred-p nil)

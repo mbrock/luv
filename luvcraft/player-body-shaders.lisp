@@ -171,7 +171,51 @@
                  (+ point (* d reach)) left-palm right-palm)))))))
 
 ;;; ---------------------------------------------------------------------
-;;; Lower-screen proxy and marcher.
+;;; The proxy and marcher.
+;;;
+;;; Every proxy fragment marches the whole field, all fifty-two steps, and
+;;; blends, so nothing beneath it is culled.  A proxy over the whole lower
+;;; screen was most of a 32:9 fullscreen frame: three quarters of the scene
+;;; pass, for arms covering a tenth of it.  Instead each arm gets its own
+;;; proxy, the screen rectangle bounding a capsule from its shoulder to its
+;;; palm fattened by the hand, so only fragments that might meet an arm
+;;; launch a ray.  Both proxies still march the whole field, so the arms
+;;; occlude each other correctly, and where the rectangles overlap the second
+;;; draw repeats the first exactly: coverage is all or nothing.
+
+(define-shader-function player-viewmodel-reach ()
+  "How far beyond its shoulder-to-palm axis any part of an arm can reach."
+  (+ (max player-sdf-arm-radius (* player-sdf-hand-size 1.7))
+     (+ player-sdf-smoothing 0.01)))
+
+(define-shader-function player-viewmodel-screen-bounds
+    (point reach x-scale y-scale)
+  "The clip rectangle (left top right bottom) a ball of REACH around the
+view-local POINT can cover; positive clip y is down the presented image."
+  (let* ((near (max (- (swizzle point :z) reach) 0.05))
+         (far (+ (swizzle point :z) reach))
+         (left (- (swizzle point :x) reach))
+         (right (+ (swizzle point :x) reach))
+         (low (- (swizzle point :y) reach))
+         (high (+ (swizzle point :y) reach)))
+    (vec4 (* (min (/ left near) (/ left far)) x-scale)
+          (* (- (max (/ high near) (/ high far))) y-scale)
+          (* (max (/ right near) (/ right far)) x-scale)
+          (* (- (min (/ low near) (/ low far))) y-scale))))
+
+(define-shader-function player-viewmodel-bounds-union (first second)
+  (vec4 (min (swizzle first :x) (swizzle second :x))
+        (min (swizzle first :y) (swizzle second :y))
+        (max (swizzle first :z) (swizzle second :z))
+        (max (swizzle first :w) (swizzle second :w))))
+
+(define-shader-function player-viewmodel-arm-bounds
+    (palm side reach x-scale y-scale)
+  "The clip rectangle covering the arm on SIDE whose palm is at PALM."
+  (player-viewmodel-bounds-union
+   (player-viewmodel-screen-bounds
+    (player-viewmodel-shoulder palm side) reach x-scale y-scale)
+   (player-viewmodel-screen-bounds palm reach x-scale y-scale)))
 
 (define-shader-method shader-specification-for
     player-body-sdf-vertex-specification
@@ -187,12 +231,26 @@
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
-  (let* ((corner-x (- (* (swizzle quad-corner :x) 2.0) 1.0))
-         ;; In this projection positive clip y is down the presented image.
-         ;; The arms never need the top fifth of the screen.
-         (corner-y (- (* (swizzle quad-corner :y) 1.18) 0.18))
-         (x-scale (representation (swizzle projection-vector :x)))
+  (let* ((x-scale (representation (swizzle projection-vector :x)))
          (y-scale (representation (swizzle projection-vector :y)))
+         (left-palm (swizzle left-palm-input :xyz))
+         (right-palm (swizzle right-palm-input :xyz))
+         (reach (player-viewmodel-reach))
+         ;; The left palm's spare lane says which arm this instance covers:
+         ;; negative the left, positive the right.
+         (right-arm-p (step 0.0 (swizzle left-palm-input :w)))
+         (bounds
+           (mix (player-viewmodel-arm-bounds
+                 left-palm -1.0 reach x-scale y-scale)
+                (player-viewmodel-arm-bounds
+                 right-palm 1.0 reach x-scale y-scale)
+                right-arm-p))
+         (clipped (clamp bounds (vec4 -1.0 -1.0 -1.0 -1.0)
+                         (vec4 1.0 1.0 1.0 1.0)))
+         (corner-x (mix (swizzle clipped :x) (swizzle clipped :z)
+                        (swizzle quad-corner :x)))
+         (corner-y (mix (swizzle clipped :y) (swizzle clipped :w)
+                        (swizzle quad-corner :y)))
          (view-position (vec3 (/ corner-x x-scale)
                               (- (/ corner-y y-scale))
                               1.0)))

@@ -3488,11 +3488,11 @@ lowering later without changing this queue-level operation."
    (vulkan-handle (vulkan-queue-device queue))
    (vulkan-queue-timeline queue)))
 
-(defmethod queue-completion-watch ((queue vulkan-gpu-queue))
+(defmethod queue-completion-watch ((queue vulkan-gpu-queue) &key (behind 0))
   ;; The timeline semaphore's counter is the newest completed submission.
   ;; Reading it needs no external synchronization, so the predicate takes no
   ;; queue lock and never waits, like Metal's shared-event read.
-  (let ((index (vulkan-queue-submission-counter queue))
+  (let ((index (- (vulkan-queue-submission-counter queue) behind))
         (device (vulkan-queue-device queue))
         (timeline (vulkan-queue-timeline queue)))
     (lambda ()
