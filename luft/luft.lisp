@@ -66,6 +66,7 @@
    #:star-rotations #:star-reflections #:transform-star
    #:transform-star-triangles #:star-orbit #:star-canonical-form
    #:star-atlas-parts #:star-atlas-owned-triangles
+   #:star-atlas-flat-owned-triangles #:star-atlas-flat-owned-appearance-masks
    #:star-atlas-owned-appearance-masks
    #:star-surface-sites #:star-surface-triangles
    ;; Face topology.

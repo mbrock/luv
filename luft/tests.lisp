@@ -395,6 +395,64 @@ triangles and all 48 signed-axis symmetries."
         (%check (= 3 (fiber-store-highest-cell-below store 10 10 50)))
         (%check (fiber-store-column-clear-p store 10 10 4 255))))))
 
+(defun %flat-surface-segments (cells)
+  "Count FLAT owned triangle edges over CELLS, split into one-tick segments."
+  (let ((segments (make-hash-table :test #'equal)))
+    (maphash
+     (lambda (site star)
+       (dolist (triangle (star-atlas-flat-owned-triangles star))
+         (let ((points (loop for point in triangle
+                             collect (mapcar (lambda (c s)
+                                               (+ c (* +mesh-cell-size+ s)))
+                                             point site))))
+           (loop for (a b) on (append points (list (first points)))
+                 while b
+                 do (let* ((delta (mapcar #'- b a))
+                           (steps (reduce #'max (mapcar #'abs delta))))
+                      (dotimes (i steps)
+                        (incf (gethash
+                               (list (mapcar (lambda (u d) (+ u (/ (* d i) steps)))
+                                             a delta)
+                                     (mapcar (lambda (u d)
+                                               (+ u (/ (* d (1+ i)) steps)))
+                                             a delta))
+                               segments 0))))))))
+     (star-surface-sites cells))
+    segments))
+
+(defun %test-flat-atlas ()
+  "The flat atlas is the plain cube surface: watertight, square, and small."
+  (dotimes (star 256)
+    (let ((flat (star-atlas-flat-owned-triangles star)))
+      (%check (= (length flat)
+                 (length (star-atlas-flat-owned-appearance-masks star))))
+      (%check (<= (length flat) (length (star-atlas-owned-triangles star))))
+      ;; Every vertex lies on the cell lattice: no bevel tick survives.
+      (%check (every (lambda (triangle)
+                       (every (lambda (point)
+                                (every (lambda (c) (zerop (mod c +mesh-cell-size+)))
+                                       point))
+                              triangle))
+                     flat))))
+  ;; One cube draws its six faces as twelve triangles.
+  (let ((cube (make-hash-table :test #'equal)))
+    (setf (gethash '(0 0 0) cube) t)
+    (%check (= 12 (loop for star being the hash-values of (star-surface-sites cube)
+                        sum (length (star-atlas-flat-owned-triangles star))))))
+  ;; On random solids every edge segment meets its reverse.
+  (let ((*random-state* (sb-ext:seed-random-state 7)))
+    (dotimes (trial 8)
+      (let ((cells (make-hash-table :test #'equal)))
+        (dotimes (x 5)
+          (dotimes (y 5)
+            (dotimes (z 5)
+              (when (< (random 1.0) 0.45)
+                (setf (gethash (list x y z) cells) t)))))
+        (let ((segments (%flat-surface-segments cells)))
+          (maphash (lambda (segment count)
+                     (%check (= count (gethash (reverse segment) segments 0))))
+                   segments))))))
+
 (defun run-luft-tests (&key (stream *standard-output*))
   (setf *luft-test-count* 0)
   (%test-chunk-fibers)
@@ -405,6 +463,7 @@ triangles and all 48 signed-axis symmetries."
   (%test-atlas)
   (%test-atlas-appearance-selector-hypothesis)
   (%test-atlas-appearance-sample-set-policy)
+  (%test-flat-atlas)
   (%test-cubical-addressing)
   (format stream "LUFT: ~D star checks passed.~%" *luft-test-count*)
   (values t *luft-test-count*))

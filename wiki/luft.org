@@ -1322,23 +1322,31 @@ runs saturated rather than at the clock it lowers to under light work; the
 slope is one repetition's cost, and the slope with terrain hidden is
 subtracted.  Metal 4 GPU timestamps, two runs each, on the same Mac:
 
-| GPU ms per frame | Luvcraft | Luft |
+| GPU ms per frame | Luvcraft | Luft | Luft, flat |
 |-
-| Terrain, both passes | 0.94--1.04 | 4.7--5.1 |
-| Terrain in the shadow pass | ~1.1 | 2.6--3.0 |
-| Terrain in the scene pass | ~1.0 | 3.0--3.3 |
-| The passes without terrain | 1.55 | 0.87 |
-| Geometry | 1.27 M prebuilt vertices | 216,814 site workgroups, ≤25 triangles each |
+| Terrain, both passes | 0.94--1.04 | 4.7--5.1 | 3.61--3.64 |
+| Terrain in the shadow pass | ~1.1 | 2.6--3.0 | 2.3--2.4 |
+| Terrain in the scene pass | ~1.0 | 3.0--3.3 | 2.2 |
+| Geometry | 1.27 M prebuilt vertices | 216,814 site workgroups, ≤25 triangles each | the same workgroups, plain faces |
 
 Luvcraft draws vertex buffers its CPU mesher built once per chunk.  Luft
 re-derives every surface star in a mesh shader, in both passes, every frame,
 and its stars are bevelled, so it emits more and smaller triangles for the
 same faces.  The terrain is about five times as expensive.  This is the
-measurement #WQ611A asked for: at this scale, reconstruction rather than
-shading looks like the cost, and caching emitted geometry across frames --
-or at least across the shadow and scene passes -- is the experiment it
-earns.  The materials and time of day differ between the two, and it is one
-view on one machine.
+measurement #WQ611A asked for.
+
+The flat column is the same renderer reading a flat star table
+(=*terrain-bevels-p*= nil): each star's owned faces pushed out to the cell
+edges, without bands or junctions.  It is watertight, and it draws the same
+exposed faces Luvcraft draws -- about 211,000, at six Luvcraft vertices or
+two Luft triangles each -- yet still costs three and a half times as much.
+Bevels are a quarter of Luft's terrain cost; the rest is the shape of the
+work: a 32-lane workgroup per surface site, re-deriving a handful of
+triangles from the atlas in both passes, every frame.  Caching emitted
+geometry per chunk publication -- or across the shadow and scene passes at
+least -- is the experiment this earns, and a flat Luft with that cache is a
+plausible foundation for Luvcraft's world.  The materials and time of day
+differ between the games, and it is one view on one machine.
 
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:

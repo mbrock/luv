@@ -10,6 +10,13 @@
 
 This is the ordinary size; dynamic resolution draws a share of it.")
 
+(defparameter *terrain-bevels-p* t
+  "Whether terrain draws the bevelled star atlas or plain cube faces.
+
+Both are the same renderer: one mesh workgroup per surface site reading one
+256-star table.  The flat table keeps only each star's owned faces, pushed out
+to the cell edges.  A new renderer reads it.")
+
 (defparameter *dynamic-resolution-frame-rate* 60
   "The frame rate LUFT holds by drawing its scene smaller, or NIL for never.
 

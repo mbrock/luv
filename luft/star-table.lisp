@@ -250,3 +250,56 @@ each drawn once by the site that owns it."
             (%star-owned-appearance-masks
              star (svref *star-atlas-parts* star)))))
   "Symmetry-stable material/light sample sets parallel to owned triangles.")
+
+;;; The flat atlas: the same owned faces with no bevel.  Every atlas face is
+;;; inset one tick from its cell's edges to leave room for the bands and
+;;; junction that round them; pushed out to the edges, the owned faces alone
+;;; tile the plain cube surface once, and the bands and junctions go.
+
+(defun %flat-face-coordinate (coordinate)
+  (case coordinate
+    ((-1 1) 0)
+    (-7 -8)
+    (7 8)
+    (t coordinate)))
+
+(defun %flat-owned-triangles (parts)
+  (loop for (pair triangles) in (getf parts :faces)
+        when (= (second pair) #b111)
+          append (loop for triangle in triangles
+                       collect (mapcar (lambda (point)
+                                         (map 'list #'%flat-face-coordinate point))
+                                       triangle))))
+
+(defun %flat-owned-appearance-masks (star parts)
+  (loop for (pair triangles) in (getf parts :faces)
+        when (= (second pair) #b111)
+          append (multiple-value-bind (material light)
+                     (%face-appearance-sample-masks star pair)
+                   (%repeat-appearance-masks triangles material light))))
+
+(defparameter *star-atlas-flat-owned-triangles*
+  (let ((table (make-array 256)))
+    (dotimes (star 256 table)
+      (setf (svref table star)
+            (%flat-owned-triangles (svref *star-atlas-parts* star)))))
+  "Every star's owned faces as plain unbevelled squares.")
+
+(defparameter *star-atlas-flat-owned-appearance-masks*
+  (let ((table (make-array 256)))
+    (dotimes (star 256 table)
+      (setf (svref table star)
+            (%flat-owned-appearance-masks
+             star (svref *star-atlas-parts* star)))))
+  "Material/light sample sets parallel to the flat owned triangles.")
+
+(defun star-atlas-flat-owned-triangles (star)
+  "Return the unbevelled triangles a site with occupancy STAR draws itself."
+  (%check-star star)
+  (svref *star-atlas-flat-owned-triangles* star))
+
+(defun star-atlas-flat-owned-appearance-masks (star)
+  "Return (MATERIAL-MASK LIGHT-MASK) parallel to STAR's flat triangles."
+  (%check-star star)
+  (svref *star-atlas-flat-owned-appearance-masks* star))
+

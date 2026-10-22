@@ -80,8 +80,12 @@ outward order.  Coordinates are biased only to keep this first ABI unsigned."
                       :element-type '(unsigned-byte 32)
                       :initial-element 0)))
     (dotimes (star 256 words)
-      (let* ((triangles (luft:star-atlas-owned-triangles star))
-             (appearance (luft:star-atlas-owned-appearance-masks star))
+      (let* ((triangles (if *terrain-bevels-p*
+                            (luft:star-atlas-owned-triangles star)
+                            (luft:star-atlas-flat-owned-triangles star)))
+             (appearance (if *terrain-bevels-p*
+                             (luft:star-atlas-owned-appearance-masks star)
+                             (luft:star-atlas-flat-owned-appearance-masks star)))
              (triangle-count (length triangles))
              (block (* star +star-meshlet-record-count+ 4)))
         (when (> triangle-count +star-meshlet-triangle-capacity+)
