@@ -3,9 +3,7 @@
 ;;; Production module manifest ----------------------------------------------
 
 (defparameter *production-shader-specifications*
-  '(terrain-mesh-specification
-    star-fragment-specification
-    terrain-shadow-mesh-specification
+  '(star-fragment-specification
     terrain-vertex-specification
     terrain-shadow-vertex-specification
     player-sdf-vertex-specification

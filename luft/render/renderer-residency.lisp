@@ -177,7 +177,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
 (defstruct (render-population
              (:constructor %make-render-population
                  (instance-words appearance-words descriptor-words
-                  mesh-workgroup-count))
+                  site-count))
              (:copier nil))
   "Geometry sites plus a one-for-one, independently replaceable appearance."
   (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
@@ -185,15 +185,15 @@ cohort untouched. No frame can interleave with the owner-thread publication."
                     :read-only t)
   (descriptor-words #() :type (simple-array (unsigned-byte 32) (*))
                     :read-only t)
-  (mesh-workgroup-count 0 :type (integer 0 *) :read-only t))
+  (site-count 0 :type (integer 0 *) :read-only t))
 
 (defclass resident-population (gpu-resource-owner)
   ((population :initarg :population :reader resident-population-population)
    (instance-buffer :accessor resident-population-instance-buffer)
    (appearance-buffer :accessor resident-population-appearance-buffer)
    (descriptor-buffer :accessor resident-population-descriptor-buffer)
-   (triangle-buffer :initform nil :accessor resident-population-triangle-buffer)
-   (triangle-count :initform 0 :accessor resident-population-triangle-count)))
+   ;; (STAR FIRST COUNT) for each star present, over the star-sorted sites.
+   (star-runs :initform nil :accessor resident-population-star-runs)))
 
 (defstruct (prepared-render-mesh
              (:constructor %make-prepared-render-mesh (mesh population))
@@ -359,26 +359,38 @@ cohort untouched. No frame can interleave with the owner-thread publication."
             (own-gpu-object slot (%upload-render-population
                                   renderer (prepared-render-mesh-population prepared)))))))
 
-(defun terrain-triangle-words (instance-words counts)
-  "One word per triangle: its site's index above five bits of triangle number.
+(defun sort-sites-by-star (instance-words appearance-words)
+  "Return INSTANCE-WORDS and APPEARANCE-WORDS reordered by star, and the runs.
 
-COUNTS gives each star's triangles in the table the renderer drew."
-  (declare (type (simple-array (unsigned-byte 32) (*)) instance-words)
-           (type (simple-array (unsigned-byte 8) (256)) counts)
+Each site is four instance words ending in its star and two appearance
+words; the two arrays keep their one-for-one order.  The runs are
+(STAR FIRST COUNT) for every star present, the instances one draw covers."
+  (declare (type (simple-array (unsigned-byte 32) (*)) instance-words appearance-words)
            (optimize (speed 3) (safety 1)))
   (let* ((sites (floor (length instance-words) 4))
-         (total (loop for site fixnum below sites
-                      sum (aref counts (logand #xff (aref instance-words
-                                                          (+ 3 (* 4 site)))))
-                        fixnum))
-         (words (make-array total :element-type '(unsigned-byte 32)))
-         (next 0))
-    (declare (fixnum next))
-    (dotimes (site sites words)
-      (dotimes (triangle (aref counts (logand #xff (aref instance-words
-                                                         (+ 3 (* 4 site))))))
-        (setf (aref words next) (logior (ash site 5) triangle))
-        (incf next)))))
+         (counts (make-array 256 :element-type 'fixnum :initial-element 0))
+         (starts (make-array 256 :element-type 'fixnum :initial-element 0))
+         (sorted-instances (make-array (length instance-words)
+                                       :element-type '(unsigned-byte 32)))
+         (sorted-appearances (make-array (length appearance-words)
+                                         :element-type '(unsigned-byte 32))))
+    (flet ((star (site) (logand #xff (aref instance-words (+ 3 (* 4 site))))))
+      (dotimes (site sites) (incf (aref counts (star site))))
+      (loop with next fixnum = 0
+            for star below 256
+            do (setf (aref starts star) next)
+               (incf next (aref counts star)))
+      (let ((runs (loop for star below 256
+                        when (plusp (aref counts star))
+                          collect (list star (aref starts star) (aref counts star)))))
+        (dotimes (site sites)
+          (let ((slot (aref starts (star site))))
+            (incf (aref starts (star site)))
+            (replace sorted-instances instance-words
+                     :start1 (* 4 slot) :start2 (* 4 site) :end2 (* 4 (1+ site)))
+            (replace sorted-appearances appearance-words
+                     :start1 (* 2 slot) :start2 (* 2 site) :end2 (* 2 (1+ site)))))
+        (values sorted-instances sorted-appearances runs)))))
 
 (zdefun (%upload-render-population :zone :luft/upload-slot) (renderer population)
   "Own each buffer before uploading, so even a failed write rolls back."
@@ -391,20 +403,18 @@ COUNTS gives each star's triangles in the table the renderer drew."
                                                       :usage '(:storage :copy-dst)))))
                  (when (plusp (length words)) (write-buffer buffer words))
                  buffer)))
-        (setf (resident-population-instance-buffer resident)
-              (upload "luft resident site instances" (render-population-instance-words population))
-              (resident-population-appearance-buffer resident)
-              (upload "luft active-star appearance sidecars" (render-population-appearance-words population))
-              (resident-population-descriptor-buffer resident)
-              (upload "luft terrain material descriptors" (render-population-descriptor-words population)))
-        (let ((counts (terrain-star-triangle-counts (renderer-terrain renderer))))
-          (when counts
-            (let ((words (terrain-triangle-words
-                          (render-population-instance-words population) counts)))
-              (setf (resident-population-triangle-buffer resident)
-                    (upload "luft terrain triangle list" words)
-                    (resident-population-triangle-count resident)
-                    (length words)))))))))
+        ;; One indexed draw per star covers a contiguous run of sites.
+        (multiple-value-bind (instances appearances runs)
+            (sort-sites-by-star (render-population-instance-words population)
+                                (render-population-appearance-words population))
+          (setf (resident-population-instance-buffer resident)
+                (upload "luft resident site instances" instances)
+                (resident-population-appearance-buffer resident)
+                (upload "luft active-star appearance sidecars" appearances)
+                (resident-population-descriptor-buffer resident)
+                (upload "luft terrain material descriptors"
+                        (render-population-descriptor-words population))
+                (resident-population-star-runs resident) runs))))))
 
 (defun prospective-renderer-slot-entries (renderer candidates removed-keys)
   "Return the sorted slot population after applying one candidate cohort."

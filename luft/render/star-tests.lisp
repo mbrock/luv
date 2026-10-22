@@ -104,46 +104,31 @@
                       :key #'asdf:component-name
                       :test #'string=)))))
 
-(define-test atlas-is-one-fixed-complete-table
-  (let ((words (render::star-meshlet-template-words)))
-    (true (= (* 256 render::+star-meshlet-record-count+ 4)
-             (length words)))
-    (dotimes (star 256)
-      (let ((block (* star render::+star-meshlet-record-count+ 4)))
-        (true (= (length (luft:star-atlas-owned-triangles star))
-                 (aref words block)))))))
-
-(define-test terrain-shaders-are-direct-mesh-stages
-  (let* ((mesh (shaders:terrain-mesh-specification))
-         (shadow (shaders:terrain-shadow-mesh-specification))
-         (fragment (shaders:star-fragment-specification))
-         (output (luv.shader:shader-specification-mesh-output mesh)))
-    (true (eq :mesh (luv.shader:shader-specification-stage mesh)))
-    (true (eq :mesh (luv.shader:shader-specification-stage shadow)))
-    (true (= 75 (luv.shader:shader-mesh-output-max-vertices output)))
-    (true (= 25 (luv.shader:shader-mesh-output-max-primitives output)))
-    (true (luv.msl:compile-msl mesh))
-    (true (luv.spir-v:compile-shader-specification mesh))
-    (true (luv.msl:compile-msl shadow))
-    (true (luv.spir-v:compile-shader-specification shadow))
-    (true (luv.msl:compile-msl fragment))
-    (true (luv.spir-v:compile-shader-specification fragment))
+(define-test terrain-shaders-are-vertex-stages
+  (let ((scene (shaders:terrain-vertex-specification))
+        (shadow (shaders:terrain-shadow-vertex-specification))
+        (fragment (shaders:star-fragment-specification)))
+    (true (eq :vertex (luv.shader:shader-specification-stage scene)))
+    (true (eq :vertex (luv.shader:shader-specification-stage shadow)))
+    (dolist (specification (list scene shadow fragment))
+      (true (luv.msl:compile-msl specification))
+      (true (luv.spir-v:compile-shader-specification specification)))
     (let ((scene-bindings
             (mapcar #'luv.shader:shader-resource-binding
-                    (luv.shader:shader-specification-resources mesh)))
+                    (luv.shader:shader-specification-resources scene)))
           (shadow-bindings
             (mapcar #'luv.shader:shader-resource-binding
                     (luv.shader:shader-specification-resources shadow))))
       (true (member 3 scene-bindings)
-            "the scene mesh stage binds active-star appearance")
+            "the scene stage binds active-star appearance")
       (true (member 6 scene-bindings)
-            "the scene mesh stage binds the material descriptor table")
+            "the scene stage binds the material descriptor table")
       (true (not (member 3 shadow-bindings))
-            "the shadow mesh stage remains geometry-only")
+            "the shadow stage remains geometry-only")
       (true (not (member 6 shadow-bindings))
-            "the shadow mesh stage does not bind material descriptors"))))
+            "the shadow stage does not bind material descriptors"))))
 
-(define-test one-cell-is-eight-workgroups-with-no-cpu-geometry
+(define-test one-cell-is-eight-sites-with-no-cpu-geometry
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))
          (builder (luft:make-chain-builder domain)))
     (luft:chain-builder-add-site
@@ -160,7 +145,7 @@
                 chain key
                 :outside-domain-policy :air)))
            (population (render::make-render-population (list mesh))))
-      (true (= 8 (render::render-population-mesh-workgroup-count
+      (true (= 8 (render::render-population-site-count
                   population)))
       (true (= 32 (length (luft:surface-mesh-star-site-words mesh))))
       (true (= 64 (length (luft:surface-mesh-appearance-codes mesh))))

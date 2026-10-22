@@ -85,8 +85,6 @@
            #:torch-body-shadow-vertex-specification
            #:torch-body-fragment-specification
            #:star-fragment-specification
-           #:terrain-mesh-specification
-           #:terrain-shadow-mesh-specification
            #:terrain-vertex-specification
            #:terrain-shadow-vertex-specification
            #:sky-fragment-specification

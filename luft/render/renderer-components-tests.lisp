@@ -32,15 +32,15 @@
 
 (defmethod render::make-terrain-binding
     ((drawing replacement-terrain) device sites camera
-     &key appearances descriptors triangles shadow-map shadow-sampler shadow-p)
-  (declare (ignore sites camera appearances descriptors triangles shadow-map
-                   shadow-sampler shadow-p))
+     &key appearances descriptors shadow-map shadow-sampler shadow-p)
+  (declare (ignore sites camera appearances descriptors shadow-map shadow-sampler
+                   shadow-p))
   (luv:create device (luv:make-bind-group-descriptor :label "replacement terrain")))
 
 (defmethod render::encode-terrain
     ((drawing replacement-terrain) pass binding resident &key shadow-p)
   (true binding)
-  (true (plusp (render::render-population-mesh-workgroup-count
+  (true (plusp (render::render-population-site-count
                 (render::resident-population-population resident))))
   (luv:encode pass (if shadow-p :replacement-shadow :replacement-scene)))
 
@@ -365,3 +365,67 @@
       (render:destroy-renderer renderer))
     (dolist (resource (test-gpu-resources device))
       (true (= 1 (test-gpu-release-attempts resource))))))
+
+(define-test star-patch-tables-index-exactly-the-star-triangles
+  (dolist (bevels-p '(t nil))
+    (multiple-value-bind (scene-words normals scene-indices shadow-words
+                          shadow-indices ranges)
+        (render::star-patch-tables bevels-p)
+      (flet ((point (words index)
+               (loop for lane below 3
+                     collect (- (aref words (+ (* 4 index) lane))
+                                render::+star-patch-coordinate-bias+))))
+        (dotimes (star 256)
+          (let* ((triangles (if bevels-p
+                                (luft:star-atlas-owned-triangles star)
+                                (luft:star-atlas-flat-owned-triangles star)))
+                 (masks (if bevels-p
+                            (luft:star-atlas-owned-appearance-masks star)
+                            (luft:star-atlas-flat-owned-appearance-masks star)))
+                 (corners (loop for triangle in triangles append triangle))
+                 (range (aref ranges star)))
+            ;; Both index lists replay the triangles corner for corner.
+            (true (= (length corners) (aref range 1) (aref range 3)))
+            (true (equal corners
+                         (loop for i from (aref range 0)
+                               repeat (aref range 1)
+                               collect (point scene-words (aref scene-indices i)))))
+            (true (equal corners
+                         (loop for i from (aref range 2)
+                               repeat (aref range 3)
+                               collect (point shadow-words (aref shadow-indices i)))))
+            ;; A shared scene vertex carries its triangle's mask and normal.
+            (loop for triangle in triangles
+                  for (material light) in masks
+                  for corner from (aref range 0) by 3
+                  for key = (render::star-triangle-normal-key triangle)
+                  do (dotimes (k 3)
+                       (let* ((fourth (aref scene-words
+                                            (+ 3 (* 4 (aref scene-indices (+ corner k))))))
+                              (normal (ldb (byte 16 16) fourth))
+                              (length (sqrt (reduce #'+ (mapcar (lambda (x) (* x x)) key)))))
+                         (true (= (logior material (ash light 8)) (ldb (byte 16 0) fourth)))
+                         (true (< (abs (- (aref normals (* 4 normal))
+                                          (/ (first key) length)))
+                                  1e-6)))))))))))
+
+(define-test sites-sort-by-star-with-their-appearance
+  (let* ((stars '(7 3 7 200 3 7))
+         (instances (make-array (* 4 (length stars)) :element-type '(unsigned-byte 32)))
+         (appearances (make-array (* 2 (length stars)) :element-type '(unsigned-byte 32))))
+    (loop for star in stars
+          for site from 0
+          do (setf (aref instances (* 4 site)) site
+                   (aref instances (+ 3 (* 4 site))) star
+                   (aref appearances (* 2 site)) (* 10 site)
+                   (aref appearances (1+ (* 2 site))) (1+ (* 10 site))))
+    (multiple-value-bind (sorted-instances sorted-appearances runs)
+        (render::sort-sites-by-star instances appearances)
+      (true (equal '((3 0 2) (7 2 3) (200 5 1)) runs))
+      (true (equal '(3 3 7 7 7 200)
+                   (loop for site below 6 collect (aref sorted-instances (+ 3 (* 4 site))))))
+      ;; Each site keeps its own appearance words.
+      (dotimes (slot 6)
+        (let ((site (aref sorted-instances (* 4 slot))))
+          (true (= (* 10 site) (aref sorted-appearances (* 2 slot))))
+          (true (= (1+ (* 10 site)) (aref sorted-appearances (1+ (* 2 slot))))))))))

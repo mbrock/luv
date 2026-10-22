@@ -1,153 +1,194 @@
 (in-package #:luft.render)
 
 ;;; Terrain contributes the same resident sites to the scene and the sun's
-;;; shadow pass. It owns the immutable star atlas and those two programs;
-;;; resident owners supply sites, appearance, and the triangle list, frames
-;;; supply the camera.  The programs pull vertices from a plain draw of
-;;; three vertices per listed triangle, or, with *TERRAIN-MESH-SHADERS-P*,
-;;; run the earlier one-workgroup-per-site mesh stages.
+;;; shadow pass. It owns the immutable star tables and those two programs;
+;;; resident owners supply sites sorted by star and their appearance, frames
+;;; supply the camera.  Each star is one indexed patch instanced over its
+;;; run of sites (#8TUEPF).
 
 (defclass terrain-drawing (gpu-resource-owner)
-  ((templates :accessor terrain-templates)
-   (star-triangle-counts :initform nil :accessor %terrain-star-triangle-counts)
-   (mesh-shaders-p :initform nil :accessor terrain-mesh-shaders-p)
+  (;; Per star: scene first index, scene index count, shadow first index,
+   ;; shadow index count, into the two shared index buffers.
+   (star-ranges :initform nil :accessor terrain-star-ranges)
+   (scene-vertices :initform nil :accessor terrain-scene-vertices)
+   (normals :initform nil :accessor terrain-normals)
+   (scene-indices :initform nil :accessor terrain-scene-indices)
+   (shadow-vertices :initform nil :accessor terrain-shadow-vertices)
+   (shadow-indices :initform nil :accessor terrain-shadow-indices)
    (scene-program :accessor terrain-scene-program)
    (shadow-program :accessor terrain-shadow-program)))
 
 (defgeneric make-terrain-binding
     (drawing device sites camera
-     &key appearances descriptors triangles shadow-map shadow-sampler shadow-p))
+     &key appearances descriptors shadow-map shadow-sampler shadow-p))
 (defgeneric encode-terrain (drawing pass binding resident &key shadow-p))
-(defgeneric terrain-star-triangle-counts (drawing)
-  (:documentation "Triangles per star for a triangle list, or NIL for none.")
-  (:method (drawing)
-    (declare (ignore drawing))
-    nil))
-
-(defmethod terrain-star-triangle-counts ((drawing terrain-drawing))
-  (unless (terrain-mesh-shaders-p drawing)
-    (%terrain-star-triangle-counts drawing)))
 
 (defmethod make-terrain-binding
     ((drawing terrain-drawing) device sites camera
-     &key appearances descriptors triangles shadow-map shadow-sampler shadow-p)
+     &key appearances descriptors shadow-map shadow-sampler shadow-p)
   (apply #'make-program-binding
          (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))
-         device :sites sites :star-templates (terrain-templates drawing) :camera-state camera
-         (append
-          (unless (terrain-mesh-shaders-p drawing)
-            (list :terrain-triangles triangles))
-          (unless shadow-p
-            (list :terrain-appearances appearances :material-descriptors descriptors
-                  :shadow-map shadow-map :shadow-sampler shadow-sampler)))))
+         device :sites sites :camera-state camera
+         (if shadow-p
+             (list :terrain-vertices (terrain-shadow-vertices drawing))
+             (list :terrain-vertices (terrain-scene-vertices drawing)
+                   :terrain-normals (terrain-normals drawing)
+                   :terrain-appearances appearances :material-descriptors descriptors
+                   :shadow-map shadow-map :shadow-sampler shadow-sampler))))
 
 (defmethod encode-terrain ((drawing terrain-drawing) pass binding resident &key shadow-p)
-  (let ((program (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))))
-    (if (terrain-mesh-shaders-p drawing)
-        (let ((workgroups (render-population-mesh-workgroup-count
-                           (resident-population-population resident))))
-          (when (plusp workgroups)
-            (encode-program program pass binding
-                            (make-gpu-draw-mesh-command :x workgroups))))
-        (let ((triangles (resident-population-triangle-count resident)))
-          (when (plusp triangles)
-            (encode-program program pass binding
-                            (make-gpu-draw-command :vertex-count (* 3 triangles))))))))
+  (let ((program (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing)))
+        (runs (resident-population-star-runs resident))
+        (ranges (terrain-star-ranges drawing))
+        (indices (if shadow-p
+                     (terrain-shadow-indices drawing)
+                     (terrain-scene-indices drawing)))
+        (offset (if shadow-p 2 0)))
+    (when runs
+      (set-pipeline pass (program-pipeline program))
+      (set-bind-group pass 0 binding)
+      (loop for (star first count) in runs
+            for range = (aref ranges star)
+            for index-count = (aref range (1+ offset))
+            when (plusp index-count)
+              do (draw-indexed pass indices :uint32 index-count count
+                               (aref range offset) 0 first)))))
+
+;;; Star-table coordinates are mesh ticks in [-8, 8], biased to keep the
+;;; GPU records unsigned.
+
+(defconstant +star-patch-coordinate-bias+ 8)
+
+;;; The star tables as indexed patches.
+
+(defun star-triangle-normal-key (triangle)
+  "TRIANGLE's outward normal as the smallest integer vector along it."
+  (destructuring-bind (a b c) triangle
+    (let* ((u (mapcar #'- b a))
+           (v (mapcar #'- c a))
+           (n (list (- (* (second u) (third v)) (* (third u) (second v)))
+                    (- (* (third u) (first v)) (* (first u) (third v)))
+                    (- (* (first u) (second v)) (* (second u) (first v)))))
+           (g (max 1 (reduce #'gcd n))))
+      (mapcar (lambda (x) (/ x g)) n))))
+
+(defun star-patch-tables (bevels-p)
+  "Index each star's owned triangles into shared scene and shadow tables.
+
+Returns the scene vertex words, the normal table, the scene indices, the
+shadow vertex words, the shadow indices, and a 256-vector of per-star
+(scene-first scene-count shadow-first shadow-count) ranges.  A scene vertex
+is shared only between triangles with the same normal and material mask, so
+flat per-triangle shading is unchanged; a shadow vertex wherever positions
+meet."
+  (let ((scene-keys (make-hash-table :test #'equal))
+        (scene-words (make-array 0 :element-type '(unsigned-byte 32)
+                                   :adjustable t :fill-pointer 0))
+        (normal-keys (make-hash-table :test #'equal))
+        (normals (make-array 0 :element-type 'single-float
+                               :adjustable t :fill-pointer 0))
+        (scene-indices (make-array 0 :element-type '(unsigned-byte 32)
+                                     :adjustable t :fill-pointer 0))
+        (shadow-keys (make-hash-table :test #'equal))
+        (shadow-words (make-array 0 :element-type '(unsigned-byte 32)
+                                    :adjustable t :fill-pointer 0))
+        (shadow-indices (make-array 0 :element-type '(unsigned-byte 32)
+                                      :adjustable t :fill-pointer 0))
+        (ranges (make-array 256)))
+    (flet ((record (words point fourth)
+             (destructuring-bind (x y z) point
+               (vector-push-extend (+ x +star-patch-coordinate-bias+) words)
+               (vector-push-extend (+ y +star-patch-coordinate-bias+) words)
+               (vector-push-extend (+ z +star-patch-coordinate-bias+) words)
+               (vector-push-extend fourth words)
+               (1- (/ (fill-pointer words) 4))))
+           (normal-index (key)
+             (or (gethash key normal-keys)
+                 (let ((length (sqrt (reduce #'+ (mapcar (lambda (x) (* x x)) key)))))
+                   (dolist (x key) (vector-push-extend (/ x length) normals))
+                   (vector-push-extend 0.0 normals)
+                   (setf (gethash key normal-keys) (1- (/ (fill-pointer normals) 4)))))))
+      (dotimes (star 256)
+        (let ((triangles (if bevels-p
+                             (luft:star-atlas-owned-triangles star)
+                             (luft:star-atlas-flat-owned-triangles star)))
+              (appearance (if bevels-p
+                              (luft:star-atlas-owned-appearance-masks star)
+                              (luft:star-atlas-flat-owned-appearance-masks star)))
+              (scene-first (fill-pointer scene-indices))
+              (shadow-first (fill-pointer shadow-indices)))
+          (loop for triangle in triangles
+                for (material-mask light-mask) in appearance
+                for fourth = (logior material-mask (ash light-mask 8)
+                                     (ash (normal-index
+                                           (star-triangle-normal-key triangle))
+                                          16))
+                do (dolist (point triangle)
+                     (let ((scene-key (list star point fourth))
+                           (shadow-key (list star point)))
+                       (vector-push-extend
+                        (or (gethash scene-key scene-keys)
+                            (setf (gethash scene-key scene-keys)
+                                  (record scene-words point fourth)))
+                        scene-indices)
+                       (vector-push-extend
+                        (or (gethash shadow-key shadow-keys)
+                            (setf (gethash shadow-key shadow-keys)
+                                  (record shadow-words point 0)))
+                        shadow-indices))))
+          (setf (aref ranges star)
+                (vector scene-first (- (fill-pointer scene-indices) scene-first)
+                        shadow-first (- (fill-pointer shadow-indices) shadow-first))))))
+    (flet ((simple (array type)
+             (make-array (length array) :element-type type :initial-contents array)))
+      (values (simple scene-words '(unsigned-byte 32))
+              (simple normals 'single-float)
+              (simple scene-indices '(unsigned-byte 32))
+              (simple shadow-words '(unsigned-byte 32))
+              (simple shadow-indices '(unsigned-byte 32))
+              ranges))))
 
 (defun make-terrain-drawing (device target-formats sample-count)
   (let ((drawing (make-instance 'terrain-drawing)))
     (with-gpu-construction (drawing)
-      (setf (terrain-mesh-shaders-p drawing) *terrain-mesh-shaders-p*)
-      (let ((words (star-meshlet-template-words)))
-        (setf (%terrain-star-triangle-counts drawing)
-              (let ((counts (make-array 256 :element-type '(unsigned-byte 8))))
-                (dotimes (star 256 counts)
-                  (setf (aref counts star)
-                        (aref words (* star +star-meshlet-record-count+ 4))))))
-        (setf (terrain-templates drawing)
-              (own-gpu-resource drawing device
-                                (make-buffer-descriptor :label "luft 256 star meshlets"
-                                                        :size (* 4 (length words))
-                                                        :usage '(:storage :copy-dst))))
-        (write-buffer (terrain-templates drawing) words))
-      (let ((mesh-p (terrain-mesh-shaders-p drawing)))
-        (setf (terrain-scene-program drawing)
-              (own-gpu-object
-               drawing
-               (apply #'make-drawing-program
-                      device :label "luft site streams"
-                      :fragment (shaders:star-fragment-specification)
-                      :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
-                      :sample-count sample-count
-                      :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                       :depth-compare :less)
-                      (if mesh-p
-                          (list :mesh (shaders:terrain-mesh-specification))
-                          (list :vertex (shaders:terrain-vertex-specification)))))
-              (terrain-shadow-program drawing)
-              (own-gpu-object
-               drawing
-               (apply #'make-drawing-program
-                      device :label "luft sun shadow sites"
-                      :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                       :depth-compare :less)
-                      (if mesh-p
-                          (list :mesh (shaders:terrain-shadow-mesh-specification))
-                          (list :vertex (shaders:terrain-shadow-vertex-specification))))))))))
-
-
-
-;;; Fixed star-meshlet representation consumed by both programs.
-
-(defconstant +render-template-vertex-count+ 6)
-
-(defconstant +star-meshlet-triangle-capacity+ 25)
-(defconstant +star-meshlet-vertex-capacity+
-  (* 3 +star-meshlet-triangle-capacity+))
-(defconstant +star-meshlet-record-count+
-  (1+ +star-meshlet-vertex-capacity+))
-(defconstant +star-meshlet-coordinate-bias+ 8)
-
-(defun star-meshlet-template-words ()
-  "Return the fixed 256-record triangle-soup atlas consumed by mesh shaders.
-
-Each star owns one fixed-size block (#0UAD9N).  Its first uvec4 contains the triangle
-count; the remaining records are the three vertices of each triangle in
-outward order.  Coordinates are biased only to keep this first ABI unsigned."
-  (let ((words
-          (make-array (* 256 +star-meshlet-record-count+ 4)
-                      :element-type '(unsigned-byte 32)
-                      :initial-element 0)))
-    (dotimes (star 256 words)
-      (let* ((triangles (if *terrain-bevels-p*
-                            (luft:star-atlas-owned-triangles star)
-                            (luft:star-atlas-flat-owned-triangles star)))
-             (appearance (if *terrain-bevels-p*
-                             (luft:star-atlas-owned-appearance-masks star)
-                             (luft:star-atlas-flat-owned-appearance-masks star)))
-             (triangle-count (length triangles))
-             (block (* star +star-meshlet-record-count+ 4)))
-        (when (> triangle-count +star-meshlet-triangle-capacity+)
-          (error "Star #x~2,'0X owns ~D triangles; the meshlet ABI admits ~D."
-                 star triangle-count +star-meshlet-triangle-capacity+))
-        (setf (aref words block) triangle-count)
-        (loop for triangle in triangles
-              for (material-mask light-mask) in appearance
-              for triangle-index from 0
-              do (loop for point in triangle
-                       for corner from 0
-                       for record = (+ 1 (* 3 triangle-index) corner)
-                       for offset = (+ block (* 4 record))
-                       do (destructuring-bind (x y z) point
-                            (setf (aref words offset)
-                                  (+ x +star-meshlet-coordinate-bias+)
-                                  (aref words (+ offset 1))
-                                  (+ y +star-meshlet-coordinate-bias+)
-                                  (aref words (+ offset 2))
-                                  (+ z +star-meshlet-coordinate-bias+)
-                                  (aref words (+ offset 3))
-                                  (if (zerop corner)
-                                      (logior material-mask
-                                              (ash light-mask 8))
-                                      0)))))))))
-
+      (multiple-value-bind (scene-words normals scene-indices shadow-words
+                            shadow-indices ranges)
+          (star-patch-tables *terrain-bevels-p*)
+        (flet ((upload (label words usage)
+                 (let ((buffer (own-gpu-resource
+                                drawing device
+                                (make-buffer-descriptor
+                                 :label label :size (max 16 (* 4 (length words)))
+                                 :usage (list usage :copy-dst)))))
+                   (write-buffer buffer words)
+                   buffer)))
+          (setf (terrain-star-ranges drawing) ranges
+                (terrain-scene-vertices drawing)
+                (upload "luft star patch vertices" scene-words :storage)
+                (terrain-normals drawing)
+                (upload "luft star patch normals" normals :storage)
+                (terrain-scene-indices drawing)
+                (upload "luft star patch indices" scene-indices :index)
+                (terrain-shadow-vertices drawing)
+                (upload "luft star shadow vertices" shadow-words :storage)
+                (terrain-shadow-indices drawing)
+                (upload "luft star shadow indices" shadow-indices :index))))
+      (setf (terrain-scene-program drawing)
+            (own-gpu-object
+             drawing
+             (make-drawing-program
+              device :label "luft site streams"
+              :vertex (shaders:terrain-vertex-specification)
+              :fragment (shaders:star-fragment-specification)
+              :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
+              :sample-count sample-count
+              :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                               :depth-compare :less)))
+            (terrain-shadow-program drawing)
+            (own-gpu-object
+             drawing
+             (make-drawing-program
+              device :label "luft sun shadow sites"
+              :vertex (shaders:terrain-shadow-vertex-specification)
+              :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                               :depth-compare :less)))))))

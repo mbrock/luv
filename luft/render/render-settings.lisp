@@ -10,17 +10,11 @@
 
 This is the ordinary size; dynamic resolution draws a share of it.")
 
-(defparameter *terrain-mesh-shaders-p* nil
-  "Whether terrain runs the earlier one-mesh-workgroup-per-site stages.
-
-The default pulls vertices from a plain draw over each chunk's triangle list.
-A new renderer reads it.")
-
 (defparameter *terrain-bevels-p* t
   "Whether terrain draws the bevelled star atlas or plain cube faces.
 
-Both are the same renderer: one mesh workgroup per surface site reading one
-256-star table.  The flat table keeps only each star's owned faces, pushed out
+Both are the same renderer: each star's indexed patch, instanced over the
+sites of that star, read from one 256-star table.  The flat table keeps only each star's owned faces, pushed out
 to the cell edges.  A new renderer reads it.")
 
 (defparameter *dynamic-resolution-frame-rate* 60

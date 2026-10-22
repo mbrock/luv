@@ -71,7 +71,6 @@ releases for retry, but those retired bindings must never be served again. #RBNW
       (resident-population-instance-buffer resident) (renderer-frame-state-camera-buffer frame)
       :appearances (resident-population-appearance-buffer resident)
       :descriptors (resident-population-descriptor-buffer resident)
-      :triangles (resident-population-triangle-buffer resident)
       :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer)
       :shadow-p shadow-p))))
 
@@ -169,5 +168,5 @@ releases for retry, but those retired bindings must never be served again. #RBNW
       (renderer-frame-state-camera-buffer frame)))))
 
 (defun draw-resident-opaque-population (terrain pass resident bind-group &key shadow-p)
-  "Draw RESIDENT's terrain triangles, or one mesh workgroup per active site."
+  "Draw RESIDENT's terrain: one indexed draw per star, or one mesh workgroup per site."
   (encode-terrain terrain pass bind-group resident :shadow-p shadow-p))

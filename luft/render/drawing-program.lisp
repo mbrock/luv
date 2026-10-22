@@ -10,7 +10,6 @@
    (pipeline :accessor program-pipeline)))
 
 (defclass vertex-drawing-program (drawing-program) ())
-(defclass mesh-drawing-program (drawing-program) ())
 
 (defgeneric encode-program (program pass binding command)
   (:documentation "Select PROGRAM and BINDING, then encode its draw COMMAND."))
@@ -35,11 +34,7 @@
 
 (defmethod encode-program :before ((program vertex-drawing-program) pass binding command)
   (declare (ignore pass binding))
-  (check-type command luv::gpu-draw-command))
-
-(defmethod encode-program :before ((program mesh-drawing-program) pass binding command)
-  (declare (ignore pass binding))
-  (check-type command luv::gpu-draw-mesh-command))
+  (check-type command (or luv::gpu-draw-command luv::gpu-draw-indexed-command)))
 
 (defmethod release-program ((program drawing-program))
   (release-owned-gpu-resources program))
@@ -48,22 +43,21 @@
   (release-program program))
 
 (defun make-drawing-program
-    (device &key label vertex mesh fragment targets (sample-count 1) depth-stencil)
-  "Build a vertex or direct mesh program from its checked shader interface.
-Exactly one geometry stage is required. Descriptor set zero is supported;
-invalid stages, sets, and conflicting inputs fail before GPU allocation."
-  (unless (and (or vertex mesh) (not (and vertex mesh)))
-    (error "Drawing program ~S needs exactly one vertex or mesh stage." label))
-  (let* ((geometry (or vertex mesh))
-         (stage (if mesh :mesh :vertex)))
-    (unless (eq stage (luv.shader:shader-specification-stage geometry))
-      (error "Drawing program ~S needs a ~S shader in its geometry stage." label stage))
+    (device &key label vertex fragment targets (sample-count 1) depth-stencil)
+  "Build a vertex program from its checked shader interface.
+A vertex stage is required. Descriptor set zero is supported; invalid
+stages, sets, and conflicting inputs fail before GPU allocation."
+  (unless vertex
+    (error "Drawing program ~S needs a vertex stage." label))
+  (let ((geometry vertex))
+    (unless (eq :vertex (luv.shader:shader-specification-stage geometry))
+      (error "Drawing program ~S needs a vertex shader in its geometry stage." label))
     (when (and fragment (not (eq :fragment (luv.shader:shader-specification-stage fragment))))
       (error "Drawing program ~S needs a fragment shader in its fragment stage." label))
     (let* ((inputs (apply #'luv.shader:link-shader-resources
                           (remove nil (list geometry fragment))))
            (entries (mapcar #'program-input-layout-entry inputs))
-           (program (make-instance (if mesh 'mesh-drawing-program 'vertex-drawing-program)
+           (program (make-instance 'vertex-drawing-program
                                    :inputs inputs)))
       (with-gpu-construction (program)
         (labels ((own (descriptor) (own-gpu-resource program device descriptor))
@@ -88,10 +82,6 @@ invalid stages, sets, and conflicting inputs fail before GPU allocation."
     ((program vertex-drawing-program) geometry-module &rest state)
   (apply #'make-render-pipeline-descriptor
          :vertex `(:module ,geometry-module) :primitive '(:topology :triangle-list) state))
-
-(defmethod program-pipeline-descriptor
-    ((program mesh-drawing-program) geometry-module &rest state)
-  (apply #'make-mesh-render-pipeline-descriptor :mesh `(:module ,geometry-module) state))
 
 (defun program-input-layout-entry (resource)
   (unless (zerop (luv.shader:shader-resource-descriptor-set resource))

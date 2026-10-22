@@ -1348,31 +1348,40 @@ least -- is the experiment this earns, and a flat Luft with that cache is a
 plausible foundation for Luvcraft's world.  The materials and time of day
 differ between the games, and it is one view on one machine.
 
-**** Vertex pulling replaces the mesh stage for plain cubes
+**** Instanced star patches replace the mesh stage
 :PROPERTIES:
 :ID: 8TUEPF
 :END:
 
 Moppe dropped its mesh shaders for instanced vertex pulling after measuring
-each path against the other.  Luft's terrain now does the same by default
-(=*terrain-mesh-shaders-p*= nil): each resident chunk carries a triangle
-list, one word per triangle naming its site and its triangle within the
-site's star, and one plain draw of three vertices per word reads the site,
-the star table, and the appearance as the mesh stage did.  On the exported
-world, with 12 and 36 repetitions so the cheap path also saturates:
+each path against the other, and Luft's terrain has now done the same.  The
+star table becomes two shared indexed tables: the scene's, whose vertices
+are shared only between triangles with the same normal and material mask so
+flat per-triangle shading is unchanged, and the shadow's, shared wherever
+positions meet ([[lisp:luft.render::star-patch-tables]]).  Each chunk sorts
+its sites by star at upload, and one indexed draw per star instances that
+patch over the star's run of sites.  A vertex reads its own record, its
+site, and the site's appearance.  The mesh stages, their per-site culling,
+and the fixed 76-record meshlet table are gone; #0UAD9N and #FIZQQ6 record
+what they were.
 
-| Terrain GPU ms | Mesh stage | Vertex pulling | Triangles |
+Over all 256 stars, indexing replays 12,600 corners from 7,702 scene
+vertices and 4,186 shadow vertices.  On the exported world, with 8 and 24
+pass repetitions:
+
+| Terrain GPU ms | Mesh stage | Instanced patches | Triangles |
 |-
-| Flat | 2.57 | 0.56 | 435,134 |
-| Bevelled | 4.78 | 6.96 | 3,147,820 |
+| Bevelled | 4.15 | 3.16 | 3,147,820 |
+| Flat | 2.65 | below noise | 435,134 |
 
-Flat cubes drawn this way cost half of Luvcraft's prebuilt chunks on the
-same faces.  Bevels are seven times the triangles, unshared between the
-three corners of each and unculled, and there the mesh stage's per-site
-rejection still wins.  Their sensible path is the one Moppe took for trees
-and boulders: an index buffer per star and an instanced draw per star, so
-a bevelled patch's shared corners are transformed once.
-
+An intermediate step, a plain triangle list drawn three unshared vertices
+per word, already made flat terrain cost 0.56 ms but bevelled terrain 6.96:
+the corners each bevel shares were transformed, and shaded, once per
+triangle.  Indexing is what turned that around.  The price is one draw per star
+present in each chunk and pass rather than one per chunk: 686 runs over the
+sixteen chunks of the default world, 1,372 draws a frame.  Building those
+commands costs 0.045 ms of Lisp per frame; the Metal backend's own
+per-draw encoding is on top and is not yet measured apart.
 
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:
