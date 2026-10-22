@@ -125,6 +125,12 @@ the next one."
          (dynamic-resolution-steps controller))
      (float (dynamic-resolution-steps controller))))
 
+(defun dynamic-resolution-floor-p (controller)
+  "Whether CONTROLLER already draws the scene as small as it ever will."
+  (<= (or (%dynamic-resolution-step controller)
+          (dynamic-resolution-steps controller))
+      (dynamic-resolution-fewest controller)))
+
 (defun reset-dynamic-resolution (controller)
   "Return CONTROLLER to the whole scene with no evidence gathered."
   (setf (%dynamic-resolution-step controller) nil

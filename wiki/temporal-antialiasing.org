@@ -429,8 +429,8 @@ held items, and the crosshair are drawn.  Wherever the finished scene differs
 from that copy the texel sorts nearest and its motion is zero.
 
 The resolve writes the colour image presentation already read, at the
-extent the frame pacer would draw at full allowance (#MAC668 would move that
-pacer onto #IKWHEW's controller).  When the pacer sheds
+extent the frame pacer would draw at full allowance; that pacer uses
+#IKWHEW's controller (#MAC668).  When the pacer sheds
 resolution, the resolve upscales; the post, lens, and readback paths do not
 know the difference.  =*luvcraft-temporal-p*= takes effect at the next
 reframing.
@@ -481,17 +481,26 @@ exhausted.  Live on an M-series Mac, a 2.4× scene measured 26.7 ms, stepped
 down to a half, held history throughout, and grew back step by step to the
 whole when the load was removed.
 
-** TODO Move Luvcraft's scene pacing onto the shared controller
+** DONE Move Luvcraft's scene pacing onto the shared controller
 :PROPERTIES:
 :ID: MAC668
 :END:
 
-/Intent./ Luvcraft's pacer now reads the same GPU timestamps, but its own
-rule grows the scene only when the next size is predicted under 72% of a
-beat.  With the clock following the load that is rarely true, and it settles
-at 40% after one heavy startup sample.  Use the shared controller for the
-scene share, keep the pacer's cadence fallback, and let a scene-only resize
-keep Luvcraft's temporal history as Luft's now does.
+/Intent./ Luvcraft's own rule grew the scene only when the next size was
+predicted under 72% of a beat.  With the clock following the load that was
+rarely true, and one heavy startup sample left it at 40% for good.
 
-/Done when./ Luvcraft returns to full size after a startup spike on a machine
-that holds 60 Hz, and its history survives a pacing step.
+/Evidence./ The pacer now feeds every GPU sample to the shared controller,
+steered against the fastest cadence's beat, and squares its linear share into
+the pixel budget the scene extent already used.  The cadence falls to an even
+divisor of the display's only once the scene is at the controller's floor and
+still overruns.  A reframing carries over every image whose size did not
+change, so the resolved colour and its history survive a pacing step; the
+temporal resolve recognises its history by that image rather than by the
+cohort.  Live, a 21 ms startup sample shed the scene to 84% and then 78%,
+where 13.9 ms sat inside the quiet band at 60 Hz, with history valid
+throughout.  A renderer test proves which images a scene-only reframing keeps,
+releases, and resizes, and that none enters the inventory twice.
+
+/Done when./ Luvcraft no longer sticks at a low size after a startup spike,
+and its history survives a pacing step.  Those conditions now hold.

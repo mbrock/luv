@@ -78,9 +78,10 @@ projected point by exactly that much, without touching a shader."
    (lanes :initform nil :accessor luvcraft-temporal-lanes)
    (previous-lanes :initform nil :accessor luvcraft-temporal-previous-lanes)
    (jitter :initform '(0.0 0.0) :accessor luvcraft-temporal-jitter)
-   ;; History is only history of the attachments it was resolved into.
-   (history-attachments :initform nil
-                        :accessor luvcraft-temporal-history-attachments))
+   ;; History is only history of the image it was resolved into.  A
+   ;; scene-only reframing carries that image over, and with it the history.
+   (history-texture :initform nil
+                    :accessor luvcraft-temporal-history-texture))
   (:documentation
    "Owns the block world's temporal pipelines, bindings, and history state."))
 
@@ -205,7 +206,8 @@ projected point by exactly that much, without touching a shader."
     (shear-luvcraft-camera-lanes lanes (first jitter) (second jitter))))
 
 (defun luvcraft-temporal-history-valid-p (temporal attachments)
-  (and (eq attachments (luvcraft-temporal-history-attachments temporal))
+  (and (eq (getf attachments :history-texture)
+           (luvcraft-temporal-history-texture temporal))
        (luvcraft-camera-lanes-continuous-p
         (luvcraft-temporal-previous-lanes temporal)
         (luvcraft-temporal-lanes temporal))))
@@ -337,6 +339,7 @@ projected point by exactly that much, without touching a shader."
              :destination (getf attachments :history-texture)))
     (setf (luvcraft-temporal-previous-lanes temporal)
           (luvcraft-temporal-lanes temporal)
-          (luvcraft-temporal-history-attachments temporal) attachments)
+          (luvcraft-temporal-history-texture temporal)
+          (getf attachments :history-texture))
     (incf (luvcraft-temporal-frame-index temporal))
     temporal))

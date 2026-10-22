@@ -446,6 +446,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:dynamic-resolution
            #:make-dynamic-resolution
            #:dynamic-resolution-share
+           #:dynamic-resolution-floor-p
            #:observe-dynamic-resolution
            #:reset-dynamic-resolution
            #:write-buffer

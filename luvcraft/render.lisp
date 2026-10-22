@@ -726,7 +726,8 @@ the frame uniform cannot silently diverge between shader and host."
 ;;; agree on formats and usages without either one drifting.
 
 (defun make-luvcraft-frame-attachments
-    (device context render-extent presentation-extent &optional output-extent)
+    (device context render-extent presentation-extent
+     &optional output-extent previous)
   "Create the scene and presentation attachments as one GPU-object cohort.
 
 The scene is drawn at RENDER-EXTENT into a linear HDR colour attachment with
@@ -737,38 +738,48 @@ native-density HUD and the complete surface copy.
 
 With OUTPUT-EXTENT the scene is temporal: it is drawn jittered into a separate
 image at RENDER-EXTENT, and the colour image presentation reads is the
-resolve's, at OUTPUT-EXTENT, beside its history and the resolve's inputs."
+resolve's, at OUTPUT-EXTENT, beside its history and the resolve's inputs.
+
+Images of PREVIOUS, an installed cohort, whose size is unchanged are carried
+over rather than made again: when the frame pacer only resizes the scene, the
+resolved image and its history survive, and so does the accumulation in them."
   (let* ((color-extent (or output-extent render-extent))
          (bloom-extent (luvcraft-bloom-extent color-extent))
          (made nil)
          (temporal nil)
          (completed-p nil))
-    (flet ((texture (label size format usage)
-             (let ((texture
-                     (create device
-                             (make-texture-descriptor
-                              :label label :size size :dimensions :2d
-                              :format format :usage usage))))
-               (push texture made)
-               (let ((view
-                       (create device
-                               (make-texture-view-descriptor
-                                :texture texture))))
-                 (push view made)
-                 (values texture view)))))
+    (flet ((texture (key label size format usage)
+             (let ((kept (getf previous (luvcraft-attachment-key key "TEXTURE"))))
+               (if (and kept
+                        (equal size (subseq (gpu-texture-size kept) 0 2)))
+                   (values kept
+                           (getf previous (luvcraft-attachment-key key "VIEW")))
+                   (let ((texture
+                           (create device
+                                   (make-texture-descriptor
+                                    :label label :size size :dimensions :2d
+                                    :format format :usage usage))))
+                     (push texture made)
+                     (let ((view
+                             (create device
+                                     (make-texture-view-descriptor
+                                      :texture texture))))
+                       (push view made)
+                       (values texture view)))))))
       (unwind-protect
            (multiple-value-bind (color-texture color-view)
-               (texture "block world color" color-extent
+               (texture :color "block world color" color-extent
                         +luvcraft-scene-color-format+
                         '(:render-attachment :texture-binding :copy-src))
              (when output-extent
                (flet ((image (key label size usage)
                         (multiple-value-bind (texture view)
-                            (texture label size +luvcraft-scene-color-format+ usage)
+                            (texture key label size +luvcraft-scene-color-format+
+                                     usage)
                           (setf temporal
-                                (list* (intern (format nil "~A-TEXTURE" key) :keyword)
+                                (list* (luvcraft-attachment-key key "TEXTURE")
                                        texture
-                                       (intern (format nil "~A-VIEW" key) :keyword)
+                                       (luvcraft-attachment-key key "VIEW")
                                        view temporal)))))
                  (image :scene "block world jittered scene" render-extent
                         '(:render-attachment :texture-binding :copy-src))
@@ -781,31 +792,32 @@ resolve's, at OUTPUT-EXTENT, beside its history and the resolve's inputs."
                  (image :history "block world temporal history" output-extent
                         '(:render-attachment :texture-binding :copy-dst))))
              (multiple-value-bind (depth-texture depth-view)
-                 (texture "block world depth" render-extent :depth32-float
+                 (texture :depth "block world depth" render-extent :depth32-float
                           '(:render-attachment :texture-binding))
                (multiple-value-bind (bloom-primary-texture bloom-primary-view)
-                   (texture "block world bloom primary" bloom-extent
+                   (texture :bloom-primary "block world bloom primary" bloom-extent
                             +luvcraft-bloom-color-format+
                             '(:render-attachment :texture-binding))
                  (multiple-value-bind
                        (bloom-secondary-texture bloom-secondary-view)
-                     (texture "block world bloom secondary" bloom-extent
+                     (texture :bloom-secondary "block world bloom secondary"
+                              bloom-extent
                               +luvcraft-bloom-color-format+
                               '(:render-attachment :texture-binding))
                    (multiple-value-bind
                          (world-panel-color-texture world-panel-color-view)
-                       (texture "world application panel color"
+                       (texture :world-panel-color "world application panel color"
                                 presentation-extent
                                 +luvcraft-scene-color-format+
                                 '(:render-attachment :texture-binding))
                      (multiple-value-bind
                            (world-panel-depth-texture world-panel-depth-view)
-                         (texture "world application panel depth"
+                         (texture :world-panel-depth "world application panel depth"
                                   presentation-extent :depth32-float
                                   '(:render-attachment :texture-binding))
                        (multiple-value-bind
                              (presentation-texture presentation-view)
-                           (texture "block world presentation color"
+                           (texture :presentation "block world presentation color"
                                     presentation-extent
                                     (canvas-format context)
                                     '(:render-attachment :copy-src))
@@ -838,11 +850,17 @@ resolve's, at OUTPUT-EXTENT, beside its history and the resolve's inputs."
               (releasing :frame-attachment-candidate
                 (destroy resource)))))))))
 
+(defun luvcraft-attachment-key (name kind)
+  (intern (format nil "~A-~A" name kind) :keyword))
+
 (defun install-luvcraft-frame-attachments (renderer attachments)
-  "Adopt and atomically publish ATTACHMENTS as one frame-sized cohort."
-  (let* ((resources (luvcraft-frame-attachment-resources attachments))
-         (inventory
-           (append resources (luvcraft-renderer-resources renderer))))
+  "Adopt and atomically publish ATTACHMENTS as one frame-sized cohort.
+
+Objects carried over from the installed cohort are already in the inventory."
+  (let* ((owned (luvcraft-renderer-resources renderer))
+         (resources (remove-if (lambda (resource) (member resource owned))
+                               (luvcraft-frame-attachment-resources attachments)))
+         (inventory (append resources owned)))
     ;; Everything that may allocate is complete before either owner slot is
     ;; changed.  FRAME-ATTACHMENTS is the sole reader-visible publication.
     (setf (luvcraft-renderer-resources renderer) inventory
@@ -1271,9 +1289,13 @@ attachments the renderer actually holds."
             (luvcraft-renderer-device renderer)
             (luvcraft-renderer-context renderer)
             render-extent presentation-extent
-            (luvcraft-frame-extents-output extents)))
+            (luvcraft-frame-extents-output extents)
+            (luvcraft-renderer-frame-attachments renderer)))
+         (kept (luvcraft-frame-attachment-resources attachments))
+         ;; Only what the new cohort did not carry over retires.
          (old-attachments
-           (luvcraft-renderer-frame-attachment-resources renderer))
+           (remove-if (lambda (resource) (member resource kept))
+                      (luvcraft-renderer-frame-attachment-resources renderer)))
          (installed-p nil))
     (unwind-protect
          (progn
@@ -1293,7 +1315,12 @@ attachments the renderer actually holds."
       (unless installed-p
         (with-release-warnings
           (dolist (resource
-                    (luvcraft-frame-attachment-resources attachments))
+                    (remove-if
+                     (lambda (resource)
+                       (member resource
+                               (luvcraft-renderer-frame-attachment-resources
+                                renderer)))
+                     (luvcraft-frame-attachment-resources attachments)))
             (releasing :frame-attachment-candidate (destroy resource)))))))
   renderer)
 
@@ -1989,18 +2016,12 @@ measured GPU time.")
 (defparameter *luvcraft-frame-pacing-headroom* 1.15
   "How much longer than a measured frame a chosen beat must be.")
 
-(defparameter *luvcraft-frame-pacing-interval* 0.25d0
+(defparameter *luvcraft-frame-pacing-interval* 0.1d0
   "Seconds between the pacer's GPU time samples.")
 
-(defparameter *luvcraft-scene-scales* '(1.0 0.8 0.64 0.5 0.4)
-  "The fractions of the scene's pixel budget the pacer may render, largest
-first.  Each step is a fifth fewer pixels, about a tenth off each side.")
-
 (defparameter *luvcraft-frame-pacing-overrun* 0.92
-  "The fraction of a beat whose typical GPU time makes the scene shrink.")
-
-(defparameter *luvcraft-frame-pacing-room* 0.72
-  "The fraction of a beat the next larger scene must be predicted to fit.")
+  "The fraction of a beat whose typical GPU time, with the scene already as
+small as dynamic resolution draws it, makes the cadence slow down.")
 
 ;; The decision itself runs on the canvas thread; only the stopwatch runs
 ;; beside it.
@@ -2009,19 +2030,21 @@ first.  Each step is a fifth fewer pixels, about a tenth off each side.")
   (samples nil :type list)
   (arrivals nil :type list)
   (lock (sb-thread:make-mutex :name "luvcraft frame pacer"))
-  (faster-votes 0 :type fixnum)
-  ;; An index into *LUVCRAFT-SCENE-SCALES*.
-  (scale-level 0 :type fixnum)
+  ;; Moppe's controller chooses the scene's linear share; see #IKWHEW.
+  (resolution (make-dynamic-resolution) :type dynamic-resolution)
   ;; Samples taken before a change describe the old frame; ignore them.
   (settled-time 0d0 :type double-float)
   (next-trial-time 0d0 :type double-float)
   (trial-backoff 4d0 :type double-float))
 
 (defun luvcraft-scene-scale (session)
-  "The fraction of the pixel budget SESSION's pacer currently renders."
+  "The fraction of the pixel budget SESSION's pacer currently renders.
+
+Dynamic resolution chooses a share of width and height; the pixel budget is
+an area, so the fraction is that share squared."
   (let ((pacer (luvcraft-session-frame-pacer session)))
     (if pacer
-        (nth (frame-pacer-scale-level pacer) *luvcraft-scene-scales*)
+        (expt (dynamic-resolution-share (frame-pacer-resolution pacer)) 2)
         1.0)))
 
 (defun luvcraft-frame-pacing-rates (canvas)
@@ -2053,91 +2076,67 @@ Returns the finisher START-GPU-WORK-STOPWATCH describes."
      (sb-thread:with-mutex ((frame-pacer-lock pacer))
        (push seconds (frame-pacer-arrivals pacer))))))
 
-(defun change-luvcraft-pacing (session pacer clock now
-                               &key (level (frame-pacer-scale-level pacer))
-                                    (rate (clock-frames-per-second clock))
-                                    seconds)
-  "Move SESSION to scene scale LEVEL at cadence RATE, and say so."
+(defun change-luvcraft-cadence (session pacer clock now rate &optional seconds)
+  "Move SESSION's CLOCK to RATE, and say so."
   (log-event :luvcraft
-             "frame pacing: ~@[~,1F ms of GPU work, ~]~,1F Hz at ~D% -> ~,1F Hz at ~D%"
+             "frame pacing: ~@[~,1F ms of GPU work, ~]~,1F Hz -> ~,1F Hz at ~D%"
              (and seconds (* 1000 seconds))
-             (clock-frames-per-second clock)
-             (round (* 100 (luvcraft-scene-scale session)))
-             rate
-             (round (* 100 (nth level *luvcraft-scene-scales*))))
-  (setf (frame-pacer-scale-level pacer) level
-        (clock-frames-per-second clock) rate
+             (clock-frames-per-second clock) rate
+             (round (* 100 (dynamic-resolution-share
+                            (frame-pacer-resolution pacer)))))
+  (setf (clock-frames-per-second clock) rate
         (frame-pacer-samples pacer) nil
-        (frame-pacer-faster-votes pacer) 0
         ;; The GPU's clock takes a moment to follow a new load.
         (frame-pacer-settled-time pacer) (+ now 0.75d0)))
 
-(defun retune-luvcraft-cadence (session pacer clock now)
-  "Choose SESSION's scene scale and CLOCK's rate from PACER's GPU times."
+(defun retune-luvcraft-cadence (session pacer clock now arrivals)
+  "Give PACER's controller ARRIVALS, then choose CLOCK's rate.
+
+The scene's size is dynamic resolution's: it is steered against the fastest
+cadence's beat, so it only grows when frames would fit there.  The cadence
+gives way only once the scene is as small as it is drawn and still overruns."
   (let* ((canvas (luvcraft-session-canvas session))
          (current (clock-frames-per-second clock))
          (fastest (first (luvcraft-frame-pacing-rates canvas)))
          (beat (/ 1d0 current))
-         (level (frame-pacer-scale-level pacer))
-         (smallest (1- (length *luvcraft-scene-scales*)))
+         (resolution (frame-pacer-resolution pacer))
+         (floor-p (dynamic-resolution-floor-p resolution))
          (samples (frame-pacer-samples pacer))
          (latest (first samples))
          ;; The median of recent samples, so one hitch is not a trend.
          (typical (let ((sorted (sort (copy-list samples) #'<)))
                     (nth (floor (length sorted) 2) sorted))))
-    (flet ((scale (level) (nth level *luvcraft-scene-scales*)))
-      (cond
-        ;; Overrunning the beat is the judder itself: shrink the scene as
-        ;; soon as it is typical, or at once when it is gross, by as many
-        ;; steps as the overrun predicts.  Only the smallest scene gives up
-        ;; rate instead.
-        ((and (>= (length samples) 3)
-              (or (> typical (* *luvcraft-frame-pacing-overrun* beat))
-                  (> latest (* 1.5d0 beat))))
-         (let ((seconds (max typical (min latest (* 1.5d0 beat)))))
-           (if (< level smallest)
-               (change-luvcraft-pacing
-                session pacer clock now
-                :seconds seconds
-                :level (or (loop for candidate from (1+ level) to smallest
-                                 when (<= (* seconds (/ (scale candidate)
-                                                        (scale level)))
-                                          (* *luvcraft-frame-pacing-room*
-                                             beat))
-                                   return candidate)
-                           smallest))
-               (let ((slower (luvcraft-frame-pacing-rate-for canvas seconds)))
-                 (when (< slower current)
-                   (change-luvcraft-pacing session pacer clock now
-                                           :seconds seconds :rate slower)
-                   (setf (frame-pacer-next-trial-time pacer)
-                         (+ now (frame-pacer-trial-backoff pacer))
-                         (frame-pacer-trial-backoff pacer)
-                         (min 32d0 (* 2 (frame-pacer-trial-backoff
-                                         pacer)))))))))
-        ;; A slower cadence's timings are taken at a slower GPU clock, so
-        ;; they cannot say whether the faster beat would fit.  Try it.
-        ((and (< current fastest)
-              (>= now (frame-pacer-next-trial-time pacer)))
-         (change-luvcraft-pacing session pacer clock now :rate fastest))
-        ;; Grow back only when the next larger scene is predicted to fit
-        ;; with room to spare, several samples running -- and only at the
-        ;; fastest cadence, whose timings are taken at a working clock.
-        ((and (> level 0)
-              (= current fastest)
-              (>= (length samples) 3)
-              (< (* typical (/ (scale (1- level)) (scale level)))
-                 (* *luvcraft-frame-pacing-room* beat)))
-         (when (>= (incf (frame-pacer-faster-votes pacer)) 4)
-           (change-luvcraft-pacing session pacer clock now
-                                   :seconds typical :level (1- level))))
-        (t
-         (setf (frame-pacer-faster-votes pacer) 0)
-         ;; A cadence that has held for a while earns a prompt retry the
-         ;; next time it has to give way.
-         (when (and (= current fastest)
-                    (> now (+ (frame-pacer-settled-time pacer) 8d0)))
-           (setf (frame-pacer-trial-backoff pacer) 4d0)))))))
+    (dolist (seconds (reverse arrivals))
+      (when (observe-dynamic-resolution resolution seconds (/ 1d0 fastest))
+        (log-event :luvcraft
+                   "frame pacing: ~,1F ms of GPU work, scene at ~D%"
+                   (* 1000 seconds)
+                   (round (* 100 (dynamic-resolution-share resolution))))))
+    (cond
+      ;; Overrunning the beat with nothing left to shed is the judder itself:
+      ;; slow the cadence to an even divisor of the display's.
+      ((and floor-p
+            (>= (length samples) 3)
+            (or (> typical (* *luvcraft-frame-pacing-overrun* beat))
+                (> latest (* 1.5d0 beat))))
+       (let* ((seconds (max typical (min latest (* 1.5d0 beat))))
+              (slower (luvcraft-frame-pacing-rate-for canvas seconds)))
+         (when (< slower current)
+           (change-luvcraft-cadence session pacer clock now slower seconds)
+           (setf (frame-pacer-next-trial-time pacer)
+                 (+ now (frame-pacer-trial-backoff pacer))
+                 (frame-pacer-trial-backoff pacer)
+                 (min 32d0 (* 2 (frame-pacer-trial-backoff pacer)))))))
+      ;; A slower cadence's timings are taken at a slower GPU clock, so they
+      ;; cannot say whether the faster beat would fit.  Try it.
+      ((and (< current fastest)
+            (>= now (frame-pacer-next-trial-time pacer)))
+       (change-luvcraft-cadence session pacer clock now fastest))
+      ;; A cadence that has held for a while earns a prompt retry the next
+      ;; time it has to give way.
+      ((and (= current fastest)
+            (> now (+ (frame-pacer-settled-time pacer) 8d0)))
+       (setf (frame-pacer-trial-backoff pacer) 4d0)))))
 
 (defun luvcraft-frame-pacer-for (session)
   "SESSION's frame pacer, when its clock is one the pacer may retune."
@@ -2183,7 +2182,8 @@ Returns the finisher START-GPU-WORK-STOPWATCH describes."
           (setf (frame-pacer-samples pacer)
                 (let ((samples (append arrivals (frame-pacer-samples pacer))))
                   (subseq samples 0 (min 6 (length samples)))))
-          (retune-luvcraft-cadence session pacer (canvas-clock canvas) now))))))
+          (retune-luvcraft-cadence session pacer (canvas-clock canvas) now
+                                   arrivals))))))
 
 (defun render-luvcraft-frame (session timestamp &optional sample)
   (declare (ignore timestamp))

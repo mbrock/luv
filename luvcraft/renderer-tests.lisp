@@ -178,3 +178,68 @@
     (release-luvcraft-component renderer)
     (true (= 1 (renderer-release-probe-attempts resource)))
     (true (null (luvcraft::luvcraft-renderer-resources renderer)))))
+
+(defclass attachment-probe-device (luv:gpu-device) ())
+
+(defclass attachment-probe-texture (luv:gpu-texture)
+  ((destroyed :initform 0 :accessor attachment-probe-destroyed)))
+
+(defclass attachment-probe-view (luv:gpu-texture-view)
+  ((destroyed :initform 0 :accessor attachment-probe-destroyed)))
+
+(defmethod create ((device attachment-probe-device)
+                   (descriptor luv::texture-descriptor))
+  (make-instance 'attachment-probe-texture
+                 :size (luv::texture-descriptor-size descriptor)
+                 :usage (luv::texture-descriptor-usage descriptor)
+                 :format (luv::texture-descriptor-format descriptor)
+                 :dimensions :2d))
+
+(defmethod create ((device attachment-probe-device)
+                   (descriptor luv::texture-view-descriptor))
+  (make-instance 'attachment-probe-view
+                 :texture (luv::texture-view-descriptor-texture descriptor)))
+
+(defmethod destroy ((object attachment-probe-texture))
+  (incf (attachment-probe-destroyed object)))
+
+(defmethod destroy ((object attachment-probe-view))
+  (incf (attachment-probe-destroyed object)))
+
+(defclass attachment-probe-context (luv:canvas-context) ())
+
+(defmethod luv:canvas-format ((context attachment-probe-context))
+  :bgra8-unorm-srgb)
+
+(define-test scene-only-reframing-keeps-the-resolved-image-and-its-history
+  (let* ((renderer (make-instance 'luvcraft-renderer
+                                  :device (make-instance 'attachment-probe-device)
+                                  :context (make-instance 'attachment-probe-context)))
+         (presentation '(2048 1284))
+         (output '(1024 642)))
+    (luvcraft::resize-luvcraft-component
+     renderer (luvcraft::make-luvcraft-frame-extents '(724 453) presentation output))
+    (let* ((before (luvcraft::luvcraft-renderer-frame-attachments renderer))
+           (count (length (luvcraft::luvcraft-renderer-resources renderer))))
+      ;; The pacer draws the scene larger; nothing the output owns changes.
+      (luvcraft::resize-luvcraft-component
+       renderer (luvcraft::make-luvcraft-frame-extents '(900 564) presentation output))
+      (let ((after (luvcraft::luvcraft-renderer-frame-attachments renderer)))
+        (dolist (key '(:color-texture :history-texture :bloom-primary-texture
+                       :presentation-texture :world-panel-color-texture))
+          (true (eq (getf before key) (getf after key)))
+          (true (zerop (attachment-probe-destroyed (getf after key)))))
+        (dolist (key '(:scene-texture :depth-texture :bounds-low-texture))
+          (true (not (eq (getf before key) (getf after key))))
+          (true (= 1 (attachment-probe-destroyed (getf before key))))
+          (true (equal '(900 564)
+                       (subseq (gpu-texture-size (getf after key)) 0 2))))
+        ;; One inventory entry per live object: kept ones are not adopted twice.
+        (true (= count (length (luvcraft::luvcraft-renderer-resources renderer))))
+        (true (= count (length (remove-duplicates
+                                (luvcraft::luvcraft-renderer-resources renderer)))))
+        ;; A new output size starts over.
+        (luvcraft::resize-luvcraft-component
+         renderer (luvcraft::make-luvcraft-frame-extents
+                   '(900 564) presentation '(1280 802)))
+        (true (= 1 (attachment-probe-destroyed (getf after :history-texture))))))))
