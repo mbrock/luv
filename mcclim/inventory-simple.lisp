@@ -401,11 +401,13 @@
   (with-sheet-medium (medium pane)
     (draw-analytic-rounded-rectangle*
      medium x y (+ x width) (+ y height) :radius 9
-     :ink (if dark *simple-ink* (make-rgb-color 0.70 0.65 0.53)))
+     :ink (if selected *simple-focus*
+              (if dark *simple-ink* (make-rgb-color 0.70 0.65 0.53))))
     (when selected
       (draw-analytic-rounded-rectangle*
        medium (+ x 2) (+ y 2) (- (+ x width) 2) (- (+ y height) 2)
-       :radius 8 :filled nil :ink *simple-focus* :line-thickness 3))))
+       :radius 7
+       :ink (if dark *simple-ink* (make-rgb-color 0.70 0.65 0.53))))))
 
 (defun simple-label (pane text x y &key (size 15) light)
   (draw-text* pane text x y :align-x :center :align-y :center
@@ -413,20 +415,19 @@
 
 (defun draw-inventory-header (frame pane)
   (let ((simple (inventory-simple-p frame)))
-    (draw-rectangle* pane 0 0 840 47
-                     :ink (if simple *simple-paper* *inventory-panel-ink*))
-    (simple-panel pane 18 8 137 34 :dark t)
-    (simple-label pane (format nil "Player ~D  · F2"
-                              (1+ (inventory-active-player frame)))
-                  86 25 :size 13 :light t)
-    (when simple
-      (simple-label pane "Choose your building blocks" 408 27 :size 20))
-    (unless simple
-      (draw-inventory-page-controls frame pane)
-      (draw-text* pane (format nil "Inventory · ~D / ~D"
-                              (1+ (inventory-page frame)) (inventory-page-count frame))
-                  408 27 :align-x :center :align-y :center :text-size 17
-                  :ink *inventory-text-ink*))
+    (if simple
+        (progn
+          (draw-rectangle* pane 0 0 840 47 :ink *simple-paper*)
+          (simple-panel pane 18 8 137 34 :dark t)
+          (simple-label pane "Choose your building blocks" 408 27 :size 20))
+        (with-sheet-medium (medium pane)
+          (draw-hotbar-slot pane medium 18 10 155 42)
+          (draw-text* pane "Material library" 174 27 :align-y :center
+                      :text-size 16 :ink *inventory-text-ink*)))
+    (draw-text* pane (format nil "Player ~D  · F2"
+                            (1+ (inventory-active-player frame)))
+                86 25 :align-x :center :align-y :center :text-size 13
+                :ink (if simple *simple-paper* *inventory-text-ink*))
     (let ((ink (if simple *simple-ink* *inventory-text-ink*)))
       (draw-rectangle* pane 654 15 674 35 :filled nil :ink ink :line-thickness 2)
       (unless simple

@@ -1385,30 +1385,16 @@
       (true (equal point-addition
                    (shader:shader-language-error-form point-error))))))
 
-(define-test production-crosshair-composes-linear-rgb-with-opacity
+(define-test production-crosshair-carries-linear-rgba-coverage
   (let* ((specification (shaders:block-world-crosshair-fragment-specification))
          (ink (first (shader:shader-specification-inputs specification)))
-         (rgba (binding-named 'rgba specification))
+         (rgba (first (shader:shader-specification-outputs specification)))
          (ink-quantity
            (shader:shader-declaration-quantity-specification ink))
-         (opaque-quantity
-           (shader:shader-expression-quantity-specification
-            (find-if
-             (lambda (expression)
-               (let ((quantity
-                       (shader:shader-expression-quantity-specification
-                        expression)))
-                 (and quantity
-                      (eq :opacity
-                          (math:quantity-specification-name quantity)))))
-             (shader:shader-specification-expressions specification))))
          (rgba-quantity
-           (shader:shader-expression-quantity-specification
-            (shader:shader-binding-expression rgba))))
-    (true (eq :linear-rgb
+           (shader:shader-declaration-quantity-specification rgba)))
+    (true (eq :linear-rgba
               (math:quantity-specification-name ink-quantity)))
-    (true (eq :opacity
-              (math:quantity-specification-name opaque-quantity)))
     (true (eq :linear-rgba
               (math:quantity-specification-name rgba-quantity)))
     (true (math:quantity-specification-non-negative-p rgba-quantity))))

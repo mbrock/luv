@@ -190,23 +190,26 @@
             (luvcraft:luvcraft-overlay-stage
              (allocate-instance
               (find-class 'mcluv:luvcraft-inventory-overlay)))))
-  (true (= 0 (mcluv::inventory-slot-at 0.21 0.12 9)))
-  ;; Eight columns by three rows: a page holds twenty-four materials.
-  (true (= 3 (mcluv::inventory-slot-at 0.45 0.12 9)))
-  (true (= 9 (mcluv::inventory-slot-at 0.31 0.31 24)))
+  (true (= 0 (mcluv::inventory-slot-at 0.21 0.15 9)))
+  ;; Eight columns by five rows: a page holds forty square material wells.
+  (true (= 3 (mcluv::inventory-slot-at 0.45 0.15 9)))
+  (true (= 9 (mcluv::inventory-slot-at 0.31 0.31 40)))
   (true (null (mcluv::inventory-slot-at 0.31 0.31 9)))
-  (true (= 23 (mcluv::inventory-slot-at 0.76 0.50 24)))
+  (true (= 23 (mcluv::inventory-slot-at 0.76 0.40 40)))
+  (true (= 39 (mcluv::inventory-slot-at 0.76 0.70 40)))
+  (true (null (mcluv::inventory-slot-at 0.76 0.72 40)))
   (true (null (mcluv::inventory-slot-at 0.01 0.20 9)))
   (true (null (mcluv::inventory-slot-at 0.50 0.95 9)))
-  (true (eq :all (mcluv::inventory-category-at 0.05 0.12)))
+  (true (eq :all (mcluv::inventory-category-at 0.05 0.15)))
   (true (eq :building (mcluv::inventory-category-at 0.05 0.28)))
-  (true (= -1 (mcluv::inventory-page-direction-at 0.22 0.05)))
+  (true (= -1 (mcluv::inventory-page-direction-at 0.70 0.05)))
   (true (= 1 (mcluv::inventory-page-direction-at 0.75 0.05)))
   (true (null (mcluv::inventory-page-direction-at 0.50 0.05)))
   (true (eq :masonry (mcluv::inventory-category-at 0.05 0.33)))
-  (true (eq :colors (mcluv::inventory-category-at 0.05 0.68)))
-  (true (= 0 (mcluv::inventory-quickbar-slot-at 0.20 0.64 9)))
-  (true (= 8 (mcluv::inventory-quickbar-slot-at 0.76 0.64 9)))
+  (true (eq :colors (mcluv::inventory-category-at 0.05 0.64)))
+  (true (= 0 (mcluv::inventory-quickbar-slot-at 0.21 0.84 10)))
+  (true (= 9 (mcluv::inventory-quickbar-slot-at 0.97 0.84 10)))
+  (true (null (mcluv::inventory-quickbar-slot-at 0.99 0.84 10)))
   (true (mcluv::inventory-category-block-p
          :roofing (luvcraft:block-kind-named :thatch)))
   (true (mcluv::inventory-category-block-p

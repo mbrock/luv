@@ -45,10 +45,10 @@
 ;;;; disagree about which one the player clicked.
 
 (defconstant +hotbar-width+ 612)
-(defconstant +hotbar-height+ 104)
+(defconstant +hotbar-height+ 98)
 (defconstant +hotbar-pad+ 12)
 (defconstant +hotbar-gap+ 6)
-(defconstant +hotbar-slot-height+ 60)
+(defconstant +hotbar-slot-height+ 54)
 (defconstant +hotbar-slot-top+ 10)
 
 (defun hotbar-slot-geometry (count index)
@@ -70,81 +70,78 @@
                (when (and (<= left x) (< x right))
                  (return index))))))
 
-(defun draw-hotbar-shell (pane medium)
-  "The instrument the slots sit in: one raised chassis, quietly lit."
+(defun draw-hotbar-shell (pane medium &key (width +hotbar-width+)
+                                          (height +hotbar-height+))
+  "The shared inventory chassis: graphite, with a single lit edge."
   ;; Cover the whole sheet first.  The chassis is drawn at the bar's declared
   ;; size, and a sheet that is larger than that -- a frame outliving a resize
   ;; -- would otherwise show through as bare white.
   (with-bounding-rectangle* (left top right bottom) pane
     (draw-rectangle* pane left top right bottom
-                     :ink (make-rgb-color 0.012 0.014 0.018)))
+                     :ink (make-rgb-color 0.004 0.005 0.007)))
   (draw-analytic-rounded-rectangle*
-   medium 0 0 +hotbar-width+ +hotbar-height+ :radius 14
+   medium 0 0 width height :radius 10
    :ink (make-linear-gradient
-         0 0 0 +hotbar-height+
-         (make-rgb-color 0.20 0.21 0.23)
-         (make-rgb-color 0.055 0.060 0.070)))
+         0 0 0 height
+         (make-rgb-color 0.09 0.10 0.12)
+         (make-rgb-color 0.025 0.032 0.043)))
   (draw-analytic-rounded-rectangle*
-   medium 2 2 (- +hotbar-width+ 2) (- +hotbar-height+ 2) :radius 12
+   medium 1 1 (- width 1) (- height 1) :radius 9
    :ink (make-linear-gradient
-         0 0 0 +hotbar-height+
-         (make-rgb-color 0.085 0.092 0.105)
-         (make-rgb-color 0.030 0.034 0.040)))
+         0 0 0 height
+         (make-rgb-color 0.020 0.026 0.035)
+         (make-rgb-color 0.008 0.011 0.016)))
   ;; A single bright hairline along the top edge is what reads as "made of
   ;; something" without drawing a border around every slot.
-  (draw-line* pane 12 1.5 (- +hotbar-width+ 12) 1.5
-              :ink (make-rgb-color 0.42 0.45 0.50) :line-thickness 1))
+  (draw-line* pane 12 1.5 (- width 12) 1.5
+              :ink (make-rgb-color 0.16 0.19 0.23) :line-thickness 1))
 
 (defun draw-hotbar-slot (pane medium left top right bottom
-                         &key selected-p (accent '(0.95 0.86 0.55)))
-  "One recessed well, lit from inside when it is the chosen one."
+                         &key selected-p hovered-p (accent '(0.56 0.45 0.24)))
+  "A one-pixel analytic rim, with the same inset on every side.
+
+Outline-mode roundrects decompose into aliased line segments on this port;
+two filled distance fields keep both edges of the rim smooth at any scale."
+  (declare (ignore pane))
   (draw-analytic-rounded-rectangle*
-   medium left top right bottom :radius 8
+   medium left top right bottom :radius 5
+   :ink (cond (selected-p (hotbar-scaled-color accent 1.0))
+              (hovered-p (make-rgb-color 0.16 0.20 0.25))
+              (t (make-rgb-color 0.028 0.035 0.045))))
+  (draw-analytic-rounded-rectangle*
+   medium (+ left 1) (+ top 1) (- right 1) (- bottom 1) :radius 4
    :ink (if selected-p
             (make-linear-gradient
              0 top 0 bottom
-             (hotbar-scaled-color accent 0.34)
-             (hotbar-scaled-color accent 0.13))
+             (hotbar-scaled-color accent 0.10)
+             (hotbar-scaled-color accent 0.045))
             (make-linear-gradient
              0 top 0 bottom
-             (make-rgb-color 0.028 0.032 0.038)
-             (make-rgb-color 0.055 0.060 0.068))))
-  (when selected-p
-    (draw-analytic-rounded-rectangle*
-     medium (- left 2) (- top 2) (+ right 2) (+ bottom 2) :radius 10
-     :filled nil :ink (hotbar-scaled-color accent 1.0))
-    (draw-analytic-rounded-rectangle*
-     medium (- left 1) (- top 1) (+ right 1) (+ bottom 1) :radius 9
-     :filled nil :ink (hotbar-scaled-color accent 1.0)))
-  ;; The well's own top edge, darker than the chassis, is the whole recess.
-  (draw-line* pane (+ left 3) (+ top 0.5) (- right 3) (+ top 0.5)
-              :ink (make-rgb-color 0.014 0.016 0.020)))
+             (make-rgb-color 0.008 0.010 0.014)
+             (if hovered-p
+                 (make-rgb-color 0.050 0.064 0.080)
+                 (make-rgb-color 0.021 0.027 0.036))))))
 
-(defun draw-hotbar-caption (pane medium text &key (ink '(0.93 0.93 0.90)))
+(defun draw-hotbar-caption (pane text &key (ink '(0.90 0.88 0.82)))
   "The one label the bar carries: what is currently chosen."
-  (let ((top (- +hotbar-height+ 28))
-        (bottom (- +hotbar-height+ 10)))
-    (draw-analytic-rounded-rectangle*
-     medium (- (/ +hotbar-width+ 2.0) 96) top
-     (+ (/ +hotbar-width+ 2.0) 96) bottom
-     :radius 7 :ink (make-rgb-color 0.020 0.023 0.028))
-    (draw-text* pane text (/ +hotbar-width+ 2.0) (/ (+ top bottom) 2.0)
-                :align-x :center :align-y :center :text-size 12
-                :ink (apply #'make-rgb-color ink))))
+  (draw-text* pane text (/ +hotbar-width+ 2.0) (- +hotbar-height+ 17)
+              :align-x :center :align-y :center :text-size 12
+              :ink (apply #'make-rgb-color ink)))
 
 (defun hotbar-creative-button-at-p (u v)
   (and (<= 12 (* u +hotbar-width+) 146)
-       (<= 76 (* v +hotbar-height+) 98)))
+       (<= 70 (* v +hotbar-height+) 92)))
 
 (defun draw-hotbar-creative-button (pane medium session)
   (let ((active (luvcraft:luvcraft-session-creative-p session)))
     (draw-analytic-rounded-rectangle*
-     medium 12 76 146 98 :radius 7
-     :ink (if active (make-rgb-color 0.12 0.31 0.25)
-              (make-rgb-color 0.055 0.065 0.08)))
-    (draw-text* pane (if active "Creative ON · F6" "Creative · F6") 79 87
+     medium 12 70 146 92 :radius 5
+     :ink (if active (make-rgb-color 0.025 0.045 0.035)
+              (make-rgb-color 0.016 0.022 0.030)))
+    (draw-text* pane (if active "Creative ON · F6" "Creative · F6") 79 81
                 :align-x :center :align-y :center :text-size 12
-                :ink (make-rgb-color 0.93 0.96 0.94))))
+                :ink (if active (make-rgb-color 0.74 0.80 0.72)
+                         (make-rgb-color 0.30 0.35 0.40)))))
 
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
@@ -156,6 +153,11 @@
             (luvcraft:luvcraft-session-inventory session))))
     (with-sheet-medium (medium pane)
       (draw-hotbar-shell pane medium)
+      (draw-line* pane 12 68 (- +hotbar-width+ 12) 68
+                  :ink (make-rgb-color 0.045 0.055 0.070))
+      (draw-text* pane "Inventory · I" (- +hotbar-width+ 16) 81
+                  :align-x :right :align-y :center :text-size 12
+                  :ink (make-rgb-color 0.30 0.35 0.40))
       (draw-hotbar-creative-button pane medium session)
       (let ((count (max 1 (length blocks))))
         (loop for block in blocks
@@ -169,7 +171,7 @@
                    ;; world is built from, not a swatch of its average colour.
                    (draw-block-icon pane block
                                     (- (/ (+ left right) 2.0) 20)
-                                    (- (/ (+ top bottom) 2.0) 21)
+                                    (- (/ (+ top bottom) 2.0) 20)
                                     40)
                    ;; The tenth slot's key is 0, at the end of the number row.
                    (draw-text* pane (format nil "~D" (mod (1+ index) 10))
@@ -181,7 +183,7 @@
       ;; Nine labels is nine things to read; the chosen one is the only name
       ;; that answers a question the player is actually asking.
       (draw-hotbar-caption
-       pane medium
+       pane
        (string-capitalize
         (substitute #\Space #\- (symbol-name
                                   (luvcraft:block-kind-name selected))))))))

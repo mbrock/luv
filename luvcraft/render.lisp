@@ -151,7 +151,7 @@
                (dolist (component
                         (list (clip-x (+ origin-x x))
                               (clip-y (+ origin-y y)) 0.0
-                              (first color) (second color) (third color)))
+                              (first color) (second color) (third color) 1.0))
                  (vector-push-extend (coerce component 'single-float)
                                      vertices)))
              (rectangle (left top right bottom color)
@@ -169,7 +169,7 @@
      vertices :crosshair-vertices +block-world-crosshair-vertex-count+
      (luvcraft.shaders:block-world-crosshair-vertex-specification))))
 
-(defconstant +luvcraft-target-vertex-count+ 48)
+(defconstant +luvcraft-target-vertex-count+ 120)
 
 (defun luvcraft-target-face-corners (hit)
   "LUFT's face marker: the hit cell's face toward its adjacent empty cell."
@@ -193,7 +193,7 @@
                         (apply #'make-vec3 point)))))))
 
 (defun make-luvcraft-target-vertices (session width height)
-  "Project the aimed face into constant-pixel dark and light edge strips."
+  "Project the aimed face into a joined, pixel-feathered two-tone rim."
   (let* ((hit (unless (luvcraft-session-modal-focus session)
                 (luvcraft-session-target session)))
          (corners (and hit (luvcraft-target-face-corners hit)))
@@ -212,30 +212,57 @@
                      (when (> z +luvcraft-camera-near-distance+)
                        (list (* (/ height 2d0) focal (/ (vec3-dot delta right) z))
                              (* (- (/ height 2d0)) focal (/ (vec3-dot delta up) z))))))
-                 (vertex (point ink)
-                   (dolist (value (append (list (/ (* 2d0 (first point)) width)
-                                                (/ (* 2d0 (second point)) height)
-                                                0d0) ink))
-                     (vector-push-extend (coerce value 'single-float) vertices)))
-                 (edge (a b radius ink)
+                 (normal (a b)
                    (let* ((dx (- (first b) (first a)))
                           (dy (- (second b) (second a)))
-                          (length (max 0.001d0 (sqrt (+ (* dx dx) (* dy dy)))))
-                          (nx (* radius (/ (- dy) length)))
-                          (ny (* radius (/ dx length)))
-                          (a1 (list (+ (first a) nx) (+ (second a) ny)))
-                          (a2 (list (- (first a) nx) (- (second a) ny)))
-                          (b1 (list (+ (first b) nx) (+ (second b) ny)))
-                          (b2 (list (- (first b) nx) (- (second b) ny))))
-                     (dolist (point (list a1 b1 b2 a1 b2 a2))
-                       (vertex point ink)))))
+                          (length (max 0.001d0 (sqrt (+ (* dx dx) (* dy dy))))))
+                     (list (/ (- dy) length) (/ dx length))))
+                 (vertex (point miter band)
+                   (destructuring-bind (offset . ink) band
+                     (dolist (value
+                              (append
+                               (list (/ (* 2d0 (+ (first point)
+                                                  (* offset (first miter)))) width)
+                                     (/ (* 2d0 (+ (second point)
+                                                  (* offset (second miter)))) height)
+                                     0d0)
+                               ink))
+                       (vector-push-extend (coerce value 'single-float) vertices)))))
           (let ((points (mapcar #'project corners)))
             (when (every #'identity points)
-              (loop for (radius ink) in '((2d0 (0.025 0.03 0.035))
-                                          (0.85d0 (1.0 0.90 0.55)))
-                    do (loop for a in points
+              (let* ((normals
+                       (loop for a in points
                              for b in (append (rest points) (list (first points)))
-                             do (edge a b radius ink))))))))
+                             collect (normal a b)))
+                     (miters
+                       (loop for current in normals
+                             for previous in (cons (car (last normals)) normals)
+                             ;; Limit acute joins when the face is almost edge-on.
+                             for denominator =
+                               (max 0.25d0 (+ 1d0 (* (first previous) (first current))
+                                               (* (second previous) (second current))))
+                             collect (mapcar (lambda (a b) (/ (+ a b) denominator))
+                                             previous current)))
+                     ;; Zero-alpha endpoints and shared corner miters avoid
+                     ;; hard triangle edges, overlapping strips, and corner gaps.
+                     (bands '((-2.5 0.0 0.0 0.0 0.0)
+                              (-1.5 0.018 0.022 0.028 1.0)
+                              (-0.55 0.85 0.73 0.48 1.0)
+                              (0.55 0.85 0.73 0.48 1.0)
+                              (1.5 0.018 0.022 0.028 1.0)
+                              (2.5 0.0 0.0 0.0 0.0))))
+                (dotimes (edge 4)
+                  (let ((a (nth edge points))
+                        (b (nth (mod (1+ edge) 4) points))
+                        (ma (nth edge miters))
+                        (mb (nth (mod (1+ edge) 4) miters)))
+                    (loop for (inner outer) on bands while outer
+                          do (vertex a ma inner)
+                             (vertex b mb inner)
+                             (vertex b mb outer)
+                             (vertex a ma inner)
+                             (vertex b mb outer)
+                             (vertex a ma outer))))))))))
     vertices))
 
 (defun make-luvcraft-cursor-vertices (width height x y)
@@ -1001,7 +1028,7 @@ native-density HUD and the complete surface copy."
                                 (luvcraft-session-device session)
                                 (make-buffer-descriptor
                                  :label "block world frame crosshair vertices"
-                                 :size (* 4 6 (+ +block-world-crosshair-vertex-count+
+                                 :size (* 4 7 (+ +block-world-crosshair-vertex-count+
                                                   +luvcraft-target-vertex-count+)) :usage '(:vertex)))))
                          (write-buffer new data)
                          new))
@@ -1352,7 +1379,7 @@ completes."
            (/ (length body-vertices) +block-mesh-floats-per-vertex+))
          (target-vertices
            (make-luvcraft-target-vertices session (first extent) (second extent)))
-         (target-vertex-count (/ (length target-vertices) 6))
+         (target-vertex-count (/ (length target-vertices) 7))
          (physics-body-count (luvcraft-physics-body-count session))
          (physics-shadow-vertex-count
            (luvcraft-physics-shadow-vertex-count session)))
@@ -1436,7 +1463,7 @@ completes."
       (when (plusp target-vertex-count)
         (write-buffer (luvcraft-frame-crosshair-vertex-buffer frame)
                       target-vertices
-                      :offset (* 4 6 +block-world-crosshair-vertex-count+)))
+                      :offset (* 4 7 +block-world-crosshair-vertex-count+)))
       (when (plusp particle-vertex-count)
         (write-buffer
          (luvcraft-frame-particle-vertex-buffer frame)
@@ -2608,13 +2635,14 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
                              :label "block world crosshair pipeline"
                              :device device :layout layout
                              :vertex-buffers
-                             '((:array-stride 24
+                             '((:array-stride 28
                                 :attributes
                                 ((:shader-location 0 :offset 0
                                   :format :float32x3)
                                  (:shader-location 1 :offset 12
-                                  :format :float32x3))))
+                                  :format :float32x4))))
                              :target-format +luvcraft-scene-color-format+
+                             :target-blend :premultiplied-alpha
                              :primitive '(:topology :triangle-list)
                              :depth-stencil
                              '(:format :depth32-float

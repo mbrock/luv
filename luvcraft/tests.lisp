@@ -2502,7 +2502,7 @@
                                  :title-base "luvcraft test"
                                  :selected-block luvcraft::*stone-block*)))
     (true (= (length vertices)
-             (* luvcraft::+block-world-crosshair-vertex-count+ 6)))
+             (* luvcraft::+block-world-crosshair-vertex-count+ 7)))
     (true (eq (select-luvcraft-block session 1) luvcraft::*grass-block*))
     (true (eq (luvcraft-session-selected-block session) luvcraft::*grass-block*))
     (true (eq (select-luvcraft-block session 7) luvcraft::*snow-block*))
@@ -3361,7 +3361,7 @@
       (true hit)
       (true (every (lambda (corner) (< (abs (- (vec3-z corner) 3.998d0)) 1d-6))
                    (luvcraft::luvcraft-target-face-corners hit))))
-    (true (= (* 6 luvcraft::+luvcraft-target-vertex-count+)
+    (true (= (* 7 luvcraft::+luvcraft-target-vertex-count+)
              (length (luvcraft::make-luvcraft-target-vertices session 800 600))))
     (setf (luvcraft-session-modal-focus session) :test-focus)
     (true (zerop (length (luvcraft::make-luvcraft-target-vertices session 800 600))))

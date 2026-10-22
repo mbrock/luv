@@ -2662,11 +2662,11 @@ distribution overhead."
     (:stage :vertex
      :inputs ((screen-position :vec3 :location 0
                                :quantity :clip-coordinate :unit :one)
-              (ink-input :vec3 :location 1
-                         :quantity :linear-rgb :unit :one))
+              (ink-input :vec4 :location 1
+                         :quantity :linear-rgba :unit :one))
      :outputs ((clip-position :vec4 :built-in :position)
-               (ink-output :vec3 :location 0
-                           :quantity :linear-rgb :unit :one)))
+               (ink-output :vec4 :location 0
+                           :quantity :linear-rgba :unit :one)))
   (let* ((clip
            (vec4 (representation (swizzle screen-position :x))
                  (representation (swizzle screen-position :y))
@@ -2682,18 +2682,13 @@ distribution overhead."
     block-world-crosshair-fragment-specification
     ((role (eql :block-crosshair)) (stage (eql :fragment)))
     (:stage :fragment
-     :inputs ((ink-input :vec3 :location 0
-                         :quantity :linear-rgb :unit :one))
-     :outputs ((color-output :vec4 :location 0)))
-  (let* ((ink ink-input)
-         (rgba
-           (assume-quantity
-            (vec4
-             (representation ink)
-             (representation
-              (quantity 1.0 :quantity :opacity :unit :one)))
-            :quantity :linear-rgba :unit :one)))
-    (set-output color-output rgba)))
+     :inputs ((ink-input :vec4 :location 0
+                         :quantity :linear-rgba :unit :one))
+     :outputs ((color-output :vec4 :location 0
+                             :quantity :linear-rgba :unit :one)))
+  ;; The CPU supplies premultiplied coverage at the target rim's vertices.
+  ;; Interpolation gives its outer pixel a continuous fade, not a hard cut.
+  (set-output color-output ink-input))
 
 (defun block-world-crosshair-fragment-specification ()
   (shader-specification-for :block-crosshair :fragment))

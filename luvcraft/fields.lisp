@@ -226,16 +226,16 @@
 
 (defun make-crosshair-vertex-product-layout ()
   (luv.arithmetic:make-quantity-layout
-   6
+   7
    (list
     (luv.arithmetic:make-quantity-projection
      '(0 1 2)
      (luv.arithmetic:make-declared-quantity-specification
       '(:quantity :clip-coordinate :unit :one :tensor-order 1)))
     (luv.arithmetic:make-quantity-projection
-     '(3 4 5)
+     '(3 4 5 6)
      (luv.arithmetic:make-declared-quantity-specification
-      '(:quantity :linear-rgb :unit :one :tensor-order 1))))))
+      '(:quantity :linear-rgba :unit :one :tensor-order 1))))))
 
 (defun make-cursor-vertex-product-layout ()
   "Describe a clip position and its cursor-local offset as one packed vertex."
@@ -272,12 +272,12 @@
     :representation-type '(vector single-float)
     :quantity-layout
     (luv.arithmetic:make-repeated-quantity-layout
-     (make-crosshair-vertex-product-layout) :stride 6)
+     (make-crosshair-vertex-product-layout) :stride 7)
     :source-form
     '(crosshair-vertices :type (vector single-float)
       :repeated-product
-      ((0 1 2) clip-coordinate (3 4 5) absolute-linear-rgb)
-      :stride 6))))
+      ((0 1 2) clip-coordinate (3 4 5 6) absolute-linear-rgba)
+      :stride 7))))
 
 (defmethod luv.arithmetic:value-declaration-for
     ((name (eql :cursor-vertices)))
