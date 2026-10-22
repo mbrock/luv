@@ -440,6 +440,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:submit
            #:submitted-work-done
            #:queue-completion-watch
+           #:queue-progress-reader
            #:write-buffer
            #:read-buffer
            #:read-buffer-if-ready

@@ -6,6 +6,9 @@
   (declare (ignore provider))
   :metal)
 
+(defconstant +metal-canvas-frames-in-flight+ 3
+  "Frames a Metal canvas may have recorded but not finished on the GPU.")
+
 (defclass metal-canvas-context (canvas-context)
   ((canvas :initarg :canvas :reader context-canvas)
    (provider :initarg :provider :reader metal-canvas-provider)
@@ -19,10 +22,85 @@
    (residency-queue :initform nil :accessor metal-canvas-residency-queue
                     :documentation
                     "The queue holding the layer's drawable residency set.")
+   (frame-serial :initform 0 :accessor metal-canvas-frame-serial)
+   (slot-submissions
+    :initform (make-array +metal-canvas-frames-in-flight+ :initial-element 0)
+    :reader metal-canvas-slot-submissions
+    :documentation
+    "Each frame slot's last queue submission: reusing the slot waits on it.")
    (state :initform :unconfigured :accessor canvas-context-state)))
+
+;;; Frame slots and late drawables.
+;;;
+;;; A CAMetalLayer lends three drawables, and a drawable stays lent from the
+;;; moment it is acquired until the compositor has shown the one after it.
+;;; Acquired at the top of a frame, it is held through the frame's simulation
+;;; and encoding and the whole of its GPU work as well, so three of them did
+;;; not cover 60 Hz once a frame took 14 ms: luvcraft fullscreen ran at 47.
+;;;
+;;; So a frame's resources no longer belong to whichever drawable it got.
+;;; Each frame takes the next of three slots, and the slot's previous frame
+;;; must have finished on the GPU before it is reused; that wait is the proof
+;;; a frame resource cache relies on.  The frame's surface is a stand-in
+;;; which knows its size and format, and fetches a drawable only when
+;;; something first needs the real texture.  An application rendering into
+;;; the surface fetches it at once, as before.  One which renders elsewhere
+;;; and copies into the surface last -- luvcraft -- fetches it only for that
+;;; copy, and everything recorded until then is handed to the GPU first, so
+;;; the frame's work is under way while the drawable is awaited and the
+;;; drawable is held for the copy alone.  Moppe's NHAL makes the same split.
 
 (defmethod context-device ((context metal-canvas-context))
   (canvas-device context))
+
+(defclass metal-canvas-surface-texture (metal-gpu-texture)
+  ((context :initarg :context :reader metal-surface-context)
+   (slot :initarg :slot :reader metal-surface-slot)
+   (drawable :initform nil :accessor metal-surface-drawable)
+   ;; :PENDING until something needs the native texture, then :ACQUIRED, or
+   ;; :UNPRESENTABLE when the drawable is not the size the frame was built
+   ;; for.  :CLOSED once the frame is over: nothing fetches a drawable then.
+   (status :initform :pending :accessor metal-surface-status))
+  (:documentation
+   "A frame's presentation surface, which fetches its drawable on first use."))
+
+(defun realize-metal-canvas-surface (surface &optional encoder)
+  "Fetch SURFACE's drawable unless it has one, and say whether it is usable.
+
+With ENCODER, whatever it has recorded is submitted first, so the GPU works
+on the frame while this thread waits for a drawable."
+  (when (eq :pending (metal-surface-status surface))
+    (when encoder
+      (with-cpu-trace-zone (:metal/flush-before-drawable)
+        (flush-metal-command-encoder encoder)))
+    (let* ((context (metal-surface-context surface))
+           (drawable (with-cpu-trace-zone (:canvas/acquire-drawable)
+                       (luv.metal:next-drawable (metal-canvas-layer context)))))
+      (unless drawable
+        (error 'canvas-error :canvas (context-canvas context)
+               :operation :frame :reason :no-metal-drawable))
+      (let ((native (luv.metal:drawable-texture drawable)))
+        (setf (metal-surface-drawable surface) drawable
+              (slot-value surface 'native-object) native
+              (metal-surface-status surface)
+              ;; A fullscreen transition can leave an old-size drawable in
+              ;; the layer's pool after SDL reports the new size.  Such a
+              ;; frame is simply not shown.
+              (if (equal (list (metal-drawable-texture-width native)
+                               (metal-drawable-texture-height native))
+                         (subseq (gpu-texture-size surface) 0 2))
+                  :acquired
+                  :unpresentable)))))
+  (eq :acquired (metal-surface-status surface)))
+
+(defmethod metal-native-object ((surface metal-canvas-surface-texture))
+  (when (eq :pending (metal-surface-status surface))
+    (realize-metal-canvas-surface surface))
+  (call-next-method))
+
+(defmethod prepare-metal-copy-destination
+    ((surface metal-canvas-surface-texture) encoder)
+  (realize-metal-canvas-surface surface encoder))
 
 (defun ensure-metal-canvas-state (context operation expected-state)
   (unless (member (canvas-context-state context)
@@ -220,21 +298,35 @@
              :state (canvas-context-state context) :expected-state :in-frame)))
 
 (defmethod canvas-frame-resource-key
-    ((context metal-canvas-context) (surface-texture metal-gpu-texture))
+    ((context metal-canvas-context)
+     (surface-texture metal-canvas-surface-texture))
   (declare (ignore context))
-  ;; CAMetalLayer cycles a bounded native drawable pool, but each NEXTDRAWABLE
-  ;; call is represented by a fresh borrowed Lisp texture wrapper.  Metal 4's
-  ;; resource identity survives those wrappers and becomes reusable only when
-  ;; the layer makes that drawable available again.
-  (getf
-   (luv.metal:metal-texture-resource-id
-    (metal-native-object surface-texture))
-   'luv.metal::value))
+  ;; The frame slot, not the drawable: the slot's fence is what proves its
+  ;; previous frame's resources are free, and asking which drawable this is
+  ;; would fetch one early.
+  (metal-surface-slot surface-texture))
 
 (luv.objective-c:define-objective-c-message metal-drawable-texture-width
     ("width" :uint64))
 (luv.objective-c:define-objective-c-message metal-drawable-texture-height
     ("height" :uint64))
+
+(defun begin-metal-canvas-frame-slot (context)
+  "Advance CONTEXT to its next frame slot once that slot's last frame is done."
+  (let* ((serial (incf (metal-canvas-frame-serial context)))
+         (slot (mod serial +metal-canvas-frames-in-flight+))
+         (value (aref (metal-canvas-slot-submissions context) slot))
+         (queue (device-queue (context-device context))))
+    (when (plusp value)
+      (with-cpu-trace-zone (:metal/wait-for-frame-slot)
+        (flush-metal-queue-completion-signal queue)
+        (unless (plusp
+                 (luv.metal:wait-for-metal-shared-event
+                  (metal-queue-completion-event queue) value 2000))
+          (error 'canvas-error :canvas (context-canvas context)
+                 :operation :frame :reason :frame-slot-timeout
+                 :details (list :slot slot :submission value)))))
+    slot))
 
 (zdefun (call-with-metal-canvas-frame :zone :canvas/frame) (context function)
   (ensure-metal-canvas-state context :frame :configured)
@@ -249,77 +341,72 @@
         (let* ((device (context-device context))
                (queue (device-queue device))
                (native-queue (metal-native-object queue))
-               (drawable
-                 (with-cpu-trace-zone (:canvas/acquire-drawable)
-                   (luv.metal:next-drawable
-                    (metal-canvas-layer context)))))
-          (unless drawable
-            (error 'canvas-error :canvas (context-canvas context)
-                   :operation :frame :reason :no-metal-drawable))
-          (let ((encoder nil)
-                (command-buffer nil)
-                (texture nil))
-            (with-cpu-trace-zone (:metal/allocate-frame-resources)
-              (setf encoder
-                    (create
-                     device
-                     (make-command-encoder-descriptor
-                      :label "Metal canvas frame"))))
-            (unwind-protect
-                 (let ((native-texture
-                         (luv.metal:drawable-texture drawable)))
-                   ;; A fullscreen transition can leave an old-size drawable
-                   ;; in the layer's pool after SDL reports the new window size.
-                   ;; Attachments and viewport must follow the acquired texture,
-                   ;; rather than describing it using the requested layer extent.
-                   (setf (canvas-extent context)
-                         (list (metal-drawable-texture-width native-texture)
-                               (metal-drawable-texture-height native-texture)))
-                   (setf texture
-                         (make-instance
-                          'metal-gpu-texture
-                          :device device :native-object native-texture
-                          :owned-p nil
-                          :size (canonical-texture-extent
-                                 (canvas-extent context) context :canvas-frame)
-                          :dimensions :2d :format (canvas-format context)
-                          :usage (canvas-configuration-usage
-                                  (canvas-context-configuration context))))
-                   (setf (metal-canvas-current-texture context) texture
-                         (canvas-context-state context) :in-frame)
-                   (with-cpu-trace-zone (:gpu/encode)
-                     (let ((presentation-time
-                             (canvas-presentation-time
-                              (context-canvas context))))
-                       (call-with-canvas-time
-                        (context-canvas context) presentation-time
-                        (lambda ()
-                          (funcall function texture encoder
-                                   presentation-time)))))
-                   (when (metal-encoder-active-pass encoder)
-                     (error 'canvas-error :canvas (context-canvas context)
-                            :operation :frame
-                            :reason :metal-pass-left-open))
-                   (with-cpu-trace-zone (:gpu/finish-encoding)
-                     (setf command-buffer (finish encoder)))
-                   (with-cpu-trace-zone (:metal/wait-for-drawable)
-                     (luv.metal:wait-for-drawable native-queue drawable))
-                   (with-cpu-trace-zone (:gpu/submit)
-                     (submit-metal-command-buffers
-                      queue (vector command-buffer)
-                      :after-commit
+               (slot (begin-metal-canvas-frame-slot context))
+               (encoder nil)
+               (command-buffer nil)
+               (texture nil))
+          (with-cpu-trace-zone (:metal/allocate-frame-resources)
+            (setf encoder
+                  (create
+                   device
+                   (make-command-encoder-descriptor
+                    :label "Metal canvas frame"))))
+          (unwind-protect
+               (progn
+                 (setf texture
+                       (make-instance
+                        'metal-canvas-surface-texture
+                        :context context :slot slot
+                        :device device :native-object nil
+                        :owned-p nil
+                        :size (canonical-texture-extent
+                               (canvas-extent context) context :canvas-frame)
+                        :dimensions :2d :format (canvas-format context)
+                        :usage (canvas-configuration-usage
+                                (canvas-context-configuration context))))
+                 (setf (metal-canvas-current-texture context) texture
+                       (canvas-context-state context) :in-frame)
+                 (with-cpu-trace-zone (:gpu/encode)
+                   (let ((presentation-time
+                           (canvas-presentation-time
+                            (context-canvas context))))
+                     (call-with-canvas-time
+                      (context-canvas context) presentation-time
                       (lambda ()
-                        (luv.metal:signal-drawable native-queue drawable)
-                        (luv.metal:present-drawable drawable))))
-                   texture)
-              (setf (metal-canvas-current-texture context) nil
-                    (canvas-context-state context) :configured)
-              (when command-buffer
-                (destroy command-buffer))
-              (when encoder
-                (destroy encoder))
-              (when texture
-                (destroy texture))))))))
+                        (funcall function texture encoder
+                                 presentation-time)))))
+                 (when (metal-encoder-active-pass encoder)
+                   (error 'canvas-error :canvas (context-canvas context)
+                          :operation :frame
+                          :reason :metal-pass-left-open))
+                 (with-cpu-trace-zone (:gpu/finish-encoding)
+                   (setf command-buffer (finish encoder)))
+                 (let ((drawable (and (eq :acquired
+                                          (metal-surface-status texture))
+                                      (metal-surface-drawable texture))))
+                   (when drawable
+                     (with-cpu-trace-zone (:metal/wait-for-drawable)
+                       (luv.metal:wait-for-drawable native-queue drawable)))
+                   (with-cpu-trace-zone (:gpu/submit)
+                     (setf (aref (metal-canvas-slot-submissions context) slot)
+                           (submit-metal-command-buffers
+                            queue (vector command-buffer)
+                            :after-commit
+                            (and drawable
+                                 (lambda ()
+                                   (luv.metal:signal-drawable
+                                    native-queue drawable)
+                                   (luv.metal:present-drawable drawable)))))))
+                 texture)
+            (setf (metal-canvas-current-texture context) nil
+                  (canvas-context-state context) :configured)
+            (when command-buffer
+              (destroy command-buffer))
+            (when encoder
+              (destroy encoder))
+            (when texture
+              (setf (metal-surface-status texture) :closed)
+              (destroy texture)))))))
 
 (defmethod call-with-canvas-frame
     ((context metal-canvas-context) function)

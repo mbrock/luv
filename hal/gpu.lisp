@@ -780,17 +780,26 @@ on until it completes.  Use SUBMITTED-WORK-DONE to wait."))
   (:documentation "Block until all work submitted to QUEUE so far has
 completed on the GPU."))
 
-(defgeneric queue-completion-watch (queue &key behind)
+(defgeneric queue-completion-watch (queue)
   (:documentation "Return a predicate for the work submitted to QUEUE so far.
 
 The predicate takes no arguments and says whether that work has completed.
 It may be called from any thread and never waits or takes QUEUE's lock, so a
 helper thread can time the GPU without holding up the thread that renders.
-BEHIND watches an earlier frontier instead: the work submitted before the
-newest BEHIND submissions, so a timer can tell when the GPU actually reached
-the newest one.  A backend that cannot answer so cheaply returns NIL.")
-  (:method (queue &key behind)
-    (declare (ignore queue behind))
+A backend that cannot answer so cheaply returns NIL.")
+  (:method (queue)
+    (declare (ignore queue))
+    nil))
+
+(defgeneric queue-progress-reader (queue)
+  (:documentation "Return a function answering how far QUEUE has come.
+
+The function takes no arguments and returns two values: how many submissions
+QUEUE has received, and how many of those the GPU has completed.  Like
+QUEUE-COMPLETION-WATCH it may be called from any thread and never waits or
+takes QUEUE's lock.  A backend that cannot answer so cheaply returns NIL.")
+  (:method (queue)
+    (declare (ignore queue))
     nil))
 
 (defgeneric write-buffer (buffer data &key offset)

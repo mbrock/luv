@@ -3488,17 +3488,27 @@ lowering later without changing this queue-level operation."
    (vulkan-handle (vulkan-queue-device queue))
    (vulkan-queue-timeline queue)))
 
-(defmethod queue-completion-watch ((queue vulkan-gpu-queue) &key (behind 0))
+(defmethod queue-completion-watch ((queue vulkan-gpu-queue))
   ;; The timeline semaphore's counter is the newest completed submission.
   ;; Reading it needs no external synchronization, so the predicate takes no
   ;; queue lock and never waits, like Metal's shared-event read.
-  (let ((index (- (vulkan-queue-submission-counter queue) behind))
+  (let ((index (vulkan-queue-submission-counter queue))
         (device (vulkan-queue-device queue))
         (timeline (vulkan-queue-timeline queue)))
     (lambda ()
       (and (not (vulkan-object-destroyed-p device))
            (>= (lvk:semaphore-counter-value (vulkan-handle device) timeline)
                index)))))
+
+(defmethod queue-progress-reader ((queue vulkan-gpu-queue))
+  (let ((device (vulkan-queue-device queue))
+        (timeline (vulkan-queue-timeline queue)))
+    (lambda ()
+      (values (vulkan-queue-submission-counter queue)
+              (if (vulkan-object-destroyed-p device)
+                  0
+                  (lvk:semaphore-counter-value (vulkan-handle device)
+                                               timeline))))))
 
 (defun wait-for-vulkan-submission (queue index)
   "Block until QUEUE's completion frontier reaches INDEX."

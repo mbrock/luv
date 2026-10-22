@@ -1979,33 +1979,56 @@ GPU's clock -- so timings taken then say nothing about play."
              (not (intersection '(:occluded :hidden :minimized) flags))))))
 
 (defun time-luvcraft-frame-gpu-work (pacer queue)
-  "Start a stopwatch on QUEUE's newest submission; its time arrives in PACER.
+  "Start a stopwatch on the frame about to be recorded for QUEUE.
 
-The frame's GPU time is from when the GPU could start it -- its submission,
-or the previous submission's completion if that came later -- to its own
-completion.  Counting from submission alone would also count the frame it
-queued behind.  A helper thread polls both completions without the queue
-lock, so the canvas thread keeps its beat.  Waiting there instead made every
-sampled frame miss the next one: a hitch a second, caused by the instrument."
-  (let ((done-p (queue-completion-watch queue))
-        (previous-done-p (queue-completion-watch queue :behind 1))
-        (start (get-internal-real-time)))
-    (when done-p
-      (sb-thread:make-thread
-       (lambda ()
-         (let ((began start))
-           (loop repeat 500
-                 until (funcall done-p)
-                 do (when (and previous-done-p (funcall previous-done-p))
-                      (setf began (get-internal-real-time)
-                            previous-done-p nil))
-                    (sleep 0.0005))
-           (when (funcall done-p)
-             (let ((seconds (/ (- (get-internal-real-time) began)
-                               (float internal-time-units-per-second 1d0))))
-               (sb-thread:with-mutex ((frame-pacer-lock pacer))
-                 (push seconds (frame-pacer-arrivals pacer)))))))
-       :name "luvcraft frame pacing stopwatch"))))
+Returns a function to call once the frame is submitted; the frame's GPU time
+then arrives in PACER.  That time runs from when the GPU could start the
+frame -- its first submission, or the previous frame's completion if that
+came later -- to its work completing.  A frame may be submitted in parts:
+the Metal canvas hands over the frame's work before it waits for a drawable,
+and only the final copy into that drawable is submitted after.  That copy
+waits on the GPU for the drawable too, which is presentation, not work, so
+a split frame's clock stops at its next-to-last submission.  The clock
+starts before recording and watches the queue's counters.  A helper thread polls them without the queue lock, so
+the canvas thread keeps its beat.  Waiting there instead made every sampled
+frame miss the next one: a hitch a second, caused by the instrument."
+  (let ((progress (queue-progress-reader queue))
+        (target nil))
+    (when progress
+      (multiple-value-bind (before completed) (funcall progress)
+        (let ((start (get-internal-real-time)))
+          (flet ((now () (get-internal-real-time)))
+            (sb-thread:make-thread
+             (lambda ()
+               (let ((submitted-at nil)
+                     (previous-done-at (and (>= completed before) start)))
+                 (loop repeat 2000
+                       do (multiple-value-bind (submitted done)
+                              (funcall progress)
+                            (when (and (null submitted-at) (> submitted before))
+                              (setf submitted-at (now)))
+                            (when (and (null previous-done-at) (>= done before))
+                              (setf previous-done-at (now)))
+                            (let ((last target))
+                              (when (and last submitted-at (>= done last))
+                                (let ((seconds
+                                        (/ (- (now)
+                                              (max submitted-at
+                                                   (or previous-done-at start)))
+                                           (float internal-time-units-per-second
+                                                  1d0))))
+                                  (sb-thread:with-mutex
+                                      ((frame-pacer-lock pacer))
+                                    (push seconds
+                                          (frame-pacer-arrivals pacer))))
+                                (return))))
+                          (sleep 0.0005))))
+             :name "luvcraft frame pacing stopwatch")
+            (lambda ()
+              (let ((submitted (funcall progress)))
+                (setf target (if (>= (- submitted before) 2)
+                                 (1- submitted)
+                                 submitted))))))))))
 
 (defun change-luvcraft-pacing (session pacer clock now
                                &key (level (frame-pacer-scale-level pacer))
@@ -2093,25 +2116,24 @@ sampled frame miss the next one: a hitch a second, caused by the instrument."
                     (> now (+ (frame-pacer-settled-time pacer) 8d0)))
            (setf (frame-pacer-trial-backoff pacer) 4d0)))))))
 
-(defun pace-luvcraft-frames (session)
-  "Time this frame's GPU work now and then, and retune scene and cadence."
+(defun luvcraft-frame-pacer-for (session)
+  "SESSION's frame pacer, when its clock is one the pacer may retune."
   (let* ((canvas (luvcraft-session-canvas session))
          (clock (canvas-clock canvas)))
     (when (and *luvcraft-frame-pacing-p* (typep clock 'cadence-clock))
-      (let* ((now (canvas-time-unadjusted canvas))
-             (pacer (or (luvcraft-session-frame-pacer session)
-                        ;; The first frames compile pipelines and fill the
-                        ;; world; they are no evidence about play.
-                        (setf (luvcraft-session-frame-pacer session)
-                              (make-luvcraft-frame-pacer
-                               :settled-time (+ now 2d0))))))
-        (let ((arrivals (sb-thread:with-mutex ((frame-pacer-lock pacer))
-                          (shiftf (frame-pacer-arrivals pacer) nil))))
-          (when (and arrivals (>= now (frame-pacer-settled-time pacer)))
-            (setf (frame-pacer-samples pacer)
-                  (let ((samples (append arrivals (frame-pacer-samples pacer))))
-                    (subseq samples 0 (min 6 (length samples)))))
-            (retune-luvcraft-cadence session pacer clock now)))
+      (or (luvcraft-session-frame-pacer session)
+          ;; The first frames compile pipelines and fill the world; they are
+          ;; no evidence about play.
+          (setf (luvcraft-session-frame-pacer session)
+                (make-luvcraft-frame-pacer
+                 :settled-time (+ (canvas-time-unadjusted canvas) 2d0)))))))
+
+(defun start-luvcraft-frame-timing (session)
+  "Start timing the coming frame if a sample is due; return its finisher."
+  (let ((pacer (luvcraft-frame-pacer-for session)))
+    (when pacer
+      (let* ((canvas (luvcraft-session-canvas session))
+             (now (canvas-time-unadjusted canvas)))
         (when (>= now (frame-pacer-next-sample-time pacer))
           (setf (frame-pacer-next-sample-time pacer)
                 (+ now *luvcraft-frame-pacing-interval*))
@@ -2119,8 +2141,26 @@ sampled frame miss the next one: a hitch a second, caused by the instrument."
               (time-luvcraft-frame-gpu-work
                pacer (device-queue (luvcraft-session-device session)))
               ;; Hold every decision until somebody is looking again.
-              (setf (frame-pacer-samples pacer) nil
-                    (frame-pacer-settled-time pacer) (+ now 0.75d0))))))))
+              (progn
+                (setf (frame-pacer-samples pacer) nil
+                      (frame-pacer-settled-time pacer) (+ now 0.75d0))
+                nil)))))))
+
+(defun pace-luvcraft-frames (session finish-timing)
+  "Finish this frame's timing, if any, and retune scene and cadence."
+  (when finish-timing
+    (funcall finish-timing))
+  (let ((pacer (luvcraft-frame-pacer-for session)))
+    (when pacer
+      (let* ((canvas (luvcraft-session-canvas session))
+             (now (canvas-time-unadjusted canvas))
+             (arrivals (sb-thread:with-mutex ((frame-pacer-lock pacer))
+                         (shiftf (frame-pacer-arrivals pacer) nil))))
+        (when (and arrivals (>= now (frame-pacer-settled-time pacer)))
+          (setf (frame-pacer-samples pacer)
+                (let ((samples (append arrivals (frame-pacer-samples pacer))))
+                  (subseq samples 0 (min 6 (length samples)))))
+          (retune-luvcraft-cadence session pacer (canvas-clock canvas) now))))))
 
 (defun render-luvcraft-frame (session timestamp &optional sample)
   (declare (ignore timestamp))
@@ -2133,7 +2173,8 @@ sampled frame miss the next one: a hitch a second, caused by the instrument."
                  (luvcraft-frame-sample-simulation-seconds sample)))
           (streaming-before
             (and sample
-                 (luvcraft-frame-sample-streaming-seconds sample))))
+                 (luvcraft-frame-sample-streaming-seconds sample)))
+          (finish-timing (start-luvcraft-frame-timing session)))
       (with-luvcraft-frame-timing
           (sample luvcraft-frame-sample-frame-seconds :luvcraft/frame)
         (with-luvcraft-frame-timing
@@ -2157,7 +2198,7 @@ sampled frame miss the next one: a hitch a second, caused by the instrument."
                (evict-luvcraft-products session))
              (encode-luvcraft-frame
               session surface-texture encoder :sample sample))))
-        (pace-luvcraft-frames session)
+        (pace-luvcraft-frames session finish-timing)
         ;; PRESENTATION encloses acquisition and submission now, so remove
         ;; the explicitly measured application phases nested inside it.  This
         ;; preserves the sample's old meaning while letting acquisition choose

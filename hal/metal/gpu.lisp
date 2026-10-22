@@ -411,6 +411,44 @@ The first vertex-stage realization is the executable mechanism described by
             (finish-under-lock))
           (finish-under-lock)))))
 
+(defun flush-metal-command-encoder (encoder)
+  "Submit what ENCODER has recorded so far and keep recording afresh.
+
+The work recorded so far goes to the queue as its own command buffer, so the
+GPU can start on it while the caller waits for something else -- a drawable,
+typically.  ENCODER then records into a new native command buffer.  Returns
+the submission's value, or NIL when nothing had been recorded."
+  (ensure-metal-command-encoder-state encoder :flush)
+  (ensure-no-active-metal-pass encoder :flush)
+  (when (metal-encoder-encoded-p encoder)
+    (let* ((device (metal-command-encoder-device encoder))
+           (finished (finish encoder))
+           (allocator nil)
+           (command-buffer nil))
+      (unwind-protect
+           (prog1 (submit-metal-command-buffers
+                   (metal-device-queue device) (vector finished))
+             (setf allocator
+                   (luv.metal:new-command-allocator (metal-native-object device))
+                   command-buffer
+                   (luv.metal:new-command-buffer (metal-native-object device)))
+             (unless (and allocator command-buffer)
+               (error 'metal-gpu-error :operation :flush-command-encoder
+                      :reason :command-resource-creation-failed))
+             (luv.metal:begin-command-buffer command-buffer allocator)
+             (clrhash (metal-encoder-resources encoder))
+             (setf (metal-encoder-allocator encoder) allocator
+                   (metal-encoder-command-buffer encoder) command-buffer
+                   (metal-encoder-encoded-p encoder) nil
+                   (metal-encoder-state encoder) :recording
+                   allocator nil
+                   command-buffer nil))
+        (destroy finished)
+        (when command-buffer
+          (luv.objective-c:release-objective-c-object command-buffer))
+        (when allocator
+          (luv.objective-c:release-objective-c-object allocator))))))
+
 (defun make-metal-finished-command-buffer
     (encoder device command-buffer allocator)
   "Publish ENCODER's ended native ownership as one command-buffer wrapper."
@@ -605,13 +643,19 @@ The first vertex-stage realization is the executable mechanism described by
     (maintain-metal-queue queue))
   (values))
 
-(defmethod queue-completion-watch ((queue metal-gpu-queue) &key (behind 0))
+(defmethod queue-completion-watch ((queue metal-gpu-queue))
   ;; The shared event's signalled value is a plain property read: no queue
   ;; lock, no wait, safe from a timing thread.
-  (let ((value (- (metal-queue-submitted-value queue) behind))
+  (let ((value (metal-queue-submitted-value queue))
         (event (metal-queue-completion-event queue)))
     (lambda ()
       (>= (luv.metal:metal-shared-event-signaled-value event) value))))
+
+(defmethod queue-progress-reader ((queue metal-gpu-queue))
+  (let ((event (metal-queue-completion-event queue)))
+    (lambda ()
+      (values (metal-queue-submitted-value queue)
+              (luv.metal:metal-shared-event-signaled-value event)))))
 
 (defun submit-metal-command-buffers
     (queue command-buffers &key after-commit)
@@ -2797,11 +2841,24 @@ compiler boundary of #58IDSR."
    luv.metal:+stage-blit+
    luv.metal:+visibility-device+))
 
+(defgeneric prepare-metal-copy-destination (destination encoder)
+  (:documentation
+   "Make DESTINATION ready for ENCODER to copy into, before any native
+encoding begins.  True to go ahead; NIL skips the copy.  A presentation
+surface acquired late uses this to fetch its drawable, after first handing
+the GPU everything recorded so far.")
+  (:method (destination encoder)
+    (declare (ignore destination encoder))
+    t))
+
 (defmethod encode
     ((encoder metal-gpu-command-encoder)
      (command gpu-copy-texture-command))
   (ensure-metal-command-encoder-state encoder :copy-texture)
   (ensure-no-active-metal-pass encoder :copy-texture)
+  (unless (prepare-metal-copy-destination
+           (gpu-copy-texture-command-destination command) encoder)
+    (return-from encode command))
   (let ((source (gpu-copy-texture-command-source command))
         (destination (gpu-copy-texture-command-destination command)))
     (unless (and (typep source 'metal-gpu-texture)
