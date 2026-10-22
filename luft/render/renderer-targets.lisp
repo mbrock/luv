@@ -24,6 +24,10 @@
    (resolved-view :initform nil :reader renderer-target-generation-resolved-view)
    (history-texture :initform nil :reader renderer-target-generation-history-texture)
    (history-view :initform nil :reader renderer-target-generation-history-view)
+   (bounds-low-texture :initform nil :reader renderer-target-generation-bounds-low-texture)
+   (bounds-low-view :initform nil :reader renderer-target-generation-bounds-low-view)
+   (bounds-high-texture :initform nil :reader renderer-target-generation-bounds-high-texture)
+   (bounds-high-view :initform nil :reader renderer-target-generation-bounds-high-view)
    (composite-texture :initform nil :reader renderer-target-generation-composite-texture)
    (composite-view :initform nil :reader renderer-target-generation-composite-view)
    (bloom-primary-texture :initform nil :reader renderer-target-generation-bloom-primary-texture)
@@ -31,6 +35,8 @@
    (bloom-secondary-texture :initform nil :reader renderer-target-generation-bloom-secondary-texture)
    (bloom-secondary-view :initform nil :reader renderer-target-generation-bloom-secondary-view)
    (composite-source-bind-group :initform nil :reader renderer-target-generation-composite-source-bind-group)
+   (history-composite-source-bind-group
+    :initform nil :reader renderer-target-generation-history-composite-source-bind-group)
    (exposure-binding :initform nil :reader renderer-target-generation-exposure-binding)))
 
 (defun %make-empty-renderer-target-generation ()
@@ -84,20 +90,52 @@
   (renderer-target-generation-motion-view
    (renderer-target-generation renderer)))
 
+;;; The shader resolve keeps two output-sized images and alternates them:
+;;; each frame reads the one the last frame wrote and writes the other, so
+;;; history never needs copying.  MetalFX writes RESOLVED and keeps its own.
+
+(defun renderer-history-swapped-p (renderer)
+  (and (renderer-shader-temporal-p renderer)
+       (oddp (renderer-frame-index renderer))))
+
 (defun renderer-resolved-texture (renderer)
-  (renderer-target-generation-resolved-texture
-   (renderer-target-generation renderer)))
+  (let ((generation (renderer-target-generation renderer)))
+    (if (renderer-history-swapped-p renderer)
+        (renderer-target-generation-history-texture generation)
+        (renderer-target-generation-resolved-texture generation))))
 
 (defun renderer-resolved-view (renderer)
-  (renderer-target-generation-resolved-view
-   (renderer-target-generation renderer)))
+  (let ((generation (renderer-target-generation renderer)))
+    (if (renderer-history-swapped-p renderer)
+        (renderer-target-generation-history-view generation)
+        (renderer-target-generation-resolved-view generation))))
 
 (defun renderer-history-texture (renderer)
-  (renderer-target-generation-history-texture
-   (renderer-target-generation renderer)))
+  (let ((generation (renderer-target-generation renderer)))
+    (if (renderer-history-swapped-p renderer)
+        (renderer-target-generation-resolved-texture generation)
+        (renderer-target-generation-history-texture generation))))
 
 (defun renderer-history-view (renderer)
-  (renderer-target-generation-history-view
+  (let ((generation (renderer-target-generation renderer)))
+    (if (renderer-history-swapped-p renderer)
+        (renderer-target-generation-resolved-view generation)
+        (renderer-target-generation-history-view generation))))
+
+(defun renderer-bounds-low-view (renderer)
+  (renderer-target-generation-bounds-low-view
+   (renderer-target-generation renderer)))
+
+(defun renderer-bounds-low-texture (renderer)
+  (renderer-target-generation-bounds-low-texture
+   (renderer-target-generation renderer)))
+
+(defun renderer-bounds-high-view (renderer)
+  (renderer-target-generation-bounds-high-view
+   (renderer-target-generation renderer)))
+
+(defun renderer-bounds-high-texture (renderer)
+  (renderer-target-generation-bounds-high-texture
    (renderer-target-generation renderer)))
 
 (defun renderer-composite-texture (renderer)
@@ -129,8 +167,10 @@
    (renderer-target-generation renderer)))
 
 (defun renderer-composite-source-bind-group (renderer)
-  (renderer-target-generation-composite-source-bind-group
-   (renderer-target-generation renderer)))
+  (let ((generation (renderer-target-generation renderer)))
+    (if (renderer-history-swapped-p renderer)
+        (renderer-target-generation-history-composite-source-bind-group generation)
+        (renderer-target-generation-composite-source-bind-group generation))))
 
 (defun renderer-exposure-binding (renderer)
   (renderer-target-generation-exposure-binding
@@ -153,12 +193,10 @@
 (defun renderer-render-scale-extent (renderer extent)
   "Return RENDERER's internal extent for output EXTENT.
 
-MetalFX performs temporal upscaling from *RENDER-SCALE*.  Luft's inspectable
-Vulkan resolve is the original native-resolution TAA algorithm; it accumulates
-subpixel samples but does not claim a stable reconstruction-upscaling filter."
-  (if (renderer-shader-temporal-p renderer)
-      (copy-list extent)
-      (render-scale-extent extent)))
+Both temporal implementations reconstruct the output from *RENDER-SCALE*;
+without one, presentation enlarges the scene directly."
+  (declare (ignore renderer))
+  (render-scale-extent extent))
 
 (defun make-renderer-target-generation (renderer extent)
   "Stage the images and bindings for one output size under one GPU owner."
@@ -167,6 +205,7 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
          (render-extent (renderer-render-scale-extent renderer extent))
          (generation (%make-empty-renderer-target-generation))
          (shader-p (renderer-shader-temporal-p renderer))
+         (samples (renderer-scene-sample-count renderer))
          (scaler nil))
     (with-gpu-construction (generation)
       (labels ((own (descriptor) (own-gpu-resource generation device descriptor))
@@ -191,20 +230,24 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
         (image :depth :depth32-float render-extent
                (usage '(:render-attachment :texture-binding)
                       (and scaler (gpu-temporal-scaler-depth-usage scaler))))
-        (image :depth-msaa :depth32-float render-extent :render-attachment *scene-sample-count*)
+        (when (> samples 1)
+          (image :depth-msaa :depth32-float render-extent :render-attachment samples))
         (image :scene :rgba16-float render-extent
                (usage '(:render-attachment :texture-binding)
                       (and scaler (gpu-temporal-scaler-color-usage scaler))))
-        (image :scene-msaa :rgba16-float render-extent :render-attachment *scene-sample-count*)
+        (when (> samples 1)
+          (image :scene-msaa :rgba16-float render-extent :render-attachment samples))
         (when (renderer-temporal-p renderer)
           (image :motion :rg16-float render-extent
                  (usage (if shader-p '(:render-attachment :texture-binding) '(:render-attachment))
                         (and scaler (gpu-temporal-scaler-motion-usage scaler))))
-          (image :motion-msaa :rg16-float render-extent :render-attachment *scene-sample-count*)
           (image :resolved :rgba16-float extent
-                 (usage (if shader-p '(:render-attachment :texture-binding :copy-src) '(:texture-binding))
+                 (usage (if shader-p '(:render-attachment :texture-binding) '(:texture-binding))
                         (and scaler (gpu-temporal-scaler-output-usage scaler))))
-          (when shader-p (image :history :rgba16-float extent '(:texture-binding :copy-dst))))
+          (when shader-p
+            (image :history :rgba16-float extent '(:render-attachment :texture-binding))
+            (image :bounds-low :rgba16-float render-extent '(:render-attachment :texture-binding))
+            (image :bounds-high :rgba16-float render-extent '(:render-attachment :texture-binding))))
         (image :composite :rgba16-float extent '(:render-attachment :texture-binding))
         (image :bloom-primary :rgba16-float (bloom-extent extent)
                '(:render-attachment :texture-binding))
@@ -217,6 +260,13 @@ subpixel samples but does not claim a stable reconstruction-upscaling filter."
                 (renderer-finishing renderer) device
                 (or (renderer-target-generation-resolved-view generation)
                     (renderer-target-generation-scene-view generation))))
+              (slot-value generation 'history-composite-source-bind-group)
+              (and shader-p
+                   (own-gpu-object
+                    generation
+                    (make-composite-binding
+                     (renderer-finishing renderer) device
+                     (renderer-target-generation-history-view generation))))
               (slot-value generation 'exposure-binding)
               (own-gpu-object
                generation

@@ -2,12 +2,14 @@
 #+startup: overview
 
 Luft's temporal antialiasing is deliberately a renderer experiment rather
-than a new engine-wide temporal framework.  Both backends draw a jittered
-scene and write current-to-previous motion beside it before the lens and
-presentation pass.  Vulkan resolves those inputs with Luft's inspectable
-shader, one explicit history image, and one distinct resolve output; Metal
-gives colour, depth, and motion to a
-MetalFX temporal scaler that owns its opaque history.
+than a new engine-wide temporal framework.  Both backends draw a jittered,
+single-sample scene at =*render-scale*= and write current-to-previous motion
+beside it before the lens and presentation pass.  Vulkan reconstructs the
+output with Luft's inspectable shader, a neighbourhood pass and a resolve over
+two alternating history images; Metal gives colour, depth, and motion to a
+MetalFX temporal scaler that owns its opaque history, unless
+=*temporal-reconstruction*= asks for the shader there too.  Luvcraft has its
+own resolve of the same shape, described in #HDC5D8.
 
 The work also answers two architectural questions the small greenfield
 renderer made cheap to ask.  The renderer wanted explicit owners for a frozen
@@ -24,10 +26,14 @@ the native texture contract and ordering fence.
 :END:
 
 One rasterized frame samples each pixel once.  Luft moves that sample to a
-different subpixel on each frame with an eight-sample Halton(2,3) sequence,
+different subpixel on each frame with a sixteen-sample Halton(2,3) sequence,
 then reprojects the last resolved picture so samples from different frames
-describe the same world points.  A static camera therefore gathers eight
-positions within a pixel instead of repeatedly gathering its centre.  A moving
+describe the same world points.  A static camera therefore gathers sixteen
+positions within a pixel instead of repeatedly gathering its centre.  That is
+why a temporal scene rasterizes one sample per pixel: 4× MSAA on top of it
+cost geometry bandwidth for edges the jitter already resolves, and made
+depth and motion need resolves with no honest meaning at a silhouette.  MSAA
+remains only when temporal reconstruction is off (#O18BY6).  A moving
 camera can keep the old evidence only where motion says where it went and the
 new neighbourhood says it is still plausible.
 
@@ -68,14 +74,18 @@ so restoring the shader path did not change the established 27-vec4 ABI.
 
 #+begin_src mermaid
 flowchart TB
-  S["jittered surface + sky"] --> C["RGBA16F current colour"]
+  S["jittered surface + sky, one sample"] --> C["RGBA16F current colour"]
   S --> M["RG16F current-to-previous motion"]
   S --> D["D32 visibility"]
-  C --> R["temporal resolve"]
-  M --> R
-  A["old RGBA16F history, Vulkan"] --> R
-  R --> B["resolved RGBA16F"]
-  B -. "copy after resolve" .-> A
+  C --> N["neighbourhood, scene size"]
+  M --> N
+  D --> N
+  N --> L["YCoCg bounds + nearest motion"]
+  L --> R["temporal resolve, output size"]
+  C --> R
+  A["history: last frame's output image"] --> R
+  R --> B["resolved RGBA16F: the other image"]
+  B -. "roles swap next frame" .-> A
   B --> P["lens or plain present"]
   P --> O["output attachment"]
 #+end_src
@@ -84,14 +94,16 @@ flowchart TB
 |-
 | Current colour | =RGBA16F= | This frame's jittered, pre-presentation colour; alpha is current focus metadata |
 | Motion | =RG16F= | Unjittered current-to-previous displacement in UV units |
-| Depth | =D32= | Surface visibility; consumed by MetalFX and retained for the Vulkan experiment |
-| Resolved colour | =RGBA16F= | Vulkan writes a distinct output and copies it to explicit history; MetalFX owns native history behind one output |
+| Depth | =D32= | Surface visibility; consumed by MetalFX and by the shader neighbourhood's velocity dilation |
+| Bounds | 2 × =RGBA16F= | Per scene texel: YCoCg minimum and maximum, nearest motion in their W lanes |
+| Resolved colour | =RGBA16F= | The shader alternates two output images, reading one and writing the other; MetalFX owns native history behind one output |
 | Output | Renderer format | Lens-processed or plainly presented result, normally sRGB |
 
 [[lisp:luft.render::encode-renderer-frame]] keeps this semantic order on both
-backends.  Vulkan ends the surface pass, samples current colour, exact motion,
-and old history in a fullscreen resolve, then copies the completed output into
-next frame's history before compositing flames and presenting.  Metal ends the
+backends.  Vulkan ends the surface pass, gathers each scene texel's
+neighbourhood once, then resolves current colour, those bounds, and last
+frame's output into the other output image before compositing flames and
+presenting.  The two images swap roles each frame, so nothing is copied.  Metal ends the
 surface pass by signaling the scaler's fence, encodes MetalFX on the Metal 4
 command encoder, then makes the composite pass wait before sampling resolved
 colour.  A cold or invalid frame rejects history; only after resolve encoding
@@ -137,14 +149,27 @@ convention on both Vulkan and Metal.
 :ID: C4ED2V
 :END:
 
-[[lisp:luft.render.shaders:temporal-resolve-fragment-shader]] gathers the
-current 3×3 neighbourhood, converts it to YCoCg, and forms the componentwise
-minimum and maximum.  It bilinearly samples reprojected history and clips that
-colour to the box before blending.  YCoCg makes this a box in luminance and two
+[[lisp:luft.render.shaders:temporal-neighbourhood-fragment-specification]]
+gathers the current 3×3 neighbourhood once per scene texel, converts it to
+YCoCg, and stores the componentwise minimum and maximum.  The resolve draws
+several output pixels per scene texel when upscaling, so gathering there would
+repeat the same eighteen taps for each of them; Moppe measured that split at
+3.4 ms becoming 1.3 at 7680×2160.  YCoCg makes this a box in luminance and two
 chroma axes rather than three unrelated RGB axes, so clipping changes hue less
 readily.
 
-The configured Vulkan history share is 0.97.  It falls as screen motion rises;
+The same pass keeps the motion of the /nearest/ of the nine texels.  At a
+silhouette the centre may be background while its neighbour is the moving
+foreground, and history must follow the foreground or leave its old colour on
+the newly revealed background.
+
+[[lisp:luft.render.shaders:temporal-resolve-fragment-specification]] samples
+the current scene at the unjittered address, reads the texel's bounds, and
+fetches reprojected history with a five-tap Catmull-Rom filter.  Bilinear
+history blurs a little more every frame it is reprojected; the bicubic
+fetch keeps the accumulated image sharp.
+
+The configured history share is 0.9.  It falls as screen motion rises;
 an out-of-frame address or invalid history makes it zero.  The YCoCg box clips
 old colour but deliberately does not reject alternate luminance at a static
 silhouette: that coverage is the evidence TAA exists to retain.  Alpha is never
@@ -326,12 +351,11 @@ where colour clipping alone has the least information.
 :ID: 1MZC4T
 :END:
 
-/Intent./ Sample the retained current depth in Luft's shader resolve, choose
-the frontmost velocity from a small neighbourhood at silhouettes, and reject
-history whose reprojected depth no longer describes the visible surface.  This
-is velocity dilation and disocclusion testing, one connected improvement rather
-than two unrelated filters.  MetalFX already receives depth under #NL5J0J;
-this mark concerns the inspectable Vulkan implementation.
+/Intent./ Reject history whose reprojected depth no longer describes the
+visible surface.  The first half of this mark, choosing the frontmost
+velocity from the 3×3 neighbourhood, landed with #O18BY6; what remains is
+the disocclusion test itself.  MetalFX already receives depth under #NL5J0J;
+this mark concerns the inspectable shader implementation.
 
 /Evidence./ Current motion is exact at its own pixel and the YCoCg box rejects
 many stale colours, but Vulkan discards depth after visibility and cannot yet
@@ -351,3 +375,74 @@ detail, higher-quality history sampling, and previous positions for genuinely
 animated geometry are local quality experiments.  Today a deformation change
 correctly invalidates the whole history; it does not pretend to have per-object
 motion that the scene model cannot yet express.
+
+* DONE Port Moppe's resolve and drop MSAA under TAA
+:PROPERTIES:
+:ID: O18BY6
+:END:
+
+/Intent./ Bring the decisions Moppe's portable NHAL resolve settled on into
+Luft's shader path, and stop paying for MSAA beneath temporal reconstruction.
+
+/Evidence./ Moppe retired its Metal renderer and MetalFX in October 2026 and
+kept one resolve written in Luv's shader language on every backend.  Its
+choices came over whole: a single-sample jittered scene, sixteen Halton
+phases, a separate neighbourhood pass at scene size, nearest-depth velocity,
+Catmull-Rom history, ping-pong history images instead of a copy, and a 0.9
+history share.  The shader path now also upscales from =*render-scale*=
+rather than resolving at native size.  A renderer test proves one sample, the
+render extent, neighbourhood-before-resolve order, no copy command, and
+alternating output images.  Live on Metal with =*temporal-reconstruction*=
+=:shader=, the atelier ran at 60 fps reconstructing 1630×1162 into 2174×1550;
+captures matched MetalFX at rest and showed no silhouette trails while
+turning.  Both temporal SPIR-V modules pass =spirv-val=.
+
+/Done when./ Temporal scenes rasterize once per pixel on both backends, the
+shader path upscales with Moppe's resolve, and MetalFX stays the Metal
+default.  Those conditions now hold.
+
+* Luvcraft resolves from depth, not from motion vectors
+:PROPERTIES:
+:ID: HDC5D8
+:END:
+
+Luvcraft has a dozen scene pipelines and none of them writes motion.  Its TAA
+([[lisp:luvcraft::encode-luvcraft-temporal-resolve]]) avoids touching them in
+three ways.
+
+The jitter is folded into the camera.  Every block-world vertex stage
+projects clip x as /(relative · right) × x-scale/ over /relative · forward/,
+so adding a share of =forward= to =right= and =up= displaces every projected
+point by exactly the jitter ([[lisp:luvcraft::shear-luvcraft-camera-lanes]]).
+The sky inverts that basis approximately, which only matters at second order
+for a smooth gradient.
+
+Motion comes from depth.  The neighbourhood pass unprojects its nearest tap
+through this frame's unjittered camera and projects it through the last one;
+the sky, which writes no depth, reprojects as a direction.  This covers the
+camera, which is almost all motion in a block world.  Critters, particles,
+and bodies are left to the YCoCg clamp.
+
+First-person geometry is screen-locked, and its SDF arms write no depth, so
+the scene pass is split: the world is drawn, its colour is copied, then hands,
+held items, and the crosshair are drawn.  Wherever the finished scene differs
+from that copy the texel sorts nearest and its motion is zero.
+
+The resolve writes the colour image presentation already read, at the
+extent the frame pacer would draw at full allowance.  When the pacer sheds
+resolution, the resolve upscales; the post, lens, and readback paths do not
+know the difference.  =*luvcraft-temporal-p*= takes effect at the next
+reframing.
+
+** TODO Measure Luvcraft's TAA cost and reconstruct to native density
+:PROPERTIES:
+:ID: 60U20V
+:END:
+
+/Intent./ Time the neighbourhood, resolve, and world-copy passes under
+Tracy, then try resolving to the drawable's physical pixels rather than
+logical points, since the scene is already stretched there by presentation.
+
+/Done when./ A matched benchmark gives the TAA passes' GPU time, and a
+native-density resolve is kept or rejected on that evidence.
+

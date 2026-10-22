@@ -27,11 +27,11 @@
 
 (defun upload-renderer-frame (renderer frame camera-uniform-data effect-time)
   (when (renderer-shader-temporal-p renderer)
-    ;; These W components are padding to every geometry consumer.  The Vulkan
+    ;; These W components are padding to every geometry consumer.  The shader
     ;; resolve reads them as its per-frame validity and accumulation weight.
     (setf (aref camera-uniform-data 27)
           (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
-          (aref camera-uniform-data 31) *vulkan-temporal-history-weight*))
+          (aref camera-uniform-data 31) *temporal-history-weight*))
   ;; The lens-extent row describes images this renderer owns, so it is
   ;; written here rather than by the viewer that packed the rest.
   (let ((extent (renderer-extent renderer))
@@ -73,78 +73,82 @@
                    :texture-binding))
 
 (defun encode-renderer-scene (renderer frame encoder player-p construction-p)
-  (let* ((temporal-p (renderer-temporal-p renderer))
-         (color-view (renderer-scene-msaa-view renderer))
-         (color-attachments
-           (if temporal-p
-               `((:view ,color-view
-                  :resolve-view ,(renderer-scene-view renderer)
-                  :load-op :clear :store-op :store
-                  :clear-value #(0.0 0.0 0.0 1.0))
-                 (:view ,(renderer-motion-msaa-view renderer)
-                  :resolve-view ,(renderer-motion-view renderer)
-                  :load-op :clear :store-op :store
-                  :clear-value #(0.0 0.0 0.0 0.0)))
-               `((:view ,color-view
-                  :resolve-view ,(renderer-scene-view renderer)
-                  :load-op :clear :store-op :store
-                  :clear-value #(0.0 0.0 0.0 1.0)))))
-         (pass
-           (begin-render-pass
-            encoder
-            (make-render-pass-descriptor
-             :label "luft site streams"
-             :color-attachments color-attachments
-             :depth-stencil-attachment
-             `(:view ,(renderer-depth-msaa-view renderer)
-               :resolve-view ,(renderer-depth-view renderer)
-               :depth-load-op :clear
-               :depth-store-op :store
-               :depth-clear-value 1.0)))))
-    ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
-    ;; the selected temporal implementation reconstructs it, and the exposure
-    ;; probe meters the same pixels presentation will grade.
+  (flet ((target (multisampled single clear)
+           ;; A temporal scene has one sample and draws straight into the
+           ;; images reconstruction reads; otherwise MSAA resolves into them.
+           (if multisampled
+               `(:view ,multisampled :resolve-view ,single
+                 :load-op :clear :store-op :store :clear-value ,clear)
+               `(:view ,single :load-op :clear :store-op :store
+                 :clear-value ,clear))))
+    (let* ((color-attachments
+             (cons (target (renderer-scene-msaa-view renderer)
+                           (renderer-scene-view renderer) #(0.0 0.0 0.0 1.0))
+                   (when (renderer-temporal-p renderer)
+                     (list (target (renderer-motion-msaa-view renderer)
+                                   (renderer-motion-view renderer)
+                                   #(0.0 0.0 0.0 0.0))))))
+           (depth-msaa-view (renderer-depth-msaa-view renderer))
+           (pass
+             (begin-render-pass
+              encoder
+              (make-render-pass-descriptor
+               :label "luft site streams"
+               :color-attachments color-attachments
+               :depth-stencil-attachment
+               `(:view ,(or depth-msaa-view (renderer-depth-view renderer))
+                 ,@(when depth-msaa-view
+                     `(:resolve-view ,(renderer-depth-view renderer)))
+                 :depth-load-op :clear
+                 :depth-store-op :store
+                 :depth-clear-value 1.0)))))
+      (encode-renderer-scene-drawings renderer frame pass player-p construction-p))))
+
+(defun encode-renderer-scene-drawings (renderer frame pass player-p construction-p)
+  ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
+  ;; the selected temporal implementation reconstructs it, and the exposure
+  ;; probe meters the same pixels presentation will grade.
+  (encode-scene-drawing
+   (renderer-sky renderer) pass
+   (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
+  (dolist (key (renderer-slot-order renderer))
+    (let ((resident
+            (mesh-slot-resident
+             (gethash key (renderer-mesh-slots renderer)))))
+      (draw-resident-opaque-population
+       (renderer-terrain renderer) pass resident
+       (renderer-frame-resident-bind-group renderer frame resident nil))))
+  (when (plusp (renderer-flame-instance-count renderer))
+    (encode-torch-bodies
+     (renderer-torches renderer) pass
+     (renderer-frame-torch-body-bind-group renderer frame nil)
+     (renderer-flame-instance-count renderer)))
+  ;; Text and panels stand on surfaces the opaque world has already drawn.
+  (encode-renderer-world-text renderer frame pass)
+  (when player-p
     (encode-scene-drawing
-     (renderer-sky renderer) pass
-     (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
+     (renderer-player renderer) pass
+     (renderer-frame-drawing-binding renderer frame (renderer-player renderer))))
+  (when (and construction-p (renderer-lattice renderer))
+    ;; Populate at most one diagnostic slot per frame. The overlay is a
+    ;; debugging view, so progressive readiness is preferable to freezing
+    ;; one frame while every resident chunk is scanned.
+    (loop for key in (renderer-slot-order renderer)
+          for slot = (gethash key (renderer-mesh-slots renderer))
+          unless (mesh-slot-lattice-point-buffer slot)
+            do (ensure-mesh-slot-lattice-points renderer slot)
+               (return))
     (dolist (key (renderer-slot-order renderer))
-      (let ((resident
-              (mesh-slot-resident
-               (gethash key (renderer-mesh-slots renderer)))))
-        (draw-resident-opaque-population
-         (renderer-terrain renderer) pass resident
-         (renderer-frame-resident-bind-group renderer frame resident nil))))
-    (when (plusp (renderer-flame-instance-count renderer))
-      (encode-torch-bodies
-       (renderer-torches renderer) pass
-       (renderer-frame-torch-body-bind-group renderer frame nil)
-       (renderer-flame-instance-count renderer)))
-    ;; Text and panels stand on surfaces the opaque world has already drawn.
-    (encode-renderer-world-text renderer frame pass)
-    (when player-p
-      (encode-scene-drawing
-       (renderer-player renderer) pass
-       (renderer-frame-drawing-binding renderer frame (renderer-player renderer))))
-    (when (and construction-p (renderer-lattice renderer))
-      ;; Populate at most one diagnostic slot per frame. The overlay is a
-      ;; debugging view, so progressive readiness is preferable to freezing
-      ;; one frame while every resident chunk is scanned.
-      (loop for key in (renderer-slot-order renderer)
-            for slot = (gethash key (renderer-mesh-slots renderer))
-            unless (mesh-slot-lattice-point-buffer slot)
-              do (ensure-mesh-slot-lattice-points renderer slot)
-                 (return))
-      (dolist (key (renderer-slot-order renderer))
-        (let ((slot (gethash key (renderer-mesh-slots renderer))))
-          (when (plusp (mesh-slot-lattice-point-count slot))
-            (encode-program (renderer-lattice renderer) pass
-                            (renderer-frame-lattice-bind-group renderer frame slot)
-                            (make-gpu-draw-command :vertex-count 6
-                                                   :instance-count (mesh-slot-lattice-point-count slot)))))))
-    (when (renderer-metalfx-temporal-p renderer)
-      (signal-temporal-scaler-inputs pass
-                                     (renderer-temporal-scaler renderer)))
-    (end-pass pass)))
+      (let ((slot (gethash key (renderer-mesh-slots renderer))))
+        (when (plusp (mesh-slot-lattice-point-count slot))
+          (encode-program (renderer-lattice renderer) pass
+                          (renderer-frame-lattice-bind-group renderer frame slot)
+                          (make-gpu-draw-command :vertex-count 6
+                                                 :instance-count (mesh-slot-lattice-point-count slot)))))))
+  (when (renderer-metalfx-temporal-p renderer)
+    (signal-temporal-scaler-inputs pass
+                                   (renderer-temporal-scaler renderer)))
+  (end-pass pass))
 
 (defun encode-renderer-reconstruction (renderer frame encoder jitter view)
   (when (renderer-metalfx-temporal-p renderer)
@@ -168,10 +172,32 @@
             (renderer-history-used-p renderer) history-valid-p)))
   (when (renderer-shader-temporal-p renderer)
     (let ((history-valid-p (renderer-history-valid-p renderer)))
-      (prepare-texture encoder (renderer-scene-texture renderer)
+      (dolist (texture (list (renderer-scene-texture renderer)
+                             (renderer-motion-texture renderer)
+                             (renderer-depth-texture renderer)))
+        (prepare-texture encoder texture :texture-binding))
+      (let ((pass
+              (begin-render-pass
+               encoder
+               (make-render-pass-descriptor
+                :label "luft temporal neighbourhood"
+                :color-attachments
+                `((:view ,(renderer-bounds-low-view renderer)
+                   :load-op :clear :store-op :store
+                   :clear-value #(0.0 0.0 0.0 0.0))
+                  (:view ,(renderer-bounds-high-view renderer)
+                   :load-op :clear :store-op :store
+                   :clear-value #(0.0 0.0 0.0 0.0)))))))
+        (encode-reconstruction-neighbourhood
+         (renderer-reconstruction renderer) pass
+         (renderer-frame-neighbourhood-bind-group renderer frame))
+        (end-pass pass))
+      (prepare-texture encoder (renderer-bounds-low-texture renderer)
                        :texture-binding)
-      (prepare-texture encoder (renderer-motion-texture renderer)
+      (prepare-texture encoder (renderer-bounds-high-texture renderer)
                        :texture-binding)
+      ;; History is weighted out when invalid, but never-written memory may
+      ;; hold NaNs, which survive any weight.
       (unless history-valid-p
         (encode encoder
                 (make-gpu-clear-texture-command
@@ -179,6 +205,8 @@
                  :color #(0.0 0.0 0.0 0.0))))
       (prepare-texture encoder (renderer-history-texture renderer)
                        :texture-binding)
+      ;; The two output images alternate roles each frame, so resolve never
+      ;; reads the image it writes and nothing is copied.
       (let ((resolve-pass
               (begin-render-pass
                encoder
@@ -192,16 +220,7 @@
          (renderer-reconstruction renderer) resolve-pass
          (renderer-frame-temporal-bind-group renderer frame))
         (end-pass resolve-pass))
-      ;; One explicit full-resolution history keeps the extent cohort small:
-      ;; resolve never reads and writes the same image, and the completed
-      ;; result becomes next frame's input only after the render pass ends.
-      (encode encoder
-              (make-gpu-copy-texture-command
-               :source (renderer-resolved-texture renderer)
-               :destination (renderer-history-texture renderer)))
       (prepare-texture encoder (renderer-resolved-texture renderer)
-                       :texture-binding)
-      (prepare-texture encoder (renderer-history-texture renderer)
                        :texture-binding)
       (setf (renderer-previous-view renderer) view
             (renderer-history-valid-p renderer) t

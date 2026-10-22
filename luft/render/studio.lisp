@@ -460,8 +460,8 @@ the selector is the whole of the difference."
         finally (return (coerce value 'single-float))))
 
 (defun temporal-jitter (frame-index width height)
-  "Sample the eight-position Halton(2,3) sequence in clip coordinates."
-  (let ((sample (1+ (mod frame-index 8))))
+  "Sample the sixteen-position Halton(2,3) sequence in clip coordinates."
+  (let ((sample (1+ (mod frame-index 16))))
     (vector (coerce (/ (* 2.0 (- (halton sample 2) 0.5))
                        (max width 1))
                     'single-float)

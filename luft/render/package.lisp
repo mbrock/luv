@@ -89,6 +89,7 @@
            #:terrain-shadow-mesh-specification
            #:sky-fragment-specification
            #:sky-temporal-fragment-specification
+           #:temporal-neighbourhood-fragment-specification
            #:temporal-resolve-fragment-specification
            #:exposure-probe-fragment-specification
            #:present-fragment-specification

@@ -850,66 +850,149 @@ the figure stays clear and only its far reaches recede."
         (+ (swizzle value :x) (- (swizzle value :y))
            (- (swizzle value :z)))))
 
+;;; Temporal reconstruction is two fullscreen passes.  The resolve draws
+;;; more output pixels than there are scene texels, and each output pixel's
+;;; history clamp and motion belong to the scene texel it falls in; gathered
+;;; there, the same nine taps of colour, motion, and depth would be taken
+;;; again for every output pixel.  So a pass at the scene's size gathers them
+;;; once per texel into two targets: the low and high YCoCg bounds, with the
+;;; nearest surface's motion in their fourth lanes.  See #C4ED2V.
+
+(define-shader-abstraction scene-texel (centre dx dy size)
+  `(uvec2 (uint (clamp (+ (swizzle ,centre :x) ,dx) 0.0
+                       (- (swizzle ,size :x) 1.0)))
+          (uint (clamp (+ (swizzle ,centre :y) ,dy) 0.0
+                       (- (swizzle ,size :y) 1.0)))))
+
+(define-shader-abstraction scene-neighbourhood (extreme scene centre size)
+  (let ((taps (loop for dy in '(-1.0 0.0 1.0)
+                    append (loop for dx in '(-1.0 0.0 1.0)
+                                 collect `(rgb-to-ycocg
+                                           (swizzle
+                                            (texel-load ,scene
+                                                        (scene-texel ,centre
+                                                                     ,dx ,dy
+                                                                     ,size))
+                                            :xyz))))))
+    (reduce (lambda (a b) `(,extreme ,a ,b)) taps)))
+
+(define-shader-function motion-tap (motion depth)
+  (vec3 (swizzle motion :x) (swizzle motion :y) (swizzle depth :x)))
+
+(define-shader-function nearer-motion-tap (a b)
+  "Keep whichever tap is nearer the camera; depth grows away from it."
+  (mix a b (step (swizzle b :z) (swizzle a :z))))
+
+(define-shader-abstraction nearest-motion (motion depth centre size)
+  ;; At a silhouette the centre may be background while its neighbour is the
+  ;; moving foreground; history must follow the foreground, or its old colour
+  ;; is left behind as a trail on the newly revealed background.
+  (let ((taps (loop for dy in '(-1.0 0.0 1.0)
+                    append (loop for dx in '(-1.0 0.0 1.0)
+                                 collect `(motion-tap
+                                           (texel-load ,motion
+                                                       (scene-texel ,centre
+                                                                    ,dx ,dy
+                                                                    ,size))
+                                           (texel-load ,depth
+                                                       (scene-texel ,centre
+                                                                    ,dx ,dy
+                                                                    ,size)))))))
+    (reduce (lambda (a b) `(nearer-motion-tap ,a ,b)) taps)))
+
+(define-live-shader temporal-neighbourhood-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((low-output :vec4 :location 0)
+               (high-output :vec4 :location 1))
+     :resources
+     ((current :texture-2d :binding 0 :sample-transfer :identity)
+      (motion-texture :texture-2d :binding 1 :sample-transfer :identity)
+      (scene-depth :depth-texture-2d :binding 2)
+      (camera-state :uniform-block :binding 3
+       :members #.(scene-uniform-prefix 13))))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
+         ;; INSPECTION-PARAMETERS.ZW is the inverse internal scene extent.
+         (texel (representation (swizzle inspection-parameters :zw)))
+         (size (/ (vec2 1.0 1.0) texel))
+         (centre (floor (* uv size)))
+         (motion (nearest-motion motion-texture scene-depth centre size)))
+    (set-output low-output
+                (vec4 (scene-neighbourhood min current centre size)
+                      (swizzle motion :x)))
+    (set-output high-output
+                (vec4 (scene-neighbourhood max current centre size)
+                      (swizzle motion :y)))))
+
+(define-shader-abstraction catmull-rom-history (texture sampler w0 w12 w3 at0 at12 at3)
+  ;; Bicubic Catmull-Rom from five bilinear taps: the four corner taps carry
+  ;; little weight and are dropped.  A plain bilinear fetch would blur
+  ;; history a little more on every frame it is reprojected.
+  (flet ((tap (x y wx wy)
+           `(* (swizzle (sample ,texture ,sampler
+                                (vec2 (swizzle ,x :x) (swizzle ,y :y)))
+                        :xyz)
+               (* (swizzle ,wx :x) (swizzle ,wy :y)))))
+    `(/ (+ ,(tap at12 at0 w12 w0) ,(tap at0 at12 w0 w12)
+           ,(tap at12 at12 w12 w12) ,(tap at3 at12 w3 w12)
+           ,(tap at12 at3 w12 w3))
+        (+ (* (swizzle ,w12 :x) (swizzle ,w0 :y))
+           (* (swizzle ,w0 :x) (swizzle ,w12 :y))
+           (* (swizzle ,w12 :x) (swizzle ,w12 :y))
+           (* (swizzle ,w3 :x) (swizzle ,w12 :y))
+           (* (swizzle ,w12 :x) (swizzle ,w3 :y))))))
+
 (define-live-shader temporal-resolve-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))
      :resources
      ((current :texture-2d :binding 0 :sample-transfer :identity)
-      (motion-texture :texture-2d :binding 1 :sample-transfer :identity)
-      (history :texture-2d :binding 2 :sample-transfer :identity)
-      (temporal-sampler :sampler :binding 3)
-      (camera-state :uniform-block :binding 4
-       :members #.(scene-uniform-prefix 13))))
+      (bounds-low :texture-2d :binding 1 :sample-transfer :identity)
+      (bounds-high :texture-2d :binding 2 :sample-transfer :identity)
+      (history :texture-2d :binding 3 :sample-transfer :identity)
+      (temporal-sampler :sampler :binding 4)
+      (camera-state :uniform-block :binding 5
+       :members #.(scene-uniform-prefix 31))))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
-         ;; INSPECTION-PARAMETERS.ZW is the inverse internal scene extent.
-         ;; The resolve target and history are full-size, but the current
-         ;; neighbourhood and integer motion lookup remain in input pixels.
-         (texel
-           (representation (swizzle inspection-parameters :zw)))
-         (dx (vec2 (swizzle texel :x) 0.0))
-         (dy (vec2 0.0 (swizzle texel :y)))
-         (centre (sample current temporal-sampler uv))
-         (c00 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (- (- uv dx) dy))
-                        :xyz)))
-         (c10 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (- uv dy)) :xyz)))
-         (c20 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (+ (- uv dy) dx))
-                        :xyz)))
-         (c01 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (- uv dx)) :xyz)))
-         (c11 (rgb-to-ycocg (swizzle centre :xyz)))
-         (c21 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (+ uv dx)) :xyz)))
-         (c02 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (+ (- uv dx) dy))
-                        :xyz)))
-         (c12 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (+ uv dy)) :xyz)))
-         (c22 (rgb-to-ycocg
-               (swizzle (sample current temporal-sampler (+ (+ uv dx) dy))
-                        :xyz)))
-         (neighbourhood-min (min c00 c10 c20 c01 c11 c21 c02 c12 c22))
-         (neighbourhood-max (max c00 c10 c20 c01 c11 c21 c02 c12 c22))
-         ;; Motion excludes jitter and resolved history lives on the fixed
-         ;; output grid. A static point therefore reads the same history UV:
-         ;; following Halton here would move the resolve instead of gathering
-         ;; different subpixel samples into one output pixel.
-         (pixel (uvec2 (uint (/ (swizzle uv :x) (swizzle texel :x)))
-                       (uint (/ (swizzle uv :y) (swizzle texel :y)))))
-         (velocity (swizzle (texel-load motion-texture pixel) :xy))
-         (history-uv (+ uv velocity))
+         (texel (representation (swizzle inspection-parameters :zw)))
+         (size (/ (vec2 1.0 1.0) texel))
+         ;; The scene was rasterized displaced by half its clip jitter, so the
+         ;; unjittered estimate of this output pixel lies there.
+         (here (+ uv (* (representation (swizzle temporal-parameters :xy))
+                        0.5)))
+         (fresh (sample current temporal-sampler here))
+         (centre (scene-texel (floor (* here size)) 0.0 0.0 size))
+         (below (texel-load bounds-low centre))
+         (above (texel-load bounds-high centre))
+         ;; Motion excludes jitter and history lives on the fixed output grid,
+         ;; so a static point reads the same history address every frame.
+         (motion (vec2 (swizzle below :w) (swizzle above :w)))
+         (history-uv (+ uv motion))
          (inside
            (* (* (step 0.0 (swizzle history-uv :x))
                  (step (swizzle history-uv :x) 1.0))
               (* (step 0.0 (swizzle history-uv :y))
                  (step (swizzle history-uv :y) 1.0))))
+         ;; LENS-EXTENT.ZW is the inverse output extent, history's own.
+         (output-texel (representation (swizzle lens-extent :zw)))
+         (output-size (/ (vec2 1.0 1.0) output-texel))
+         (position (* history-uv output-size))
+         (middle (+ (floor (- position (vec2 0.5 0.5))) (vec2 0.5 0.5)))
+         (f (- position middle))
+         (w0 (* f (+ (vec2 -0.5 -0.5) (* f (- (vec2 1.0 1.0) (* f 0.5))))))
+         (w1 (+ (vec2 1.0 1.0) (* f (* f (+ (vec2 -2.5 -2.5) (* f 1.5))))))
+         (w2 (* f (+ (vec2 0.5 0.5) (* f (- (vec2 2.0 2.0) (* f 1.5))))))
+         (w3 (* f (* f (- (* f 0.5) (vec2 0.5 0.5)))))
+         (w12 (+ w1 w2))
+         (at0 (* (- middle (vec2 1.0 1.0)) output-texel))
+         (at3 (* (+ middle (vec2 2.0 2.0)) output-texel))
+         (at12 (* (+ middle (/ w2 w12)) output-texel))
          (old (rgb-to-ycocg
-               (swizzle (sample history temporal-sampler history-uv) :xyz)))
-         (clipped (clamp old neighbourhood-min neighbourhood-max))
-         (speed (clamp (* (sqrt (dot velocity velocity)) 48.0) 0.0 1.0))
+               (catmull-rom-history history temporal-sampler
+                                    w0 w12 w3 at0 at12 at3)))
+         (clipped (clamp old (swizzle below :xyz) (swizzle above :xyz)))
+         (speed (clamp (* (sqrt (dot motion motion)) 48.0) 0.0 1.0))
          ;; The otherwise-unused W components of these previous-view lanes
          ;; carry resolve validity and weight without changing the frame ABI.
          (history-weight
@@ -917,9 +1000,11 @@ the figure stays clear and only its far reaches recede."
                  inside)
               (* (swizzle (representation previous-camera-right) :w)
                  (- 1.0 (* speed 0.35)))))
-         (resolved (ycocg-to-rgb (mix c11 clipped history-weight))))
+         (resolved (mix (swizzle fresh :xyz)
+                        (ycocg-to-rgb clipped)
+                        history-weight)))
     ;; Alpha is current-frame focus metadata, never temporal colour history.
-    (set-output color-output (vec4 resolved (swizzle centre :w)))))
+    (set-output color-output (vec4 resolved (swizzle fresh :w)))))
 
 (define-live-shader present-fragment-specification
     (:stage :fragment

@@ -15,6 +15,7 @@
     sky-fragment-specification
     sky-temporal-fragment-specification
     exposure-probe-fragment-specification
+    temporal-neighbourhood-fragment-specification
     temporal-resolve-fragment-specification
     torch-body-vertex-specification
     torch-body-fragment-specification

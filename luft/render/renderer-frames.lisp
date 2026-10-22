@@ -109,14 +109,28 @@ releases for retry, but those retired bindings must never be served again. #RBNW
    (renderer-lattice renderer) :lattice-points (mesh-slot-lattice-point-buffer slot)
    :camera-state (renderer-frame-state-camera-buffer frame)))
 
+(defun renderer-frame-neighbourhood-bind-group (renderer frame)
+  (renderer-frame-component-binding
+   frame (list :temporal-neighbourhood (renderer-scene-view renderer)
+               (renderer-motion-view renderer) (renderer-depth-view renderer))
+   (lambda ()
+     (make-reconstruction-neighbourhood-binding
+      (renderer-reconstruction renderer) (renderer-device renderer)
+      (renderer-scene-view renderer) (renderer-motion-view renderer)
+      (renderer-depth-view renderer) (renderer-frame-state-camera-buffer frame)))))
+
 (defun renderer-frame-temporal-bind-group (renderer frame)
+  "Bind the resolve to whichever output image holds this frame's history."
   (renderer-frame-component-binding
    frame (list :temporal (renderer-scene-view renderer)
-               (renderer-motion-view renderer) (renderer-history-view renderer))
+               (renderer-bounds-low-view renderer) (renderer-bounds-high-view renderer)
+               (renderer-history-view renderer))
    (lambda ()
      (make-reconstruction-binding
       (renderer-reconstruction renderer) (renderer-device renderer)
-      (renderer-scene-view renderer) (renderer-motion-view renderer) (renderer-history-view renderer)
+      (renderer-scene-view renderer)
+      (renderer-bounds-low-view renderer) (renderer-bounds-high-view renderer)
+      (renderer-history-view renderer)
       (renderer-sampler renderer) (renderer-frame-state-camera-buffer frame)))))
 
 (defun renderer-frame-flame-bind-group (renderer frame)

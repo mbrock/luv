@@ -9,13 +9,23 @@
   "Linear internal resolution of the LUFT scene before temporal upscaling.")
 
 (defparameter *scene-sample-count* 4
-  "Raster samples used by Luft's geometry, motion, and depth scene pass.")
+  "Raster samples for Luft's scene pass when temporal reconstruction is off.
+
+A temporal scene rasterizes one sample per pixel: the jitter sequence
+supplies the antialiasing, and multisampled depth and motion would need
+resolves whose meaning at a silhouette is ambiguous.")
 
 (defparameter *temporal-upscaling-p* t
   "Whether LUFT uses temporal reconstruction on supported GPU devices.")
 
-(defparameter *vulkan-temporal-history-weight* 0.97f0
-  "Baseline retained history for Luft's inspectable Vulkan temporal resolve.")
+(defparameter *temporal-reconstruction* :auto
+  "Which temporal implementation LUFT uses: :AUTO, :SHADER, or :METALFX.
+
+:AUTO selects MetalFX on Metal and Luft's own shader resolve elsewhere;
+:SHADER selects the portable resolve on every device.")
+
+(defparameter *temporal-history-weight* 0.9f0
+  "Retained history share of Luft's shader resolve for a still pixel.")
 
 (defparameter *flame-time* nil
   "Optional deterministic torch-flame time in seconds.
