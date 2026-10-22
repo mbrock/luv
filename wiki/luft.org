@@ -1383,6 +1383,36 @@ sixteen chunks of the default world, 1,372 draws a frame.  Building those
 commands costs 0.045 ms of Lisp per frame; the Metal backend's own
 per-draw encoding is on top and is not yet measured apart.
 
+***** Chunks are culled against each pass's own volume
+:PROPERTIES:
+:ID: 72Y245
+:END:
+
+Retiring the mesh stage retired its per-site rejection too, so each pass now
+skips whole chunks instead (=*terrain-culling-p*=).  A resident records the
+box of its sites grown by one cell, which holds every star drawn there.
+The scene pass projects the eight corners through the same camera lanes the
+vertex stage uses, the shadow pass through the sun's four light rows, and a
+chunk is skipped only when all eight lie outside one clip plane.  Nothing
+visible can be lost; a box crossing a plane is drawn.
+
+On the exported world the scene pass skipped 6 of 16 chunks and the shadow
+pass 1, since the sun's volume deliberately keeps off-screen casters:
+
+| Bevelled terrain GPU ms | Culling off | Culling on |
+|-
+| Both passes | 3.18 | 1.91--2.28 |
+| Scene pass | 1.98--2.06 | 1.08--1.17 |
+| Shadow pass | 1.07--1.14 | 0.96--1.10 |
+
+Bevelled terrain now costs less than the mesh stage's flat terrain did, and
+about twice Luvcraft's plain cubes.  The shadow pass is the larger share
+left: a caster matters only if its shadow can fall inside the view, so
+testing chunks against the view volume extruded along the light, rather
+than the whole light volume, is the next cut.  Finer granularity than a
+64-column chunk, and per-site culling by a compute pass writing indirect
+draws, wait on that measurement.
+
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:
 :ID: PGRM80

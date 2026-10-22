@@ -10,6 +10,13 @@
 
 This is the ordinary size; dynamic resolution draws a share of it.")
 
+(defparameter *terrain-culling-p* t
+  "Whether each pass skips resident chunks wholly outside what it sees.
+
+The scene pass tests a chunk's box against the camera's clip volume, the
+shadow pass against the sun's.  A box is skipped only when all eight
+corners lie outside one clip plane, so nothing visible is ever lost.")
+
 (defparameter *terrain-bevels-p* t
   "Whether terrain draws the bevelled star atlas or plain cube faces.
 

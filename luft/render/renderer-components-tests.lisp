@@ -429,3 +429,32 @@
         (let ((site (aref sorted-instances (* 4 slot))))
           (true (= (* 10 site) (aref sorted-appearances (* 2 slot))))
           (true (= (1+ (* 10 site)) (aref sorted-appearances (1+ (* 2 slot))))))))))
+
+(define-test chunk-boxes-cull-only-when-wholly-outside-one-clip-plane
+  ;; A perspective camera at the origin looking along +X, right along -Y,
+  ;; up along +Z, with a 0.1-to-600 depth range; the sun looks straight down
+  ;; over a 100-cell square.
+  (let ((data (make-array 128 :element-type 'single-float :initial-element 0.0)))
+    (setf (aref data 4) 0.0 (aref data 5) -1.0 (aref data 6) 0.0
+          (aref data 8) 0.0 (aref data 9) 0.0 (aref data 10) 1.0
+          (aref data 12) 1.0 (aref data 13) 0.0 (aref data 14) 0.0
+          (aref data 16) 1.0 (aref data 17) 1.0
+          (aref data 18) (/ 600.0 599.9) (aref data 19) (/ -60.0 599.9)
+          (aref data 22) 1.0
+          (aref data 72) 0.02 (aref data 77) 0.02
+          (aref data 82) -0.001 (aref data 83) 0.5 (aref data 87) 1.0)
+    (flet ((box (&rest corners)
+             (make-array 6 :element-type 'single-float
+                           :initial-contents (mapcar #'float corners)))
+           (outside-p (box clip)
+             (render::box-outside-clip-p box clip)))
+      (let ((camera (render::camera-clip-function data))
+            (sun (render::light-clip-function data)))
+        (true (not (outside-p (box 5 -1 -1 6 1 1) camera)))
+        (true (not (outside-p (box -1 -1 -1 1 1 1) camera))) ; around the eye
+        (true (not (outside-p (box 5 4 -1 6 6 1) camera)))   ; across the side plane
+        (true (outside-p (box -6 -1 -1 -5 1 1) camera)) ; behind
+        (true (outside-p (box 5 50 -1 6 51 1) camera))  ; far beside
+        (true (outside-p (box 700 -1 -1 701 1 1) camera)) ; beyond the far plane
+        (true (not (outside-p (box 10 10 0 20 20 30) sun)))
+        (true (outside-p (box 60 0 0 70 10 30) sun))))))

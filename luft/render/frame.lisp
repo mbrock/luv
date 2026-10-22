@@ -6,6 +6,60 @@
 ;;; places the application overlay last. Helpers below follow that same order.
 ;;; Resource ownership and replacement live in render.lisp. See #I4PRMD.
 
+;;; Chunk culling.  The frame's own uniform data names both clip volumes: the
+;;; camera lanes as the terrain vertex stage projects them, and the sun's
+;;; four light rows.
+
+(defvar *frame-uniform-data* nil
+  "The scene uniform floats of the frame being encoded, for culling.")
+
+(defun camera-clip-function (data)
+  "Project a world point to the camera's homogeneous clip, as MESH-VIEW-CLIP."
+  (let ((divisor (aref data 22)))
+    (lambda (x y z)
+      (let* ((rx (- x (aref data 0))) (ry (- y (aref data 1))) (rz (- z (aref data 2)))
+             (view-x (+ (* rx (aref data 4)) (* ry (aref data 5)) (* rz (aref data 6))))
+             (view-y (+ (* rx (aref data 8)) (* ry (aref data 9)) (* rz (aref data 10))))
+             (view-z (+ (* rx (aref data 12)) (* ry (aref data 13)) (* rz (aref data 14)))))
+        (values (* view-x (aref data 16))
+                (- (* view-y (aref data 17)))
+                (+ (* view-z (aref data 18)) (aref data 19))
+                (+ 1.0 (* (- view-z 1.0) divisor)))))))
+
+(defun light-clip-function (data)
+  "Project a world point through the sun's four light rows, as LIGHT-CLIP-POSITION."
+  (flet ((row (base x y z)
+           (+ (* x (aref data base)) (* y (aref data (+ base 1)))
+              (* z (aref data (+ base 2))) (aref data (+ base 3)))))
+    (lambda (x y z)
+      (values (row 72 x y z) (row 76 x y z) (row 80 x y z) (row 84 x y z)))))
+
+(defun box-outside-clip-p (bounds clip)
+  "Whether all eight corners of BOUNDS lie outside one plane of CLIP's volume."
+  (let ((outside (make-array 6 :initial-element 0)))
+    (dolist (x (list (aref bounds 0) (aref bounds 3)))
+      (dolist (y (list (aref bounds 1) (aref bounds 4)))
+        (dolist (z (list (aref bounds 2) (aref bounds 5)))
+          (multiple-value-bind (cx cy cz cw) (funcall clip x y z)
+            (when (> cx cw) (incf (aref outside 0)))
+            (when (< cx (- cw)) (incf (aref outside 1)))
+            (when (> cy cw) (incf (aref outside 2)))
+            (when (< cy (- cw)) (incf (aref outside 3)))
+            (when (< cz 0.0) (incf (aref outside 4)))
+            (when (> cz cw) (incf (aref outside 5)))))))
+    (find 8 outside)))
+
+(defun resident-drawn-p (resident shadow-p)
+  "Whether this frame's SHADOW-P pass may see RESIDENT's terrain."
+  (let ((bounds (resident-population-bounds resident))
+        (data *frame-uniform-data*))
+    (and bounds
+         (or (not *terrain-culling-p*)
+             (null data)
+             (not (box-outside-clip-p
+                   bounds
+                   (if shadow-p (light-clip-function data) (camera-clip-function data))))))))
+
 (defun encode-renderer-frame
     (renderer frame encoder surface-texture extent camera-uniform-data
      &key jitter view player-p construction-p overlay-encoder
@@ -13,6 +67,15 @@
          (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
   (ensure-renderer-extent renderer extent)
   (upload-renderer-frame renderer frame camera-uniform-data effect-time)
+  (let ((*frame-uniform-data* camera-uniform-data))
+    (encode-renderer-passes renderer frame encoder surface-texture jitter view
+                            player-p construction-p overlay-encoder))
+  (incf (renderer-frame-index renderer))
+  renderer)
+
+(defun encode-renderer-passes
+    (renderer frame encoder surface-texture jitter view player-p construction-p
+     overlay-encoder)
   (dotimes (repetition (1- *benchmark-pass-repetitions*))
     (encode-renderer-shadows renderer frame encoder)
     (encode-renderer-scene renderer frame encoder player-p nil :repetition-p t))
@@ -24,9 +87,7 @@
                    (renderer-exposure-binding renderer)
                    (renderer-frame-index renderer))
   (encode-renderer-lens renderer frame encoder)
-  (encode-renderer-presentation renderer frame encoder surface-texture overlay-encoder)
-  (incf (renderer-frame-index renderer))
-  renderer)
+  (encode-renderer-presentation renderer frame encoder surface-texture overlay-encoder))
 
 (defun upload-renderer-frame (renderer frame camera-uniform-data effect-time)
   (when (renderer-shader-temporal-p renderer)
@@ -63,10 +124,11 @@
       (let ((resident
               (mesh-slot-resident
                (gethash key (renderer-mesh-slots renderer)))))
-        (draw-resident-opaque-population
-         (renderer-terrain renderer) shadow-pass resident
-         (renderer-frame-resident-bind-group
-          renderer frame resident t) :shadow-p t)))
+        (when (resident-drawn-p resident t)
+          (draw-resident-opaque-population
+           (renderer-terrain renderer) shadow-pass resident
+           (renderer-frame-resident-bind-group
+            renderer frame resident t) :shadow-p t))))
     (when (plusp (renderer-flame-instance-count renderer))
       (encode-torch-bodies
        (renderer-torches renderer) shadow-pass
@@ -123,9 +185,10 @@
     (let ((resident
             (mesh-slot-resident
              (gethash key (renderer-mesh-slots renderer)))))
-      (draw-resident-opaque-population
-       (renderer-terrain renderer) pass resident
-       (renderer-frame-resident-bind-group renderer frame resident nil))))
+      (when (resident-drawn-p resident nil)
+        (draw-resident-opaque-population
+         (renderer-terrain renderer) pass resident
+         (renderer-frame-resident-bind-group renderer frame resident nil)))))
   (when (plusp (renderer-flame-instance-count renderer))
     (encode-torch-bodies
      (renderer-torches renderer) pass

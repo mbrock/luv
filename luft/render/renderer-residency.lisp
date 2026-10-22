@@ -193,7 +193,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
    (appearance-buffer :accessor resident-population-appearance-buffer)
    (descriptor-buffer :accessor resident-population-descriptor-buffer)
    ;; (STAR FIRST COUNT) for each star present, over the star-sorted sites.
-   (star-runs :initform nil :accessor resident-population-star-runs)))
+   (star-runs :initform nil :accessor resident-population-star-runs)
+   ;; World-cell box (MIN-X MIN-Y MIN-Z MAX-X MAX-Y MAX-Z) around the drawn
+   ;; geometry, or NIL when the population draws nothing.
+   (bounds :initform nil :accessor resident-population-bounds)))
 
 (defstruct (prepared-render-mesh
              (:constructor %make-prepared-render-mesh (mesh population))
@@ -359,6 +362,24 @@ cohort untouched. No frame can interleave with the owner-thread publication."
             (own-gpu-object slot (%upload-render-population
                                   renderer (prepared-render-mesh-population prepared)))))))
 
+(defun site-bounds (instance-words)
+  "The world-cell box holding every star drawn at INSTANCE-WORDS' sites.
+
+A site sits at a lattice vertex and its star's geometry stays within one
+cell of it on every axis, so the box is the sites' extent grown by one."
+  (declare (type (simple-array (unsigned-byte 32) (*)) instance-words))
+  (when (plusp (length instance-words))
+    (let ((low (make-list 3 :initial-element most-positive-fixnum))
+          (high (make-list 3 :initial-element most-negative-fixnum)))
+      (loop for site from 0 below (length instance-words) by 4
+            do (dotimes (axis 3)
+                 (let ((value (aref instance-words (+ site axis))))
+                   (setf (nth axis low) (min (nth axis low) value)
+                         (nth axis high) (max (nth axis high) value)))))
+      (map '(simple-array single-float (6))
+           (lambda (value) (coerce value 'single-float))
+           (append (mapcar #'1- low) (mapcar #'1+ high))))))
+
 (defun sort-sites-by-star (instance-words appearance-words)
   "Return INSTANCE-WORDS and APPEARANCE-WORDS reordered by star, and the runs.
 
@@ -414,7 +435,8 @@ words; the two arrays keep their one-for-one order.  The runs are
                 (resident-population-descriptor-buffer resident)
                 (upload "luft terrain material descriptors"
                         (render-population-descriptor-words population))
-                (resident-population-star-runs resident) runs))))))
+                (resident-population-star-runs resident) runs
+                (resident-population-bounds resident) (site-bounds instances)))))))
 
 (defun prospective-renderer-slot-entries (renderer candidates removed-keys)
   "Return the sorted slot population after applying one candidate cohort."
