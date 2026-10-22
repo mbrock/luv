@@ -1308,6 +1308,38 @@ profile and a deletion story before it needs subgroup vocabulary.
 bottleneck, one compaction experiment improves measured frame cost on a real
 backend, and its surface input remains the encoding of #AGVXGM.
 
+*** Luvcraft draws the same terrain for a fifth of the GPU time
+:PROPERTIES:
+:ID: PWX5RT
+:END:
+
+=scripts/terrain-comparison.lisp= copies every resident Luvcraft block --
+929,035 of them over 208 by 208 columns -- into a Luft streaming scene, cell
+for cell, and puts both renderers' cameras at the same eye, at the same
+1280 by 776 internal resolution, with dynamic resolution off.  Each renderer
+then repeats its shadow and scene passes 4 and 12 times a frame, so the GPU
+runs saturated rather than at the clock it lowers to under light work; the
+slope is one repetition's cost, and the slope with terrain hidden is
+subtracted.  Metal 4 GPU timestamps, two runs each, on the same Mac:
+
+| GPU ms per frame | Luvcraft | Luft |
+|-
+| Terrain, both passes | 0.94--1.04 | 4.7--5.1 |
+| Terrain in the shadow pass | ~1.1 | 2.6--3.0 |
+| Terrain in the scene pass | ~1.0 | 3.0--3.3 |
+| The passes without terrain | 1.55 | 0.87 |
+| Geometry | 1.27 M prebuilt vertices | 216,814 site workgroups, ≤25 triangles each |
+
+Luvcraft draws vertex buffers its CPU mesher built once per chunk.  Luft
+re-derives every surface star in a mesh shader, in both passes, every frame,
+and its stars are bevelled, so it emits more and smaller triangles for the
+same faces.  The terrain is about five times as expensive.  This is the
+measurement #WQ611A asked for: at this scale, reconstruction rather than
+shading looks like the cost, and caching emitted geometry across frames --
+or at least across the shadow and scene passes -- is the experiment it
+earns.  The materials and time of day differ between the two, and it is one
+view on one machine.
+
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:
 :ID: PGRM80

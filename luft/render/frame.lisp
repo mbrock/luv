@@ -13,6 +13,9 @@
          (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
   (ensure-renderer-extent renderer extent)
   (upload-renderer-frame renderer frame camera-uniform-data effect-time)
+  (dotimes (repetition (1- *benchmark-pass-repetitions*))
+    (encode-renderer-shadows renderer frame encoder)
+    (encode-renderer-scene renderer frame encoder player-p nil :repetition-p t))
   (encode-renderer-shadows renderer frame encoder)
   (encode-renderer-scene renderer frame encoder player-p construction-p)
   (encode-renderer-reconstruction renderer frame encoder jitter view)
@@ -55,7 +58,8 @@
             `(:view ,(renderer-shadow-view renderer)
               :depth-load-op :clear :depth-store-op :store
               :depth-clear-value 1.0)))))
-    (dolist (key (renderer-slot-order renderer))
+    (dolist (key (and (member *benchmark-terrain-p* '(t :shadow))
+                      (renderer-slot-order renderer)))
       (let ((resident
               (mesh-slot-resident
                (gethash key (renderer-mesh-slots renderer)))))
@@ -72,7 +76,8 @@
   (prepare-texture encoder (renderer-shadow-texture renderer)
                    :texture-binding))
 
-(defun encode-renderer-scene (renderer frame encoder player-p construction-p)
+(defun encode-renderer-scene
+    (renderer frame encoder player-p construction-p &key repetition-p)
   (flet ((target (multisampled single clear)
            ;; A temporal scene has one sample and draws straight into the
            ;; images reconstruction reads; otherwise MSAA resolves into them.
@@ -102,16 +107,19 @@
                  :depth-load-op :clear
                  :depth-store-op :store
                  :depth-clear-value 1.0)))))
-      (encode-renderer-scene-drawings renderer frame pass player-p construction-p))))
+      (encode-renderer-scene-drawings renderer frame pass player-p construction-p
+                                      repetition-p))))
 
-(defun encode-renderer-scene-drawings (renderer frame pass player-p construction-p)
+(defun encode-renderer-scene-drawings
+    (renderer frame pass player-p construction-p &optional repetition-p)
   ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
   ;; the selected temporal implementation reconstructs it, and the exposure
   ;; probe meters the same pixels presentation will grade.
   (encode-scene-drawing
    (renderer-sky renderer) pass
    (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
-  (dolist (key (renderer-slot-order renderer))
+  (dolist (key (and (member *benchmark-terrain-p* '(t :scene))
+                    (renderer-slot-order renderer)))
     (let ((resident
             (mesh-slot-resident
              (gethash key (renderer-mesh-slots renderer)))))
@@ -145,7 +153,8 @@
                           (renderer-frame-lattice-bind-group renderer frame slot)
                           (make-gpu-draw-command :vertex-count 6
                                                  :instance-count (mesh-slot-lattice-point-count slot)))))))
-  (when (renderer-metalfx-temporal-p renderer)
+  ;; A benchmark repetition is not this frame's input to the scaler.
+  (when (and (renderer-metalfx-temporal-p renderer) (not repetition-p))
     (signal-temporal-scaler-inputs pass
                                    (renderer-temporal-scaler renderer)))
   (end-pass pass))

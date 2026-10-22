@@ -1324,6 +1324,18 @@ attachments the renderer actually holds."
             (releasing :frame-attachment-candidate (destroy resource)))))))
   renderer)
 
+(defparameter *luvcraft-benchmark-pass-repetitions* 1
+  "How many times each frame draws its shadow and world scene passes.
+
+Extra repetitions come first and each clears its targets, so only the last
+reaches the image.  A count high enough to keep the GPU busy measures the
+passes' marginal cost at a working clock rather than one the GPU lowered
+until light work filled the frame.")
+
+(defparameter *luvcraft-benchmark-terrain-p* t
+  "Whether frames draw the resident chunk meshes, so their cost can be
+subtracted.  :SHADOW or :SCENE draws them into only that pass.")
+
 (defparameter *luvcraft-scene-pixel-budget* 2000000
   "The most pixels the scene renders, or NIL for one per logical point.
 
@@ -1431,6 +1443,10 @@ completes."
                (sample luvcraft-frame-sample-mesh-publication-seconds
                        :luvcraft/mesh-publication)
              (refresh-luvcraft-mesh session)))
+         (shadow-products
+           (and (member *luvcraft-benchmark-terrain-p* '(t :shadow)) products))
+         (products
+           (and (member *luvcraft-benchmark-terrain-p* '(t :scene)) products))
          (extent (luvcraft-session-render-extent session))
          (presentation-extent
            (luvcraft-session-presentation-extent session))
@@ -1566,38 +1582,39 @@ completes."
     (with-luvcraft-frame-timing
         (sample luvcraft-frame-sample-shadow-encode-seconds
                 :luvcraft/shadow-pass)
-      (let ((pass
-              (begin-render-pass
-               encoder
-               (make-render-pass-descriptor
-                :color-attachments nil
-                :depth-stencil-attachment
-                `(:view ,(luvcraft-session-shadow-depth-view session)
-                  :depth-load-op :clear
-                  :depth-store-op :store
-                  :depth-clear-value 1.0)))))
-        (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
-        (set-bind-group pass 0 (luvcraft-frame-shadow-bind-group frame))
-        (dolist (product products)
-          (let ((mesh (luvcraft-chunk-product-mesh product)))
-            (when (plusp (block-mesh-vertex-count mesh))
-              (set-vertex-buffer
-               pass 0 (luvcraft-chunk-product-vertex-buffer product))
-              (draw pass (block-mesh-vertex-count mesh)))))
-        ;; An animal standing in the sun casts a shadow like anything else
-        ;; solid; a tumbling smash fragment deliberately does not.
-        (when (plusp critter-vertex-count)
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-critter-vertex-buffer frame))
-          (draw pass critter-vertex-count))
-        ;; So do the balls, drops, and gobbets: things with weight.  The
-        ;; scene draws them as true spheres; a depth map is happy with the
-        ;; little turning cubes.
-        (when (plusp physics-body-count)
-          (set-vertex-buffer
-           pass 0 (luvcraft-frame-physics-vertex-buffer frame))
-          (draw pass physics-shadow-vertex-count))
-        (end-pass pass))
+      (dotimes (repetition *luvcraft-benchmark-pass-repetitions*)
+        (let ((pass
+                (begin-render-pass
+                 encoder
+                 (make-render-pass-descriptor
+                  :color-attachments nil
+                  :depth-stencil-attachment
+                  `(:view ,(luvcraft-session-shadow-depth-view session)
+                    :depth-load-op :clear
+                    :depth-store-op :store
+                    :depth-clear-value 1.0)))))
+          (set-pipeline pass (luvcraft-session-shadow-native-pipeline session))
+          (set-bind-group pass 0 (luvcraft-frame-shadow-bind-group frame))
+          (dolist (product shadow-products)
+            (let ((mesh (luvcraft-chunk-product-mesh product)))
+              (when (plusp (block-mesh-vertex-count mesh))
+                (set-vertex-buffer
+                 pass 0 (luvcraft-chunk-product-vertex-buffer product))
+                (draw pass (block-mesh-vertex-count mesh)))))
+          ;; An animal standing in the sun casts a shadow like anything else
+          ;; solid; a tumbling smash fragment deliberately does not.
+          (when (plusp critter-vertex-count)
+            (set-vertex-buffer
+             pass 0 (luvcraft-frame-critter-vertex-buffer frame))
+            (draw pass critter-vertex-count))
+          ;; So do the balls, drops, and gobbets: things with weight.  The
+          ;; scene draws them as true spheres; a depth map is happy with the
+          ;; little turning cubes.
+          (when (plusp physics-body-count)
+            (set-vertex-buffer
+             pass 0 (luvcraft-frame-physics-vertex-buffer frame))
+            (draw pass physics-shadow-vertex-count))
+          (end-pass pass)))
       (prepare-texture
        encoder (luvcraft-session-shadow-depth-texture session)
        :texture-binding))
@@ -1725,6 +1742,10 @@ completes."
                    (when (plusp target-vertex-count)
                      (draw pass target-vertex-count 1 +block-world-crosshair-vertex-count+))
                    (draw pass +block-world-crosshair-vertex-count+))))
+          (dotimes (repetition (1- *luvcraft-benchmark-pass-repetitions*))
+            (let ((pass (scene-pass :clear)))
+              (draw-world pass)
+              (end-pass pass)))
           (let ((pass (scene-pass :clear)))
             (draw-world pass)
             ;; First-person geometry is fixed to the screen, not the world,

@@ -43,3 +43,19 @@ resolves whose meaning at a silhouette is ambiguous.")
 
 NIL lets the live viewer pass its monotonic presentation clock.  Captures may
 dynamically bind a real value to reproduce the exact same flame field.")
+
+;;; Benchmark controls.  They change what a frame draws, never how.
+
+(defparameter *benchmark-pass-repetitions* 1
+  "How many times each frame draws its shadow and scene passes.
+
+Extra repetitions come first and each clears its targets, so only the last
+reaches the image.  A count high enough to keep the GPU busy measures the
+passes' marginal cost at a working clock rather than one the GPU lowered
+until light work filled the frame.")
+
+(defparameter *benchmark-terrain-p* t
+  "Whether frames draw the resident terrain, so its cost can be subtracted.
+
+:SHADOW or :SCENE draws it into only that pass.")
+
