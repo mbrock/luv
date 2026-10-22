@@ -10,7 +10,9 @@
    "One material in an inventory.  A NIL quantity means unlimited supply."))
 
 (defclass block-inventory ()
-  ((entries :initarg :entries :accessor block-inventory-entries))
+  ((entries :initarg :entries :accessor block-inventory-entries)
+   (simple-p :initform nil :accessor block-inventory-simple-p)
+   (kit :initform nil :accessor block-inventory-kit))
   (:documentation "The ordered materials available to one player."))
 
 (defconstant +block-inventory-quickbar-size+ 10)
@@ -38,10 +40,14 @@ unlimited supply."
           (block-inventory-entries inventory)))
 
 (defun block-inventory-quickbar-entries (inventory)
-  "Return the first ten entries addressable by number keys, 1-9 then 0."
-  (let ((entries (block-inventory-entries inventory)))
-    (subseq entries 0 (min +block-inventory-quickbar-size+
-                           (length entries)))))
+  "Return the simple building kit, or the full inventory's first ten entries."
+  (if (block-inventory-simple-p inventory)
+      (loop for block in (block-inventory-kit inventory)
+            for entry = (block-inventory-entry-for inventory block)
+            when entry collect entry)
+      (let ((entries (block-inventory-entries inventory)))
+        (subseq entries 0 (min +block-inventory-quickbar-size+
+                              (length entries))))))
 
 (defun block-inventory-quickbar-blocks (inventory)
   "Return INVENTORY's number-key materials in stable order."
@@ -109,3 +115,22 @@ method."))
 (defmethod toggle-luvcraft-inventory ((session t))
   (declare (ignore session))
   nil)
+
+(defconstant +building-kit-size+ 6)
+
+(defun add-building-kit-block (inventory block &optional replacement)
+  "Add BLOCK once, or replace zero-based REPLACEMENT when the six-slot kit is full.
+Return its slot and :ADDED, :PRESENT, or :FULL. Never discard a block silently."
+  (unless (block-inventory-entry-for inventory block)
+    (error "Block ~S is not in this inventory." block))
+  (let* ((kit (block-inventory-kit inventory))
+         (present (position block kit :test #'eq)))
+    (cond (present (values present :present))
+          ((< (length kit) +building-kit-size+)
+           (setf (block-inventory-kit inventory) (append kit (list block)))
+           (values (length kit) :added))
+          ((and (typep replacement '(integer 0))
+                (< replacement (length kit)))
+           (setf (nth replacement (block-inventory-kit inventory)) block)
+           (values replacement :added))
+          (t (values nil :full)))))

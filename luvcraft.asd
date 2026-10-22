@@ -166,6 +166,7 @@
                (:file "mcclim/block-icon")
                (:file "mcclim/hotbar")
                (:file "mcclim/inventory")
+               (:file "mcclim/inventory-simple")
                (:file "mcclim/luvcraft-metabar"))
   :in-order-to ((test-op (test-op "luvcraft/mcclim/test"))))
 

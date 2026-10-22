@@ -51,6 +51,14 @@
    ;; The block under the pointer: what the inspector shows and what a
    ;; number key puts on the bar.  NIL when the pointer is not over a cell.
    (hovered :initform nil :accessor inventory-hovered-block)
+   (simple-focus :initform :blocks :accessor inventory-simple-focus)
+   (simple-cursor :initform 0 :accessor inventory-simple-cursor)
+   (pending-block :initform nil :accessor inventory-pending-block)
+   (added-block :initform nil :accessor inventory-added-block)
+   (added-slot :initform nil :accessor inventory-added-slot)
+   (added-time :initform nil :accessor inventory-added-time)
+   (preferences :initform nil :accessor inventory-preferences)
+   (preferences-writer :initform nil :accessor inventory-preferences-writer)
    (atlas :initform (luvcraft:make-block-texture-atlas)
           :reader inventory-atlas))
   (:menu-bar nil)
@@ -142,6 +150,7 @@ every cell makes the word louder than the block it is about."
 (defun inventory-visible-state-for (frame)
   (let ((session (inventory-session frame)))
     (list
+     (inventory-simple-state frame)
      (inventory-category frame)
      (inventory-page frame)
      (inventory-hovered-block frame)
@@ -651,6 +660,7 @@ on the bar wears the number key that selects it."
                (make-application-frame
                 'luvcraft-inventory :frame-manager manager :enable t
                 :session session))))
+      (initialize-inventory-preferences frame)
       (setf (frame-pretty-name frame) title
             (inventory-visible-state frame) (inventory-visible-state-for frame))
       (let* ((mirror (sheet-direct-mirror (frame-top-level-sheet frame)))

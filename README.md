@@ -43,6 +43,18 @@ out of. It has generated terrain, a day with a moving sun, shadows, fog, bloom
 and light shafts, blocks you can mine and place, simple physics, a world that
 is saved as you play, and a few inhabitants you can talk to.
 
+Press `I` for the picture-first inventory: arrow keys browse six large material
+cards, `Enter` adds to your six-block building kit, and `Esc` returns to play.
+Move up from the first row to choose a category, or use the wheel and page
+arrows to see more blocks. `Tab` selects your kit; `Backspace` removes a kit
+entry. A full kit asks which block to replace. Nothing is removed from the
+material collection.
+
+`Full inventory` (`F3`) restores the dense grid, inspector, and ten-slot hotbar.
+The player button (`F2`) switches between two local players. Each remembers
+its kit, full hotbar, and inventory mode in `luvcraft/inventory-players.sexp`
+under the same data directory as the saved worlds.
+
 ### Terminals made of blocks
 
 ![Walking up to a terminal wall, running ls and opening a file in Vim](screenshots/luvcraft-terminal.gif)

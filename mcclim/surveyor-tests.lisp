@@ -213,3 +213,82 @@
          :natural luvcraft::*grass-block*))
   (true (not (mcluv::inventory-category-block-p
               :natural luvcraft::*stone-block*))))
+
+(define-test building-kit-keeps-six-unique-blocks-and-never-replaces-silently
+  (let* ((inventory (luvcraft:make-block-inventory))
+         (blocks (mapcar #'luvcraft:block-kind-named
+                         '(:grass :planks :bricks :marble :lantern :gold)))
+         (extra (luvcraft:block-kind-named :basalt)))
+    (loop for block in blocks for index from 0 do
+      (multiple-value-bind (slot status)
+          (luvcraft::add-building-kit-block inventory block)
+        (true (= slot index))
+        (true (eq status :added))))
+    (multiple-value-bind (slot status)
+        (luvcraft::add-building-kit-block inventory (third blocks))
+      (true (= slot 2))
+      (true (eq status :present)))
+    (multiple-value-bind (slot status)
+        (luvcraft::add-building-kit-block inventory extra)
+      (true (null slot))
+      (true (eq status :full))
+      (true (equal blocks (luvcraft::block-inventory-kit inventory))))
+    (luvcraft::add-building-kit-block inventory extra 2)
+    (true (eq extra (third (luvcraft::block-inventory-kit inventory))))
+    (true (= 6 (length (luvcraft::block-inventory-kit inventory))))
+    (true (= 10 (length (luvcraft:block-inventory-quickbar-blocks inventory))))
+    (setf (luvcraft::block-inventory-simple-p inventory) t)
+    (true (equal (luvcraft::block-inventory-kit inventory)
+                 (luvcraft:block-inventory-quickbar-blocks inventory)))
+    (true (luvcraft:block-inventory-entry-for inventory (third blocks)))))
+
+(define-test player-kits-round-trip-independently-with-their-inventory-modes
+  (let* ((data (mcluv::default-inventory-preferences))
+         (path (merge-pathnames
+                (format nil "luv-inventory-test-~A.sexp" (gensym))
+                (uiop:temporary-directory)))
+         (writer nil))
+    (setf (getf data :active) 1
+          (getf (first (getf data :players)) :kit) '(:marble :gold)
+          (getf (second (getf data :players)) :kit) '(:planks :lantern)
+          (getf (second (getf data :players)) :full) t)
+    (unwind-protect
+         (progn
+           (setf writer (luvcraft::make-world-checkpoint-writer path))
+           (luvcraft::request-world-checkpoint writer data)
+           (luvcraft::stop-world-checkpoint-writer writer)
+           (setf writer nil)
+           (let ((restored (mcluv::read-inventory-preferences path)))
+             (true (equal data restored))
+             (true (= 1 (getf restored :active)))
+             (false (getf (first (getf restored :players)) :full))
+             (true (getf (second (getf restored :players)) :full))))
+      (when writer (luvcraft::stop-world-checkpoint-writer writer))
+      (when (probe-file path) (delete-file path)))))
+
+(define-test damaged-player-kits-are-rejected-before-writing
+  (dolist (change '((:active 2) (:version 99) (:players nil)))
+    (let ((data (mcluv::default-inventory-preferences)))
+      (setf (getf data (first change)) (second change))
+      (fail (mcluv::validate-inventory-preferences data))))
+  (dolist (bad-kit '((:grass :grass) (:grass "not a block") (:grass :stone :bricks :planks :gold :marble :lantern)))
+    (let ((data (mcluv::default-inventory-preferences)))
+      (setf (getf (first (getf data :players)) :kit) bad-kit)
+      (fail (mcluv::validate-inventory-preferences data)))))
+
+(define-test simple-inventory-cards-and-controls-have-distinct-hit-targets
+  (loop for index below 6 do
+    (multiple-value-bind (x y width height) (mcluv::simple-inventory-card index)
+      (true (equal (list :blocks index)
+                   (multiple-value-list
+                    (mcluv::simple-inventory-hit (+ x (/ width 2))
+                                                 (+ y (/ height 2)))))))
+    (multiple-value-bind (x y width height) (mcluv::simple-inventory-slot index)
+      (true (equal (list :kit index)
+                   (multiple-value-list
+                    (mcluv::simple-inventory-hit (+ x (/ width 2))
+                                                 (+ y (/ height 2))))))))
+  (true (equal '(:mode 0) (multiple-value-list (mcluv::simple-inventory-hit 740 25))))
+  (true (equal '(:profile 0) (multiple-value-list (mcluv::simple-inventory-hit 80 25))))
+  (true (equal '(:play 0) (multiple-value-list (mcluv::simple-inventory-hit 700 480))))
+  (true (null (mcluv::simple-inventory-hit 18 130))))

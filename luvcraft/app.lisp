@@ -1114,8 +1114,10 @@ A failed restoration is reported and its description kept, never dropped."
   (check-type number (integer 1))
   (let ((block
           (nth (1- number)
-               (block-inventory-blocks
-                (luvcraft-session-inventory session)))))
+               (let ((inventory (luvcraft-session-inventory session)))
+                 (if (block-inventory-simple-p inventory)
+                     (block-inventory-quickbar-blocks inventory)
+                     (block-inventory-blocks inventory))))))
     (when block
       (setf (luvcraft-session-selected-block session) block)
       (update-luvcraft-session-title session))
@@ -1141,6 +1143,15 @@ The wheel's verb: a material off the bar steps onto its first slot."
 Choosing a material in the inventory is how a player says they want it at
 hand, so it takes the place of whatever the selected slot held, which moves
 to where BLOCK was.  Every other number key keeps its material."
+  (when (block-inventory-simple-p (luvcraft-session-inventory session))
+    (let* ((inventory (luvcraft-session-inventory session))
+           (current (or (position (luvcraft-session-selected-block session)
+                                  (block-inventory-kit inventory)) 0)))
+      (multiple-value-bind (slot status)
+          (add-building-kit-block inventory block current)
+        (declare (ignore status))
+        (return-from put-luvcraft-block-on-quickbar
+          (select-luvcraft-block session (1+ slot))))))
   (let* ((inventory (luvcraft-session-inventory session))
          (entries (block-inventory-entries inventory))
          (quickbar (block-inventory-quickbar-blocks inventory))
