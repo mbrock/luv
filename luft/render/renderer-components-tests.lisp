@@ -13,8 +13,15 @@
       (loop for failure from 1 to allocations do
         (let ((device (make-instance 'gpu-test-device :fail-at failure)))
           (fail (render:make-renderer device :bgra8-unorm '(640 480)))
-          (dolist (resource (test-gpu-resources device))
-            (true (= 1 (test-gpu-release-attempts resource)))))))))
+          ;; Parachute keeps every check's closure, so count here and drop
+          ;; the recorded descriptors: each prefix's shaders would otherwise
+          ;; stay reachable from the results for the rest of the run.
+          (let ((unreleased (count-if-not
+                             (lambda (resource)
+                               (= 1 (test-gpu-release-attempts resource)))
+                             (test-gpu-resources device))))
+            (setf (test-gpu-resources device) nil)
+            (true (zerop unreleased))))))))
 
 (define-test renderer-retains-a-failed-nested-program-for-release-retry
   (let* ((device (make-instance 'gpu-test-device))
