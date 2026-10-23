@@ -154,6 +154,7 @@ this package draws; the renderer and the ateliers use it.")
            #:make-streaming-scene
            #:make-walking-character
            #:make-world-simulation
+           #:make-world-source-streaming-scene
            #:material-cell-at
            #:material-cell-reader
            #:material-kind
@@ -286,4 +287,5 @@ this package draws; the renderer and the ateliers use it.")
            #:world-source-domain
            #:world-source-edit-at
            #:world-source-edits
-           #:world-source-material-vocabulary))
+           #:world-source-material-vocabulary
+           #:world-source-spawn))

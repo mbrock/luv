@@ -385,36 +385,19 @@ column itself."
                     do (funcall place x y z
                                 *sanctuary-material-placement*))))))))
 
+(defmethod world-source-spawn ((source authored-world-source))
+  (multiple-value-bind (x y yaw) (large-world-scenic-spawn source)
+    (values x y (large-world-terrain-height source x y) yaw)))
+
 (defun make-authored-world-streaming-scene
     (&key (horizontal-bits +large-world-horizontal-bits+)
       (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1)
       mesh-preparer)
   "Make the canonical large demand world without materializing any chunk."
-  (let* ((domain (luft:make-world-domain
-                  :x-bits horizontal-bits :y-bits horizontal-bits))
-         (source (make-instance 'authored-world-source
-                                :domain domain :seed seed))
-         (builder (make-world-scene-builder :horizontal-bits horizontal-bits))
-         ;; Regional voxel light is deliberately not begun by this stage.
-         (empty (finish-scene-builder
-                 builder :player-p t :voxel-light-propagation-p nil)))
-    (make-instance
-     'streaming-scene
-     :source source
-     :solid (luft:make-fiber-store domain)
-     :material-vocabulary (scene-material-vocabulary empty)
-     :material-cells (make-material-store)
-     :authored-light-sources #()
-     :authored-light-opacity-table
-     (scene-authored-light-opacity-table empty)
-     :authored-light-revision 0
-     :authored-light-provenance (scene-authored-light-provenance empty)
-     :authored-light-generation (scene-authored-light-generation empty)
-     :content-revision 0
-     :voxel-light-propagation-p nil
-     :light-generation (scene-authored-light-generation empty)
-     :attachments #()
-     :player-p t
-     :frames-per-load frames-per-load
-     :residency-radius residency-radius
-     :mesh-preparer mesh-preparer)))
+  (make-world-source-streaming-scene
+   (make-instance 'authored-world-source
+                  :domain (luft:make-world-domain
+                           :x-bits horizontal-bits :y-bits horizontal-bits)
+                  :seed seed)
+   :frames-per-load frames-per-load :residency-radius residency-radius
+   :mesh-preparer mesh-preparer))

@@ -200,12 +200,10 @@ at the atelier boundary where a person has selected one site."))
   "Make SCENE's player at a supported authored spawn."
   (if (and (typep scene 'streaming-scene)
            (streaming-scene-source scene))
-      (multiple-value-bind (x y) (large-world-scenic-spawn
-                                  (streaming-scene-source scene))
-        (let ((z (large-world-terrain-height
-                  (streaming-scene-source scene) x y)))
-          (make-walking-character
-           :position (make-vec3 (+ x 0.5) (+ y 0.5) (coerce z 'single-float)))))
+      (multiple-value-bind (x y z)
+          (world-source-spawn (streaming-scene-source scene))
+        (make-walking-character
+         :position (make-vec3 (+ x 0.5) (+ y 0.5) (coerce z 'single-float))))
       (make-walking-character
        :position (make-vec3 (+ +sanctuary-origin-x+ 29.5)
                             (+ +sanctuary-origin-y+ 24.5) 14.0))))
@@ -216,8 +214,7 @@ at the atelier boundary where a person has selected one site."))
     (when (and (typep source 'streaming-scene)
                (streaming-scene-source source))
       (setf (camera-yaw (viewer-camera viewer))
-            (nth-value 2 (large-world-scenic-spawn
-                          (streaming-scene-source source)))
+            (nth-value 3 (world-source-spawn (streaming-scene-source source)))
             ;; A little above level: the peak, and sky over it.
             (camera-pitch (viewer-camera viewer)) 0.08)))
   viewer)

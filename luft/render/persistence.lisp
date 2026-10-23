@@ -31,7 +31,10 @@
   "Each persistent viewer's save record.")
 
 (defun persistent-world-source (scene)
-  (and (typep scene 'streaming-scene) (streaming-scene-source scene)))
+  "SCENE's Luft world source, the only kind a Luft save describes."
+  (and (typep scene 'streaming-scene)
+       (typep (streaming-scene-source scene) 'authored-world-source)
+       (streaming-scene-source scene)))
 
 (defun placement-named (name)
   (find name (domains:identity-vocabulary-members

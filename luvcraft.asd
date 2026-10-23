@@ -207,6 +207,31 @@
   :depends-on ("luvcraft/mcclim")
   :components ((:file "mcclim/shader-lab")))
 
+(defsystem "luvcraft/luft"
+  :description "Luvcraft as a game on the Luft terrain: palette, world source, and saves."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  ;; Luvcraft's generator is the oracle and runs as is; only the terrain is Luft's.
+  :depends-on ("luvcraft/core" "luft/terrain")
+  :serial t
+  :components ((:module "luvcraft/luft"
+                :serial t
+                :components ((:file "package")
+                             (:file "palette")
+                             (:file "world-source"))))
+  :in-order-to ((test-op (test-op "luvcraft/luft/test"))))
+
+(defsystem "luvcraft/luft/test"
+  :description "Luvcraft on Luft against Luvcraft's own streaming, cell for cell."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/luft" "luv/test-support")
+  :components ((:file "luvcraft/luft/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luvcraft.luft.tests)))
+
 (defsystem "luvcraft"
   :description "The complete interactive luvcraft game."
   :version "0.0.1"

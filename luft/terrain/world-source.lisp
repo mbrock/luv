@@ -35,6 +35,53 @@ worker, so it must read only SOURCE's immutable description."))
   (fibers nil :type luft:chunk-fibers :read-only t)
   (material-cells nil :type hash-table :read-only t))
 
+(defgeneric world-source-spawn (source)
+  (:documentation
+   "Where a player arriving in SOURCE's world stands: cell X and Y, the height
+Z of the ground under its feet, and the yaw it faces, as four values.")
+  (:method ((source world-source))
+    (let ((domain (world-source-domain source)))
+      (values (floor (luft:world-domain-x-limit domain) 2)
+              (floor (luft:world-domain-y-limit domain) 2)
+              0 0.0))))
+
+(defun make-world-source-streaming-scene
+    (source &key (frames-per-load 1) (residency-radius 1) mesh-preparer)
+  "Make a demand-streamed scene over SOURCE without materializing any chunk.
+
+The scene paints in SOURCE's own vocabulary, so the offsets a worker
+materializes and the descriptors the scene compiles name the same palette."
+  (let* ((domain (world-source-domain source))
+         (vocabulary (world-source-material-vocabulary source))
+         (builder (make-scene-builder
+                   :horizontal-bits (luft:world-domain-x-bits domain)
+                   :material-vocabulary vocabulary))
+         ;; Regional voxel light is deliberately not begun by this stage.
+         (empty (finish-scene-builder
+                 builder :player-p t :voxel-light-propagation-p nil)))
+    (unless (= (luft:world-domain-x-bits domain) (luft:world-domain-y-bits domain))
+      (error "A streamed world source needs a square domain, not ~S." domain))
+    (make-instance
+     'streaming-scene
+     :source source
+     :solid (luft:make-fiber-store domain)
+     :material-vocabulary vocabulary
+     :material-cells (make-material-store)
+     :authored-light-sources #()
+     :authored-light-opacity-table
+     (scene-authored-light-opacity-table empty)
+     :authored-light-revision 0
+     :authored-light-provenance (scene-authored-light-provenance empty)
+     :authored-light-generation (scene-authored-light-generation empty)
+     :content-revision 0
+     :voxel-light-propagation-p nil
+     :light-generation (scene-authored-light-generation empty)
+     :attachments #()
+     :player-p t
+     :frames-per-load frames-per-load
+     :residency-radius residency-radius
+     :mesh-preparer mesh-preparer)))
+
 (defun world-source-edit-at (source cell)
   "Return a sparse edited placement and whether SOURCE owns an edit at CELL."
   (gethash cell (world-source-edits source)))

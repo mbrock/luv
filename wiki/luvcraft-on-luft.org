@@ -143,6 +143,12 @@ generates, and the terrain materializes, replays edits, and assembles fibers.
 world, and its own mesh preparer -- that runs with neither the renderer nor
 the Luft world loaded.
 
+=luvcraft/luft= is the first game outside the atelier.  It answers that
+protocol with Luvcraft's own generator and its own palette, and a source
+names its spawn through [[lisp:luft.terrain:world-source-spawn]], so the
+studio no longer assumes the atelier's large world when it places a
+character.
+
 A streaming scene's consumer may realize each finished mesh on the worker
 through [[lisp:luft.terrain:prepare-streamed-mesh]], with
 [[lisp:luft.terrain:streamed-mesh-preparation-signature]] keeping the mesh
@@ -351,18 +357,34 @@ exported Luvcraft world (#PWX5RT) before choosing.
 kind recognizably itself and its grass at least as good, at a measured
 cost.
 
-** TODO Start Luvcraft as a game on the engine
+** NEXT Start Luvcraft as a game on the engine
 :PROPERTIES:
 :ID: J3WZZS
 :END:
 
 /Intent./ Begin the Luvcraft game over Luft with its palette and its
-generator: caves, crystals, trees, and rocks become world sources the way
-the alpine relief crossed, so a seed raises the same world in both
-programs.  Then replay a Luvcraft save onto it.
+generator.  Luvcraft's own terrain, caves, crystals, trees, rocks, and
+landmarks answer the world-source protocol directly, so a seed raises the
+same world in both programs without a second generator to keep in step.
+Then replay a Luvcraft save onto it and play it.
 
-/Done when./ One Luvcraft save opens in the new game with its edits in
-place, and the old generator is deleted.
+/Done when./ One Luvcraft save opens and plays in the new game with its
+edits in place, and Luvcraft's old meshing and streaming path is no longer
+needed to show it.
+
+/Evidence./ =luvcraft/luft=, in the =luvcraft.luft= package, depends on
+=luvcraft/core= and =luft/terrain= and nothing of the atelier.  Its palette
+gives every block kind one placement, toned by the linear mean of the
+kind's atlas tiles, with blocklight as tinted emission.  Its
+=luvcraft-world-source= generates a Luft chunk by materializing the
+sixteen Luvcraft chunks under it through Luvcraft's own chunk producer and
+landmarks, with Luvcraft's (x, y, z) at Luft's (x + 1024, z + 1024, y).
+Its test compares that cell for cell against Luvcraft's real load request
+on alpine and meadow chunks, edits included, and finds no difference.  The
+real =default.sexp= save imports with all 174 edits in place.  The birthday
+saves use a =:birthday-meadow= source the import does not yet know.  A
+source now names its own spawn, and the studio walks a character onto it,
+so the next piece is opening such a scene in the atelier.
 
 ** TODO Stream voxel light in the terrain engine
 :PROPERTIES:
