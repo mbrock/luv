@@ -34,16 +34,6 @@
       (progn (apply #'reinitialize-instance current initargs) current)
       (apply #'make-instance class initargs)))
 
-(defvar *torch-flame-material* nil)
-
-;;; A torch's flame is still terrain vocabulary: its light seeds realized
-;;; voxel light (see realized-light.lisp).
-(setf *torch-flame-material*
-      (ensure-semantic-instance
-       *torch-flame-material* 'material-kind
-       :name :torch-flame :base-tone '(1.0 0.36 0.055)
-       :light-emission '(15 9 3) :surface-emission 1.8))
-
 (defun material-kind-oriented-tones (kind)
   "Return KIND's top, side, and underside terrain tones."
   (let ((base (material-kind-base-tone kind)))

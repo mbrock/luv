@@ -91,7 +91,6 @@ this package draws; the renderer and the ateliers use it.")
            #:%make-resident-cell-chunk
            #:%make-streaming-mesh-result
            #:*body-vertical-velocity-declaration*
-           #:*torch-flame-material*
            #:*walking-displacement-function*
            #:*walking-displacement-realization*
            #:*walking-duration-declaration*
@@ -189,12 +188,14 @@ this package draws; the renderer and the ateliers use it.")
            #:retarget-authored-world
            #:retarget-streaming-scene
            #:scene
+           #:scene-attachments
            #:scene-authored-light-generation
            #:scene-authored-light-opacity-table
            #:scene-authored-light-provenance
            #:scene-authored-light-sources
            #:scene-authored-voxel-light
            #:scene-builder-architecture-material
+           #:scene-builder-attach
            #:scene-builder-box
            #:scene-builder-carve-arch
            #:scene-builder-cell
@@ -204,7 +205,6 @@ this package draws; the renderer and the ateliers use it.")
            #:scene-builder-ground-material
            #:scene-builder-ring
            #:scene-builder-staircase
-           #:scene-builder-torch
            #:scene-cell-bit
            #:scene-content-revision
            #:scene-domain
@@ -228,8 +228,6 @@ this package draws; the renderer and the ateliers use it.")
            #:scene-mesh-output-manifest-entry-tree
            #:scene-player-p
            #:scene-solid
-           #:scene-torch-light-emission
-           #:scene-torches
            #:scene-voxel-light
            #:scene-voxel-light-propagation-p
            #:schedule-streaming-scene-cohort
@@ -269,6 +267,9 @@ this package draws; the renderer and the ateliers use it.")
            #:streaming-scene-residency-radius
            #:streaming-scene-source
            #:streaming-scene-store
+           #:surface-attachment
+           #:surface-attachment-light-emission
+           #:surface-attachment-material
            #:surface-mesh-tree-manifest
            #:surface-mesh-tree-manifest-matches-p
            #:sweep-body-axis

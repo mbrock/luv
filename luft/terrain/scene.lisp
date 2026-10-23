@@ -1,6 +1,6 @@
 (in-package #:luft.terrain)
 
-;;; A scene: one authored solid, its sparse cell-material field, torches,
+;;; A scene: one authored solid, its sparse cell-material field, attachments,
 ;;; and the immutable generation values that justify a finished mesh.  The
 ;;; scene builder at the end is the authored construction vocabulary.
 
@@ -24,15 +24,12 @@
     :accessor scene-authored-light-generation)
    (content-revision
     :initarg :content-revision :initform 0 :accessor scene-content-revision)
-   (torch-light-emission
-    :initarg :torch-light-emission
-    :reader scene-torch-light-emission)
    (voxel-light-propagation-p
     :initarg :voxel-light-propagation-p
     :initform t
     :reader scene-voxel-light-propagation-p
     :type boolean)
-   (torches :initarg :torches :initform #() :reader scene-torches)
+   (attachments :initarg :attachments :initform #() :reader scene-attachments)
    (player-p :initarg :player-p :initform nil :reader scene-player-p))
   (:documentation
    "One authored solid and its cell-material field.
@@ -44,7 +41,7 @@ per-chunk tables of dense vocabulary offsets; semantic material objects remain a
 boundary rather than being allocated per cell.  Its authored light generation
 contains material sources only when its immutable propagation policy is true;
 the diagnostic false policy owns the exact empty propagated generation.
-Realized torch light is view/profile-dependent and therefore belongs to an
+Realized attachment light is view/profile-dependent and therefore belongs to an
 immutable SCENE-MESH-GENERATION, never this scene."))
 
 (defun scene-domain (scene)
@@ -62,7 +59,7 @@ immutable SCENE-MESH-GENERATION, never this scene."))
 (defun scene-authored-voxel-light (scene)
   "Return SCENE's immutable authored-policy base light field.
 
-This field deliberately excludes torches: their source positions do not exist
+This field deliberately excludes attachments: their source positions do not exist
 until a particular final bevel surface has realized their attachment frames."
   (check-type scene scene)
   (realized-light-generation-field
@@ -73,23 +70,31 @@ until a particular final bevel surface has realized their attachment frames."
 
 This is not necessarily the field visible in a rendered static or streaming
 view.  Inspect SCENE-MESH-GENERATION-LIGHT-GENERATION, or the installed
-STREAMING-SCENE-LIGHT-GENERATION, for profile-dependent realized torch light."
+STREAMING-SCENE-LIGHT-GENERATION, for profile-dependent realized attachment light."
   (scene-authored-voxel-light scene))
 
-(defclass torch-attachment ()
-  ((support-cell :initarg :support-cell :reader torch-attachment-support-cell)
-   (face :initarg :face :reader torch-attachment-face)
+(defclass surface-attachment ()
+  ((support-cell :initarg :support-cell :reader surface-attachment-support-cell)
+   (face :initarg :face :reader surface-attachment-face)
    (clearance-cell :initarg :clearance-cell
-                   :reader torch-attachment-clearance-cell)
+                   :reader surface-attachment-clearance-cell)
    (chart-u :initarg :chart-u :initform 0.0f0
-            :reader torch-attachment-chart-u)
+            :reader surface-attachment-chart-u)
    (chart-v :initarg :chart-v :initform 0.0f0
-            :reader torch-attachment-chart-v))
+            :reader surface-attachment-chart-v)
+   (material :initarg :material :reader surface-attachment-material))
   (:documentation
    "A sparse semantic attachment keyed by an oriented face-chart point.
 
-CLEARANCE-CELL is only the authored outward cell that must remain air.  It is
-not a light source; the source is the wick of the final realized frame."))
+A game decides what is attached -- a torch, a sign, a screen -- and names the
+MATERIAL-KIND it is made of; the terrain keeps its SUPPORT-CELL solid and
+its CLEARANCE-CELL, the authored outward cell, air.  The clearance is not a
+light source; an emissive attachment emits from the wick of its final
+realized frame."))
+
+(defun surface-attachment-light-emission (attachment)
+  "ATTACHMENT's packed RGB4 emission, from the material it is made of."
+  (material-kind-packed-light-emission (surface-attachment-material attachment)))
 
 (defconstant +unkeyed-scene-mesh-output+ :unkeyed-scene-mesh-output)
 
@@ -120,7 +125,7 @@ not a light source; the source is the wick of the final realized frame."))
 NODES and CHILD-COUNTS are parallel preorder vectors.  Geometry arrays are
 ownership-immutable after generation; exact object identity therefore names
 their topology.  ATTACHMENT-FRAMES additionally copies every mutable packed
-torch-frame scalar, so later companion or frame mutation invalidates the
+attachment-frame scalar, so later companion or frame mutation invalidates the
 manifest instead of silently changing a published cohort."
   (nodes #() :type simple-vector :read-only t)
   (child-counts
@@ -229,7 +234,7 @@ publication."
              (:copier nil))
   "One immutable profile/residency-specific mesh-light generation.
 
-REQUEST-STAMP names the exact geometry and torch semantics observed before
+REQUEST-STAMP names the exact geometry and attachment semantics observed before
 meshing.  RESULT-STAMP pairs it with the exact quantized realized-light stamp.
 Meshes retain the generation's FIELD directly; publication retains this value
 so visible geometry, light sidecars, body flags, and flame frames stay one
@@ -257,8 +262,8 @@ inspectable cohort."
                           :reader scene-builder-architecture-material)
    (material-cells :initform (make-hash-table :test #'eql)
                    :reader scene-builder-material-cells)
-   (torches :initform (make-hash-table :test #'eql)
-            :reader scene-builder-torches)
+   (attachments :initform (make-hash-table :test #'eql)
+            :reader scene-builder-attachments)
    (light-revision :initform 0 :accessor scene-builder-light-revision)))
 
 (defun make-scene-builder
@@ -303,18 +308,21 @@ the author names none."
   (incf (scene-builder-light-revision builder))
   builder)
 
-(defun scene-builder-torch (builder x y z axis side &key (u 0.0) (v 0.0))
-  "Record a torch attachment on support cell X/Y/Z's outward AXIS/SIDE face.
+(defun scene-builder-attach
+    (builder x y z axis side material &key (u 0.0) (v 0.0))
+  "Attach something made of MATERIAL, a material kind, to support cell
+X/Y/Z's outward AXIS/SIDE face.
 
 The attachment is not voxel occupancy. The adjacent cell is reserved clearance;
 U and V retain normalized coordinates in the oriented face chart. The current
 star mesher does not yet realize these requests into body/flame frames or wick
 light sources. Keeping authoring separate lets a future surface query supply
-those frames to the independent torch drawing."
+those frames to an independent drawing such as the renderer's torches."
   (check-type axis luft:axis)
   (check-type side luft:side)
+  (check-type material material-kind)
   (unless (and (realp u) (<= -1 u 1) (realp v) (<= -1 v 1))
-    (error "Torch chart coordinates must lie in [-1,1], not (~S,~S)." u v))
+    (error "Attachment chart coordinates must lie in [-1,1], not (~S,~S)." u v))
   (let* ((domain (scene-builder-domain builder))
          (support
            (luft:make-site domain
@@ -327,13 +335,14 @@ those frames to the independent torch drawing."
          (clearance (luft:step-site domain support axis
                                     (if (eq side :low) -1 1))))
     (unless clearance
-      (error "Torch face ~S points outside the LUFT domain." face))
-    (setf (gethash face (scene-builder-torches builder))
-          (make-instance 'torch-attachment
+      (error "Attachment face ~S points outside the LUFT domain." face))
+    (setf (gethash face (scene-builder-attachments builder))
+          (make-instance 'surface-attachment
                          :support-cell support :face face
                          :clearance-cell clearance
                          :chart-u (coerce u 'single-float)
-                         :chart-v (coerce v 'single-float))))
+                         :chart-v (coerce v 'single-float)
+                         :material material)))
   (incf (scene-builder-light-revision builder))
   builder)
 
@@ -491,20 +500,20 @@ stair topology. #WSEK3C"
                (declare (ignore present-p))
                (luft:chain-builder-add-site chain-builder site))
              cells)
-    (let ((torches nil))
+    (let ((attachments nil))
       (maphash
        (lambda (face attachment)
          (declare (ignore face))
-         (unless (gethash (torch-attachment-support-cell attachment) cells)
-           (error "Torch support cell ~S is not occupied."
-                  (torch-attachment-support-cell attachment)))
-         (when (gethash (torch-attachment-clearance-cell attachment) cells)
-           (error "Torch outward cell ~S is occupied."
-                  (torch-attachment-clearance-cell attachment)))
-         (push attachment torches))
-       (scene-builder-torches builder))
-      (setf torches
-            (coerce (sort torches #'< :key #'torch-attachment-face) 'vector))
+         (unless (gethash (surface-attachment-support-cell attachment) cells)
+           (error "Attachment support cell ~S is not occupied."
+                  (surface-attachment-support-cell attachment)))
+         (when (gethash (surface-attachment-clearance-cell attachment) cells)
+           (error "Attachment outward cell ~S is occupied."
+                  (surface-attachment-clearance-cell attachment)))
+         (push attachment attachments))
+       (scene-builder-attachments builder))
+      (setf attachments
+            (coerce (sort attachments #'< :key #'surface-attachment-face) 'vector))
       (let* ((solid (luft:make-fiber-store-from-chain
                      (luft:finish-chain-builder chain-builder)))
              (sources
@@ -518,8 +527,6 @@ stair topology. #WSEK3C"
                (compile-material-light-opacity-table material-vocabulary))
              (revision (scene-builder-light-revision builder))
              (authored-light-provenance (gensym "AUTHORED-LIGHT-"))
-             (torch-light-emission
-               (material-kind-packed-light-emission *torch-flame-material*))
              (base-generation
                (solve-realized-light-generation
                 (scene-builder-domain builder) material-cells opacity-table
@@ -533,13 +540,12 @@ stair topology. #WSEK3C"
          :player-p player-p
          :material-vocabulary material-vocabulary
          :material-cells (material-store-from-table material-cells)
-         :torches torches
+         :attachments attachments
          :authored-light-sources sources
          :authored-light-opacity-table opacity-table
          :authored-light-revision revision
          :authored-light-provenance authored-light-provenance
          :authored-light-generation base-generation
-         :torch-light-emission torch-light-emission
          :voxel-light-propagation-p voxel-light-propagation-p)))))
 
 (defun scene-material-placement-at (scene cell)

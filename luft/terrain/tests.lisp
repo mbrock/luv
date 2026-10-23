@@ -50,6 +50,28 @@
       ;; Both glowing cells, and only they, seed authored light.
       (is = 2 (length (terrain:scene-authored-light-sources scene))))))
 
+(define-test an-attachment-keeps-its-support-and-clearance
+  (let ((builder (make-builder)))
+    (terrain:scene-builder-cell builder 3 3 0)
+    (terrain:scene-builder-cell builder 4 3 0)
+    ;; A glowing lamp on top of the first cell.
+    (terrain:scene-builder-attach builder 3 3 0 :z :high
+                                  (terrain:material-placement-kind *glow*))
+    (let* ((scene (terrain:make-streaming-scene
+                   (terrain:finish-scene-builder builder)))
+           (domain (terrain:scene-domain scene))
+           (attachment (aref (terrain:scene-attachments scene) 0)))
+      (flet ((cell (x z) (luft:make-site domain x 3 z luft:+cell-extent+ 1)))
+        (is = (luft:pack-voxel-light 15 12 4)
+            (terrain:surface-attachment-light-emission attachment))
+        (is eq :attachment
+            (nth-value 1 (terrain:edit-streaming-scene-cell scene (cell 3 0) nil)))
+        (is eq :attachment
+            (nth-value 1 (terrain:edit-streaming-scene-cell scene (cell 3 1) *stone*)))
+        ;; The neighbouring cell is the game's to change.
+        (is eq :edited
+            (nth-value 1 (terrain:edit-streaming-scene-cell scene (cell 4 0) nil)))))))
+
 (defclass flat-source (terrain:world-source) ()
   (:documentation "Two layers of stone under the whole domain."))
 

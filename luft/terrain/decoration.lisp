@@ -2,7 +2,7 @@
 
 ;;; Finalize star-mesh appearance and light metadata, then record the exact
 ;;; outputs as a SCENE-MESH-GENERATION. Static compilation also combines the
-;;; region into one root. Authored torch placement is not yet realized here.
+;;; region into one root. Authored attachment placement is not yet realized here.
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
@@ -99,7 +99,7 @@
     (owners scene
      &key appearance-prepared-p
        request-stamp reusable-light-generation
-       (realize-torch-light-p t)
+       (realize-attachment-light-p t)
        (generation-scene scene))
   "Finalize appearance and exact light metadata for a region of star meshes.
 
@@ -107,14 +107,15 @@ OWNERS is an alist of canonical chunk owner to finished mesh. The returned
 SCENE-MESH-GENERATION snapshots those exact outputs after metadata is final.
 APPEARANCE-PREPARED-P means their material arrays are already compiled.
 
-Authored torches are retained by SCENE, but the star representation has no
-surface-attachment resolver yet. This path therefore produces no torch frames.
-The independent torch drawing consumes frames supplied by diagnostic callers;
-its presence does not imply that world attachments have been realized."
+Authored attachments are retained by SCENE, but the star representation has no
+surface-attachment resolver yet, so this path produces no attachment frames.
+An independent drawing, such as the renderer's torches, consumes frames
+supplied by diagnostic callers; its presence does not imply that world
+attachments have been realized."
   (check-type owners list)
   (let* ((light-generation
            (zone :luft/realize-light
-             (if realize-torch-light-p
+             (if realize-attachment-light-p
                  (scene-mesh-light-generation scene reusable-light-generation)
                  (or (etypecase reusable-light-generation
                        (null nil)

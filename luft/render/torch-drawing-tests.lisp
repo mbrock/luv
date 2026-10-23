@@ -102,7 +102,7 @@
     (render::scene-builder-cell builder 10 10 0)
     (render::scene-builder-torch builder 10 10 0 :z :high)
     (let ((scene (render::finish-scene-builder builder)))
-      (true (= 1 (length (render::scene-torches scene))))
+      (true (= 1 (length (render::scene-attachments scene))))
       (multiple-value-bind (mesh generation) (render::make-render-mesh scene)
         (true (null (luft:surface-mesh-attachments mesh)))
         (true (eq (render::scene-authored-light-generation scene)

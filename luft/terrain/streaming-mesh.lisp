@@ -63,23 +63,22 @@ chunk is empty; excluding that owner drops real boundary triangles."
                   t)))))
     (sort (loop for key being the hash-keys of keys collect key) #'<)))
 
-(defun scene-torch-semantics-signature (scene resident-source-keys)
+(defun scene-attachment-semantics-signature (scene resident-source-keys)
   "Return exact sorted resident attachment semantics and authored emission."
-  (list
-   (scene-torch-light-emission scene)
-   (loop for attachment across (scene-torches scene)
-         for support = (torch-attachment-support-cell attachment)
-         when (member (luft:site-chunk-key support) resident-source-keys
-                      :test #'eql)
-           collect
-           (list support
-                 (torch-attachment-face attachment)
-                 (torch-attachment-clearance-cell attachment)
-                 (torch-attachment-chart-u attachment)
-                 (torch-attachment-chart-v attachment)))))
+  (loop for attachment across (scene-attachments scene)
+        for support = (surface-attachment-support-cell attachment)
+        when (member (luft:site-chunk-key support) resident-source-keys
+                     :test #'eql)
+          collect
+          (list support
+                (surface-attachment-face attachment)
+                (surface-attachment-clearance-cell attachment)
+                (surface-attachment-chart-u attachment)
+                (surface-attachment-chart-v attachment)
+                (surface-attachment-light-emission attachment))))
 
 (defun streaming-scene-mesh-stamp (scene output-keys bevel-width)
-  "Name exact content, owner, geometry, light, and torch request inputs."
+  "Name exact content, owner, geometry, light, and attachment request inputs."
   (let ((resident-source-keys
           (sort
            (loop for key being the hash-keys of (streaming-scene-loaded scene)
@@ -92,7 +91,7 @@ chunk is empty; excluding that owner drops real boundary triangles."
           (scene-authored-light-revision scene)
           (scene-authored-light-provenance scene)
           (scene-voxel-light-propagation-p scene)
-          (scene-torch-semantics-signature scene resident-source-keys)
+          (scene-attachment-semantics-signature scene resident-source-keys)
           (loop for key in resident-source-keys
                 collect (list key
                               (gethash key (streaming-scene-loaded scene))
@@ -100,7 +99,7 @@ chunk is empty; excluding that owner drops real boundary triangles."
 
 (zdefun (make-streaming-region-snapshot :zone :luft/capture-mesh-region
                                         :value (length output-keys))
-    (scene output-keys bevel-width &key (realize-torch-light-p t))
+    (scene output-keys bevel-width &key (realize-attachment-light-p t))
   "Capture one immutable union window and its width/repair guard ring."
   (check-type scene streaming-scene)
   (check-type output-keys list)
@@ -142,7 +141,7 @@ chunk is empty; excluding that owner drops real boundary triangles."
      bevel-width union-neighborhood
      (streaming-scene-mesh-stamp
       scene output-keys bevel-width)
-     realize-torch-light-p
+     realize-attachment-light-p
      (streaming-scene-light-generation scene)
      (streaming-scene-mesh-cache scene))))
 
@@ -212,11 +211,11 @@ products; arbitrary source or compiler changes must still miss the cache."
    products))
 
 (defun make-streaming-mesh-snapshot
-    (scene key bevel-width &key (realize-torch-light-p t))
+    (scene key bevel-width &key (realize-attachment-light-p t))
   "Capture the one-owner form of MAKE-STREAMING-REGION-SNAPSHOT."
   (make-streaming-region-snapshot
    scene (list key) bevel-width
-   :realize-torch-light-p realize-torch-light-p))
+   :realize-attachment-light-p realize-attachment-light-p))
 
 (zdefun (mesh-streaming-snapshot :zone :luft/mesh-region
                                  :value
@@ -276,8 +275,8 @@ appearance reads authored cells directly and needs no meshed context owners."
                 :request-stamp (streaming-mesh-snapshot-stamp snapshot)
                 :reusable-light-generation
                 (streaming-mesh-snapshot-reusable-light-generation snapshot)
-                :realize-torch-light-p
-                (streaming-mesh-snapshot-realize-torch-light-p snapshot))))
+                :realize-attachment-light-p
+                (streaming-mesh-snapshot-realize-attachment-light-p snapshot))))
       (handler-bind
           ((luft:missing-chunk
              (lambda (condition)
@@ -381,14 +380,14 @@ generation before publication succeeds."
                        (streaming-scene-loaded scene)
                        collect resident)
                  #'<))
-         (resident-torch-p
+         (resident-attachment-p
            (plusp
             (length
-             (streaming-scene-resident-torch-support-keys
+             (streaming-scene-resident-attachment-support-keys
               scene resident-source-keys))))
          (output-keys
            (streaming-scene-canonical-owner-closure
-            scene (if resident-torch-p resident-source-keys (list key))))
+            scene (if resident-attachment-p resident-source-keys (list key))))
          (snapshot
            (make-streaming-region-snapshot
             scene output-keys bevel-width)))

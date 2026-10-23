@@ -45,6 +45,7 @@ the terrain brings its own.")
            #:*terminal-material*
            #:*terminal-material-placement*
            #:*terrain-material-placement*
+           #:*torch-flame-material*
            #:+large-world-horizontal-bits+
            #:+large-world-seed+
            #:+large-world-spawn-x+
@@ -88,4 +89,5 @@ the terrain brings its own.")
            #:mountain-sanctuary-terrain-height
            #:mountain-sanctuary-terrain-x-bounds
            #:scene-builder-mountain-border-wall
+           #:scene-builder-torch
            #:smooth-landscape-reading))

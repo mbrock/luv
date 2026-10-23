@@ -38,12 +38,10 @@ a future LoD must bring an explicit transition representation."
                     :authored-light-generation
                     (scene-authored-light-generation scene)
                     :content-revision (scene-content-revision scene)
-                    :torch-light-emission
-                    (scene-torch-light-emission scene)
                     :voxel-light-propagation-p
                     (scene-voxel-light-propagation-p scene)
                     :light-generation (scene-authored-light-generation scene)
-                    :torches (scene-torches scene)
+                    :attachments (scene-attachments scene)
                     :player-p (scene-player-p scene)
                     :frames-per-load frames-per-load
                     :residency-radius residency-radius
@@ -112,9 +110,8 @@ a future LoD must bring an explicit transition representation."
      :authored-light-provenance (scene-authored-light-provenance scene)
      :authored-light-generation (scene-authored-light-generation scene)
      :content-revision (scene-content-revision scene)
-     :torch-light-emission (scene-torch-light-emission scene)
      :voxel-light-propagation-p (scene-voxel-light-propagation-p scene)
-     :torches (scene-torches scene)
+     :attachments (scene-attachments scene)
      :player-p (scene-player-p scene))))
 
 (defstruct (scene-edit
@@ -127,11 +124,11 @@ a future LoD must bring an explicit transition representation."
   (new-placement nil :type (or null material-placement) :read-only t)
   (content-revision 0 :type (integer 0 *) :read-only t))
 
-(defun scene-edit-torch-conflict-p (scene cell)
-  "Whether changing CELL would invalidate a retained torch attachment."
-  (loop for attachment across (scene-torches scene)
-        thereis (or (= cell (torch-attachment-support-cell attachment))
-                    (= cell (torch-attachment-clearance-cell attachment)))))
+(defun scene-edit-attachment-conflict-p (scene cell)
+  "Whether changing CELL would invalidate a retained surface attachment."
+  (loop for attachment across (scene-attachments scene)
+        thereis (or (= cell (surface-attachment-support-cell attachment))
+                    (= cell (surface-attachment-clearance-cell attachment)))))
 
 (zdefun (edit-streaming-scene-cell :zone :luft/edit-cell)
     (scene cell new-placement)
@@ -155,7 +152,7 @@ published."
                  (luft:site-positive-p cell))
       (error "A scene edit needs one positive cell in the scene domain, not ~S."
              cell))
-    (when (scene-edit-torch-conflict-p scene cell)
+    (when (scene-edit-attachment-conflict-p scene cell)
       (return-from edit-streaming-scene-cell (values nil :attachment nil)))
     (multiple-value-bind (old-offset occupied-p)
         (material-cell-at (scene-material-cells scene) cell)
@@ -291,23 +288,23 @@ published."
         streaming-scene-canonical-owner-closure
         streaming-scene-dependency-guard-keys))
 
-(defun streaming-scene-resident-torch-support-keys (scene source-keys)
-  "Return sorted support owners for torches resident in SOURCE-KEYS."
+(defun streaming-scene-resident-attachment-support-keys (scene source-keys)
+  "Return sorted support owners for attachments resident in SOURCE-KEYS."
   (sort
    (remove-duplicates
-    (loop for attachment across (scene-torches scene)
+    (loop for attachment across (scene-attachments scene)
           for key = (luft:site-chunk-key
-                     (torch-attachment-support-cell attachment))
+                     (surface-attachment-support-cell attachment))
           when (member key source-keys :test #'eql)
             collect key)
     :test #'eql)
    #'<))
 
-(defun streaming-residency-changes-affect-torches-p
+(defun streaming-residency-changes-affect-attachments-p
     (scene changes old-source-keys desired-source-keys)
-  "Whether CHANGES can add, remove, or move a resident realized torch frame."
+  "Whether CHANGES can add, remove, or move a resident realized attachment frame."
   (let ((support-keys
-          (streaming-scene-resident-torch-support-keys
+          (streaming-scene-resident-attachment-support-keys
            scene (union old-source-keys desired-source-keys :test #'eql))))
     (some (lambda (support)
             (some (lambda (changed)
@@ -366,21 +363,21 @@ silently empty the desired residency window."
           (owner-removals
             (set-difference old-owner-keys desired-owner-keys :test #'eql))
           (changes (append arrivals departures width-changes)))
-      (let* ((torch-residency-change-p
-               (streaming-residency-changes-affect-torches-p
+      (let* ((attachment-residency-change-p
+               (streaming-residency-changes-affect-attachments-p
                 scene residency-changes old-source-keys desired))
-             (desired-torch-p
+             (desired-attachment-p
                (plusp
                 (length
-                 (streaming-scene-resident-torch-support-keys
+                 (streaming-scene-resident-attachment-support-keys
                   scene desired))))
              (full-closure-p
-               (or width-changes torch-residency-change-p))
-             (realize-torch-light-p
+               (or width-changes attachment-residency-change-p))
+             (realize-attachment-light-p
                (not
                 (null
-                 (or torch-residency-change-p
-                     (and desired-torch-p width-changes))))))
+                 (or attachment-residency-change-p
+                     (and desired-attachment-p width-changes))))))
         (setf (streaming-scene-focus scene) focus)
         (when changes
           (clrhash loaded)
@@ -402,13 +399,13 @@ silently empty the desired residency window."
                 (reduce #'min affected
                         :key (lambda (key)
                                (streaming-scene-key-distance key focus)))
-                :realize-torch-light-p realize-torch-light-p
+                :realize-attachment-light-p realize-attachment-light-p
                 :removals owner-removals))
               (owner-removals
                ;; A removal can leave no affected output owner to send to a
                ;; worker. Preserve the installed realized field when resident
-               ;; torch semantics are unchanged; only an exact empty resident
-               ;; torch set returns to the material-only base generation.
+               ;; attachment semantics are unchanged; only an exact empty resident
+               ;; attachment set returns to the material-only base generation.
                (setf (streaming-scene-replacement scene)
                      (make-streaming-removal
                       owner-removals
@@ -416,7 +413,7 @@ silently empty the desired residency window."
                        scene
                        (streaming-scene-mesh-stamp
                         scene nil bevel-width)
-                       (if desired-torch-p
+                       (if desired-attachment-p
                            (streaming-scene-light-generation scene)
                            (scene-authored-light-generation scene)))))))
             t))))))

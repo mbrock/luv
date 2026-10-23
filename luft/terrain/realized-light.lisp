@@ -1,9 +1,9 @@
 (in-package #:luft.terrain)
 
 ;;; ---------------------------------------------------------------------------
-;;; Realized torch light
+;;; Realized attachment light
 ;;;
-;;; A torch is authored on a cubical face but emits from the wick of its final
+;;; An attachment is authored on a cubical face but emits from the wick of its final
 ;;; realized surface frame.  This layer translates that continuous point into
 ;;; the discrete max-plus sources consumed by LUFT's one voxel-light solver.
 ;;; Geometry, residency, and publication freshness remain owned by their
@@ -35,12 +35,12 @@ are owned by this value and are never mutated after construction."
                   seed-sites seed-lights))
              (:copier nil)
              (:conc-name %realized-light-stamp-))
-  "Exact reusable identity of one realized torch-light solve.
+  "Exact reusable identity of one realized attachment-light solve.
 
 AUTHORED-LIGHT-PROVENANCE is the caller's immutable finished-input token and is
-compared by identity.  AUTHORED-LIGHT-REVISION names that input's non-torch
+compared by identity.  AUTHORED-LIGHT-REVISION names that input's non-attachment
 source and opacity revision.  The copied seed lanes name the geometry-dependent
-torch input.  No hash stands in for any value."
+attachment input.  No hash stands in for any value."
   (authored-light-provenance nil :read-only t)
   (authored-light-revision 0 :type (integer 0 *) :read-only t)
   (seed-sites (make-array 0 :element-type 'luft:site)
@@ -56,15 +56,15 @@ torch input.  No hash stands in for any value."
   (stamp nil :type realized-light-stamp :read-only t)
   (field nil :type luft:voxel-light-field :read-only t))
 
-(define-condition unrealizable-torch-light-source (error)
-  ((point :initarg :point :reader unrealizable-torch-light-source-point))
+(define-condition unrealizable-attachment-light-source (error)
+  ((point :initarg :point :reader unrealizable-attachment-light-source-point))
   (:report
    (lambda (condition stream)
      (format stream
-             "Torch wick ~S has no positive in-domain authored-air light seed."
-             (unrealizable-torch-light-source-point condition))))
+             "Attachment wick ~S has no positive in-domain authored-air light seed."
+             (unrealizable-attachment-light-source-point condition))))
   (:documentation
-   "A realized torch wick is outside the source domain, occluded, or too dim."))
+   "A realized attachment wick is outside the source domain, occluded, or too dim."))
 
 (declaim (inline %realized-light-finite-single-float
                  %quantize-max-plus-light-lane))
@@ -83,32 +83,32 @@ torch input.  No hash stands in for any value."
     (error "~A must contain at least three coordinates, not ~S." role point))
   (%realized-light-finite-single-float (elt point index) role))
 
-(defun realized-torch-wick-point
+(defun realized-attachment-wick-point
     (origin normal scale &optional (wick-offset 0.5f0))
-  "Return the exact single-float flame wick of a realized torch frame.
+  "Return the exact single-float flame wick of a realized attachment frame.
 
 The result is ORIGIN + WICK-OFFSET * SCALE * NORMAL.  The default offset is
-the canonical half-cell torch wick; a renderer may pass its shared flame
+the canonical half-cell wick; a renderer may pass its shared flame
 constant explicitly.  NORMAL must already be unit length, as required by the
 body/flame frame ABI."
-  (let* ((origin-x (%point-coordinate origin 0 "Torch-frame origin"))
-         (origin-y (%point-coordinate origin 1 "Torch-frame origin"))
-         (origin-z (%point-coordinate origin 2 "Torch-frame origin"))
-         (normal-x (%point-coordinate normal 0 "Torch-frame normal"))
-         (normal-y (%point-coordinate normal 1 "Torch-frame normal"))
-         (normal-z (%point-coordinate normal 2 "Torch-frame normal"))
-         (scale (%realized-light-finite-single-float scale "Torch-frame scale"))
+  (let* ((origin-x (%point-coordinate origin 0 "Attachment-frame origin"))
+         (origin-y (%point-coordinate origin 1 "Attachment-frame origin"))
+         (origin-z (%point-coordinate origin 2 "Attachment-frame origin"))
+         (normal-x (%point-coordinate normal 0 "Attachment-frame normal"))
+         (normal-y (%point-coordinate normal 1 "Attachment-frame normal"))
+         (normal-z (%point-coordinate normal 2 "Attachment-frame normal"))
+         (scale (%realized-light-finite-single-float scale "Attachment-frame scale"))
          (wick-offset
            (%realized-light-finite-single-float
-            wick-offset "Torch-frame wick offset"))
+            wick-offset "Attachment-frame wick offset"))
          (normal-length-squared
            (+ (* normal-x normal-x)
               (* normal-y normal-y)
               (* normal-z normal-z))))
     (unless (plusp scale)
-      (error "Torch-frame scale must be positive, not ~S." scale))
+      (error "Attachment-frame scale must be positive, not ~S." scale))
     (unless (<= (abs (- normal-length-squared 1.0f0)) 2.0f-4)
-      (error "Torch-frame normal is not unit length: ~S." normal))
+      (error "Attachment-frame normal is not unit length: ~S." normal))
     (let ((distance (* wick-offset scale)))
       (make-array
        3 :element-type 'single-float
@@ -200,7 +200,7 @@ body/flame frame ABI."
 (defun merge-realized-light-seeds (&rest groups)
   "Join GROUPS by site with componentwise RGB4 maximum.
 
-This is the duplicate-torch law: source order cannot change the solved field."
+This is the duplicate-attachment law: source order cannot change the solved field."
   (dolist (group groups)
     (check-type group realized-light-seeds))
   (let* ((count (reduce #'+ groups :key #'realized-light-seeds-count
@@ -269,18 +269,18 @@ This is the duplicate-torch law: source order cannot change the solved field."
                             (abs (- point-y (+ y 0.5d0)))
                             (abs (- point-z (+ z 0.5d0)))))))))))))))))
 
-(defun realized-torch-light-seeds
+(defun realized-attachment-light-seeds
     (domain authored-occupied-p wick-point authored-light)
-  "Discretize one continuous torch wick for LUFT's max-plus light solver.
+  "Discretize one continuous attachment wick for LUFT's max-plus light solver.
 
 Each axis brackets WICK-POINT against cell centers I+0.5, so at most eight
 cells are considered.  Only in-domain cells reported as air by the authored
 semantic occupancy callback survive.  Each RGB4 lane receives
-Q(max(0,L-L1(WICK,CENTER))).  A flat centered torch therefore produces the
+Q(max(0,L-L1(WICK,CENTER))).  A flat centered attachment therefore produces the
 exact same single source as the former adjacent-cell authoring path."
   (check-type authored-light (unsigned-byte 12))
   (unless (plusp authored-light)
-    (error "A torch needs positive authored RGB4 emission, not ~S."
+    (error "An attachment needs positive authored RGB4 emission, not ~S."
            authored-light))
   (let ((sites (make-array 8 :element-type 'luft:site))
         (lights (make-array 8 :element-type '(unsigned-byte 12)))
@@ -294,7 +294,7 @@ exact same single source as the former adjacent-cell authoring path."
            (incf count))))
      domain wick-point authored-occupied-p)
     (when (zerop count)
-      (error 'unrealizable-torch-light-source
+      (error 'unrealizable-attachment-light-source
              :point (copy-seq wick-point)))
     (make-realized-light-seeds
      (subseq sites 0 count) (subseq lights 0 count))))
@@ -303,7 +303,7 @@ exact same single source as the former adjacent-cell authoring path."
     (field point authored-occupied-p)
   "Max-plus sample immutable FIELD at a continuous authored-air point.
 
-The same center brackets and quantized L1 law used to seed a realized torch
+The same center brackets and quantized L1 law used to seed a realized attachment
 reconstruct its continuous light cone.  Occupied brackets are excluded by the
 authored semantic occupancy callback; no settled field storage is mutated."
   (check-type field luft:voxel-light-field)
@@ -318,9 +318,9 @@ authored semantic occupancy callback; no settled field storage is mutated."
      (luft:voxel-light-field-domain field) point authored-occupied-p)
     answer))
 
-(defun realized-torch-self-light
+(defun realized-attachment-self-light
     (field wick-point authored-occupied-p authored-light)
-  "Join the continuous field sample at WICK-POINT with the torch's own RGB4.
+  "Join the continuous field sample at WICK-POINT with the attachment's own RGB4.
 
 Self emission is a componentwise lower bound, while unrelated colored sources
 may still contribute brighter lanes."
@@ -362,7 +362,7 @@ may still contribute brighter lanes."
   (copy-seq (%realized-light-stamp-seed-lights stamp)))
 
 (defun realized-light-stamp= (left right)
-  "Whether two stamps justify reuse of the same realized torch-light solve."
+  "Whether two stamps justify reuse of the same realized attachment-light solve."
   (and (typep left 'realized-light-stamp)
        (typep right 'realized-light-stamp)
        (eq (%realized-light-stamp-authored-light-provenance left)
@@ -412,11 +412,11 @@ may still contribute brighter lanes."
     (domain material-cells opacity-table authored-sources
      authored-light-provenance authored-light-revision realized-seeds
      &key (field-revision authored-light-revision))
-  "Solve and own one immutable realized torch-light generation.
+  "Solve and own one immutable realized attachment-light generation.
 
 AUTHORED-SOURCES, AUTHORED-LIGHT-PROVENANCE, and AUTHORED-LIGHT-REVISION name
-the caller-owned non-torch light inputs.  REALIZED-SEEDS are the exact
-sorted/coalesced torch sources.
+the caller-owned non-attachment light inputs.  REALIZED-SEEDS are the exact
+sorted/coalesced attachment sources.
 FIELD-REVISION is only the legacy scalar carried by VOXEL-LIGHT-FIELD; reuse and
 staleness decisions must compare the generation's exact stamp."
   (check-type domain luft:world-domain)

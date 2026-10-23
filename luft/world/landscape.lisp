@@ -411,10 +411,9 @@ column itself."
      :authored-light-provenance (scene-authored-light-provenance empty)
      :authored-light-generation (scene-authored-light-generation empty)
      :content-revision 0
-     :torch-light-emission (scene-torch-light-emission empty)
      :voxel-light-propagation-p nil
      :light-generation (scene-authored-light-generation empty)
-     :torches #()
+     :attachments #()
      :player-p t
      :frames-per-load frames-per-load
      :residency-radius residency-radius

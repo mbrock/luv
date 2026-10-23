@@ -17,7 +17,7 @@
 (zdefun (schedule-streaming-scene-cohort :zone :luft/schedule-mesh-region
                                          :value (length output-keys))
     (scene production-system output-keys bevel-width priority
-     &key (realize-torch-light-p t) removals)
+     &key (realize-attachment-light-p t) removals)
   "Schedule one region and retain its whole replacement after submission succeeds."
   (when (streaming-scene-replacement scene)
     (error "Cannot schedule another region while a streaming replacement is active."))
@@ -26,7 +26,7 @@
   (let* ((snapshot
            (make-streaming-region-snapshot
             scene output-keys bevel-width
-            :realize-torch-light-p realize-torch-light-p))
+            :realize-attachment-light-p realize-attachment-light-p))
          (request
            (make-instance 'streaming-mesh-request
                           :key +streaming-cohort-production-key+
@@ -162,6 +162,6 @@
                             (streaming-scene-key-distance
                              key (streaming-scene-focus scene))))
              0)
-         :realize-torch-light-p t)
+         :realize-attachment-light-p t)
         (setf (streaming-scene-frame-counter scene) 0))
       affected)))

@@ -320,12 +320,16 @@ row's W lane, SEED is in [0,1), and SCALE is strictly positive.  Return DATA."
     (%torch-flame-reference-seed
      (first ticks) (second ticks) (third ticks))))
 
+(defparameter *torch-flame-tone* '(1.0 0.36 0.055)
+  "Linear tone of the renderer's drawn torch flame.")
+
+(defparameter *torch-flame-surface-emission* 1.8
+  "HDR strength the drawn torch flame multiplies its tone by.")
+
 (defun %torch-flame-authored-hdr-radiance ()
-  "Return the flame material's authored linear HDR radiance as three values."
-  (destructuring-bind (red green blue)
-      (material-kind-base-tone *torch-flame-material*)
-    (let ((strength
-            (material-kind-surface-emission *torch-flame-material*)))
+  "Return the drawn flame's authored linear HDR radiance as three values."
+  (destructuring-bind (red green blue) *torch-flame-tone*
+    (let ((strength *torch-flame-surface-emission*))
       (unless (and (realp strength) (not (minusp strength))
                    (every (lambda (channel)
                             (and (realp channel) (not (minusp channel))))

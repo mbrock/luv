@@ -69,7 +69,7 @@
            #:scene-authored-voxel-light
            #:scene-voxel-light
            #:scene-voxel-light-propagation-p
-           #:scene-torches
+           #:scene-attachments
            #:scene-mesh-generation
            #:scene-mesh-generation-light-generation
            #:scene-mesh-generation-request-stamp
@@ -96,7 +96,6 @@
            #:*light*
            #:make-render-mesh
            #:make-whole-domain-diagnostic-mesh
-           #:scene-builder-torch
            #:exposure-control
            #:make-fixed-exposure #:make-automatic-exposure
            #:exposure-value #:advance-exposure

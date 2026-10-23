@@ -41,7 +41,7 @@
              (:constructor %make-streaming-mesh-snapshot
                  (scene input-scene output-keys witness-keys resident-source-keys
                   bevel-width union-neighborhood stamp
-                  realize-torch-light-p reusable-light-generation
+                  realize-attachment-light-p reusable-light-generation
                   &optional mesh-cache)))
   "Immutable CPU input for one dependency-closed regional mesh request."
   (scene nil :read-only t)
@@ -60,7 +60,7 @@
   ;; finished instances into opaque and translucent passes later.
   (union-neighborhood nil :type hash-table :read-only t)
   (stamp nil :read-only t)
-  (realize-torch-light-p t :type boolean :read-only t)
+  (realize-attachment-light-p t :type boolean :read-only t)
   (reusable-light-generation nil
                              :type (or null realized-light-generation)
                              :read-only t)

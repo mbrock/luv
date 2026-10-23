@@ -124,6 +124,15 @@ the fixture scenes.  The atelier, =luft/render=, uses all of them;
 exported, and the atelier attaches =luft.world= when it loads, so the
 renderer's own package never names the world.
 
+A torch is now one game's [[lisp:luft.terrain:surface-attachment]]: a
+face-anchored thing made of a material kind.  The terrain keeps an
+attachment's support cell solid and its clearance cell clear, refusing
+edits that would break either, and an attachment's light comes from its
+material; the Luft world's =scene-builder-torch= attaches its flame
+material, and the renderer's drawn flame keeps its own tone.  No path yet
+realizes attachments into frames, so attachment light is still the empty
+seed set it was for torches.
+
 A game's palette reaches the terrain in two places.  A scene builder takes
 a material vocabulary and the placements a cell gets by default, and a
 [[lisp:luft.terrain:world-source]] carries the vocabulary its chunks are
@@ -143,15 +152,12 @@ preparer a streamed product is simply the mesh.
 
 What still sits on the wrong side of the line:
 
-- Torches are terrain vocabulary: the scene carries torch attachments, the
-  streaming scene checks them through =scene-edit-torch-conflict-p= and
-  torch support keys, and realized light seeds from torch wicks.
+- The scene still carries a =player-p= flag, and =luft/simulation= puts
+  the collision sweep, standing, and walking routes, which are terrain
+  queries, beside a walking character and the world clock, which are a
+  game's.  The follow camera lives in the atelier's studio.
 - The atelier shares =luft.render= with the renderer, which is why it
   attaches =luft.world= at load rather than in a package definition.
-- =luft/simulation= puts the collision sweep, standing, and walking
-  routes, which are terrain queries, beside a walking character and the
-  world clock, which are a game's.  The follow camera lives in the
-  atelier's studio.
 
 * Luvcraft is closer than its code suggests
 :PROPERTIES:
@@ -314,8 +320,9 @@ moved the palette, the landscapes, and the fixtures into =luft/world= and
 gave the terrain a world-source protocol; streamed alpine chunks, the
 mountain sanctuary, and the compiled palette are identical cell for cell to
 the code before it, and =luft/terrain/test= plays a second game on the
-terrain alone.  #TNOILN lists what remains; the next piece is torches as
-change facts.
+terrain alone.  #TNOILN lists what remains; the fourth cut made
+torches one kind of surface attachment, so the terrain no longer names
+them.  The next pieces are the player flag and the walking queries.
 
 ** TODO Make the isometric wizard a game of its own
 :PROPERTIES:

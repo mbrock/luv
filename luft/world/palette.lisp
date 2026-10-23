@@ -116,6 +116,20 @@
                   *terminal-material-placement*)
    :limit #xff))
 
+(defvar *torch-flame-material* nil)
+
+;;; A torch is an attachment made of flame.
+(setf *torch-flame-material*
+      (ensure-semantic-instance
+       *torch-flame-material* 'material-kind
+       :name :torch-flame :base-tone '(1.0 0.36 0.055)
+       :light-emission '(15 9 3) :surface-emission 1.8))
+
+(defun scene-builder-torch (builder x y z axis side &key (u 0.0) (v 0.0))
+  "Attach a torch to support cell X/Y/Z's outward AXIS/SIDE face."
+  (scene-builder-attach builder x y z axis side *torch-flame-material*
+                        :u u :v v))
+
 (defun make-world-scene-builder (&rest initargs &key &allow-other-keys)
   "Make a scene builder over this palette: earth by default, limestone for
 architecture."
