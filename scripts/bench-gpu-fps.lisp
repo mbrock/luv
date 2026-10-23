@@ -308,9 +308,12 @@ The old renderer relights the same occupied cells with its own light solver."
                    (r::world-terminal-device terminal)))))
        (luv.terminal:send-pty-device-text
         device (format nil "printf '\\033[2J\\033[HLUVCRAFT GPU BENCHMARK\\n'; i=1; while [ $i -le 24 ]; do printf 'line %02d | seed 7 | fixed native target\\n' \"$i\"; i=$((i+1)); done~%"))
-       (sleep 0.3)
-       (let ((text (luv.terminal:call-with-pty-device-terminal device #'luv.ghostty:terminal-text)))
-         (assert (search "line 24" text)))
+       ;; PTY echo can arrive before the shell executes the fixture command.
+       (loop repeat 200
+             for text = (luv.terminal:call-with-pty-device-terminal device #'luv.ghostty:terminal-text)
+             when (search "line 24" text) return t
+             do (sleep 0.05)
+             finally (error "Terminal fixture output did not become ready: ~S" text))
        (unless old-p (r::advance-viewer-world-text host))))
     (:companion
      (let* ((turn (make-instance 'luv.application-agent:turn :prompt "Benchmark thought"))
