@@ -292,11 +292,11 @@ the layer of #W9QMPT that owns the feature afterwards.
 | Streaming, production | 1k | done | terrain | delete |
 | Player, walking, step-up | 0.6k | done (#8E110Y) | terrain queries, game character | delete |
 | Pathing (Move To) | 0.3k | click-to-walk A* | terrain queries | delete |
-| Place, mine, pick | in =app.lisp= | done, with undo | terrain edits, game rules | carried kind, reach rules |
+| Place, mine, pick | in =app.lisp= | done, with undo and bevel-face rim (#7O90OS) | terrain edits, game rules | carried kind, reach rules |
 | Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | shared old instruments (#291ELY) | game | host protocol; both inventory modes and profiles |
 | Physics, balls | 3.7k | reused solver, throws, sphere figures (#0JMB9O) | physics, game | Luft occupancy/residency adapter; spring behaviours remain |
 | Critters | 0.7k | none | game | minds neutral; bodies re-hosted on queries |
-| Particles | 0.2k | none | renderer stage | small |
+| Particles | 0.2k | reused mining burst, material-tinted figures (#7O90OS) | game simulation, figure stage | old motion and bounded population, Luft tones |
 | First-person hands, held items | 1k | none | game, on a renderer stage | animation neutral |
 | Sky, clock, night | 0.4k | done, and further | renderer | delete |
 | World text | 0.4k | done | renderer | delete |
@@ -1124,3 +1124,47 @@ speed and invalidates residency focus. A stationary-player test observes
 the demanded window grow. Native checks also observed exposure 0.7 × 2 = 1.4
 in the uploaded frame, changed projection and construction lanes, a replaced
 bevel renderer, and the movement/jump/pointer consumers using their new values.
+
+** DONE The aimed face and the broken block answer back
+:PROPERTIES:
+:ID: 7O90OS
+:END:
+
+The game reuses Luvcraft's joined, pixel-feathered dark-and-gold target rim.
+Only the world boundary changes: its four corners used to be the voxel's
+uncut square; now the ordinary face triangles from the actual neighboring
+star patches supply the boundary. Cancelling shared triangle edges preserves
+the bevel inset and the joins with neighboring cells. Fixture bodies keep
+the old convention of marking the picked cell face, not the barrel's curved
+silhouette. Non-solid attachments were not targets in the old game's
+=block-solid-p= raycast and are not invented as new targets here.
+
+A successful removal emits the original eighteen deterministic fragments,
+with the same spread, size, lifetime, gravity, and bounded population. The
+game advances the original particle system; the figure stage draws small
+depth-tested boxes, transformed from Y-up to Z-up and tinted by the Luft
+material's side tone. A particle-only lighting floor keeps backlit material
+readable without changing body lighting. Failed edits do not emit. The
+existing stock accounting, edit history, and ball figure stage remain in
+the path.
+
+The audit found no mining or placement sounds: =sound.lisp= is film audio.
+Nor is there a placement burst or a mine/place hand-swing animation in the
+old game. Placement feedback is the placed block and the retargeted rim.
+Walking bob, landing motion, and equip easing live with the body port; this
+change does not duplicate its geometry or animation. Balls already reuse
+the old throw/marble handler, including every fifth throw's smiley.
+
+Headless software-Vulkan captures at 800 × 600 compare both games aiming at
+the same brick face, placing red wool, and breaking it at 0.12 seconds. The
+real E-key and pointer-button event handlers perform the edits; both games
+have zero placement particles and eighteen mining fragments. Barrel captures
+confirm the shared cell-face convention. Further controls check air has no
+rim, releasing the pointer removes it, and expired debris is compacted away.
+Run =scripts/capture-luvcraft-feedback.lisp= to repeat these captures; it also
+throws a ball with B and left-click to exercise the shared figure stage.
+The capture clock is demand-driven and the software driver's fatal canvas
+watchdog is disabled. SDL's offscreen driver cannot enter native relative
+pointer mode, so the harness establishes that flag before dispatching action
+events; it does not bypass the editing handlers. The permanent regression
+test exercises the same raycast and mouse-edit boundary without a GPU.

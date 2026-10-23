@@ -4,10 +4,12 @@
 ;;; triangles write depth; the original ball's procedural paint is reused.
 (defclass ball-figure-drawing (render::figure-drawing)
   ((sphere-program :accessor ball-sphere-program)
+   (particle-program :accessor particle-program)
    (shadow-program :accessor ball-shadow-program)))
 
 (defclass ball-figure-binding (render::figure-binding)
   ((sphere-binding :accessor ball-sphere-binding)
+   (particle-binding :accessor particle-binding)
    (shadow-binding :accessor ball-shadow-binding)
    (sphere-buffer :initform nil :accessor ball-sphere-buffer)))
 
@@ -22,6 +24,17 @@
               device :label "Luvcraft balls on Luft"
               :vertex (luft.render.shaders::ball-vertex-specification)
               :fragment (luft.render.shaders::ball-fragment-specification)
+              :targets (mapcar (lambda (format) `(:format ,format)) formats)
+              :sample-count samples
+              :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                               :depth-compare :less)))
+            (particle-program drawing)
+            (render::own-gpu-object
+             drawing
+             (render:make-drawing-program
+              device :label "Luvcraft mining fragments"
+              :vertex (luft.render.shaders::figure-box-vertex-specification)
+              :fragment (luft.render.shaders::particle-fragment-specification)
               :targets (mapcar (lambda (format) `(:format ,format)) formats)
               :sample-count samples
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
@@ -50,6 +63,12 @@
              binding (render:make-program-binding
                       (ball-sphere-program drawing) device :camera-state camera
                       :figure-instances (render::figure-binding-buffer binding)))
+            (particle-binding binding)
+            (render::own-gpu-object
+             binding (render:make-program-binding
+                      (particle-program drawing) device :camera-state camera
+                      :figure-instances (render::figure-binding-buffer binding)
+                      :box-vertices (render::figure-box-vertices drawing)))
             (ball-shadow-binding binding)
             (render::own-gpu-object
              binding (render:make-program-binding
@@ -63,11 +82,13 @@
     (destructuring-bind (kind first count) run
       (render:encode-program
        (ecase kind (0 (render::scene-drawing-program drawing))
-                   (1 (render::figure-box-program drawing)) (2 (ball-sphere-program drawing)))
+                   (1 (render::figure-box-program drawing)) (2 (ball-sphere-program drawing))
+                   (3 (particle-program drawing)))
        pass
        (ecase kind (0 (render::figure-binding-program-binding binding))
-                   (1 (render::figure-binding-box-binding binding)) (2 (ball-sphere-binding binding)))
-       (luv:make-gpu-draw-command :vertex-count (ecase kind (0 6) (1 36) (2 3072))
+                   (1 (render::figure-binding-box-binding binding)) (2 (ball-sphere-binding binding))
+                   (3 (particle-binding binding)))
+       (luv:make-gpu-draw-command :vertex-count (ecase kind (0 6) ((1 3) 36) (2 3072))
                                   :first-instance first :instance-count count)))))
 
 (defmethod render::encode-scene-drawing-shadow

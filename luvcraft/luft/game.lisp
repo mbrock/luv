@@ -45,7 +45,11 @@ quickbar begins: things to build a house with, colours, and a lamp.")
    (ball-in-hand-p :initform nil :accessor viewer-ball-in-hand-p)
    (ball-previous-centers :initform (make-hash-table) :reader viewer-ball-previous-centers)))
 
-(clim:define-application-frame luvcraft-viewer (ball-game-state render:game-host)
+(defclass feedback-game-state ()
+  ((particles :initform (make-instance 'luvcraft::block-particle-system)
+              :reader viewer-particles)))
+
+(clim:define-application-frame luvcraft-viewer (feedback-game-state ball-game-state render:game-host)
   ((luvcraft-world :initarg :luvcraft-world :reader luvcraft-viewer-world
                    :documentation "Luvcraft's own world: its source and edits as read.")
    (resume :initarg :resume :initform nil :reader luvcraft-viewer-resume)
@@ -185,6 +189,9 @@ quickbar begins: things to build a house with, colours, and a lamp.")
         ;; deliberately only a visual identity (all films share one reel).
         (apply #'luvcraft::record-block-edit overlay block coordinate)
         (when (and old-block (null placement))
+          (luvcraft::smash-block-particles
+           (viewer-particles viewer) old-block
+           (apply #'luvcraft.world:make-world-coordinate coordinate))
           (setf (viewer-held-block viewer) old-block)
           (put-on-hotbar viewer old)))
       (values edit status))))

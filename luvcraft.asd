@@ -236,7 +236,8 @@
                (:file "luvcraft/luft/ball-drawing")
                (:file "luvcraft/luft/agents")
                (:file "luvcraft/luft/agent-tools")
-               (:file "luvcraft/luft/presentation"))
+               (:file "luvcraft/luft/presentation")
+               (:file "luvcraft/luft/feedback"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"

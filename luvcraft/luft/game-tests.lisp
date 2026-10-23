@@ -156,3 +156,67 @@
         (host::initialize-viewer-agents viewer)
         (is = 3 (length (host::viewer-agents viewer)))
         (is equal saved (host::agent-inhabitant-descriptions viewer saved))))))
+
+(define-test mining-at-the-crosshair-emits-material-tinted-fragments-only-on-success
+  (let* ((block luvcraft::*red-wool-block*)
+         (placement (game:block-placement block))
+         (world (luvcraft:make-empty-little-block-world :chunk-height 16))
+         (source (game:luvcraft-world-luft-source world))
+         (builder (luft.terrain:make-scene-builder
+                   :horizontal-bits 11
+                   :material-vocabulary (game:luvcraft-palette-vocabulary game:*luvcraft-palette*)))
+         (producer (luv.production:make-single-worker-production-system)))
+    (unwind-protect
+         (progn
+           (luft.terrain:scene-builder-cell builder 1032 1033 5 :material placement)
+           (let* ((scene (luft.terrain:make-streaming-scene
+                          (luft.terrain:finish-scene-builder builder :voxel-light-propagation-p nil)))
+                  (viewer (make-instance 'host:luvcraft-viewer :source scene :luvcraft-world world
+                                         :production-system producer :hotbar (list placement)
+                                         :camera (render:make-fly-camera
+                                                  :position (luv.arithmetic.lisp.vec3:make-vec3 1032.5 1030.5 5.5)
+                                                  :yaw (/ pi 2) :pitch 0.0))))
+             ;; Source-backed edits retain resident material records, unlike
+             ;; the finite-scene fixture's initial bare fiber store. Supply
+             ;; its empty halo too, so the real production snapshot is valid.
+             (loop for x from 15 to 17 do
+               (loop for y from 15 to 17
+                     for key = (luft:chunk-key-at (* 64 x) (* 64 y))
+                     for fibers = (or (gethash key (luft.terrain:streaming-scene-store scene))
+                                      (luft:make-chunk-fibers (luft.terrain:scene-domain scene) key))
+                     do (setf (gethash key (luft.terrain:streaming-scene-store scene))
+                              (luft.terrain:%make-resident-cell-chunk
+                               key 1 fibers
+                               (or (gethash key (luft.terrain::material-store-chunks
+                                                 (luft.terrain:scene-material-cells scene)))
+                                   (make-hash-table :test #'eql))))))
+             (setf (slot-value scene 'luft.terrain::source) source
+                   (slot-value viewer 'render::canvas) (luv:make-sdl-canvas :width 800 :height 600)
+                   (render:viewer-mode viewer) (make-instance 'render:first-person-mode)
+                   (render:viewer-pointer-captured-p viewer) t)
+             (let* ((hit (render::update-viewer-inspection viewer))
+                    (boundary (host::target-face-boundary
+                               scene (render:site-inspection-site hit) (render:site-inspection-cell hit))))
+               ;; An isolated block's true front starts a bevel tick in from
+               ;; each side, rather than at the uncut voxel corners.
+               (is = 4 (length boundary))
+               (dolist (p boundary)
+                 (true (member (luv.arithmetic.lisp.vec3:vec3-x p) '(1032.125 1032.875) :test #'=))
+                 (is = 1033 (luv.arithmetic.lisp.vec3:vec3-y p))
+                 (true (member (luv.arithmetic.lisp.vec3:vec3-z p) '(5.125 5.875) :test #'=))))
+             (luv:handle-canvas-event
+              viewer nil (make-instance 'luv:canvas-pointer-button-press-event
+                                        :timestamp 0 :x 400 :y 300 :button :left))
+             (is eq :edited (render:viewer-last-edit-status viewer))
+             (is = 18 (luvcraft::block-particle-count (host::viewer-particles viewer)))
+             (let ((figures (render:viewer-figures viewer)))
+               (is = 18 (length figures))
+               (is equal (append (nth-value 1 (luft.terrain:material-kind-oriented-tones
+                                               (luft.terrain:material-placement-kind placement))) '(0.0))
+                   (fifth (first figures))))
+             ;; The same click now hits air: there is no phantom second burst.
+             (luv:handle-canvas-event
+              viewer nil (make-instance 'luv:canvas-pointer-button-press-event
+                                        :timestamp 0 :x 400 :y 300 :button :left))
+             (is = 18 (luvcraft::block-particle-count (host::viewer-particles viewer)))))
+      (luv.production:stop-production-system producer))))

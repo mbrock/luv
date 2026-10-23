@@ -199,11 +199,17 @@
          (corners (and hit (luvcraft-target-face-corners hit)))
          (camera (luvcraft-session-camera session))
          (eye (camera-position camera))
-         (focal (/ (tan (/ (camera-field-of-view camera) 2d0))))
-         (vertices (make-array 0 :element-type 'single-float
-                                :adjustable t :fill-pointer 0)))
+         (focal (/ (tan (/ (camera-field-of-view camera) 2d0)))))
+    (multiple-value-bind (right up forward) (camera-basis camera)
+      (make-face-marker-vertices corners eye right up forward focal width height))))
+
+(defun make-face-marker-vertices (corners eye right up forward focal width height)
+  "Project a planar face boundary into the shared feathered target rim.
+The caller supplies its world-space camera basis, independent of up axis."
+  (let ((vertices (make-array 0 :element-type 'single-float
+                               :adjustable t :fill-pointer 0)))
     (when corners
-      (multiple-value-bind (right up forward) (camera-basis camera)
+      (let ((count (length corners)))
         (labels ((project (point)
                    (let* ((delta (make-vec3 (- (vec3-x point) (vec3-x eye))
                                             (- (vec3-y point) (vec3-y eye))
@@ -251,11 +257,11 @@
                               (0.55 0.85 0.73 0.48 1.0)
                               (1.5 0.018 0.022 0.028 1.0)
                               (2.5 0.0 0.0 0.0 0.0))))
-                (dotimes (edge 4)
+                (dotimes (edge count)
                   (let ((a (nth edge points))
-                        (b (nth (mod (1+ edge) 4) points))
+                        (b (nth (mod (1+ edge) count) points))
                         (ma (nth edge miters))
-                        (mb (nth (mod (1+ edge) 4) miters)))
+                        (mb (nth (mod (1+ edge) count) miters)))
                     (loop for (inner outer) on bands while outer
                           do (vertex a ma inner)
                              (vertex b mb inner)
