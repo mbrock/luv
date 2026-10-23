@@ -37,24 +37,27 @@
   (luvcraft::luvcraft-focus-carries-player-p ride))
 
 (defmethod render:viewer-focus-entered ((ride luvcraft::critter-ride) (viewer luvcraft-viewer))
-  (setf (viewer-ride-return-p viewer) nil)
   (luvcraft:clear-movement-intent (viewer-rider-intent viewer))
   (luvcraft::carry-luvcraft-player viewer (luvcraft::critter-ride-critter ride)))
 
 (defmethod render:viewer-focus-left ((ride luvcraft::critter-ride) (viewer luvcraft-viewer))
-  (setf (viewer-ride-return-p viewer) t)
   (luvcraft:clear-movement-intent (viewer-rider-intent viewer))
   (luvcraft::luvcraft-focus-left ride viewer))
 
 (defmethod render:viewer-focus-return-camera-pose ((viewer luvcraft-viewer) origin)
-  (when (and (viewer-ride-return-p viewer) (render:viewer-player viewer)
-             (typep (render:viewer-mode viewer) 'render:first-person-mode))
+  ;; As in Luvcraft, return to the player's current eyes: gravity may have
+  ;; moved them while a wall owned the view. Rides use this same return.
+  (if (and (render:viewer-player viewer)
+           (typep (render:viewer-mode viewer) 'render:first-person-mode))
     (let ((p (terrain:body-position (terrain:character-body (render:viewer-player viewer)))))
       (render:make-camera-pose
        :position (vec3:make-vec3 (vec3:vec3-x p) (vec3:vec3-y p)
                                  (+ (vec3:vec3-z p) render::*first-person-eye-height*))
        :yaw (render:camera-pose-yaw origin) :pitch (render:camera-pose-pitch origin)
-       :field-of-view (render:camera-pose-field-of-view origin)))))
+       :field-of-view (render:camera-pose-field-of-view origin)))
+    ;; Stationary focuses (including terminal walls) ease back to the saved
+    ;; pose too; NIL makes the host cut straight back to ordinary following.
+    origin))
 
 (defmethod render:handle-viewer-focus-event
     ((ride luvcraft::critter-ride) (viewer luvcraft-viewer) canvas event)

@@ -56,6 +56,55 @@
     (vec3:make-vec3 (+ (vec3:vec3-x p) offset) (+ (vec3:vec3-z p) offset)
                     (vec3:vec3-y p))))
 
+;;; Give the original safe-viewport framing solver a wall in its own axes.
+;;; This is only a geometric view, not a second terminal or block world.
+(defclass terminal-framing-surface (luvcraft::terminal-surface)
+  ((surface :initarg :surface :reader framing-surface)
+   (viewer :initarg :viewer :reader framing-viewer)))
+
+(defmethod luvcraft::terminal-surface-physical-width ((surface terminal-framing-surface))
+  (render::terminal-surface-width (framing-surface surface)))
+
+(defmethod luvcraft::terminal-surface-physical-height ((surface terminal-framing-surface))
+  (render::terminal-surface-height (framing-surface surface)))
+
+(defmethod luvcraft::terminal-surface-lower-left-point
+    ((surface terminal-framing-surface) &optional (offset 0.006))
+  (presentation-position
+   (framing-viewer surface)
+   (render::terminal-surface-point
+    (framing-surface surface) 0 0 (- offset render::*terminal-surface-offset*))))
+
+(defmethod render:viewer-focus-camera-pose
+    ((state render::viewer-terminals) (viewer luvcraft-viewer))
+  (let ((terminal (render::viewer-terminals-focus state)))
+    (when terminal
+      (let* ((surface (render::world-terminal-surface terminal))
+             (framing (make-instance
+                       'terminal-framing-surface :surface surface :viewer viewer
+                       :face (cdr (assoc (render::terminal-surface-normal surface)
+                                         '(((1 0 0) . :right) ((-1 0 0) . :left)
+                                           ((0 1 0) . :front) ((0 -1 0) . :back))
+                                         :test #'equal))
+                       :block-width (render::terminal-surface-width surface)
+                       :block-height (render::terminal-surface-height surface))))
+        (destructuring-bind (width height) (luv:canvas-extent (render:viewer-context viewer))
+          ;; The shared workbench owns the top status line, not an overlay.
+          (let ((left 0) (top (if (luv.workbench:application-workbench viewer)
+                                 mcluv::+status-bar-height+ 0))
+                (right 0) (bottom 0))
+            (dolist (overlay (render:viewer-overlays viewer))
+              (multiple-value-bind (l u r b) (render::viewer-overlay-focus-insets overlay viewer)
+                (setf left (max left l) top (max top u)
+                      right (max right r) bottom (max bottom b))))
+            (let ((pose (luvcraft::terminal-focus-camera-pose
+                         framing width height left top right bottom)))
+              (render:make-camera-pose
+               :position (host-position viewer (luvcraft::camera-pose-position pose))
+               :yaw (- (/ pi 2) (luvcraft::camera-pose-yaw pose))
+               :pitch (luvcraft::camera-pose-pitch pose)
+               :field-of-view (luvcraft::camera-pose-field-of-view pose)))))))))
+
 (defmethod luvcraft:luvcraft-session-canvas ((viewer luvcraft-viewer))
   (render:viewer-canvas viewer))
 (defmethod luvcraft:luvcraft-session-context ((viewer luvcraft-viewer))

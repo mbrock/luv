@@ -299,14 +299,14 @@ the layer of #W9QMPT that owns the feature afterwards.
 | Particles | 0.2k | reused mining burst, material-tinted figures (#7O90OS) | game simulation, figure stage | old motion and bounded population, Luft tones |
 | First-person hands, held items | 1k | original bounded hands and ball (#DEHFD4) | game, native HDR viewmodel stage | original animation, geometry and shaders |
 | Sky, clock, night | 0.4k | original atmosphere/profile/clock + Luft night (#S84HR6) | game, renderer | shared shader functions; game-owned clock and engine knobs |
-| World text | 0.4k | done | renderer | delete |
-| Terminal walls, phone | 2.8k | game terminal walls and modal shell focus (#PXUPMA) | game, on renderer stages | Urbit and focus camera remain; phone skipped |
+| World text | 0.4k | renderer text and terminal batches | renderer, capture tooling | old =:world-text-string= is a startup diagnostic banner, not authored signs; not persisted |
+| Terminal walls, phone | 2.8k | game walls, modal shell focus and original camera framing/easing (#PXUPMA) | game, on renderer stages | Urbit remains; phone skipped |
 | Portals, mirror, video, tape, film | 2.6k | none | game, on renderer stages | Darwin and libav hosting; tape and film are behaviours |
 | Agents: gnome, cat, Fantus | 5.8k | original SDFs, dialogue and cloud (#JZWPAI) | game | shared presentation adapter; Luft tools and physical bodies |
 | Birthday content | 3.2k | none | game | follows stages and agents |
 | Knobs, intent, camera, sound, lobby | 1k | shared knobs including old text controls, lobby | game, luv | view bob and film soundtrack remain |
 | CLIM menus, legend, metabar | 1.4k + 4.8k | game workbench, complete F1/H legend (#PXUPMA) | luv | shared instrument layout |
-| Capture, gazetteer, benchmark | 0.9k | frame recording, Tracy | luv, game | gazetteer needs named views |
+| Capture, gazetteer, benchmark | 0.9k | frame recording, Tracy, matched old/new capture scripts | luv, game | old gazetteer is seven fixed screenshot scene recipes, not saved player views |
 
 About a quarter of Luvcraft, some 13,000 lines of renderer, meshing,
 streaming, walking, world text, and terminal walls, is engine that
@@ -1292,10 +1292,42 @@ Changing optical weight advances the installed renderer revision 0 → 1;
 the capture republishes terminal surfaces after rebuilding that renderer.
 Old/new text-metabar captures come from =capture-knob-metabars.lisp=.
 
+/Terminal camera follow-up./ Tab now gives the host the old
+=terminal-focus-camera-pose= solver through a geometric surface adapter.
+It retains the original oblique focus angles, narrowed FOV, corner-by-corner
+safe-viewport fit and 12/s exponential easing. The safe area includes the
+shared hotbar and the workbench's top status line. Leaving eases to the
+player's current eyes (gravity can move them while focused), or the saved
+free-camera pose; riding uses the same return rather than its own flag.
+
+=scripts/capture-terminal-camera.lisp= dispatches portable Tab, typed
+=printf=, Return and Shift-Tab events in both native software-Vulkan games,
+checks actual PTY output, and captures the same 800 by 600 wall before,
+0.1 seconds into entry, focused, 0.1 seconds into return, and returned.
+The camera poses match within 0.002 cells/radians in all five states;
+focused text fits between both HUD bands. The fatal canvas watchdog is
+disabled for these slow captures. SDL offscreen cannot capture a relative
+pointer: the harness supplies the routing flag and disables the old game's
+pretend recapture. This exercises the old uncaptured cinematic return;
+on real pointer recapture the old game intentionally snaps to avoid mouse
+look fighting the return. Luft already leaves modal focus with the pointer
+released. The distant Luft glyphs still alias more than the old ones;
+this camera port does not claim pixel-identical text rendering.
+The public host regression covers all four wall orientations, original
+framing equivalence, Shift-Tab dismissal and intermediate return FOV; removing
+the framing method makes it fail. Existing riding regressions remain green.
+
+/Diagnostic tooling, not missing gameplay./ The source audit corrects the
+earlier parity sweep: =gazetteer.lisp= defines seven fixed screenshot scenes
+with world/camera/sky factories and capture APIs, not a player's named-place
+bookmarks. =:world-text-string= in =start-luvcraft= creates an optional
+startup Slug proof banner, not sign placement or writing. Neither appears
+in the old save format. These remain old capture/diagnostic tooling; no
+authoring UI, bookmark persistence or replacement recipes are invented.
+Luft's existing capture scripts and text batches serve current comparisons.
+
 /Left./ Tape download/activation; film projection, playback, rewind and
-soundtrack; Urbit activation and the old terminal focus-camera easing;
-diagnostic world text/sign authoring and gazetteer named views where not
-exposed by the host; detailed companion construction previews, transcript
+soundtrack; Urbit activation; detailed companion construction previews, transcript
 cassettes, agent walls and the remaining old tool vocabulary; turtle atlas
 relief and cast shadows rather than the current box figures. View bob and
 landing dip belong with the old player-body phase and are noted for the
