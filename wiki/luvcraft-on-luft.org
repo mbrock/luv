@@ -290,7 +290,7 @@ the layer of #W9QMPT that owns the feature afterwards.
 | Light (sky, block) | 1.1k + frontier 1.6k | streamed voxel light | terrain | field (#JDB26Y), frontier language (#LX8GZ2) |
 | Meshing, renderer, TAA, pacing | 8k | done, and cheaper | terrain, renderer | delete |
 | Streaming, production | 1k | done | terrain | delete |
-| Player, walking, step-up | 0.6k | done (#8E110Y) | terrain queries, game character | delete |
+| Player, walking, step-up | 0.6k | original walking motor and autojump (#A1K2A1) | terrain queries, game character | shared motor; Luft sweep/clearance adapter, not a second solver |
 | Pathing (Move To) | 0.3k | click-to-walk A* | terrain queries | delete |
 | Place, mine, pick | in =app.lisp= | done, with undo and bevel-face rim (#7O90OS) | terrain edits, game rules | carried kind, reach rules |
 | Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | shared old instruments (#291ELY) | game | host protocol; both inventory modes and profiles |
@@ -1160,6 +1160,51 @@ both turtles from height 10 to 8, with matching position and gait. Geometry
 is reused, not visually substituted; lighting is not pixel-identical, and
 the ball is mostly hidden by the shared hotbar. The earlier figure port's
 turtle atlas/shadow limitations are subsequently closed by #TG0JJU.
+
+*** DONE Walk up a clear one-block ledge with the original motor
+:PROPERTIES:
+:ID: A1K2A1
+:END:
+
+Luvcraft on Luft calls the original =step-walking-body=, the scalar motor
+under both held input and =locomotion.lisp='s destinations. Its acceleration,
+one-cell clearance decision, jump impulse, gravity and terminal fall speed
+are not a new implementation. Only =move-body-axis= and
+=body-position-clear-p= cross an adapter into Luft's swept contact and full
+box occupancy. No hidden Luvcraft collision world is queried. The existing
+Luft speed, acceleration, jump and gravity controls feed the motor; old
+Luvcraft has no separate autojump knob (step height is a one-cell constant).
+
+The terrain clock offers =advance-character-motion= so a game's character
+can choose that motor without integrating twice. Ordinary Luft characters
+and creative flight retain their previous motor. The host installs the
+game character at construction and when replacing its player, including a
+camera reset. Mounted turtle focus still suspends player simulation: WASD
+reins the original turtle rather than applying a player's autojump to its
+seat. The original hands consume the resulting velocity and grounded state,
+so bob eases out airborne and touchdown drives the existing landing dip.
+
+The public scalar regression now covers a clear one-block ledge, a two-block
+wall and a ledge beneath a low ceiling. A host regression dispatches portable
+W press/release events for all three and checks passage, peak height and
+settled support; the original riding input regressions remain in place.
+
+Native SDL/offscreen software-Vulkan runs dispatch the same portable W events
+in both games over a staged stone floor. From feet height 2, the clear ledge
+reaches 3.65 on Luft and 3.30 in old Luvcraft, then settles at 3; both blocked
+controls stay at 2 and stop before the obstacle. This retains Luft's existing
+jump speed 9 versus old Luvcraft's 8, not an identical trajectory. The original
+Luft motor control stays below the clear ledge. Both games reach bob amount 1;
+the clear landing produces dip depths 0.189 and 0.126 respectively, while the
+wall and ceiling produce no landing dip. The first new captures lacked a
+published mesh and were discarded; the repeated run uses the real streamed
+source and inspects rendered stone geometry. SDL offscreen needs the capture
+routing flag supplied; Metal and hardware execution were not tested.
+
+=make=, =make test=, both standalone application builds and all 33 available
+ASDF suites pass with two workers. Ghostty/terminal suites remain unavailable
+in the slim environment; the system foot process needs its inherited Nix
+library path cleared, and shader validation needs =spirv-val= on PATH.
 
 *** DONE Give Luvcraft companions bodies and tools on Luft
 :PROPERTIES:

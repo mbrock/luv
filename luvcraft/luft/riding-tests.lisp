@@ -23,6 +23,48 @@
    viewer nil (make-instance (if release 'luv:canvas-key-release-event 'luv:canvas-key-press-event)
                             :timestamp 0 :key-name name :modifiers modifiers)))
 
+(defun autojump-test-viewer (obstacle)
+  (let* ((viewer (riding-test-viewer))
+         (placement (game:block-placement luvcraft::*stone-block*))
+         (builder (luft.terrain:make-scene-builder
+                   :horizontal-bits 11
+                   :material-vocabulary (game:luvcraft-palette-vocabulary game:*luvcraft-palette*)
+                   :ground-material placement :architecture-material placement)))
+    (loop for x from 1028 below 1050 do
+      (loop for y from 1028 below 1033 do
+        (loop for z below 2 do (luft.terrain:scene-builder-cell builder x y z))
+        (when (>= x 1035)
+          (luft.terrain:scene-builder-cell builder x y 2)
+          (when (eq obstacle :wall) (luft.terrain:scene-builder-cell builder x y 3))
+          (when (eq obstacle :ceiling) (luft.terrain:scene-builder-cell builder x y 4)))))
+    (setf (luft.terrain:simulation-source (render:viewer-simulation viewer))
+          (luft.terrain:make-streaming-scene (luft.terrain:finish-scene-builder builder))
+          (render:viewer-pointer-captured-p viewer) t
+          (render:camera-yaw (render:viewer-camera viewer)) 0.0)
+    viewer))
+
+(define-test walking-key-autojumps-only-a-clear-one-block-ledge
+  (dolist (obstacle '(:ledge :wall :ceiling))
+    (let* ((viewer (autojump-test-viewer obstacle))
+           (body (luft.terrain:character-body (render:viewer-player viewer)))
+           (peak 2.0))
+      (ride-key viewer :w)
+      (dotimes (frame 121)
+        (render::advance-viewer-world viewer (/ frame 120d0))
+        (setf peak (max peak (luv.arithmetic.lisp.vec3:vec3-z (luft.terrain:body-position body)))))
+      (ride-key viewer :w t)
+      (dotimes (frame 121) (render::advance-viewer-world viewer (+ 1d0 (/ frame 120d0))))
+      (let ((p (luft.terrain:body-position body)))
+        (if (eq obstacle :ledge)
+            (progn
+              (true (> peak 3.0))
+              (true (> (luv.arithmetic.lisp.vec3:vec3-x p) 1035.5))
+              (true (< (abs (- (luv.arithmetic.lisp.vec3:vec3-z p) 3.0)) 0.001)))
+            (progn
+              (true (< peak 2.01))
+              (true (< (luv.arithmetic.lisp.vec3:vec3-x p) 1034.71)))))
+      (true (luft.terrain:body-grounded-p body)))))
+
 (define-test riding-uses-real-tab-wasd-and-luft-slope-contact
   (let* ((viewer (riding-test-viewer :slope t))
          (turtle (make-instance 'luvcraft::turtle :seed 3 :yaw (/ pi 2) :heading (/ pi 2)

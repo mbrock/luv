@@ -239,7 +239,8 @@
                (:file "luvcraft/luft/presentation")
                (:file "luvcraft/luft/feedback")
                (:file "luvcraft/luft/body-drawing")
-               (:file "luvcraft/luft/riding"))
+               (:file "luvcraft/luft/riding")
+               (:file "luvcraft/luft/locomotion"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"

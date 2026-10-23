@@ -99,6 +99,7 @@ this package draws; the renderer and the ateliers use it.")
            #:accept-streaming-mesh-result
            #:add-simulation-body
            #:add-simulation-character
+           #:advance-character-motion
            #:advance-world-simulation
            #:authored-chunk-load-request
            #:body-clear-at-p

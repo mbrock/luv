@@ -115,7 +115,8 @@ quickbar begins: things to build a house with, colours, and a lamp.")
     (when selected
       (setf (luvcraft:player-selected-block viewer)
             (luvcraft::restore-block-value selected)))
-    (luvcraft:update-player-instruments viewer)))
+    (luvcraft:update-player-instruments viewer))
+  (install-luvcraft-motor (render:viewer-player viewer)))
 
 (defun restore-inventory (resume)
   (let ((inventory (luvcraft:make-block-inventory

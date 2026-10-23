@@ -454,7 +454,10 @@ re-expressed in that space."
                     when (world-terrain-solid-p world x y z)
                       do (funcall function x y z)))))))))
 
-(defun move-body-axis (body world axis distance)
+(defgeneric move-body-axis (body world axis distance)
+  (:documentation "Move BODY through WORLD's contact provider along AXIS."))
+
+(defmethod move-body-axis (body world axis distance)
   "Move BODY along AXIS and clamp its AABB against solid voxel cells."
   (when (zerop distance)
     (return-from move-body-axis nil))
@@ -501,7 +504,10 @@ re-expressed in that space."
        (< (- (player-z player) (player-half-width player)) (1+ z))
        (> (+ (player-z player) (player-half-width player)) z)))
 
-(defun body-position-clear-p (body world x y z)
+(defgeneric body-position-clear-p (body world x y z)
+  (:documentation "Whether BODY fits at X,Y,Z in WORLD's contact provider."))
+
+(defmethod body-position-clear-p (body world x y z)
   "Return true when BODY's AABB would be clear standing at X, Y, Z."
   (let ((half-width (body-half-width body)))
     (multiple-value-bind (minimum-x maximum-x)

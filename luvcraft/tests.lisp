@@ -2891,29 +2891,39 @@
     (true (player-grounded-p player))))
 
 (define-test scalar-player-autojumps-a-clear-one-block-ledge
-  (let* ((world (make-block-world :chunk-width 8
-                                  :chunk-height 4
-                                  :chunk-depth 4))
-         (camera (make-instance 'fly-camera
-                                :position (make-vec3 1.5 2.62 1.5)
-                                :yaw 0d0 :pitch 0d0))
-         (player (make-instance 'block-world-player
-                                :position (make-vec3 1.5d0 1d0 1.5d0)
-                                :grounded-p t))
-         (intent (make-movement-intent))
-         (highest-y (player-y player)))
-    (ensure-world-chunk world 0 0 0)
-    (loop for x below 8 do
-      (loop for z below 4 do
-        (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
-    (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
-          (movement-urging-p intent :right) t)
-    (dotimes (step 120)
-      (declare (ignorable step))
-      (step-block-world-player player world camera intent (/ 1d0 120d0))
-      (setf highest-y (max highest-y (player-y player))))
-    (true (> highest-y 2d0))
-    (true (> (player-x player) 3.3d0))))
+  (dolist (obstacle '(:ledge :wall :ceiling))
+    (let* ((world (make-block-world :chunk-width 8
+                                    :chunk-height 4
+                                    :chunk-depth 4))
+           (camera (make-instance 'fly-camera
+                                  :position (make-vec3 1.5 2.62 1.5)
+                                  :yaw 0d0 :pitch 0d0))
+           (player (make-instance 'block-world-player
+                                  :position (make-vec3 1.5d0 1d0 1.5d0)
+                                  :grounded-p t))
+           (intent (make-movement-intent))
+           (highest-y (player-y player)))
+      (ensure-world-chunk world 0 0 0)
+      (loop for x below 8 do
+        (loop for z below 4 do
+          (setf (world-block-at world x 0 z) luvcraft::*stone-block*)))
+      (setf (world-block-at world 3 1 1) luvcraft::*stone-block*
+            (movement-urging-p intent :right) t)
+      (when (eq obstacle :wall)
+        (setf (world-block-at world 3 2 1) luvcraft::*stone-block*))
+      (when (eq obstacle :ceiling)
+        (setf (world-block-at world 3 3 1) luvcraft::*stone-block*))
+      (dotimes (step 120)
+        (declare (ignorable step))
+        (step-block-world-player player world camera intent (/ 1d0 120d0))
+        (setf highest-y (max highest-y (player-y player))))
+      (if (eq obstacle :ledge)
+          (progn
+            (true (> highest-y 2d0))
+            (true (> (player-x player) 3.3d0)))
+          (progn
+            (true (< highest-y 1.01d0))
+            (true (< (player-x player) 2.71d0)))))))
 
 (define-test destinational-body-routes-around-terrain-and-arrives-continuously
   (let* ((world (make-block-world :chunk-width 8
