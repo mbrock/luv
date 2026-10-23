@@ -3,6 +3,8 @@
 ;;; The owner/worker handoff for one regional replacement.
 ;;;
 ;;; Schedule -> accept the complete current result -> publish atomically.
+;;; Publishing belongs to the renderer (PUBLISH-READY-STREAMING-SCENE in
+;;; renderer-residency.lisp); everything before it is terrain.
 ;;; A removal-only replacement skips the worker. GPU staging failure leaves
 ;;; the ready replacement intact for retry. Resetting the scene detaches it;
 ;;; any later result from that old request is then harmlessly ignored.
@@ -68,40 +70,6 @@
         (values (streaming-mesh-result-meshes result)
                 (streaming-mesh-result-generation result) t)
         (values nil nil nil))))
-
-(zdefun (publish-ready-streaming-scene :zone :luft/publish-ready-region)
-    (scene renderer)
-  "Install a whole replacement, then make its light and CPU cache reusable."
-  (multiple-value-bind (meshes generation ready-p)
-      (ready-streaming-scene-meshes scene)
-    (when ready-p
-      (let ((replacement (streaming-scene-replacement scene)))
-        (renderer-update-meshes
-         renderer meshes (streaming-replacement-removals replacement)
-         :scene-generation generation)
-        ;; Only a successful GPU publication advances these owner-thread values.
-        (setf (streaming-scene-light-generation scene)
-              (scene-mesh-generation-light-generation generation))
-        (when (streaming-replacement-request replacement)
-          (setf (streaming-scene-mesh-cache scene)
-                (streaming-mesh-result-mesh-cache
-                 (streaming-replacement-result replacement))))
-        (setf (streaming-scene-replacement scene) nil)
-        (length meshes)))))
-
-(zdefun (drain-streaming-scene-production :zone :luft/drain-production)
-    (scene renderer production-system &key (limit 2))
-  "Drain bounded worker results, then try the pending renderer publication."
-  (loop repeat limit
-        do (multiple-value-bind (result present-p)
-               (production:receive-production-result-no-hang production-system)
-             (unless present-p (return))
-             (etypecase (production:production-result-request result)
-               (authored-chunk-load-request
-                (receive-streaming-source-result scene result))
-               (streaming-mesh-request
-                (receive-streaming-mesh-result scene result)))))
-  (publish-ready-streaming-scene scene renderer))
 
 ;;; Request identity and freshness are separate questions. Identity guards the
 ;;; pending transaction; the snapshot stamp guards its borrowed world inputs.

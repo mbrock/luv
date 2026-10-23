@@ -58,19 +58,39 @@
              (declare (ignore operation component))
              (uiop:symbol-call '#:luft '#:run-luft-tests)))
 
-(defsystem "luft/renderer"
-  :description "The indexed integer-mesh GPU renderer for LUFT solids."
+(defsystem "luft/terrain"
+  :description "LUFT terrain: scenes, materials, realized light, streaming, and world sources."
   :version "0.0.1"
   :author "Mikael Brockman"
+  ;; Nothing here draws.  The renderer and the ateliers sit on this layer.
   :depends-on ("luft" "luv" "luv/production")
   :serial t
-  :components ((:module "render"
+  :components ((:module "terrain"
                 :pathname "luft/render"
                 :serial t
                 :components ((:file "package")
                              (:file "quantities")
-                             (:file "frame-quantities")
                              (:file "materials")
+                             (:file "realized-light")
+                             (:file "scene")
+                             (:file "decoration")
+                             (:file "render-population")
+                             (:file "world")
+                             (:file "streaming-state")
+                             (:file "streaming")
+                             (:file "streaming-mesh")
+                             (:file "streaming-publication")))))
+
+(defsystem "luft/renderer"
+  :description "The indexed integer-mesh GPU renderer for LUFT solids."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/terrain")
+  :serial t
+  :components ((:module "render"
+                :pathname "luft/render"
+                :serial t
+                :components ((:file "frame-quantities")
                              (:file "lighting")
                              (:file "shaders")
                              (:file "world-text-shaders")
@@ -87,8 +107,6 @@
                              (:file "torch-shaders")
                              (:file "shader-manifest")
                              (:file "torch-drawing")
-                             (:file "scene")
-                             (:file "decoration")
                              (:file "terrain-drawing")
                              (:file "lattice-drawing")
                              (:file "sun-shadow")
@@ -100,18 +118,13 @@
                              (:file "renderer-frames")
                              (:file "world-text")
                              (:file "frame")
-                             (:file "world")
-                             (:file "streaming-state")
-                             (:file "streaming")
-                             (:file "streaming-mesh")
-                             (:file "streaming-publication")
                              (:file "fixtures")))))
 
 (defsystem "luft/simulation"
   :description "Bodies, character controllers, and the LUFT world clock without an atelier."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luft/renderer")
+  :depends-on ("luft/terrain")
   :components ((:file "luft/render/simulation")))
 
 (defsystem "luft/render"
@@ -119,7 +132,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; Share Luv's substrate and compositor, not another game's runtime.
-  :depends-on ("luft/simulation" "luv/mcclim" "luv/workbench"
+  :depends-on ("luft/renderer" "luft/simulation" "luv/mcclim" "luv/workbench"
                "luv/lobby/mcclim" "luv/terminal/canvas"
                "luv/tracy-capture" "luv/application-agent")
   :serial t

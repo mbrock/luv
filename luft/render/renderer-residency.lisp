@@ -154,38 +154,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (renderer-update-meshes renderer nil (copy-list (renderer-slot-order renderer)))
   (values))
 
-;;; Population representations and staging mechanics.
-
-(defun pack-terrain-appearance-codes (codes)
-  "Pack eight u8 sample codes per star into the GPU's parallel uvec2 lane."
-  (declare (type (simple-array (unsigned-byte 8) (*)) codes)
-           (optimize (speed 3) (safety 1)))
-  (unless (zerop (mod (length codes) 8))
-    (error "Terrain appearance has ~D bytes, not eight per active star."
-           (length codes)))
-  (let ((words (make-array (/ (length codes) 4)
-                           :element-type '(unsigned-byte 32))))
-    (loop for offset fixnum from 0 below (length codes) by 4
-          for word fixnum from 0
-          do (setf (aref words word)
-                   (logior (aref codes offset)
-                           (ash (aref codes (+ offset 1)) 8)
-                           (ash (aref codes (+ offset 2)) 16)
-                           (ash (aref codes (+ offset 3)) 24))))
-    words))
-
-(defstruct (render-population
-             (:constructor %make-render-population
-                 (instance-words appearance-words descriptor-words
-                  site-count))
-             (:copier nil))
-  "Geometry sites plus a one-for-one, independently replaceable appearance."
-  (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
-  (appearance-words #() :type (simple-array (unsigned-byte 32) (*))
-                    :read-only t)
-  (descriptor-words #() :type (simple-array (unsigned-byte 32) (*))
-                    :read-only t)
-  (site-count 0 :type (integer 0 *) :read-only t))
+;;; Staging populations (render-population.lisp) into GPU buffers.
 
 (defclass resident-population (gpu-resource-owner)
   ((population :initarg :population :reader resident-population-population)
@@ -197,50 +166,6 @@ cohort untouched. No frame can interleave with the owner-thread publication."
    ;; World-cell box (MIN-X MIN-Y MIN-Z MAX-X MAX-Y MAX-Z) around the drawn
    ;; geometry, or NIL when the population draws nothing.
    (bounds :initform nil :accessor resident-population-bounds)))
-
-(defstruct (prepared-render-mesh
-             (:constructor %make-prepared-render-mesh (mesh population))
-             (:copier nil))
-  "Worker-transferable CPU realization of one semantic surface mesh."
-  (mesh nil :type luft:surface-mesh :read-only t)
-  (population nil :type render-population :read-only t))
-
-(zdefun (prepare-render-mesh :zone :luft/prepare-population) (mesh)
-  "Canonicalize one MESH before it crosses to the renderer owner."
-  (check-type mesh luft:surface-mesh)
-  (%make-prepared-render-mesh mesh (make-render-population (list mesh))))
-
-(defun %make-star-render-population (meshes)
-  "Flatten geometry and its parallel active-star appearance independently."
-  (let* ((site-words
-           (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
-                  (mapcar #'luft:surface-mesh-star-site-words meshes)))
-         (appearance-codes
-           (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
-                  (mapcar #'luft:surface-mesh-appearance-codes meshes)))
-         (descriptor-words
-           (or (loop for mesh in meshes
-                     for words =
-                       (luft:surface-mesh-appearance-descriptor-words mesh)
-                     when (plusp (length words)) return words)
-               (compile-terrain-material-descriptors
-                (make-scene-material-vocabulary)))))
-    (unless (= (* 2 (length site-words)) (length appearance-codes))
-      (error "~D site words do not have a one-for-one eight-byte appearance (~D bytes)."
-             (length site-words) (length appearance-codes)))
-    (dolist (mesh meshes)
-      (let ((words (luft:surface-mesh-appearance-descriptor-words mesh)))
-        (unless (or (zerop (length words)) (equalp words descriptor-words))
-          (error "One terrain population contains incompatible material palettes."))))
-    (%make-render-population
-     site-words (pack-terrain-appearance-codes appearance-codes)
-     descriptor-words (/ (length site-words) 4))))
-
-(zdefun (make-render-population :zone :luft/build-render-population
-                                :value (length meshes))
-    (meshes)
-  "Prepare the sole terrain ABI: active sites indexing the fixed star atlas."
-  (%make-star-render-population meshes))
 
 (defstruct (renderer-slot-provenance
              (:constructor %make-renderer-slot-provenance
@@ -663,3 +588,40 @@ words; the two arrays keep their one-for-one order.  The runs are
             do (push old-slot retired))
     retired))
 
+
+;;; Publishing a ready streaming replacement is the renderer's half of the
+;;; owner/worker handoff in streaming-publication.lisp.
+
+(zdefun (publish-ready-streaming-scene :zone :luft/publish-ready-region)
+    (scene renderer)
+  "Install a whole replacement, then make its light and CPU cache reusable."
+  (multiple-value-bind (meshes generation ready-p)
+      (ready-streaming-scene-meshes scene)
+    (when ready-p
+      (let ((replacement (streaming-scene-replacement scene)))
+        (renderer-update-meshes
+         renderer meshes (streaming-replacement-removals replacement)
+         :scene-generation generation)
+        ;; Only a successful GPU publication advances these owner-thread values.
+        (setf (streaming-scene-light-generation scene)
+              (scene-mesh-generation-light-generation generation))
+        (when (streaming-replacement-request replacement)
+          (setf (streaming-scene-mesh-cache scene)
+                (streaming-mesh-result-mesh-cache
+                 (streaming-replacement-result replacement))))
+        (setf (streaming-scene-replacement scene) nil)
+        (length meshes)))))
+
+(zdefun (drain-streaming-scene-production :zone :luft/drain-production)
+    (scene renderer production-system &key (limit 2))
+  "Drain bounded worker results, then try the pending renderer publication."
+  (loop repeat limit
+        do (multiple-value-bind (result present-p)
+               (production:receive-production-result-no-hang production-system)
+             (unless present-p (return))
+             (etypecase (production:production-result-request result)
+               (authored-chunk-load-request
+                (receive-streaming-source-result scene result))
+               (streaming-mesh-request
+                (receive-streaming-mesh-result scene result)))))
+  (publish-ready-streaming-scene scene renderer))

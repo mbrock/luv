@@ -137,16 +137,12 @@ manifest instead of silently changing a published cohort."
   (tree nil :type surface-mesh-tree-manifest :read-only t))
 
 (defun surface-mesh-attachment-frame-snapshot (mesh)
-  (let* ((frames (luft:surface-mesh-attachments mesh))
-         (result
-           (make-array
-            (* (length frames) +torch-flame-instance-scalar-count+)
-            :element-type 'single-float)))
-    (loop for frame in frames
-          for offset from 0 by +torch-flame-instance-scalar-count+ do
-            (check-type frame torch-flame-instance-data)
-            (replace result frame :start1 offset))
-    result))
+  "Copy MESH's attachment frames, whatever row layout their consumer packs."
+  (map 'simple-vector
+       (lambda (frame)
+         (check-type frame (simple-array single-float (*)))
+         (copy-seq frame))
+       (luft:surface-mesh-attachments mesh)))
 
 (defun snapshot-surface-mesh-tree (root)
   "Snapshot ROOT's exact object tree, companion shape, and frame scalars."
@@ -175,16 +171,12 @@ manifest instead of silently changing a published cohort."
 
 (defun surface-mesh-frame-snapshot= (snapshot mesh)
   (let ((current (luft:surface-mesh-attachments mesh)))
-    (and (= (length snapshot)
-            (* (length current) +torch-flame-instance-scalar-count+))
+    (and (= (length snapshot) (length current))
          (loop for frame in current
-               for offset from 0 by +torch-flame-instance-scalar-count+
-               always
-               (and (typep frame 'torch-flame-instance-data)
-                    (loop for lane below +torch-flame-instance-scalar-count+
-                          always
-                          (eql (aref snapshot (+ offset lane))
-                               (aref frame lane))))))))
+               for copy across snapshot
+               always (and (typep frame '(simple-array single-float (*)))
+                           (= (length frame) (length copy))
+                           (every #'eql frame copy))))))
 
 (defun surface-mesh-tree-manifest-matches-p (manifest root)
   "Whether ROOT still has MANIFEST's exact tree identity and frame bytes."

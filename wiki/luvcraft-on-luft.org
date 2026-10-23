@@ -60,9 +60,10 @@ turns out to be in an awkward place, it moves.
 | Physics | bodies, contacts, the solver | terrain, which it reaches through queries |
 | A game | its palette, world sources, characters, cameras, behaviour, UI | the layers below |
 
-The terrain layer runs without a GPU.  That is already true of the =luft=
-system, which is topology, meshing, star geometry, and the light solver;
-it is not yet true of the rest of the terrain machinery (#TNOILN).
+The terrain layer runs without a GPU.  The =luft= system is topology,
+meshing, star geometry, and the light solver; =luft/terrain= adds scenes,
+materials, realized light, world sources, and streaming, and loads with
+neither the renderer nor McCLIM (#TNOILN).
 
 The renderer is a sibling of the terrain rather than a generic renderer
 underneath it.  Star shading reads packed sites directly (#AGVXGM), and
@@ -104,24 +105,35 @@ be repainted over time.  Whether relief is baked into a texture or
 evaluated in the star fragment stage is a question of measured cost
 (#Q3KI72).
 
-* Today's systems draw the line in the wrong place
+* Where the line runs today
 :PROPERTIES:
 :ID: TNOILN
 :END:
 
-The =luft= system is already a clean terrain core.  Above it,
-=luft/renderer= mixes three layers.  Next to the GPU machinery it holds
-terrain machinery -- the world-source protocol and the alpine relief in
-=luft/render/world.lisp=, residency and streaming in
-=luft/render/streaming*.lisp= -- and game content: the fixed material set
-in =luft/render/materials.lisp=, the torches, the player's drawing, and
-the sanctuary fixtures.  The streaming scene knows about torches
-directly, through =scene-edit-torch-conflict-p= and torch support keys.
-=luft/simulation= puts the collision sweep, standing, and walking routes,
-which are terrain queries, beside a walking character and the world clock,
-which are a game's.  The follow camera lives in the atelier's studio.
+Four systems now stack the way #W9QMPT draws them.  =luft= is the
+topological core.  =luft/terrain= holds the scene and its material
+field, realized light, the world-source protocol and the alpine relief,
+residency, and the streaming owner/worker handoff up to an accepted
+replacement.  =luft/renderer= sits on it with the GPU machinery and
+publishes accepted replacements into mesh slots.  =luft/simulation=
+depends on the terrain alone.  The atelier, =luft/render=, uses both.
 
-None of this is wrong for one game.  It is what has to move for a second.
+What still sits on the wrong side of the line:
+
+- The terrain shares the =luft.render= package with the renderer and the
+  atelier, so the boundary is between systems, not yet between names.
+- Torches are terrain vocabulary: the scene carries torch attachments, the
+  streaming scene checks them through =scene-edit-torch-conflict-p= and
+  torch support keys, and realized light seeds from torch wicks.
+- Streaming workers prepare the renderer's CPU population
+  (=render-population.lisp=) beside each mesh, so the terrain names its
+  consumer's packing instead of offering a hook.
+- The fixed material set lives in the terrain's =materials.lisp=, and the
+  sanctuary fixtures in the renderer.
+- =luft/simulation= puts the collision sweep, standing, and walking
+  routes, which are terrain queries, beside a walking character and the
+  world clock, which are a game's.  The follow camera lives in the
+  atelier's studio.
 
 * Luvcraft is closer than its code suggests
 :PROPERTIES:
@@ -269,6 +281,15 @@ fixtures into the atelier, which becomes one game among others.
 /Done when./ The terrain layer loads and passes its tests without the
 renderer, names no torch, player, or palette, and the atelier plays as
 before.
+
+/Evidence./ The first cut is in place: =luft/terrain= loads alone, with
+no renderer, no McCLIM, and no undefined callee, and the renderer suite
+passes unchanged on top of it.  The cut split realized light out of the
+sky's =lighting.lisp=, moved publication into the renderer's residency,
+made the scene's attachment-frame snapshot independent of the torch row
+layout, and let =luft/simulation= stand on the terrain.  #TNOILN lists
+what remains; the next pieces are the population hook and the terrain's
+own package.
 
 ** TODO Make the isometric wizard a game of its own
 :PROPERTIES:
