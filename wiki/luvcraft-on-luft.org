@@ -599,6 +599,13 @@ without heap exhaustion. Ghostty and terminal are the two unavailable
 suites. =scripts/wiki dangling= still reports the two pre-existing portrait
 references TR4VLR and H1GHLD; this material work adds no unresolved ID.
 
+The subsequent riding/viewmodel rebase leaves the star fragment at 62,155
+words. A fresh combined sampler gives alpine/meadow medians of 84/88 ms
+and reel/mixed-fixture/film sheets of 62/92/52 ms. Those whole-frame costs
+include the concurrently changed image-finishing path, not just this
+material pass; they do not establish a flat total frame budget. The full
+33-suite run and =make test= also pass on that combined revision.
+
 This is still not a blanket claim of parity: the screens have no live
 contents, the springs have no simulated spray, and distant wool's near-flat
 filtered finish trades detail for stability. The shallow weave has no gross
