@@ -1,0 +1,43 @@
+unpooled: build/canvas-stall-90148-4001751113.txt
+Analysis of sampling sbcl (pid 90148) every 1 millisecond
+Process:         sbcl [90148]
+Path:            /Volumes/VOLUME/*/sbcl
+Load Address:    0x100818000
+Identifier:      sbcl
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [90147]
+Target Type:     live task (Roots Present)
+
+Date/Time:       2026-10-23 16:31:53.463 +0300
+Launch Time:     2026-10-23 16:31:34.948 +0300
+OS Version:      macOS 27.2 (26B5091g)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         3.1G
+Physical footprint (peak):  3.1G
+Idle exit:                  untracked
+
+pooled: build/canvas-stall-90362-4001751158.txt
+Analysis of sampling sbcl (pid 90362) every 1 millisecond
+Process:         sbcl [90362]
+Path:            /Volumes/VOLUME/*/sbcl
+Load Address:    0x100104000
+Identifier:      sbcl
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  bash [90361]
+Target Type:     live task (Roots Present)
+
+Date/Time:       2026-10-23 16:32:38.846 +0300
+Launch Time:     2026-10-23 16:32:21.367 +0300
+OS Version:      macOS 27.2 (26B5091g)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         764.3M
+Physical footprint (peak):  1.0G
+Idle exit:                  untracked

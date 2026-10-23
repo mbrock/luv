@@ -1,0 +1,192 @@
+warning: Git tree '/Users/mbrock/luv' has uncommitted changes
+; in:
+;      LAMBDA (LUV.FRONTIER::WINDOW LUV.FRONTIER::FRONTIER LUV.FRONTIER::EXECUTION
+;          &KEY LUVCRAFT::DIRECT-DIRECTION)
+;     (ERROR "Frontier count disagrees with priority bucket ~D."
+;            LUV.FRONTIER::CURRENT-PRIORITY)
+;
+; note: deleting unreachable code
+;
+; compilation unit finished
+;   printed 1 note
+; in:
+;      LAMBDA (LUV.FRONTIER::WINDOW LUV.FRONTIER::FRONTIER LUV.FRONTIER::EXECUTION
+;          &KEY LUVCRAFT::DIRECT-DIRECTION)
+;     (ERROR "Frontier count disagrees with priority bucket ~D."
+;            LUV.FRONTIER::CURRENT-PRIORITY)
+;
+; note: deleting unreachable code
+;
+; compilation unit finished
+;   printed 1 note
+luv 16:32:26.118 canvas opened "Luft game", 2560x1440 pixels, metal
+STORAGE (:LABEL "luft star patch vertices" :USAGE (:STORAGE :COPY-DST) :SIZE
+         123232 :STORAGE-MODE 0 :UNIFIED-MEMORY 1)
+STORAGE (:LABEL "luft star patch indices" :USAGE (:INDEX :COPY-DST) :SIZE 50400
+         :STORAGE-MODE 0 :UNIFIED-MEMORY 1)
+luv 16:32:26.454 metal begin Metal4FX temporal scaler 1920x1080
+luv 16:32:26.596 metal complete Metal4FX temporal scaler
+STORAGE (:LABEL "luft presentation-slot camera state" :USAGE
+         (:UNIFORM :COPY-DST) :SIZE 544 :STORAGE-MODE 0 :UNIFIED-MEMORY 1)
+STORAGE (:LABEL "direct McCLIM affine state" :USAGE (:UNIFORM) :SIZE 64
+         :STORAGE-MODE 0 :UNIFIED-MEMORY 1)
+STORAGE (:LABEL "direct McCLIM vertices" :USAGE (:VERTEX :COPY-DST) :SIZE 512
+         :STORAGE-MODE 0 :UNIFIED-MEMORY 1)
+DEVICE (:NAME "Apple M2 Pro") SDL=cocoa 1280x720
+luv 16:32:27.133 metal begin Metal4FX temporal scaler 960x540
+luv 16:32:27.194 metal complete Metal4FX temporal scaler
+MEMORY (:ENCODERS 60 :POOLED T :NATIVE-ALLOCATED-BYTES 122601472
+        :LISP-DYNAMIC-BYTES 429358448 :PENDING-SUBMISSIONS 0)
+MEMORY (:ENCODERS 120 :POOLED T :NATIVE-ALLOCATED-BYTES 122601472
+        :LISP-DYNAMIC-BYTES 313038048 :PENDING-SUBMISSIONS 0)
+MEMORY (:ENCODERS 180 :POOLED T :NATIVE-ALLOCATED-BYTES 122601472
+        :LISP-DYNAMIC-BYTES 350942432 :PENDING-SUBMISSIONS 0)
+luv 16:32:29.175 watchdog canvas "Luft game" has been in :REQUESTS for 2.0 s and is not servicing its window
+MEMORY (:ENCODERS 240 :POOLED T :NATIVE-ALLOCATED-BYTES 122601472
+        :LISP-DYNAMIC-BYTES 387042400 :PENDING-SUBMISSIONS 0)
+MEMORY (:ENCODERS 300 :POOLED T :NATIVE-ALLOCATED-BYTES 122601472
+        :LISP-DYNAMIC-BYTES 425155424 :PENDING-SUBMISSIONS 0)
+MEMORY (:ENCODERS 360 :POOLED T :NATIVE-ALLOCATED-BYTES 122601472
+        :LISP-DYNAMIC-BYTES 307533664 :PENDING-SUBMISSIONS 0)
+luv 16:32:31.207 watchdog canvas "Luft game" is answering again
+luv 16:32:31.208 canvas closing "Luft game" after 12 loop iterations
+luv 16:32:31.254 canvas closed "Luft game"
+RESULT (:REPEAT 1 :HOST "temple" :SOURCE-REVISION
+        "010a9edcb48f0d8f0cdf5b4f3490eb03d09967aa" :BENCHMARK-BLOB
+        "94289a9e90917334d1d9aff581f309415a86f9d2" :FRAMES 300 :WARMUP 60
+        :SCENE :ALPINE :BACKEND :LUFT :SETUP-SECONDS 1.3601890000281855d0
+        :SETUP-PROFILE
+        ((LUVCRAFT:RELIGHT-BLOCK-WORLD :CALLS 1 :INCLUSIVE-MS
+                                       79.31499998085201d0)
+         (LUFT.TERRAIN:FINISH-SCENE-BUILDER :CALLS 1 :INCLUSIVE-MS
+                                            4.30699996650219d0)
+         (LUFT:MESH-STAR-CHUNK :CALLS 4 :INCLUSIVE-MS 1.117000007070601d0)
+         (LUFT.RENDER::STAR-LATTICE-LIGHT-WORDS :CALLS 1 :INCLUSIVE-MS
+                                                1.4130000490695238d0)
+         (LUFT.RENDER::MAKE-RENDER-POPULATION :CALLS 1 :INCLUSIVE-MS
+                                              1.6999999061226845d0)
+         (LUFT.RENDER::%UPLOAD-RENDER-POPULATION :CALLS 1 :INCLUSIVE-MS
+                                                 1.3500000350177288d0))
+        :DEVICE (:NAME "Apple M2 Pro") :MODE :DEFAULT :EXTENT (1280 720)
+        :INTERNAL-EXTENT (960 540) :TAA T :RECONSTRUCTION :METALFX
+        :FIXED-RENDER-SCALE NIL :RENDER-SCALE 0.75 :DYNAMIC-RESOLUTION NIL
+        :SCENE-SAMPLES 1 :EXPOSURE 0.45 :SKY T :TERRAIN T :CPU-ENCODE-MS
+        (:N 300 :MEAN 2.77160000288859d0 :P50 2.7230000123381615d0 :P95
+         3.009999985806644d0 :P99 5.880999960936606d0)
+        :COMPLETION-MS
+        (:N 300 :MEAN 8.8917600014247d0 :P50 8.591999998316169d0 :P95
+         11.17000007070601d0 :P99 14.400999993085861d0)
+        :CPU-FRAME-MS
+        (:N 300 :MEAN 2.771926666997994d0 :P50 2.7230000123381615d0 :P95
+         3.009999985806644d0 :P99 5.882999976165593d0)
+        :SIMULATION-MS
+        (:N 300 :MEAN 3.266641094038884d-4 :P50 0.0d0 :P95
+         0.00100000761449337d0 :P99 0.00200001522898674d0)
+        :COMPLETION-FPS 112.46367421520296d0 :GPU-MS
+        (:N 300 :MEAN 4.354287921062981d0 :P50 4.089249996468425d0 :P95
+         6.545624928548932d0 :P99 6.678874953649938d0)
+        :CPU-PASSES
+        (("luft HDR presentation"
+          (:N 300 :MEAN 0.9391266677994281d0 :P50 0.9050000226125121d0 :P95
+           1.041000010445714d0 :P99 1.5610000118613243d0))
+         ("native world panels"
+          (:N 300 :MEAN 0.040456666223083936d0 :P50 0.04000007174909115d0 :P95
+           0.04800001624971628d0 :P99 0.07800001185387373d0))
+         ("luft lens shafts"
+          (:N 300 :MEAN 0.09405332966707647d0 :P50 0.09400001727044582d0 :P95
+           0.11399993672966957d0 :P99 0.14600006397813559d0))
+         ("luft lens vertical"
+          (:N 600 :MEAN 0.06955666758585721d0 :P50 0.06799993570894003d0 :P95
+           0.0879999715834856d0 :P99 0.09999994654208422d0))
+         ("luft lens horizontal"
+          (:N 600 :MEAN 0.06263000036900242d0 :P50 0.062000006437301636d0 :P95
+           0.07500010542571545d0 :P99 0.10300008580088615d0))
+         ("luft lens bright"
+          (:N 300 :MEAN 0.0850399979390204d0 :P50 0.06799993570894003d0 :P95
+           0.08500006515532732d0 :P99 0.12099999003112316d0))
+         ("luft native viewmodel"
+          (:N 300 :MEAN 0.06937666524512072d0 :P50 0.06800005212426186d0 :P95
+           0.08299993351101875d0 :P99 0.15700003132224083d0))
+         ("luft post-temporal HDR flame composite"
+          (:N 300 :MEAN 0.0734499969985336d0 :P50 0.07200008258223534d0 :P95
+           0.0879999715834856d0 :P99 0.17199991270899773d0))
+         ("world instruments"
+          (:N 300 :MEAN 0.06764333190706869d0 :P50 0.06600003689527512d0 :P95
+           0.08199992589652538d0 :P99 0.13599998783320189d0))
+         ("luft site streams"
+          (:N 300 :MEAN 0.23298333204972246d0 :P50 0.2340000355616212d0 :P95
+           0.26300002355128527d0 :P99 0.5319999763742089d0))
+         ("luft sun shadow"
+          (:N 300 :MEAN 0.47489333354557556d0 :P50 0.47400000039488077d0 :P95
+           0.5320000927895308d0 :P99 0.9700000518932939d0)))
+        :GPU-PASSES NIL)
+luv 16:32:32.069 canvas opened "luv little block world — click, look, walk", 1280x720 pixels, metal
+STORAGE (:LABEL "block world sky corners" :USAGE (:VERTEX) :SIZE 36
+         :STORAGE-MODE 0 :UNIFIED-MEMORY 1)
+DEVICE (:NAME "Apple M2 Pro") SDL=cocoa 1280x720
+luv 16:32:32.396 luvcraft reframing scene 1280x720, presentation 1280x720
+luv 16:32:34.631 watchdog canvas "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" has been in :REQUESTS for 2.2 s and is not servicing its window
+MEMORY (:ENCODERS 420 :POOLED T :NATIVE-ALLOCATED-BYTES 97730560
+        :LISP-DYNAMIC-BYTES 312863856 :PENDING-SUBMISSIONS 0)
+luv 16:32:36.665 watchdog canvas "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" has been in :REQUESTS for 4.3 s and is not servicing its window
+MEMORY (:ENCODERS 480 :POOLED T :NATIVE-ALLOCATED-BYTES 98058240
+        :LISP-DYNAMIC-BYTES 385375232 :PENDING-SUBMISSIONS 0)
+luv 16:32:38.700 watchdog canvas "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" has been in :REQUESTS for 6.3 s and is not servicing its window
+MEMORY (:ENCODERS 540 :POOLED T :NATIVE-ALLOCATED-BYTES 98385920
+        :LISP-DYNAMIC-BYTES 303935600 :PENDING-SUBMISSIONS 0)
+luv 16:32:40.180 watchdog sampled the process 6.3 s into the stall: /Users/mbrock/luv/build/canvas-stall-90362-4001751158.txt
+luv 16:32:41.200 watchdog canvas "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" has been in :REQUESTS for 8.8 s and is not servicing its window
+MEMORY (:ENCODERS 600 :POOLED T :NATIVE-ALLOCATED-BYTES 98648064
+        :LISP-DYNAMIC-BYTES 367864496 :PENDING-SUBMISSIONS 0)
+luv 16:32:43.218 watchdog canvas "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" has been in :REQUESTS for 10.8 s and is not servicing its window
+MEMORY (:ENCODERS 660 :POOLED T :NATIVE-ALLOCATED-BYTES 98975744
+        :LISP-DYNAMIC-BYTES 437165616 :PENDING-SUBMISSIONS 0)
+luv 16:32:45.253 watchdog canvas "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" has been in :REQUESTS for 12.9 s and is not servicing its window
+MEMORY (:ENCODERS 720 :POOLED T :NATIVE-ALLOCATED-BYTES 99237888
+        :LISP-DYNAMIC-BYTES 337667312 :PENDING-SUBMISSIONS 0)
+luv 16:32:47.286 watchdog canvas "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" is answering again
+luv 16:32:47.286 canvas closing "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit" after 31 loop iterations
+luv 16:32:47.332 canvas closed "luv little block world — click, look, walk — [1] grass  ·  1–6 select  ·  e place  ·  x mine  ·  c pick  ·  I inventory  ·  F phone  ·  shift sprint  ·  arrows look  ·  tab focus  ·  ctrl-q quit"
+RESULT (:REPEAT 1 :HOST "temple" :SOURCE-REVISION
+        "010a9edcb48f0d8f0cdf5b4f3490eb03d09967aa" :BENCHMARK-BLOB
+        "94289a9e90917334d1d9aff581f309415a86f9d2" :FRAMES 300 :WARMUP 60
+        :SCENE :ALPINE :BACKEND :OLD :SETUP-SECONDS 1.136926000006497d0
+        :SETUP-PROFILE
+        ((LUVCRAFT:RELIGHT-BLOCK-WORLD :CALLS 1 :INCLUSIVE-MS
+                                       5.183000001125038d0)
+         (LUFT.TERRAIN:FINISH-SCENE-BUILDER :CALLS 1 :INCLUSIVE-MS
+                                            3.3709999406710267d0)
+         (LUVCRAFT:MAKE-BLOCK-MESH-SNAPSHOT :CALLS 6 :INCLUSIVE-MS
+                                            1.5100000891834497d0)
+         (LUVCRAFT::MESH-BLOCK-SNAPSHOT-HALO :CALLS 6 :INCLUSIVE-MS
+                                             1.6930000856518745d0))
+        :DEVICE (:NAME "Apple M2 Pro") :MODE :DEFAULT :EXTENT (1280 720)
+        :INTERNAL-EXTENT (1280 720) :TAA T :RECONSTRUCTION :SHADER
+        :FIXED-RENDER-SCALE NIL :RENDER-SCALE :HOST-BUDGET :DYNAMIC-RESOLUTION
+        NIL :SCENE-SAMPLES 1 :EXPOSURE :HOST-DEFAULT :SKY T :TERRAIN T
+        :CPU-ENCODE-MS
+        (:N 300 :MEAN 1.7348866634226094d0 :P50 1.369000063277781d0 :P95
+         4.58700000308454d0 :P99 5.218000034801662d0)
+        :COMPLETION-MS
+        (:N 300 :MEAN 38.621989998112745d0 :P50 38.19599992129952d0 :P95
+         41.406999924220145d0 :P99 45.87700008414686d0)
+        :CPU-FRAME-MS
+        (:N 300 :MEAN 1.7350033302015315d0 :P50 1.369000063277781d0 :P95
+         4.58700000308454d0 :P99 5.219000042416155d0)
+        :SIMULATION-MS
+        (:N 300 :MEAN 1.16666778922081d-4 :P50 0.0d0 :P95 0.00100000761449337d0
+         :P99 0.00100000761449337d0)
+        :COMPLETION-FPS 25.891985370222113d0 :GPU-MS
+        (:N 300 :MEAN 35.9396320868594d0 :P50 35.89412500150502d0 :P95
+         36.20033338665962d0 :P99 36.477916641160846d0)
+        :CPU-PASSES
+        (("unlabelled"
+          (:N 3300 :MEAN 0.09128030262548815d0 :P50 0.05100003909319639d0 :P95
+           0.30700000934302807d0 :P99 0.38899993523955345d0))
+         ("block world temporal resolve"
+          (:N 300 :MEAN 0.04681000136770308d0 :P50 0.03700004890561104d0 :P95
+           0.05000003147870302d0 :P99 0.11999998241662979d0))
+         ("block world temporal neighbourhood"
+          (:N 300 :MEAN 0.04703000149068733d0 :P50 0.04199997056275606d0 :P95
+           0.057999975979328156d0 :P99 0.09200000204145908d0)))
+        :GPU-PASSES NIL)

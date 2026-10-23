@@ -485,6 +485,10 @@ measurement rather than being inferred from host waits.
 :ID: B4E7Z5
 :END:
 
+This is the earlier /non-temporal fallback/ cohort, not shipped-default
+play. The default temporal rerun and the explanation of the harness's
+memory growth are in #V0MTXB. The earlier numbers remain labelled below.
+
 On 2026-10-23, temple's Mac mini (Mac14,12, Apple M2 Pro, 16 GPU cores,
 16 GB unified memory, macOS 27.2 / 26B5091g) ran the shared
 [[file:../scripts/bench-gpu-fps.lisp][GPU benchmark]] through the native Metal 4 backend. Each case used
@@ -499,7 +503,7 @@ required; asynchronous feedback retrieval happens outside the completion
 interval. CPU encode time excludes the GPU wait. Main-thread Cocoa/SDL setup
 and hidden-window handling are necessary on this backend.
 
-The main matrix used Luft's default *4× MSAA*, versus old Luvcraft's *1×*.
+The earlier matrix used Luft's *4× MSAA fallback*, versus old Luvcraft's *1×*.
 It is not an AA-quality-matched comparison. Alpine/meadow use seed 7.
 Finite cases have matched 32×32 cell fixtures. The live cases instead run
 actual streaming: Luft has nine visible 64-cell chunks, old Luvcraft 169
@@ -581,3 +585,345 @@ the turtle while Vulkan tolerated it. Native rendered turtle frames verified
 the correction. Runtime Metal compilation works. Offline shader-validation
 tests require the missing Xcode MetalToolchain component:
 =xcodebuild -downloadComponent MetalToolchain=.
+
+* DONE Shipped temporal rendering and bounded benchmark lifetimes on temple
+:PROPERTIES:
+:ID: V0MTXB
+:END:
+
+The earlier #B4E7Z5 disabled temporal reconstruction and measured the 4× MSAA
+fallback. That is not the ordinary Luft play path: temporal reconstruction
+defaults on, Metal selects MetalFX under =:auto=, and the scene uses a 0.75
+linear render scale. Temporal scenes always rasterize one sample; MSAA and
+temporal reconstruction are never combined. Old Luvcraft also defaults its
+own shader temporal resolve on. #4C7L3C's earlier chapel tables likewise
+remain non-temporal cohorts, not shipped-default comparisons.
+
+The first 18 default records (finite alpine, meadow and cave) load
+[[https://github.com/mbrock/luv/commit/1008108][1008108]]; the next 130 load [[https://github.com/mbrock/luv/commit/fedace0][fedace0]] and the final 95 load [[https://github.com/mbrock/luv/commit/d466b98][d466b98]]. All have production through
+[[https://github.com/mbrock/luv/commit/010a9ed][010a9ed]], including creature lighting, the walking motor, play-through fixes
+and the later benchmark preparation wrappers. The intervening one-line
+benchmark-only fix clears =*offscreen-render-scale*=, so SDL offscreen does
+not silently force native resolution instead of the shipped scale/budget.
+The earlier Cocoa records already assert and record the correct extents.
+The last revision replaces the terminal fixture's fixed 0.3-second sleep
+with a bounded wait for its last line: one 4× native-size setup saw only
+the echoed shell command and was rejected before any timed frames. The
+replacement waits outside timing and leaves the 24-line fixture unchanged.
+No production renderer, allocator, shader, gameplay or pool policy was
+optimized in this experiment.
+
+The shared script now has three explicit modes:
+
+| BENCH_MODE | Luft | Old Luvcraft |
+|-
+| default (the default) | shipped temporal setting, MetalFX here, scale 0.75, one sample | shipped shader temporal setting and 2,000,000-pixel scene budget |
+| native-1x | temporal off, native internal size, one sample | temporal off, native internal size, one sample |
+| native-4x | labelled fallback: temporal off, native internal size, four samples | temporal off, native internal size, one sample |
+
+=BENCH_MSAA= now errors with the replacement mode names rather than silently
+leaving temporal reconstruction active. Output size remains fixed and dynamic
+resolution stays disabled. Each record includes actual temporal activity,
+reconstruction backend, scene sample count, internal extent, output extent,
+fixed-scale override, production/source revision, benchmark Git blob and
+autorelease policy. Assertions reject a missing temporal path, a non-MetalFX
+default on this Metal host, or an unexpected output/control extent.
+
+Actual default internal sizes were verified, not inferred from the window:
+
+| Output | Luft MetalFX input | Old shader temporal input |
+|-
+| 1280×720 | 960×540 | 1280×720 |
+| 1920×1080 | 1440×810 | 1885×1060 |
+| 6016×1692 | 4512×1268 | 2666×750 |
+
+The even-size Luft rounding and old pixel-budget clamp are shipped policies.
+These default inputs are not equal-quality/equal-resolution implementations;
+the native-1x control supplies the common raster-size/sample-count comparison.
+The same serialized completion contract as #4C7L3C applies, not presentation
+FPS. Every retained matrix case uses 60 warmup and 300 measured frames:
+243 distinct records and 72,900 measured frames, each with a GPU sample.
+The three full matrices cover all ten scenes and three output sizes. Sky and terrain
+omission controls cover alpine, cave and live-alpine at all three sizes in
+both default and native-4x modes, on both games.
+
+** Shipped-default results
+
+Each entry is GPU mean milliseconds / completion FPS. Paired entries are
+Luft then old Luvcraft; atelier has only the actual default Luft viewer.
+The seven finite scenes are 32×32 fixtures, not full-world play. Live worlds
+have nine resident 64-cell Luft chunks versus 169 old 16-cell chunks.
+
+| Scene | 1280×720 Luft ; old | 1920×1080 Luft ; old | 6016×1692 Luft ; old |
+|-
+| Finite alpine | 4.49 / 112.4 ; 36.10 / 25.8 | 7.10 / 81.8 ; 79.17 / 12.2 | 21.05 / 40.5 ; 80.87 / 11.9 |
+| Finite meadow | 4.18 / 116.4 ; 35.87 / 26.0 | 7.13 / 81.9 ; 77.59 / 12.4 | 20.94 / 41.0 ; 79.74 / 12.1 |
+| Cave + lantern | 4.41 / 111.2 ; 36.39 / 25.7 | 6.91 / 83.4 ; 82.31 / 11.7 | 22.47 / 37.9 ; 79.69 / 12.1 |
+| 100 physics balls | 4.10 / 117.2 ; 35.98 / 26.0 | 7.17 / 81.1 ; 81.54 / 11.8 | 20.54 / 41.9 ; 79.80 / 12.1 |
+| Ridden moving turtle | 4.16 / 114.0 ; 35.73 / 26.2 | 7.16 / 79.9 ; 78.12 / 12.3 | 20.97 / 40.6 ; 80.18 / 12.0 |
+| Focused terminal | 3.80 / 122.3 ; 35.97 / 26.0 | 6.91 / 83.4 ; 76.73 / 12.6 | 19.78 / 42.8 ; 79.42 / 12.2 |
+| Companion bubble | 4.14 / 113.2 ; 36.07 / 26.0 | 7.27 / 79.0 ; 79.69 / 12.1 | 21.60 / 40.0 ; 80.95 / 11.9 |
+| Live alpine | 8.65 / 66.3 ; 36.91 / 25.2 | 11.91 / 52.7 ; 78.44 / 12.2 | 32.13 / 27.5 ; 80.21 / 12.0 |
+| Live meadow | 7.56 / 75.6 ; 36.65 / 25.4 | 10.64 / 57.5 ; 79.67 / 12.1 | 30.39 / 29.1 ; 80.78 / 11.9 |
+| Actual atelier | 7.03 / 83.2 | 8.10 / 74.5 | 24.74 / 35.1 |
+
+These numbers cannot be described as a speedup/regression from #B4E7Z5:
+temporal rendering, internal size, native resource lifetimes and process
+isolation all changed along with production code. The native-4x rerun is
+the closer rendering-policy control, although it too corrects the harness
+lifetime and does not isolate a particular production commit.
+
+** Native controls preserve the earlier rendering policy
+
+The same GPU-ms / completion-FPS notation follows. =native-4x= is four
+samples only on Luft; old remains single-sample. =native-1x= turns temporal
+rendering off on both hosts and fixes their internal extent to output size.
+These selected comparisons are backed by the
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-comparison-2026-10-23.txt][complete 57-case earlier/current comparison]]. Earlier revision labels remain
+those in #B4E7Z5; they are not retroactively stamped with the new revision.
+
+| Scene/output | Earlier fallback Luft ; old | Current native-4x Luft ; old | Current native-1x Luft ; old |
+|-
+| Finite alpine 1080p | 6.63 / 92.9 ; 6.33 / 94.0 | 6.42 / 104.3 ; 6.73 / 96.4 | 6.59 / 97.9 ; 6.62 / 96.4 |
+| Finite alpine native | 18.12 / 49.1 ; 25.24 / 36.1 | 18.12 / 48.1 ; 25.18 / 36.4 | 17.25 / 51.7 ; 25.20 / 36.4 |
+| Live alpine 1080p | 13.81 / 55.2 ; 6.86 / 84.8 | 13.78 / 56.7 ; 7.06 / 87.8 | 10.26 / 64.2 ; 6.87 / 90.8 |
+| Live alpine native | 36.55 / 24.4 ; 25.05 / 35.6 | 36.52 / 24.9 ; 25.20 / 31.6 | 27.92 / 31.6 ; 25.16 / 35.9 |
+| Live meadow 1080p | 12.63 / 56.6 ; 6.79 / 85.6 | 12.55 / 58.9 ; 6.99 / 88.5 | 9.12 / 74.3 ; 6.90 / 89.8 |
+| Live meadow native | 34.49 / 26.4 ; 25.01 / 35.3 | 34.47 / 26.6 ; 25.07 / 36.0 | 26.28 / 34.2 ; 25.11 / 35.0 |
+| Actual atelier 1080p | 7.83 / 79.1 | 7.75 / 88.8 | 7.01 / 96.7 |
+| Actual atelier native | 22.13 / 39.4 | 22.03 / 41.0 | 19.05 / 47.1 |
+
+At native output, Luft's earlier/current 4× GPU means agree closely:
+finite alpine 18.12/18.12 ms, live alpine 36.55/36.52 ms, live meadow
+34.49/34.47 ms, atelier 22.13/22.03 ms. This is not evidence of a large
+steady-state GPU regression from the intervening gameplay/lighting fixes.
+CPU/completion differences have more variability and different resource
+lifetimes; do not call their changes isolated production speedups.
+
+The [[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-distributions-2026-10-23.txt][complete readable distributions]] include CPU encode, CPU frame, GPU and
+completion mean/p50/p95/p99 for every retained matrix case. Raw records
+also contain simulation distributions and CPU pass/setup profiles:
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-default-2026-10-23.sexp][shipped default]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-native-1x-2026-10-23.sexp][native single-sample]], and
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-native-4x-2026-10-23.sexp][labelled native 4× fallback]].
+
+** Draw omission controls are frame effects, not additive pass timers
+
+Selected shipped-default GPU means follow. Terrain omission removes terrain
+from both scene and shadow draws; sky omission suppresses the sky draw.
+The [[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-ablations-2026-10-23.txt][full omission table]] includes all three sizes, both hosts and both default
+and native-4x modes. Raw records retain the exact flags and all percentiles:
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-default-nosky-2026-10-23.sexp][default no-sky]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-default-noterrain-2026-10-23.sexp][default no-terrain]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-native-4x-nosky-2026-10-23.sexp][4× no-sky]], and
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-native-4x-noterrain-2026-10-23.sexp][4× no-terrain]].
+
+| Default scene/output | Host | Full GPU ms | No sky | No terrain |
+|-
+| Finite alpine native | Luft | 21.05 | 14.70 | 20.24 |
+| Covered cave native | Luft | 22.47 | 22.50 | 20.42 |
+| Live alpine 1080p | Luft | 11.91 | 11.56 | 6.82 |
+| Live alpine native | Luft | 32.13 | 30.74 | 20.36 |
+| Live alpine 1080p | Old | 78.44 | 79.86 | 77.52 |
+| Live alpine native | Old | 80.21 | 79.77 | 80.95 |
+
+The old temporal bottleneck survives removal of terrain or sky. Luft's live
+scene is much more sensitive to terrain removal than sky removal in this
+camera. Exposed finite-island sky is a different workload: at native output
+omitting it changes 21.05 to 14.70 ms in default mode and 18.12 to 7.00 ms
+in the 4× native control; the covered cave sees essentially no sky benefit.
+This is consistent with visibility/pixel-shading cost, not counter proof.
+Removing terrain also exposes previously hidden sky, so these subtractions
+are not independent/additive stage costs. Small differences within clock/
+run variation, including controls that are slightly slower, are not gains.
+
+** The memory growth was in the offscreen harness lifetime
+
+An unchanged-pool default matrix again grew rapidly: the external footprint
+sampler reached about 19.84 GB current footprint, with a recorded process
+peak of 22,759,847,904 bytes (22.76 GB), before the run was stopped to limit
+pressure on the 16 GB host. An earlier =vmmap= snapshot attributed 13.8 GiB
+to IOAccelerator graphics mappings (135,535 regions), versus a roughly
+620 MiB malloc allocation total. This was not evidence that the Lisp terrain
+world itself held 41.6 GB.
+
+A separate matched 720p diagnostic inserted a per-encoder autorelease pool.
+The watchdog process snapshot fell from =3.1G= without that boundary to
+=764.3M= with it (=1.0G= peak), in Apple's displayed units. Both cases kept
+Lisp dynamic usage roughly 294--437 MB, native device =currentAllocatedSize=
+roughly 98--123 MB and
+zero pending queue submissions at the sampled completed frames. The large
+extra footprint points to autorelease-held native graphics resources around
+frame encoding, rather than a growing Lisp world, live terrain-buffer set or
+unretired submission queue. The measurements do not distinguish command/
+encoder backing from other autoreleased driver-private graphics objects;
+the exact allocating class is not named by these measurements.
+
+The production Metal canvas already encloses each frame in an autorelease
+pool. The offscreen script previously enclosed neither individual frames nor
+the batch in that same boundary. The script now drains a pool after each
+frame's completion, timestamp collection and command destruction; production
+is unchanged. Pool setup/drain is outside the reported completion interval,
+as is command destruction. The discarded unpooled diagnostic is not mixed
+into the new tables. Retained rerun cases use /both/ per-frame pools and fresh
+processes per scene/output-size pair; raw records identify the pool policy.
+
+The retained pooled matrix did not reproduce 41.6 GB growth. Its largest
+sampled footprint was 5,138,253,960 bytes (5.14 GB); the largest recorded
+process peak was 6,145,755,344 bytes (6.15 GB). The latter finite-alpine
+native-size process later sampled only 931,219,184 bytes. These are process
+footprints, not sums of live GPU texture/buffer allocation sizes. They
+include unmeasured startup: the hidden Cocoa Luft canvas initially reports
+12032×3384 physical pixels for a requested 6016×1692 logical window before
+the benchmark reframes its separate target to the asserted fixed extent.
+
+The external sampler ran every 15 seconds. It obtained SBCL samples in 98
+of 126 fresh processes; some short cases ended after only their launcher
+was observed. Recorded peaks include earlier transients, but the largest
+recorded value is not a guaranteed upper bound on every unsampled peak.
+The [[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-memory-summary-2026-10-23.txt][per-process memory summary]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-growth-footprint-2026-10-23.txt][unpooled growth snapshots]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-growth-vmmap-2026-10-23.txt][IOAccelerator vmmap attribution]], and matched
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-memory-unpooled-2026-10-23.txt][unpooled]] /
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-memory-pooled-2026-10-23.txt][pooled native-allocation probes]], with their
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-memory-snapshots-2026-10-23.txt][watchdog process-footprint headers]], preserve these observations.
+
+** Metal buffer placement is shared unified memory
+
+The HAL creates every =MTLBuffer= with resource options zero, independent of
+vertex/index/storage/uniform usage, and requires a CPU-visible contents
+pointer. A live native =storageMode= probe returned zero (=shared=) for star
+patch storage, index, camera-uniform, McCLIM vertex/uniform and old-world
+vertex buffers. The device reports =hasUnifiedMemory= true. These are not
+=private= or =managed= buffers. Textures have a separate policy: =copy-dst=
+usage chooses shared storage; other ordinary textures choose private storage.
+
+This resembles chapel's upload-friendly buffer policy at the API level, but
+not its discrete-memory consequence. M2 Pro CPU and GPU share physical memory;
+shared Metal storage is not evidence of a host-only PCIe allocation like the
+non-device-local Vulkan heap witnessed on chapel. No buffer-placement A/B or
+bandwidth-counter claim is made, and neither allocator was changed here.
+
+** The old temporal neighbourhood is a Metal-specific investigation
+
+Old Luvcraft's shipped temporal path is much slower than its native-1x
+control here. A separate draw-suppression diagnostic kept the temporal
+attachments, bindings, submission and completion loop, but skipped the draw
+whose pass label matched the selected old temporal stage. Each diagnostic
+used 30 warmup and 100 measured frames in a fresh process with frame pools.
+The resulting images are deliberately invalid: these are workload-isolation
+controls, not playable FPS or quality comparisons.
+
+| Old finite alpine | Full GPU ms | Skip neighbourhood | Skip resolve | Skip both |
+|-
+| 1280×720 output | 36.27 | 4.36 | 35.84 | 4.40 |
+| 1920×1080 output | 77.15 | 6.39 | 79.11 | 6.57 |
+
+Raw 1080p diagnostic distributions are retained for
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-temporal-probe-full-1920x1080-2026-10-23.sexp][full]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-temporal-probe-no-neighbourhood-1920x1080-2026-10-23.sexp][skip neighbourhood]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-temporal-probe-no-resolve-1920x1080-2026-10-23.sexp][skip resolve]], and
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/temple-temporal-probe-neither-1920x1080-2026-10-23.sexp][skip both]]; matching 720p files live alongside them.
+
+This localizes the large cost to executing the neighbourhood shader, not
+the final history resolve or CPU encoding. It does not turn subtraction
+into a precise GPU pass timer: clocks vary, attachment writes change, and
+the later resolve reads different data. In particular the two 1080p heavy
+runs differ by about 2 ms. There are no usable Metal hardware-counter or
+per-pass GPU timestamp records: the attempted Metal System Trace crashed
+inside Apple's residency-set event modeler. Whole-submission Metal 4 GPU
+feedback is available and required for every measured frame.
+
+Chapel reports the same old shader temporal path on fedace0 at 1080p as
+2.93--3.13 ms GPU for finite alpine, including only 0.152--0.158 ms for the
+neighbourhood and 0.127--0.129 ms for resolve. Thus the large neighbourhood
+cost is not reproduced on its RX 6600 XT/RADV setup. This is a reason to
+inspect generated Metal code, texture-load lowering and compiler behavior;
+it is not yet proof of a particular compiler bug, nor a comparison on
+identical GPU hardware. Neither shader nor compiler policy was changed.
+
+For Luft live alpine at 1080p, default CPU encoding is 5.27 ms mean:
+sun-shadow encoding contributes 2.19 ms, site streams 1.58 ms and HDR
+presentation 0.72 ms. These are CPU pass durations, not GPU durations.
+The default GPU mean is 11.91 ms; completion mean is 18.99 ms (52.7 FPS),
+not the inverse of GPU time alone. The native-1x control is 4.33 ms CPU,
+10.26 ms GPU and 15.58 ms completion (64.2 FPS); native-4x is 3.05 ms CPU,
+13.78 ms GPU and 17.62 ms completion (56.7 FPS). MetalFX's reduced scene
+size therefore does not by itself promise a higher completion rate at this
+size. Temporal processing changes the work/quality, and these sequential,
+unclocked runs do not isolate the MetalFX scaler from its surrounding passes
+or make the CPU deltas causal optimization measurements.
+
+Luft live-alpine setup remains about 16.6 seconds at 720p, versus measured
+mesh/light-word/upload inclusive totals about 24/63/23 ms. Instrumented
+phases are nested and incomplete; they do not explain the whole startup
+wait and must not be added as a complete latency breakdown.
+
+Untimed live-alpine captures in all three modes were inspected and contain
+real occupied terrain on both hosts. They are not exact image-quality
+comparisons: the Cocoa Luft capture transaction produced 2560×1440 for a
+1280×720 benchmark request, while old's capture remained 1280×720. The
+timed loop's separate target and actual internal extents are asserted and
+recorded independently; capture/readback is never in those timings.
+
+** Ranked follow-ups, not changes made
+
+1. Inspect/profile old temporal-neighbourhood Metal lowering and compiler
+   output. It dominates the shipped old path here, and chapel does not
+   reproduce the cost on RADV. Keep shader correctness and quality in the
+   comparison; skipping the stage is not a usable fix.
+2. Isolate Luft live terrain/shadow GPU work and its CPU submission cost.
+   The live scene has a much larger cost than a finite fixture; sun-shadow
+   encoding alone is about 2.19 ms CPU in the 1080p default sample.
+3. Separate temporal reconstruction, its surrounding finishing passes and
+   native-output work with quality-matched measurements. The default 0.75
+   scale is not equivalent to a 0.75 total-frame cost, and turning TAA off
+   is not a like-quality production optimization.
+4. Investigate sky pixel work only in views where it remains visible. The
+   finite island's large sky saving does not transfer to the covered cave
+   or this mostly terrain-filled live camera.
+5. Trace startup streaming/settling separately; the current mesh/light/upload
+   wrappers cover too little of the roughly 16-second setup to name its cause.
+
+No production optimization, allocator change, shader change or production
+autorelease-policy change was made for this rerun.
+
+** Reproduce and validation
+
+Run =make=, then launch a fresh process for each scene/output-size pair.
+For example:
+
+#+begin_src sh
+BENCH_MODE=default BENCH_FRAMES=300 BENCH_WARMUP=60 \
+BENCH_SCENES=live-alpine BENCH_SIZES=1920x1080 \
+BENCH_OUTPUT=build/temple-default-live-alpine-1080.sexp \
+./env sbcl --core build/sly-dependencies.core --noinform \
+  --script scripts/bench-gpu-fps.lisp
+#+end_src
+
+Repeat for all ten scenes and three sizes above, switching =BENCH_MODE= to
+=native-1x= or =native-4x= for the complete native controls. Add
+=BENCH_SKY_OFF=1= or =BENCH_TERRAIN_OFF=1= for each omission case; do not
+carry those flags into full runs. The shared script defaults to the shipped
+temporal mode, and rejects the old ambiguous =BENCH_MSAA= interface.
+
+Record validation checked unique case keys, all GPU/CPU sample counts,
+monotone percentiles, actual extents/reconstruction/sample counts, omission
+flags, disabled dynamic resolution and FPS against completion mean. There
+are 57 records in each full mode and 18 in each of four omission groups.
+The MetalFX/default and both native modes were also smoke-tested directly;
+the corrected terminal readiness was exercised at the native output size.
+
+=make= succeeds. =make test TEST_JOBS=2= runs all 35 suites/38 tasks;
+35 tasks pass and three offline shader tasks fail because Xcode's optional
+MetalToolchain component is missing (=luvcraft/core/test= halves and
+=luv/shaderc/test=). The exact diagnostic requests
+=xcodebuild -downloadComponent MetalToolchain=. Runtime Metal compilation
+and the hardware benchmark work; this missing offline component is not
+silently reported as a passing test suite. Strict Parinfer passes.
+
+Ordinary-session CPU/GPU clocks were not pinned, and temple has one
+300-frame repetition per case rather than chapel's two 600-frame repeats.
+Low-load tails and small mean differences should not be over-interpreted.
+Cave lantern lighting still is not visually equivalent between the games;
+live residency and default temporal algorithms/internal sizes also differ.
