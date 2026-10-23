@@ -231,7 +231,8 @@
   :components ((:file "luvcraft/luft/game")
                (:file "luvcraft/luft/animals")
                (:file "luvcraft/luft/agents")
-               (:file "luvcraft/luft/agent-tools"))
+               (:file "luvcraft/luft/agent-tools")
+               (:file "luvcraft/luft/presentation"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"
@@ -297,7 +298,6 @@
                              (:file "introspection")
                              (:file "approval")
                              (:file "hud")
-                             (:file "wall")
                              (:file "gnome")
                              (:file "construction")
                              (:file "cat")

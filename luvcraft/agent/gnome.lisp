@@ -422,7 +422,9 @@ may cover, from the viewport's bottom edge to the top of a two-line answer.")
     (repaint-gnome-dialogue gnome))
   gnome)
 
-(defun gnome-ask (gnome text)
+(defgeneric gnome-ask (gnome text))
+
+(defmethod gnome-ask ((gnome embodied-agent) text)
   "Start TEXT now, or queue it behind one asynchronous provider opening.
 
 In particular, first contact never performs DNS, TLS, or a WebSocket handshake
@@ -1131,6 +1133,18 @@ candidate that loses to release or another publication is detached and closed."
 (defclass gnome-body-overlay (sdf-agent-body-overlay) ()
   (:documentation "The gnome's SDF body overlay."))
 
+(defgeneric sdf-agent-pipeline-layout (session)
+  (:documentation "The host's scene uniform layout for the existing SDF shaders.")
+  (:method (session)
+    (luvcraft::live-shader-pipeline-layout
+     (luvcraft:luvcraft-session-block-pipeline session))))
+
+(defgeneric sdf-agent-scene-bind-group (session surface-texture)
+  (:documentation "The host's frame-local scene uniforms for the SDF body.")
+  (:method (session surface-texture)
+    (luvcraft::luvcraft-frame-scene-bind-group
+     (luvcraft::luvcraft-frame-state session surface-texture))))
+
 (defmethod luvcraft:luvcraft-focus-score
     ((overlay sdf-agent-body-overlay) session)
   (declare (ignore overlay session))
@@ -1172,8 +1186,7 @@ candidate that loses to release or another publication is detached and closed."
 (defmethod luvcraft:encode-luvcraft-overlay
     ((overlay sdf-agent-body-overlay) session pass surface-texture)
   (place-gnome-body overlay)
-  (let* ((frame (luvcraft::luvcraft-frame-state session surface-texture))
-         (instance-buffer
+  (let* ((instance-buffer
            (luv:canvas-frame-resource
             (gnome-body-instance-buffers overlay)
             (luvcraft:luvcraft-session-context session) surface-texture
@@ -1192,7 +1205,7 @@ candidate that loses to release or another publication is detached and closed."
       (gnome-body-pipeline overlay)))
     (luv:set-vertex-buffer pass 0 (gnome-body-vertex-buffer overlay))
     (luv:set-vertex-buffer pass 1 instance-buffer)
-    (luv:set-bind-group pass 0 (luvcraft::luvcraft-frame-scene-bind-group frame))
+    (luv:set-bind-group pass 0 (sdf-agent-scene-bind-group session surface-texture))
     (luv:draw pass 6 1))
   overlay)
 
@@ -1233,9 +1246,7 @@ candidate that loses to release or another publication is detached and closed."
                       :vertex-role role
                       :label (format nil "~A pipeline" label)
                       :device device
-                      :layout
-                      (luvcraft::live-shader-pipeline-layout
-                       (luvcraft:luvcraft-session-block-pipeline session))
+                      :layout (sdf-agent-pipeline-layout session)
                       :vertex-buffers
                       '((:array-stride 12
                          :attributes

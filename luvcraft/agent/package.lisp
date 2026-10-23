@@ -73,9 +73,6 @@
    #:com-describe-handle #:com-block-at
    ;; The HUD
    #:open-agent-hud #:close-agent-hud #:toggle-agent-hud
-   ;; The wall
-   #:agent-terminal-display #:open-agent-wall #:com-open-agent-wall
-   #:ansi-view #:+ansi-view+
    ;; Embodied agents
    #:embodied-agent #:gnome #:cat #:fantus
    #:embodied-agent-pending-approval

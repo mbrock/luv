@@ -38,6 +38,9 @@
 (defgeneric handle-viewer-focus-event (focus viewer canvas event)
   (:method (focus viewer canvas event)
     (declare (ignore focus viewer canvas event)) nil))
+(defgeneric viewer-focus-dismiss-key-p (focus viewer event)
+  (:documentation "Whether the host may dismiss FOCUS on Escape or Tab.")
+  (:method (focus viewer event) (declare (ignore focus viewer event)) t))
 (defgeneric viewer-focus-camera-pose (focus viewer)
   (:documentation "Return a host CAMERA-POSE in Luft's Z-up coordinates, or NIL.")
   (:method (focus viewer) (declare (ignore focus viewer)) nil))
@@ -1440,7 +1443,8 @@ inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
       (let ((focus (viewer-modal-focus viewer)))
         (cond
           ((and focus (typep event 'canvas-key-press-event)
-                (member (canvas-key-event-key-name event) '(:escape :tab)))
+                (member (canvas-key-event-key-name event) '(:escape :tab))
+                (viewer-focus-dismiss-key-p focus viewer event))
            (unfocus-viewer viewer) t)
           ((and (null focus) (typep event 'canvas-key-press-event)
                 (eq :tab (canvas-key-event-key-name event))
@@ -2623,7 +2627,7 @@ it makes no claim about which earlier render pass caused a discontinuity."
           (releasing :event-handler
             (setf (canvas-event-handler canvas) nil))
           (releasing :overlays
-            (dolist (overlay (copy-list (viewer-overlays viewer)))
+            (dolist (overlay (reverse (viewer-overlays viewer)))
               (remove-viewer-overlay viewer overlay)))
           ;; The Luv shell owns retained compositor resources. It must detach
           ;; after the terminal frame fence but before application renderer

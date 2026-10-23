@@ -138,6 +138,24 @@ final pass."
     (encode-renderer-scene renderer frame encoder player-p nil :repetition-p t))
   (encode-renderer-shadows renderer frame encoder)
   (encode-renderer-scene renderer frame encoder player-p construction-p)
+  (when *renderer-scene-overlay-encoder*
+    ;; Retained application shaders have one color output and one sample;
+    ;; keep them independent of terrain's MSAA and temporal MRT contracts.
+    (let ((pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :label "world instruments"
+              :color-attachments
+              `((:view ,(renderer-scene-view renderer)
+                 :load-op :load :store-op :store))
+              :depth-stencil-attachment
+              `(:view ,(renderer-depth-view renderer)
+                :depth-load-op :load :depth-store-op :store)))))
+      (funcall *renderer-scene-overlay-encoder* pass)
+      (when (renderer-metalfx-temporal-p renderer)
+        (signal-temporal-scaler-inputs pass (renderer-temporal-scaler renderer)))
+      (end-pass pass)))
   (encode-renderer-reconstruction renderer frame encoder jitter view)
   (encode-renderer-composite renderer frame encoder)
   (encode-exposure (renderer-exposure-control renderer) encoder
@@ -277,9 +295,8 @@ final pass."
                           (make-gpu-draw-command :vertex-count 6
                                                  :instance-count (mesh-slot-lattice-point-count slot)))))))
   ;; A benchmark repetition is not this frame's input to the scaler.
-  (when (and *renderer-scene-overlay-encoder* (not repetition-p))
-    (funcall *renderer-scene-overlay-encoder* pass))
-  (when (and (renderer-metalfx-temporal-p renderer) (not repetition-p))
+  (when (and (renderer-metalfx-temporal-p renderer) (not repetition-p)
+             (not *renderer-scene-overlay-encoder*))
     (signal-temporal-scaler-inputs pass
                                    (renderer-temporal-scaler renderer)))
   (end-pass pass))

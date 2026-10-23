@@ -180,14 +180,9 @@
       approval)))
 
 (defun show-companion-message (viewer inhabitant)
-  (let ((workbench (luv.workbench:application-workbench viewer)))
-    (when workbench
-      (luv.workbench:show-workbench-message
-       workbench (luvcraft.agent::wrap-words
-                  (format nil "~(~A~): ~A" (inhabitant-kind inhabitant)
-                          (or (inhabitant-said inhabitant) "Ready to talk. T opens a message."))
-                  72)
-       :seconds 30))))
+  (let ((agent (ensure-inhabitant-presentation viewer inhabitant)))
+    (when (inhabitant-said inhabitant)
+      (luvcraft.agent:gnome-say agent (inhabitant-said inhabitant)))))
 
 (defun call-companion-ui (viewer function)
   (handler-case (funcall function)
@@ -233,17 +228,16 @@
          (inhabitant (or (viewer-conversation-agent viewer)
                          (first (viewer-agents viewer)) (summon-inhabitant viewer))))
     (setf (viewer-conversation-agent viewer) inhabitant)
-    (luv.workbench:open-workbench-prompt
-     (luv.workbench:application-workbench viewer)
-     :label (format nil "~(~A~):" (inhabitant-kind inhabitant))
-     :function (lambda (text)
-                 (call-companion-ui
-                  viewer
-                  (lambda ()
-                    (unless (string= "" (string-trim " " text))
-                      (if (inhabitant-approval inhabitant)
-                          (luvcraft.agent:steer-tool-approval (inhabitant-approval inhabitant) text)
-                          (tell-inhabitant viewer inhabitant text)))))))))
+    (if (inhabitant-approval inhabitant)
+        (luv.workbench:open-workbench-prompt
+         (luv.workbench:application-workbench viewer)
+         :label "What should change?"
+         :function (lambda (text)
+                     (call-companion-ui viewer
+                      (lambda ()
+                        (unless (string= "" (string-trim " " text))
+                          (luvcraft.agent:steer-tool-approval (inhabitant-approval inhabitant) text))))))
+        (render:focus-viewer viewer (ensure-inhabitant-presentation viewer inhabitant)))))
 
 (clim:define-command (com-next-companion :command-table luvcraft-world
                                        :name "Next Companion" :keystroke (:f7)) ()

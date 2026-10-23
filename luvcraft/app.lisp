@@ -724,7 +724,9 @@ otherwise; repeated requests still defer native close to that same owner."
       (setf (luvcraft-session-pointer-captured-p session) t)))
   session)
 
-(defun unfocus-luvcraft-session (session)
+(defgeneric unfocus-luvcraft-session (session))
+
+(defmethod unfocus-luvcraft-session (session)
   "Leave SESSION's modal interaction, returning the object which was focused."
   (let ((focus (luvcraft-session-modal-focus session)))
     (when focus
@@ -736,7 +738,9 @@ otherwise; repeated requests still defer native close to that same owner."
       (luvcraft-focus-left focus session))
     focus))
 
-(defun focus-luvcraft-session (session focus)
+(defgeneric focus-luvcraft-session (session focus))
+
+(defmethod focus-luvcraft-session ((session luvcraft-session) focus)
   "Enter modal interaction with FOCUS, suspending ordinary player input.
 
 This is the common session transition behind using a world terminal or book,
@@ -906,7 +910,9 @@ and synchronously returns FUNCTION's values or condition to the caller."
         (releasing :rejected-overlay
           (release-luvcraft-overlay overlay))))))
 
-(defun add-luvcraft-overlay (session overlay)
+(defgeneric add-luvcraft-overlay (session overlay))
+
+(defmethod add-luvcraft-overlay (session overlay)
   "Attach OVERLAY at SESSION's next native frame boundary and return it.
 
 ADD consumes a newly offered OVERLAY on both success and terminal rejection.
@@ -971,7 +977,9 @@ before APPLICATION-ATTACHMENT-CLOSED is signalled."
     (release-luvcraft-overlay overlay))
   overlay)
 
-(defun remove-luvcraft-overlay (session overlay &key (release-p t))
+(defgeneric remove-luvcraft-overlay (session overlay &key release-p))
+
+(defmethod remove-luvcraft-overlay (session overlay &key (release-p t))
   "Detach OVERLAY at a frame boundary and optionally release it there.
 
 The no-release path is intentionally preserved for FUSE-LUVCRAFT-OVERLAY:
@@ -980,7 +988,9 @@ that path may run inside a frame whose command stream still borrows OVERLAY."
    session
    (lambda () (%remove-luvcraft-overlay session overlay release-p))))
 
-(defun request-luvcraft-session-checkpoint (session)
+(defgeneric request-luvcraft-session-checkpoint (session))
+
+(defmethod request-luvcraft-session-checkpoint (session)
   "Capture SESSION's durable state and submit it to its asynchronous writer."
   (let ((writer (luvcraft-session-checkpoint-writer session)))
     (when writer
