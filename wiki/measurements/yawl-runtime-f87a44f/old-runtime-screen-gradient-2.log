@@ -1,0 +1,79 @@
+luv 22:09:47.818 canvas opened "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release", 3840x2160 pixels, metal
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 22:10:04.052 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.0 s and is not servicing its window
+luv 22:10:06.090 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.1 s and is not servicing its window
+luv 22:10:08.130 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 6.1 s and is not servicing its window
+luv 22:10:09.695 watchdog sampled the process 6.1 s into the stall: /Users/mbrock/luv/build/canvas-stall-98548-4001771408.txt
+luv 22:10:09.696 canvas closing "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" after 136 loop iterations
+luv 22:10:09.735 canvas closed "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release"
+RESULT (:REPEAT 1 :HOST "yawl" :SOURCE-REVISION
+        "a31fc0b53d7126f5710f420005e07a5fbfdf6548" :BENCHMARK-BLOB
+        "e7a4c9b783f3efe601566e922efe0a942f577704" :FRAMES 300 :WARMUP 120
+        :SCENE :LIVE-ALPINE :BACKEND :LUFT :SETUP-SECONDS 14.26419299999543d0
+        :SETUP-PROFILE
+        ((LUFT.TERRAIN:FINISH-SCENE-BUILDER :CALLS 1 :INCLUSIVE-MS
+                                            1.0800000018207356d0)
+         (LUFT:MESH-STAR-CHUNK :CALLS 16 :INCLUSIVE-MS 22.767999980715103d0)
+         (LUFT.RENDER::STAR-LATTICE-LIGHT-WORDS :CALLS 16 :INCLUSIVE-MS
+                                                37.364000017987564d0)
+         (LUFT.RENDER::MAKE-RENDER-POPULATION :CALLS 16 :INCLUSIVE-MS
+                                              85.82700000260957d0)
+         (LUFT.RENDER::%UPLOAD-RENDER-POPULATION :CALLS 16 :INCLUSIVE-MS
+                                                 18.511000016587786d0))
+        :RESIDENT-CHUNKS 9 :DEVICE (:NAME "Apple M5") :MODE :NATIVE-1X :EXTENT
+        (1920 1080) :INTERNAL-EXTENT (1920 1080) :TAA NIL :RECONSTRUCTION NIL
+        :AUTORELEASE-POLICY :PER-FRAME :FIXED-RENDER-SCALE 1.0 :RENDER-SCALE
+        0.75 :DYNAMIC-RESOLUTION NIL :SCENE-SAMPLES 1 :EXPOSURE 0.45 :SKY T
+        :TERRAIN T :CPU-ENCODE-MS
+        (:N 300 :MEAN 2.155173332624448d0 :P50 2.1249999990686774d0 :P95
+         2.6400000060675666d0 :P99 3.0549999937647954d0)
+        :COMPLETION-MS
+        (:N 300 :MEAN 15.841676666750573d0 :P50 17.32300000730902d0 :P95
+         18.41499999864027d0 :P99 19.335999997565523d0)
+        :CPU-FRAME-MS
+        (:N 300 :MEAN 2.1553833329623253d0 :P50 2.1249999990686774d0 :P95
+         2.6400000060675666d0 :P99 3.0560000013792887d0)
+        :SIMULATION-MS
+        (:N 300 :MEAN 2.1000033787762126d-4 :P50 0.0d0 :P95
+         0.00100000761449337d0 :P99 0.00100000761449337d0)
+        :COMPLETION-FPS 63.12463137812034d0 :GPU-MS
+        (:N 300 :MEAN 13.25561722216662d0 :P50 14.785874998779036d0 :P95
+         15.355208335677162d0 :P99 15.43845834385138d0)
+        :CPU-PASSES
+        (("luft HDR presentation"
+          (:N 300 :MEAN 0.3252266660759536d0 :P50 0.32500000088475645d0 :P95
+           0.4309999931138009d0 :P99 0.47400000039488077d0))
+         ("native world panels"
+          (:N 300 :MEAN 0.028116666556646425d0 :P50 0.028999987989664078d0 :P95
+           0.03700000524986535d0 :P99 0.04199999966658652d0))
+         ("luft lens shafts"
+          (:N 300 :MEAN 0.020813332715382177d0 :P50 0.0219999928958714d0 :P95
+           0.029000002541579306d0 :P99 0.03200001083314419d0))
+         ("luft lens vertical"
+          (:N 600 :MEAN 0.04951166675406663d0 :P50 0.02200000744778663d0 :P95
+           0.030000010156072676d0 :P99 0.03300000389572233d0))
+         ("luft lens horizontal"
+          (:N 600 :MEAN 0.02402499994786922d0 :P50 0.02400000812485814d0 :P95
+           0.03300000389572233d0 :P99 0.038999991375021636d0))
+         ("luft lens bright"
+          (:N 300 :MEAN 0.037549999833572656d0 :P50 0.037999998312443495d0 :P95
+           0.048000001697801054d0 :P99 0.058999998145736754d0))
+         ("luft native viewmodel"
+          (:N 300 :MEAN 0.012393333696915457d0 :P50 0.012999997125007212d0 :P95
+           0.016000005416572094d0 :P99 0.020000006770715117d0))
+         ("luft post-temporal HDR flame composite"
+          (:N 300 :MEAN 0.027203333205155406d0 :P50 0.027999994927085936d0 :P95
+           0.036999990697950125d0 :P99 0.0450000079581514d0))
+         ("world instruments"
+          (:N 300 :MEAN 0.01884333313986038d0 :P50 0.018999999156221747d0 :P95
+           0.025999994250014424d0 :P99 0.03500000457279384d0))
+         ("luft site streams"
+          (:N 300 :MEAN 1.1149433333290897d0 :P50 1.1470000026747584d0 :P95
+           1.3780000008409843d0 :P99 1.5989999956218526d0))
+         ("luft sun shadow"
+          (:N 300 :MEAN 0.342390000053759d0 :P50 0.33999999868683517d0 :P95
+           0.40600000647827983d0 :P99 0.46699999074917287d0)))
+        :GPU-PASSES NIL)
+RESULT (:REPEAT 1 :HOST "yawl" :SOURCE-REVISION
+        "a31fc0b53d7126f5710f420005e07a5fbfdf6548" :BENCHMARK-BLOB
+        "e7a4c9b783f3efe601566e922efe0a942f577704" :FRAMES 300 :WARMUP 120)

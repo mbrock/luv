@@ -11,6 +11,12 @@ manifold boundaries, lighting, or live-editing behavior. This page is the
 campaign ledger, not another renderer architecture. Keep the next experiment
 small, its counterfactual explicit, and its failed results easy to find.
 
+The hilltop view is a required workload, not an exceptional failure to hide
+with a shorter horizon. Build headroom by reducing work per visible surface
+and shaded pixel at fixed scene coverage. Visibility rejection can complement
+that work, but a lower render distance or a view-dependent culling win does
+not establish that the renderer can afford a big, open landscape.
+
 Start with the [[file:../.agents/metal-profiling.md][agent Metal profiling runbook]] for the shortest known path to
 real counters, heatmaps, and source costs. #4C7L3C defines the fixed-target
 runtime measurement contract; #E6JYVE records the earlier Metal System Trace
@@ -126,7 +132,49 @@ work, not merely maximize the percentage reduction in triangle count.
 The original atlas already reuses indexed vertices and instances stars;
 replacing that representation can spend the saved work on memory traffic.
 
-* NEXT Establish repeatable sampling and useful source attribution
+* DONE Recover a runtime shading comparison that survives clock variation
+:PROPERTIES:
+:ID: ZRQM38
+:END:
+
+The [[file:measurements/yawl-runtime-f87a44f/README.org][runtime experiment bundle]] continues #57KXBH on current production
+source, with the camera, nine residents, geometry, shadows, and native
+1920×1080 shading extent fixed. No render-distance or visibility change.
+
+Multi-second blocks still hid the shading reduction. Read-only power
+sampling showed an unchanged control going from about 8.33 ms at 1.56 GHz
+to 16.9 ms at 0.78 GHz, with nominal thermal pressure. Event pumping,
+a scoped user-initiated activity, and user-initiated thread QoS did not
+stabilize it. These are failed controls, not proposed production fixes.
+The reason for the governor's behavior remains unresolved.
+
+Adjacent-frame ABCCBA/ABBA comparisons keep variants in the same sustained
+run instead. Both large relief ablations improved GPU and completion time
+in all 15 windows. An identical-shader A/A control differed by just 0.019 ms
+GPU and effectively zero mean completion time. The screen-gradient candidate
+then improved both measurements in all 30 windows across two fresh runs,
+including reversed variant order:
+
+| Run | Control GPU ms | Candidate GPU ms | Control completion ms | Candidate completion ms |
+|-
+| 1 | 14.992 | 12.963 | 17.768 | 15.723 |
+| 2, reversed order | 15.098 | 13.024 | 17.822 | 15.735 |
+
+That is 13.5–13.7% lower GPU time and 11.5–11.7% lower serialized completion
+time under the mixed-workload comparison, not a demonstrated increase in
+displayed FPS or a promise that candidate-only runs retain the same clocks.
+It establishes a runtime benefit from sharing relief evaluation without
+removing any visible terrain. It does not make this approximation production
+ready. Current stationary overview/detail captures were inspected; near,
+grazing, motion, temporal, and material coverage remain open.
+
+Two archived runs previously called uninstrumented also contain watchdog
+logs launching native process sampling during their long canvas request.
+The isolated benchmark now disables that sampling, not the game's watchdog.
+This is an established extra confound, not a quantified explanation of all
+the old replay/runtime discrepancy. Preserve those old results and logs.
+
+* TODO Establish repeatable sampling and useful source attribution
 :PROPERTIES:
 :ID: QVJVRZ
 :END:
@@ -147,7 +195,7 @@ Done when: repeated profiles explain their coverage and the cost of a known
 shader operation lands on a meaningful source region; an agent can repeat
 the extraction without rediscovering GUI navigation or permissions.
 
-* NEXT Retire distant material work, not just its visible amplitude
+* TODO Retire distant material work, not just its visible amplitude
 :PROPERTIES:
 :ID: 35AVAY
 :END:
@@ -177,3 +225,25 @@ gain, and near/far, grazing, camera-motion, temporal, material-boundary,
 chunk-boundary, cave, and shadow checks preserve the intended appearance.
 Record a failed result here too. No approximate shading tier or new scene
 compression path is approved for the default renderer by this page alone.
+
+* NEXT Validate shared relief before enabling it
+:PROPERTIES:
+:ID: XDZ78R
+:END:
+
+#ZRQM38 selects removal of repeated relief evaluation as the next shading
+bet, before adding a distant material tier. It saves work at existing scene
+coverage and is consistent with the hilltop-view goal. Screen derivatives
+are the measured prototype, not yet the selected production implementation.
+
+Check near materials, projected/grazing footprints, camera motion, temporal
+reconstruction, and material/chunk boundaries. Screen derivatives replace a
+fixed world-space finite difference with a pixel-quad difference; the
+appearance is not mathematically identical. If that fails the quality bar,
+try shared value-and-gradient evaluation rather than recomputing whole
+procedural fields three times or hiding more terrain. Keep geometry efficiency
+as a separate experiment retaining the indexed atlas and its memory reuse.
+
+Done when: a bounded shared-relief implementation passes those quality checks
+and a repeated runtime comparison, with unchanged coverage and no profiler
+or native watchdog sampler competing for the GPU.

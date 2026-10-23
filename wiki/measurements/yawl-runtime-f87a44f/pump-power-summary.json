@@ -1,0 +1,533 @@
+{
+  "origin_uncertainty_seconds": 0.0011103153228759766,
+  "windows": [
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 0,
+      "gpu_ms": 8.361005554166667,
+      "gpu_mhz": 1562.221,
+      "gpu_idle_ratio": 0.2131013,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 30,
+      "gpu_ms": 8.604976387866667,
+      "gpu_mhz": 1509.065,
+      "gpu_idle_ratio": 0.3292149,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 60,
+      "gpu_ms": 14.114698609,
+      "gpu_mhz": 942.1882,
+      "gpu_idle_ratio": 0.2602040666666667,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 90,
+      "gpu_ms": 14.869570832566668,
+      "gpu_mhz": 866.1073333333334,
+      "gpu_idle_ratio": 0.29415963333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 120,
+      "gpu_ms": 15.597798611833333,
+      "gpu_mhz": 820.1501,
+      "gpu_idle_ratio": 0.3387017,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 150,
+      "gpu_ms": 16.466105556666665,
+      "gpu_mhz": 784.3514,
+      "gpu_idle_ratio": 0.34283003333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 180,
+      "gpu_ms": 15.4694861092,
+      "gpu_mhz": 835.077,
+      "gpu_idle_ratio": 0.3504539,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 1,
+      "variant": "control",
+      "first_frame": 210,
+      "gpu_ms": 15.8295999994,
+      "gpu_mhz": 824.5231333333334,
+      "gpu_idle_ratio": 0.2798939,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 0,
+      "gpu_ms": 8.366844443533333,
+      "gpu_mhz": 1320.3776666666668,
+      "gpu_idle_ratio": 0.25951810000000003,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 30,
+      "gpu_ms": 11.2376277791,
+      "gpu_mhz": 995.0317,
+      "gpu_idle_ratio": 0.22870236666666666,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 60,
+      "gpu_ms": 14.309052779533333,
+      "gpu_mhz": 770.9618,
+      "gpu_idle_ratio": 0.23226973333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 90,
+      "gpu_ms": 15.231979166366667,
+      "gpu_mhz": 719.6035666666667,
+      "gpu_idle_ratio": 0.2562350666666667,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 120,
+      "gpu_ms": 15.3475458335,
+      "gpu_mhz": 714.2662,
+      "gpu_idle_ratio": 0.2319006,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 150,
+      "gpu_ms": 14.1185652785,
+      "gpu_mhz": 785.9826333333333,
+      "gpu_idle_ratio": 0.20561223333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 180,
+      "gpu_ms": 14.4025194439,
+      "gpu_mhz": 767.9827,
+      "gpu_idle_ratio": 0.21568890000000002,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 2,
+      "variant": "normal-off",
+      "first_frame": 210,
+      "gpu_ms": 12.112830556466667,
+      "gpu_mhz": 940.9665,
+      "gpu_idle_ratio": 0.21687833333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 0,
+      "gpu_ms": 8.113488888166666,
+      "gpu_mhz": 1262.4252666666669,
+      "gpu_idle_ratio": 0.22641986666666666,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 30,
+      "gpu_ms": 13.791684721433333,
+      "gpu_mhz": 750.9612999999999,
+      "gpu_idle_ratio": 0.21996163333333332,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 60,
+      "gpu_ms": 14.553041666933334,
+      "gpu_mhz": 702.4521333333333,
+      "gpu_idle_ratio": 0.2193042,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 90,
+      "gpu_ms": 12.341968056433334,
+      "gpu_mhz": 841.2837,
+      "gpu_idle_ratio": 0.22686976666666667,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 120,
+      "gpu_ms": 14.698481943933333,
+      "gpu_mhz": 704.9114,
+      "gpu_idle_ratio": 0.21137306666666666,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 150,
+      "gpu_ms": 14.392009722833333,
+      "gpu_mhz": 699.2764666666667,
+      "gpu_idle_ratio": 0.2026724,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 180,
+      "gpu_ms": 14.681912499266666,
+      "gpu_mhz": 701.7029,
+      "gpu_idle_ratio": 0.21769146666666667,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 3,
+      "variant": "relief-off",
+      "first_frame": 210,
+      "gpu_ms": 12.528580555733333,
+      "gpu_mhz": 845.2296,
+      "gpu_idle_ratio": 0.2188472,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 0,
+      "gpu_ms": 8.386731944766666,
+      "gpu_mhz": 1258.3419999999999,
+      "gpu_idle_ratio": 0.25834295333333335,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 30,
+      "gpu_ms": 15.724284721366667,
+      "gpu_mhz": 656.857,
+      "gpu_idle_ratio": 0.28839393333333335,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 60,
+      "gpu_ms": 15.624898610566667,
+      "gpu_mhz": 654.4686666666666,
+      "gpu_idle_ratio": 0.3176518333333333,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 90,
+      "gpu_ms": 15.6144361128,
+      "gpu_mhz": 651.2412333333333,
+      "gpu_idle_ratio": 0.3337569,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 120,
+      "gpu_ms": 16.1357374987,
+      "gpu_mhz": 631.6036666666666,
+      "gpu_idle_ratio": 0.33057173333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 150,
+      "gpu_ms": 16.258305553233335,
+      "gpu_mhz": 627.3122,
+      "gpu_idle_ratio": 0.3262535666666667,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 180,
+      "gpu_ms": 16.120013890033334,
+      "gpu_mhz": 640.9003,
+      "gpu_idle_ratio": 0.3422668,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 4,
+      "variant": "relief-off",
+      "first_frame": 210,
+      "gpu_ms": 15.1615152786,
+      "gpu_mhz": 669.1379333333333,
+      "gpu_idle_ratio": 0.3677160666666667,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 0,
+      "gpu_ms": 16.528922223833334,
+      "gpu_mhz": 665.697,
+      "gpu_idle_ratio": 0.3356502,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 30,
+      "gpu_ms": 15.707737500466667,
+      "gpu_mhz": 708.5998333333333,
+      "gpu_idle_ratio": 0.3294259333333333,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 60,
+      "gpu_ms": 14.3586722232,
+      "gpu_mhz": 761.2179,
+      "gpu_idle_ratio": 0.36212643333333333,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 90,
+      "gpu_ms": 16.613783332266667,
+      "gpu_mhz": 667.2933,
+      "gpu_idle_ratio": 0.32330533333333333,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 120,
+      "gpu_ms": 15.835140278299999,
+      "gpu_mhz": 689.0009333333334,
+      "gpu_idle_ratio": 0.33125316666666665,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 150,
+      "gpu_ms": 16.224304165133333,
+      "gpu_mhz": 675.3895,
+      "gpu_idle_ratio": 0.34027006666666665,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 180,
+      "gpu_ms": 15.4345819446,
+      "gpu_mhz": 714.4201,
+      "gpu_idle_ratio": 0.3384669,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 5,
+      "variant": "normal-off",
+      "first_frame": 210,
+      "gpu_ms": 15.524212500033332,
+      "gpu_mhz": 719.5421333333334,
+      "gpu_idle_ratio": 0.2799419,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 0,
+      "gpu_ms": 15.165348612399999,
+      "gpu_mhz": 852.3202666666667,
+      "gpu_idle_ratio": 0.19340383333333333,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 30,
+      "gpu_ms": 14.966195833366667,
+      "gpu_mhz": 862.7781,
+      "gpu_idle_ratio": 0.21928789999999998,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 60,
+      "gpu_ms": 15.094906944,
+      "gpu_mhz": 855.2628,
+      "gpu_idle_ratio": 0.24050353333333332,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 90,
+      "gpu_ms": 15.306109721633334,
+      "gpu_mhz": 842.8296333333333,
+      "gpu_idle_ratio": 0.23704043333333333,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 120,
+      "gpu_ms": 15.348411110833334,
+      "gpu_mhz": 842.7685,
+      "gpu_idle_ratio": 0.2310963,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 150,
+      "gpu_ms": 15.258462499466667,
+      "gpu_mhz": 843.2375333333333,
+      "gpu_idle_ratio": 0.20968373333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 180,
+      "gpu_ms": 14.818581943133333,
+      "gpu_mhz": 870.6881999999999,
+      "gpu_idle_ratio": 0.20549933333333334,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    },
+    {
+      "block": 6,
+      "variant": "control",
+      "first_frame": 210,
+      "gpu_ms": 15.307940276433333,
+      "gpu_mhz": 824.6574333333333,
+      "gpu_idle_ratio": 0.22455206666666666,
+      "thermal_pressure": [
+        "Nominal"
+      ]
+    }
+  ]
+}

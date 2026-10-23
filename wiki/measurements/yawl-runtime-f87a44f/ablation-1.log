@@ -1,0 +1,194 @@
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-aclrepl - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-aclrepl.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-aclrepl/sb-aclrepl.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-bsd-sockets - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-bsd-sockets.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-bsd-sockets/sb-bsd-sockets.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-capstone - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-capstone.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-capstone/sb-capstone.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-cltl2 - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cltl2.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cltl2/sb-cltl2.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-concurrency - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-concurrency.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-concurrency/sb-concurrency.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-cover - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cover.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cover/sb-cover.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-executable - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-executable.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-executable/sb-executable.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-gmp - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-gmp.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-gmp/sb-gmp.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-grovel - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-grovel.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-grovel/sb-grovel.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-introspect - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-introspect.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-introspect/sb-introspect.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-manual - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-manual.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-manual/sb-manual.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-md5 - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-md5.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-md5/sb-md5.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-mpfr - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-mpfr.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-mpfr/sb-mpfr.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-posix - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-posix.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-posix/sb-posix.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-queue - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-queue.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-queue/sb-queue.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-rotate-byte - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rotate-byte.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rotate-byte/sb-rotate-byte.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-rt - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rt.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rt/sb-rt.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-simd - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simd.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simd/sb-simd.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-simple-streams - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simple-streams.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simple-streams/sb-simple-streams.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-sprof - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-sprof.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-sprof/sb-sprof.asd"
+luv 00:15:52.645 canvas opened "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release", 3840x2160 pixels, metal
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:09.434 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.1 s and is not servicing its window
+BLOCK 1 control GPU 11.757 completion 14.326
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:11.467 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:13.507 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.0 s and is not servicing its window
+luv 00:16:15.538 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.1 s and is not servicing its window
+BLOCK 2 normal-off GPU 12.203 completion 14.574
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:16.040 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:18.068 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.4 s and is not servicing its window
+BLOCK 3 relief-off GPU 12.069 completion 14.462
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:20.108 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:22.148 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.4 s and is not servicing its window
+BLOCK 4 relief-off GPU 12.590 completion 15.104
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:24.188 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:26.209 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.1 s and is not servicing its window
+BLOCK 5 normal-off GPU 12.203 completion 14.511
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:28.239 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:30.265 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.0 s and is not servicing its window
+BLOCK 6 control GPU 11.853 completion 13.873
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:32.305 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:34.345 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.1 s and is not servicing its window
+luv 00:16:36.378 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.1 s and is not servicing its window
+BLOCK 7 control GPU 14.055 completion 16.771
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:37.389 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:39.412 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.4 s and is not servicing its window
+luv 00:16:41.434 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.5 s and is not servicing its window
+BLOCK 8 normal-off GPU 13.748 completion 16.740
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:41.944 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:43.981 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.2 s and is not servicing its window
+BLOCK 9 relief-off GPU 12.269 completion 14.787
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:46.015 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:48.051 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.1 s and is not servicing its window
+BLOCK 10 relief-off GPU 11.335 completion 13.697
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:50.086 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:52.123 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.2 s and is not servicing its window
+BLOCK 11 normal-off GPU 12.144 completion 14.474
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:54.163 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:16:56.177 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.1 s and is not servicing its window
+luv 00:16:58.214 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.1 s and is not servicing its window
+BLOCK 12 control GPU 13.571 completion 15.883
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:16:58.724 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:17:00.763 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.1 s and is not servicing its window
+luv 00:17:02.804 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.2 s and is not servicing its window
+BLOCK 13 control GPU 12.929 completion 15.343
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:17:03.314 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:17:05.353 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.3 s and is not servicing its window
+BLOCK 14 normal-off GPU 11.853 completion 14.153
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:17:07.390 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:17:09.426 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.3 s and is not servicing its window
+luv 00:17:11.463 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.3 s and is not servicing its window
+BLOCK 15 relief-off GPU 12.764 completion 15.377
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:17:11.967 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:17:13.497 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.0 s and is not servicing its window
+luv 00:17:15.524 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.0 s and is not servicing its window
+BLOCK 16 relief-off GPU 12.739 completion 15.246
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:17:16.034 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:17:18.062 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.3 s and is not servicing its window
+BLOCK 17 normal-off GPU 11.545 completion 13.761
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+luv 00:17:20.094 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:17:22.130 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 2.4 s and is not servicing its window
+luv 00:17:24.165 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" has been in :REQUESTS for 4.4 s and is not servicing its window
+BLOCK 18 control GPU 13.571 completion 15.911
+luv 00:17:24.675 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again
+luv 00:17:24.675 canvas closing "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" after 176 loop iterations
+luv 00:17:24.719 canvas closed "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release"
+RESULT (:REPEAT 1 :HOST "yawl" :SOURCE-REVISION
+        "f87a44fefc809d57afa5c6aed0df78c2e3c1c391" :BENCHMARK-BLOB
+        "e7a4c9b783f3efe601566e922efe0a942f577704" :FRAMES 240 :WARMUP 30
+        :SCENE :LIVE-ALPINE :BACKEND :LUFT :SETUP-SECONDS 14.67427800000587d0
+        :SETUP-PROFILE
+        ((LUFT.TERRAIN:FINISH-SCENE-BUILDER :CALLS 1 :INCLUSIVE-MS
+                                            1.1359999916749075d0)
+         (LUFT:MESH-STAR-CHUNK :CALLS 16 :INCLUSIVE-MS 23.32800001022406d0)
+         (LUFT.RENDER::STAR-LATTICE-LIGHT-WORDS :CALLS 16 :INCLUSIVE-MS
+                                                36.82799999660347d0)
+         (LUFT.RENDER::MAKE-RENDER-POPULATION :CALLS 16 :INCLUSIVE-MS
+                                              85.05199998035096d0)
+         (LUFT.RENDER::%UPLOAD-RENDER-POPULATION :CALLS 16 :INCLUSIVE-MS
+                                                 20.61199999297969d0))
+        :RESIDENT-CHUNKS 9 :DEVICE (:NAME "Apple M5") :MODE :NATIVE-1X :EXTENT
+        (1920 1080) :INTERNAL-EXTENT (1920 1080) :TAA NIL :RECONSTRUCTION NIL
+        :AUTORELEASE-POLICY :PER-FRAME :FIXED-RENDER-SCALE 1.0 :RENDER-SCALE
+        0.75 :DYNAMIC-RESOLUTION NIL :SCENE-SAMPLES 1 :EXPOSURE 0.45 :SKY T
+        :TERRAIN T :CPU-ENCODE-MS
+        (:N 240 :MEAN 1.9390333334134386d0 :P50 1.91199999244418d0 :P95
+         2.6510000025155023d0 :P99 3.0830000032437965d0)
+        :COMPLETION-MS
+        (:N 240 :MEAN 15.91127083356696d0 :P50 16.844000012497418d0 :P95
+         18.42900000337977d0 :P99 18.95199999853503d0)
+        :CPU-FRAME-MS
+        (:N 240 :MEAN 1.939137500085053d0 :P50 1.91199999244418d0 :P95
+         2.6510000025155023d0 :P99 3.0830000032437965d0)
+        :SIMULATION-MS
+        (:N 240 :MEAN 1.0416667161431785d-4 :P50 0.0d0 :P95
+         9.999930625781417d-4 :P99 0.00100000761449337d0)
+        :COMPLETION-FPS 62.848531111064105d0 :GPU-MS
+        (:N 240 :MEAN 13.57070034755452d0 :P50 14.502125006401911d0 :P95
+         15.46200001030229d0 :P99 16.363999995519407d0)
+        :CPU-PASSES
+        (("luft HDR presentation"
+          (:N 240 :MEAN 0.292687499980578d0 :P50 0.2860000095097348d0 :P95
+           0.41399999463465065d0 :P99 0.48499999684281647d0))
+         ("native world panels"
+          (:N 240 :MEAN 0.025349999426301412d0 :P50 0.025000001187436283d0 :P95
+           0.03599999763537198d0 :P99 0.03999999898951501d0))
+         ("luft lens shafts"
+          (:N 240 :MEAN 0.018758332710907172d0 :P50 0.018000006093643606d0 :P95
+           0.027000001864507794d0 :P99 0.03200001083314419d0))
+         ("luft lens vertical"
+          (:N 480 :MEAN 0.01986458364626742d0 :P50 0.018999999156221747d0 :P95
+           0.030000010156072676d0 :P99 0.03700000524986535d0))
+         ("luft lens horizontal"
+          (:N 480 :MEAN 0.021968749630711198d0 :P50 0.02099999983329326d0 :P95
+           0.03399999695830047d0 :P99 0.037999998312443495d0))
+         ("luft lens bright"
+          (:N 240 :MEAN 0.03409583332540933d0 :P50 0.03300000389572233d0 :P95
+           0.04999998782295734d0 :P99 0.05299999611452222d0))
+         ("luft native viewmodel"
+          (:N 240 :MEAN 0.01154166705722067d0 :P50 0.0109999964479357d0 :P95
+           0.018000006093643606d0 :P99 0.02099999983329326d0))
+         ("luft post-temporal HDR flame composite"
+          (:N 240 :MEAN 0.0246041665377561d0 :P50 0.023999993572942913d0 :P95
+           0.03599999763537198d0 :P99 0.04299999272916466d0))
+         ("world instruments"
+          (:N 240 :MEAN 0.016904166780780844d0 :P50 0.016000005416572094d0 :P95
+           0.02400000812485814d0 :P99 0.029000002541579306d0))
+         ("luft site streams"
+          (:N 240 :MEAN 1.0290833331964677d0 :P50 1.0199999960605055d0 :P95
+           1.3710000057471916d0 :P99 1.6330000071320683d0))
+         ("luft sun shadow"
+          (:N 240 :MEAN 0.3243999994689754d0 :P50 0.31799999123904854d0 :P95
+           0.450999999884516d0 :P99 0.5119999987073243d0)))
+        :GPU-PASSES NIL)
+RESULT (:REPEAT 1 :HOST "yawl" :SOURCE-REVISION
+        "f87a44fefc809d57afa5c6aed0df78c2e3c1c391" :BENCHMARK-BLOB
+        "e7a4c9b783f3efe601566e922efe0a942f577704" :FRAMES 240 :WARMUP 30)

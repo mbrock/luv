@@ -1,0 +1,2006 @@
+[
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/ablation-1.tsv",
+    "frames": 4320,
+    "blocks": [
+      {
+        "block": 1,
+        "variant": "control",
+        "gpu_ms": 11.756519965204166,
+        "completion_ms": 14.325874999008333,
+        "cpu_encode_ms": 2.1472333328375
+      },
+      {
+        "block": 2,
+        "variant": "normal-off",
+        "gpu_ms": 12.203173784770833,
+        "completion_ms": 14.574458333070833,
+        "cpu_encode_ms": 1.9604916665416667
+      },
+      {
+        "block": 3,
+        "variant": "relief-off",
+        "gpu_ms": 12.068528992808334,
+        "completion_ms": 14.462495833020833,
+        "cpu_encode_ms": 1.9797999994166666
+      },
+      {
+        "block": 4,
+        "variant": "relief-off",
+        "gpu_ms": 12.590476215095833,
+        "completion_ms": 15.103637499404167,
+        "cpu_encode_ms": 2.107333333541667
+      },
+      {
+        "block": 5,
+        "variant": "normal-off",
+        "gpu_ms": 12.2029027782,
+        "completion_ms": 14.51149583275,
+        "cpu_encode_ms": 1.9082374993166666
+      },
+      {
+        "block": 6,
+        "variant": "control",
+        "gpu_ms": 11.853213194966667,
+        "completion_ms": 13.873312500425,
+        "cpu_encode_ms": 1.6159166666583333
+      },
+      {
+        "block": 7,
+        "variant": "control",
+        "gpu_ms": 14.054805382475,
+        "completion_ms": 16.771366666583333,
+        "cpu_encode_ms": 2.2997291663958332
+      },
+      {
+        "block": 8,
+        "variant": "normal-off",
+        "gpu_ms": 13.747627777566667,
+        "completion_ms": 16.74041249997917,
+        "cpu_encode_ms": 2.5686583329583335
+      },
+      {
+        "block": 9,
+        "variant": "relief-off",
+        "gpu_ms": 12.269277431075,
+        "completion_ms": 14.787108333441667,
+        "cpu_encode_ms": 2.1131583331083332
+      },
+      {
+        "block": 10,
+        "variant": "relief-off",
+        "gpu_ms": 11.334840278004167,
+        "completion_ms": 13.696899999858333,
+        "cpu_encode_ms": 1.9577458328916666
+      },
+      {
+        "block": 11,
+        "variant": "normal-off",
+        "gpu_ms": 12.1442098962875,
+        "completion_ms": 14.473908333625,
+        "cpu_encode_ms": 1.9274583331416666
+      },
+      {
+        "block": 12,
+        "variant": "control",
+        "gpu_ms": 13.5712324652625,
+        "completion_ms": 15.883458333858334,
+        "cpu_encode_ms": 1.9107583341333334
+      },
+      {
+        "block": 13,
+        "variant": "control",
+        "gpu_ms": 12.928981250070834,
+        "completion_ms": 15.342729166666667,
+        "cpu_encode_ms": 1.9973416660666667
+      },
+      {
+        "block": 14,
+        "variant": "normal-off",
+        "gpu_ms": 11.853265798625,
+        "completion_ms": 14.15300833305,
+        "cpu_encode_ms": 1.8942124991416667
+      },
+      {
+        "block": 15,
+        "variant": "relief-off",
+        "gpu_ms": 12.764470832754167,
+        "completion_ms": 15.376875000320833,
+        "cpu_encode_ms": 2.191837499170833
+      },
+      {
+        "block": 16,
+        "variant": "relief-off",
+        "gpu_ms": 12.7386824656625,
+        "completion_ms": 15.246466666341666,
+        "cpu_encode_ms": 2.1043124994833335
+      },
+      {
+        "block": 17,
+        "variant": "normal-off",
+        "gpu_ms": 11.544700173854167,
+        "completion_ms": 13.760508333529167,
+        "cpu_encode_ms": 1.8119000007
+      },
+      {
+        "block": 18,
+        "variant": "control",
+        "gpu_ms": 13.570700347541667,
+        "completion_ms": 15.91127083355,
+        "cpu_encode_ms": 1.9390333334166667
+      }
+    ],
+    "variants": {
+      "control": {
+        "blocks": 6,
+        "gpu_ms": {
+          "mean": 12.955908767586806,
+          "block_range": [
+            11.756519965204166,
+            14.054805382475
+          ],
+          "median": 13.725270837,
+          "histogram_1ms": {
+            "8": 145,
+            "9": 101,
+            "10": 142,
+            "11": 96,
+            "12": 116,
+            "13": 177,
+            "14": 335,
+            "15": 271,
+            "16": 47,
+            "17": 4,
+            "18": 5,
+            "19": 1
+          }
+        },
+        "completion_ms": {
+          "mean": 15.351335416681945,
+          "block_range": [
+            13.873312500425,
+            16.771366666583333
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 1.985002083251389,
+          "block_range": [
+            1.6159166666583333,
+            2.2997291663958332
+          ]
+        }
+      },
+      "normal-off": {
+        "blocks": 6,
+        "gpu_ms": {
+          "mean": 12.282646701550695,
+          "block_range": [
+            11.544700173854167,
+            13.747627777566667
+          ],
+          "median": 12.7097708245,
+          "histogram_1ms": {
+            "7": 93,
+            "8": 112,
+            "9": 117,
+            "10": 134,
+            "11": 153,
+            "12": 168,
+            "13": 183,
+            "14": 271,
+            "15": 177,
+            "16": 31,
+            "17": 1
+          }
+        },
+        "completion_ms": {
+          "mean": 14.702298611000694,
+          "block_range": [
+            13.760508333529167,
+            16.74041249997917
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 2.011826388633333,
+          "block_range": [
+            1.8119000007,
+            2.5686583329583335
+          ]
+        }
+      },
+      "relief-off": {
+        "blocks": 6,
+        "gpu_ms": {
+          "mean": 12.294379369233333,
+          "block_range": [
+            11.334840278004167,
+            12.764470832754167
+          ],
+          "median": 13.200749999500001,
+          "histogram_1ms": {
+            "6": 45,
+            "7": 104,
+            "8": 116,
+            "9": 95,
+            "10": 89,
+            "11": 95,
+            "12": 149,
+            "13": 211,
+            "14": 324,
+            "15": 194,
+            "16": 17,
+            "17": 1
+          }
+        },
+        "completion_ms": {
+          "mean": 14.77891388873125,
+          "block_range": [
+            13.696899999858333,
+            15.376875000320833
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 2.07569791626875,
+          "block_range": [
+            1.9577458328916666,
+            2.191837499170833
+          ]
+        }
+      }
+    },
+    "rounds": [
+      {
+        "control": {
+          "gpu_ms": 11.804866580085417,
+          "completion_ms": 14.099593749716666
+        },
+        "normal-off": {
+          "gpu_ms": 12.203038281485416,
+          "completion_ms": 14.542977082910417
+        },
+        "relief-off": {
+          "gpu_ms": 12.329502603952083,
+          "completion_ms": 14.7830666662125
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 13.81301892386875,
+          "completion_ms": 16.327412500220834
+        },
+        "normal-off": {
+          "gpu_ms": 12.945918836927083,
+          "completion_ms": 15.607160416802085
+        },
+        "relief-off": {
+          "gpu_ms": 11.802058854539585,
+          "completion_ms": 14.24200416665
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 13.24984079880625,
+          "completion_ms": 15.627000000108334
+        },
+        "normal-off": {
+          "gpu_ms": 11.698982986239583,
+          "completion_ms": 13.956758333289583
+        },
+        "relief-off": {
+          "gpu_ms": 12.751576649208333,
+          "completion_ms": 15.311670833331249
+        }
+      }
+    ]
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/ablation-power.tsv",
+    "frames": 1440,
+    "blocks": [
+      {
+        "block": 1,
+        "variant": "control",
+        "gpu_ms": 13.7108838543125,
+        "completion_ms": 19.249475000358334,
+        "cpu_encode_ms": 4.997379166645834
+      },
+      {
+        "block": 2,
+        "variant": "normal-off",
+        "gpu_ms": 11.846555902433334,
+        "completion_ms": 14.183216667220833,
+        "cpu_encode_ms": 1.925991667575
+      },
+      {
+        "block": 3,
+        "variant": "relief-off",
+        "gpu_ms": 12.112035242733333,
+        "completion_ms": 14.623525000091666,
+        "cpu_encode_ms": 2.103145833325
+      },
+      {
+        "block": 4,
+        "variant": "relief-off",
+        "gpu_ms": 13.16359843785,
+        "completion_ms": 15.80060416595,
+        "cpu_encode_ms": 2.2324624990708335
+      },
+      {
+        "block": 5,
+        "variant": "normal-off",
+        "gpu_ms": 13.139922916716667,
+        "completion_ms": 15.780045833383333,
+        "cpu_encode_ms": 2.2312166661916666
+      },
+      {
+        "block": 6,
+        "variant": "control",
+        "gpu_ms": 13.978392882070834,
+        "completion_ms": 16.678324999858333,
+        "cpu_encode_ms": 2.2784666668333333
+      }
+    ],
+    "variants": {
+      "control": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 13.844638368191667,
+          "block_range": [
+            13.7108838543125,
+            13.978392882070834
+          ],
+          "median": 14.932958335999999,
+          "histogram_1ms": {
+            "8": 74,
+            "9": 19,
+            "10": 7,
+            "11": 5,
+            "12": 35,
+            "13": 24,
+            "14": 102,
+            "15": 136,
+            "16": 36,
+            "17": 27,
+            "18": 10,
+            "19": 5
+          }
+        },
+        "completion_ms": {
+          "mean": 17.96390000010833,
+          "block_range": [
+            16.678324999858333,
+            19.249475000358334
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 3.6379229167395835,
+          "block_range": [
+            2.2784666668333333,
+            4.997379166645834
+          ]
+        }
+      },
+      "normal-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 12.493239409575,
+          "block_range": [
+            11.846555902433334,
+            13.139922916716667
+          ],
+          "median": 12.809645843,
+          "histogram_1ms": {
+            "7": 40,
+            "8": 23,
+            "9": 25,
+            "10": 46,
+            "11": 61,
+            "12": 55,
+            "13": 57,
+            "14": 77,
+            "15": 68,
+            "16": 28
+          }
+        },
+        "completion_ms": {
+          "mean": 14.981631250302083,
+          "block_range": [
+            14.183216667220833,
+            15.780045833383333
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 2.0786041668833333,
+          "block_range": [
+            1.925991667575,
+            2.2312166661916666
+          ]
+        }
+      },
+      "relief-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 12.637816840291666,
+          "block_range": [
+            12.112035242733333,
+            13.16359843785
+          ],
+          "median": 13.4282083305,
+          "histogram_1ms": {
+            "6": 15,
+            "7": 21,
+            "8": 21,
+            "9": 34,
+            "10": 46,
+            "11": 46,
+            "12": 46,
+            "13": 35,
+            "14": 88,
+            "15": 117,
+            "16": 9,
+            "17": 2
+          }
+        },
+        "completion_ms": {
+          "mean": 15.212064583020833,
+          "block_range": [
+            14.623525000091666,
+            15.80060416595
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 2.167804166197917,
+          "block_range": [
+            2.103145833325,
+            2.2324624990708335
+          ]
+        }
+      }
+    },
+    "rounds": [
+      {
+        "control": {
+          "gpu_ms": 13.844638368191667,
+          "completion_ms": 17.96390000010833
+        },
+        "normal-off": {
+          "gpu_ms": 12.493239409575,
+          "completion_ms": 14.981631250302083
+        },
+        "relief-off": {
+          "gpu_ms": 12.637816840291666,
+          "completion_ms": 15.212064583020833
+        }
+      }
+    ]
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/activity-power.tsv",
+    "frames": 1440,
+    "blocks": [
+      {
+        "block": 1,
+        "variant": "control",
+        "gpu_ms": 12.323188888808334,
+        "completion_ms": 14.65553749935,
+        "cpu_encode_ms": 1.9264083330291666
+      },
+      {
+        "block": 2,
+        "variant": "normal-off",
+        "gpu_ms": 13.6135392364125,
+        "completion_ms": 16.468529166425,
+        "cpu_encode_ms": 2.4388083331833332
+      },
+      {
+        "block": 3,
+        "variant": "relief-off",
+        "gpu_ms": 13.135858506341666,
+        "completion_ms": 16.034349999016666,
+        "cpu_encode_ms": 2.4797124987875
+      },
+      {
+        "block": 4,
+        "variant": "relief-off",
+        "gpu_ms": 14.0432277779,
+        "completion_ms": 18.790050000470835,
+        "cpu_encode_ms": 4.24699583375
+      },
+      {
+        "block": 5,
+        "variant": "normal-off",
+        "gpu_ms": 15.790191840658334,
+        "completion_ms": 22.870241666420835,
+        "cpu_encode_ms": 6.4824791663041665
+      },
+      {
+        "block": 6,
+        "variant": "control",
+        "gpu_ms": 14.030953472066667,
+        "completion_ms": 16.697429166529165,
+        "cpu_encode_ms": 2.2559458333125
+      }
+    ],
+    "variants": {
+      "control": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 13.177071180437501,
+          "block_range": [
+            12.323188888808334,
+            14.030953472066667
+          ],
+          "median": 14.2856250025,
+          "histogram_1ms": {
+            "8": 51,
+            "9": 26,
+            "10": 33,
+            "11": 37,
+            "12": 35,
+            "13": 47,
+            "14": 76,
+            "15": 164,
+            "16": 11
+          }
+        },
+        "completion_ms": {
+          "mean": 15.676483332939583,
+          "block_range": [
+            14.65553749935,
+            16.697429166529165
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 2.0911770831708334,
+          "block_range": [
+            1.9264083330291666,
+            2.2559458333125
+          ]
+        }
+      },
+      "normal-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 14.701865538535417,
+          "block_range": [
+            13.6135392364125,
+            15.790191840658334
+          ],
+          "median": 15.200583337000001,
+          "histogram_1ms": {
+            "7": 16,
+            "8": 2,
+            "9": 4,
+            "10": 14,
+            "11": 12,
+            "12": 15,
+            "13": 41,
+            "14": 79,
+            "15": 224,
+            "16": 59,
+            "17": 12,
+            "18": 2
+          }
+        },
+        "completion_ms": {
+          "mean": 19.66938541642292,
+          "block_range": [
+            16.468529166425,
+            22.870241666420835
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 4.46064374974375,
+          "block_range": [
+            2.4388083331833332,
+            6.4824791663041665
+          ]
+        }
+      },
+      "relief-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 13.589543142120833,
+          "block_range": [
+            13.135858506341666,
+            14.0432277779
+          ],
+          "median": 14.385229173,
+          "histogram_1ms": {
+            "6": 17,
+            "7": 24,
+            "8": 5,
+            "9": 17,
+            "10": 11,
+            "11": 20,
+            "12": 53,
+            "13": 67,
+            "14": 99,
+            "15": 129,
+            "16": 16,
+            "17": 10,
+            "18": 7,
+            "19": 2,
+            "20": 3
+          }
+        },
+        "completion_ms": {
+          "mean": 17.41219999974375,
+          "block_range": [
+            16.034349999016666,
+            18.790050000470835
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 3.36335416626875,
+          "block_range": [
+            2.4797124987875,
+            4.24699583375
+          ]
+        }
+      }
+    },
+    "rounds": [
+      {
+        "control": {
+          "gpu_ms": 13.177071180437501,
+          "completion_ms": 15.676483332939583
+        },
+        "normal-off": {
+          "gpu_ms": 14.701865538535417,
+          "completion_ms": 19.66938541642292
+        },
+        "relief-off": {
+          "gpu_ms": 13.589543142120833,
+          "completion_ms": 17.41219999974375
+        }
+      }
+    ]
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/adjacent-aa.tsv",
+    "frames": 1200,
+    "windows_120_frames": [
+      {
+        "control": {
+          "gpu_ms": 10.12280555585,
+          "completion_ms": 12.487849999666667,
+          "cpu_encode_ms": 1.9428499993833332
+        },
+        "control-copy": {
+          "gpu_ms": 10.163866666983333,
+          "completion_ms": 12.517150001566668,
+          "cpu_encode_ms": 1.9343166687
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.75080138865,
+          "completion_ms": 17.384716665633334,
+          "cpu_encode_ms": 2.2289833325166666
+        },
+        "control-copy": {
+          "gpu_ms": 14.816710416666666,
+          "completion_ms": 17.31880000085,
+          "cpu_encode_ms": 2.0929833342833333
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.51144166585,
+          "completion_ms": 16.953350000216666,
+          "cpu_encode_ms": 2.0456000001666665
+        },
+        "control-copy": {
+          "gpu_ms": 14.478979860499999,
+          "completion_ms": 16.922783332866665,
+          "cpu_encode_ms": 2.0028166664833336
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.69973402735,
+          "completion_ms": 17.301833333183332,
+          "cpu_encode_ms": 2.19706666495
+        },
+        "control-copy": {
+          "gpu_ms": 14.715329166416666,
+          "completion_ms": 17.3359166676,
+          "cpu_encode_ms": 2.210766667866667
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.958421527,
+          "completion_ms": 17.51456666725,
+          "cpu_encode_ms": 2.1558666672
+        },
+        "control-copy": {
+          "gpu_ms": 14.928368054533333,
+          "completion_ms": 17.511299999016668,
+          "cpu_encode_ms": 2.1793333346833332
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.4437631941,
+          "completion_ms": 16.88056666795,
+          "cpu_encode_ms": 2.03718333455
+        },
+        "control-copy": {
+          "gpu_ms": 14.5115506935,
+          "completion_ms": 16.917933333033332,
+          "cpu_encode_ms": 2.0074666681333335
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.020254860966666,
+          "completion_ms": 16.40063333375,
+          "cpu_encode_ms": 1.9761666648333334
+        },
+        "control-copy": {
+          "gpu_ms": 14.051929165733334,
+          "completion_ms": 16.445566666283334,
+          "cpu_encode_ms": 1.9948499992833333
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.074759026366667,
+          "completion_ms": 18.214666667583334,
+          "cpu_encode_ms": 2.7269499999833333
+        },
+        "control-copy": {
+          "gpu_ms": 15.080854166683334,
+          "completion_ms": 17.978699999816666,
+          "cpu_encode_ms": 2.4798166654833333
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.042215971116667,
+          "completion_ms": 18.00588333355,
+          "cpu_encode_ms": 2.5485166672833333
+        },
+        "control-copy": {
+          "gpu_ms": 15.113404861,
+          "completion_ms": 18.219616667166665,
+          "cpu_encode_ms": 2.6896166656333333
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.115194444166667,
+          "completion_ms": 18.13331666735,
+          "cpu_encode_ms": 2.601166666416667
+        },
+        "control-copy": {
+          "gpu_ms": 15.072024999933333,
+          "completion_ms": 18.109466666683332,
+          "cpu_encode_ms": 2.61895000005
+        }
+      }
+    ],
+    "variants": {
+      "control": {
+        "frames": 600,
+        "gpu_ms": {
+          "mean": 14.273939166141666,
+          "median": 14.967916664499999
+        },
+        "completion_ms": {
+          "mean": 16.927738333613334,
+          "median": 17.554499995
+        },
+        "cpu_encode_ms": {
+          "mean": 2.2460349997283333,
+          "median": 2.1789999955
+        }
+      },
+      "control-copy": {
+        "frames": 600,
+        "gpu_ms": {
+          "mean": 14.293301805195,
+          "median": 14.9644999985,
+          "window_saving_ms_range": [
+            -0.0711888898833326,
+            0.043169444233333465
+          ],
+          "faster_windows": 3
+        },
+        "completion_ms": {
+          "mean": 16.927723333488334,
+          "median": 17.572500001,
+          "window_saving_ms_range": [
+            -0.21373333361666624,
+            0.23596666776666808
+          ],
+          "faster_windows": 5
+        },
+        "cpu_encode_ms": {
+          "mean": 2.22109166706,
+          "median": 2.174000001,
+          "window_saving_ms_range": [
+            -0.1410999983500001,
+            0.24713333449999997
+          ],
+          "faster_windows": 5
+        }
+      }
+    }
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/adjacent-ablation-1.tsv",
+    "frames": 1800,
+    "windows_120_frames": [
+      {
+        "control": {
+          "gpu_ms": 12.2890791667,
+          "completion_ms": 14.661825000775,
+          "cpu_encode_ms": 1.957899998475
+        },
+        "normal-off": {
+          "gpu_ms": 10.45764895785,
+          "completion_ms": 12.845199997575,
+          "cpu_encode_ms": 1.9709500004
+        },
+        "relief-off": {
+          "gpu_ms": 9.674130208775,
+          "completion_ms": 12.059149999175,
+          "cpu_encode_ms": 1.968574999725
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 16.1506562505,
+          "completion_ms": 18.893199998625,
+          "cpu_encode_ms": 2.339299999625
+        },
+        "normal-off": {
+          "gpu_ms": 13.631932291475,
+          "completion_ms": 16.36197499865,
+          "cpu_encode_ms": 2.3150000005
+        },
+        "relief-off": {
+          "gpu_ms": 12.64091145675,
+          "completion_ms": 15.3526500002,
+          "cpu_encode_ms": 2.299299998425
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.1577520828,
+          "completion_ms": 17.652949999275002,
+          "cpu_encode_ms": 2.09517500045
+        },
+        "normal-off": {
+          "gpu_ms": 12.905909374325,
+          "completion_ms": 15.47342499905,
+          "cpu_encode_ms": 2.1661000009999998
+        },
+        "relief-off": {
+          "gpu_ms": 11.871127084325,
+          "completion_ms": 14.3242249993,
+          "cpu_encode_ms": 2.050849998625
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.58526979225,
+          "completion_ms": 17.073725001,
+          "cpu_encode_ms": 2.08225000135
+        },
+        "normal-off": {
+          "gpu_ms": 12.392134374375,
+          "completion_ms": 14.858774999525,
+          "cpu_encode_ms": 2.059900001775
+        },
+        "relief-off": {
+          "gpu_ms": 11.514945834675,
+          "completion_ms": 13.9705499998,
+          "cpu_encode_ms": 2.044599999875
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 17.35296249975,
+          "completion_ms": 24.705875000325,
+          "cpu_encode_ms": 6.738724999675
+        },
+        "normal-off": {
+          "gpu_ms": 14.724205208375,
+          "completion_ms": 22.0647999991,
+          "cpu_encode_ms": 6.7213999977
+        },
+        "relief-off": {
+          "gpu_ms": 13.579626042725,
+          "completion_ms": 20.96275000075,
+          "cpu_encode_ms": 6.7911499991
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 17.798423956925,
+          "completion_ms": 25.1470250005,
+          "cpu_encode_ms": 6.720375000375
+        },
+        "normal-off": {
+          "gpu_ms": 15.139407292725,
+          "completion_ms": 22.407100000425,
+          "cpu_encode_ms": 6.642875001525
+        },
+        "relief-off": {
+          "gpu_ms": 14.057644792775,
+          "completion_ms": 21.5238750002,
+          "cpu_encode_ms": 6.8555999998
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 16.3345041666,
+          "completion_ms": 19.22632500235,
+          "cpu_encode_ms": 2.485875000925
+        },
+        "normal-off": {
+          "gpu_ms": 13.9792375012,
+          "completion_ms": 16.8363999994,
+          "cpu_encode_ms": 2.423849998775
+        },
+        "relief-off": {
+          "gpu_ms": 12.81694271015,
+          "completion_ms": 15.6112250002,
+          "cpu_encode_ms": 2.380675000675
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.5817760429,
+          "completion_ms": 16.8959750012,
+          "cpu_encode_ms": 1.913499999125
+        },
+        "normal-off": {
+          "gpu_ms": 12.19987291885,
+          "completion_ms": 14.44725000035,
+          "cpu_encode_ms": 1.85137499975
+        },
+        "relief-off": {
+          "gpu_ms": 11.2028416672,
+          "completion_ms": 13.488325001125,
+          "cpu_encode_ms": 1.886524999575
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 13.8779104181,
+          "completion_ms": 16.082575001225,
+          "cpu_encode_ms": 1.8057000029999999
+        },
+        "normal-off": {
+          "gpu_ms": 11.8701312512,
+          "completion_ms": 14.110725000475,
+          "cpu_encode_ms": 1.818450001175
+        },
+        "relief-off": {
+          "gpu_ms": 10.974571873175,
+          "completion_ms": 13.238625000225,
+          "cpu_encode_ms": 1.8209500013
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 16.2279177082,
+          "completion_ms": 19.02912499965,
+          "cpu_encode_ms": 2.395724998125
+        },
+        "normal-off": {
+          "gpu_ms": 13.8152302101,
+          "completion_ms": 16.62837500155,
+          "cpu_encode_ms": 2.40447500075
+        },
+        "relief-off": {
+          "gpu_ms": 12.755907293125,
+          "completion_ms": 15.560175000025,
+          "cpu_encode_ms": 2.38895000005
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.8871489588,
+          "completion_ms": 18.595649998975,
+          "cpu_encode_ms": 2.298524997975
+        },
+        "normal-off": {
+          "gpu_ms": 13.4503718745,
+          "completion_ms": 16.100149999,
+          "cpu_encode_ms": 2.241024998125
+        },
+        "relief-off": {
+          "gpu_ms": 12.440156249425,
+          "completion_ms": 15.16704999955,
+          "cpu_encode_ms": 2.3113499985
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.6457510416,
+          "completion_ms": 18.57892499975,
+          "cpu_encode_ms": 2.51482499955
+        },
+        "normal-off": {
+          "gpu_ms": 13.26641979145,
+          "completion_ms": 16.298800000700002,
+          "cpu_encode_ms": 2.616250001275
+        },
+        "relief-off": {
+          "gpu_ms": 12.2861354171,
+          "completion_ms": 15.2104500005,
+          "cpu_encode_ms": 2.510750002675
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 16.108220834625,
+          "completion_ms": 19.255874999375,
+          "cpu_encode_ms": 2.722474997775
+        },
+        "normal-off": {
+          "gpu_ms": 13.681552083325,
+          "completion_ms": 16.876000000375,
+          "cpu_encode_ms": 2.7702249998
+        },
+        "relief-off": {
+          "gpu_ms": 12.577193750675,
+          "completion_ms": 15.67557500065,
+          "cpu_encode_ms": 2.6775499991
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 16.281578125475,
+          "completion_ms": 19.165600000325,
+          "cpu_encode_ms": 2.4696500011249998
+        },
+        "normal-off": {
+          "gpu_ms": 13.874830208125,
+          "completion_ms": 16.692624999675,
+          "cpu_encode_ms": 2.38772499975
+        },
+        "relief-off": {
+          "gpu_ms": 12.843603124975001,
+          "completion_ms": 15.6568500009,
+          "cpu_encode_ms": 2.399749999325
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 16.1405510408,
+          "completion_ms": 19.306525001175,
+          "cpu_encode_ms": 2.741049998375
+        },
+        "normal-off": {
+          "gpu_ms": 13.598718749175,
+          "completion_ms": 16.75207500015,
+          "cpu_encode_ms": 2.721975002025
+        },
+        "relief-off": {
+          "gpu_ms": 12.509130207775,
+          "completion_ms": 15.6093249993,
+          "cpu_encode_ms": 2.677475
+        }
+      }
+    ],
+    "variants": {
+      "control": {
+        "frames": 600,
+        "gpu_ms": {
+          "mean": 15.627966805735,
+          "median": 15.959645832500001
+        },
+        "completion_ms": {
+          "mean": 18.951411666968333,
+          "median": 18.7565000015
+        },
+        "cpu_encode_ms": {
+          "mean": 2.885403333061667,
+          "median": 2.2879999885
+        }
+      },
+      "normal-off": {
+        "frames": 600,
+        "gpu_ms": {
+          "mean": 13.265840139136667,
+          "median": 13.501374997,
+          "window_saving_ms_range": [
+            1.8314302088500014,
+            2.6590166641999993
+          ],
+          "faster_windows": 15
+        },
+        "completion_ms": {
+          "mean": 16.583578333066665,
+          "median": 16.346999997,
+          "window_saving_ms_range": [
+            1.8166250032000004,
+            2.739925000075001
+          ],
+          "faster_windows": 15
+        },
+        "cpu_encode_ms": {
+          "mean": 2.8741050002883335,
+          "median": 2.2539999914999997,
+          "window_saving_ms_range": [
+            -0.10142500172500002,
+            0.0819250013749997
+          ],
+          "faster_windows": 9
+        }
+      },
+      "relief-off": {
+        "frames": 600,
+        "gpu_ms": {
+          "mean": 12.249657847575,
+          "median": 12.497687501,
+          "window_saving_ms_range": [
+            2.614948957925,
+            3.7733364570249996
+          ],
+          "faster_windows": 15
+        },
+        "completion_ms": {
+          "mean": 15.560720000126667,
+          "median": 15.3064999975,
+          "window_saving_ms_range": [
+            2.6026750015999998,
+            3.743124999575002
+          ],
+          "faster_windows": 15
+        },
+        "cpu_encode_ms": {
+          "mean": 2.87093666645,
+          "median": 2.2390000015,
+          "window_saving_ms_range": [
+            -0.13522499942499966,
+            0.10520000024999998
+          ],
+          "faster_windows": 10
+        }
+      }
+    }
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/adjacent-relief-1.tsv",
+    "frames": 1800,
+    "windows_120_frames": [
+      {
+        "control": {
+          "gpu_ms": 10.640987500716667,
+          "completion_ms": 13.060249999316667,
+          "cpu_encode_ms": 1.9988166665666667
+        },
+        "screen-gradient": {
+          "gpu_ms": 9.283670139133333,
+          "completion_ms": 11.722600000883334,
+          "cpu_encode_ms": 2.0124166673833335
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.312003472633334,
+          "completion_ms": 18.26918333315,
+          "cpu_encode_ms": 2.53481666485
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.268246528883333,
+          "completion_ms": 16.1972833331,
+          "cpu_encode_ms": 2.5042833344
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.633997916833334,
+          "completion_ms": 17.115433335866665,
+          "cpu_encode_ms": 2.0382000004666665
+        },
+        "screen-gradient": {
+          "gpu_ms": 12.62615069455,
+          "completion_ms": 15.04821666725,
+          "cpu_encode_ms": 2.0182499996666667
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.222560417916666,
+          "completion_ms": 17.754550000016668,
+          "cpu_encode_ms": 2.1307999983333334
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.139957638483333,
+          "completion_ms": 15.636300000166667,
+          "cpu_encode_ms": 2.0931833327166665
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.3479972214,
+          "completion_ms": 17.842100000183333,
+          "cpu_encode_ms": 2.0933333350166667
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.199935415,
+          "completion_ms": 15.643216667383333,
+          "cpu_encode_ms": 2.0459999992333335
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.3137562486,
+          "completion_ms": 18.150300000416667,
+          "cpu_encode_ms": 2.4309999995666667
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.18313888935,
+          "completion_ms": 16.030866667,
+          "cpu_encode_ms": 2.4392999997166664
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.509851390183334,
+          "completion_ms": 18.4102666676,
+          "cpu_encode_ms": 2.491416667433333
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.417854860783333,
+          "completion_ms": 16.300333333733334,
+          "cpu_encode_ms": 2.4732166668833333
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 14.708170833233334,
+          "completion_ms": 17.330049999383334,
+          "cpu_encode_ms": 2.215066666633333
+        },
+        "screen-gradient": {
+          "gpu_ms": 12.752236112033334,
+          "completion_ms": 15.313483334233334,
+          "cpu_encode_ms": 2.15918333385
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.30503819425,
+          "completion_ms": 18.350916667283332,
+          "cpu_encode_ms": 2.6295333339666667
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.194028472116667,
+          "completion_ms": 16.277633332116668,
+          "cpu_encode_ms": 2.6626166661833333
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.192913887866666,
+          "completion_ms": 17.763783334316667,
+          "cpu_encode_ms": 2.16819999865
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.099737498616667,
+          "completion_ms": 15.661649999466666,
+          "cpu_encode_ms": 2.1586166660833332
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.469426388633334,
+          "completion_ms": 18.06993333326667,
+          "cpu_encode_ms": 2.197633333416667
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.379167361333334,
+          "completion_ms": 15.995699999366666,
+          "cpu_encode_ms": 2.2114833336833333
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.627831945516666,
+          "completion_ms": 18.463166667066666,
+          "cpu_encode_ms": 2.4254333319666666
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.505638887883332,
+          "completion_ms": 16.36753333465,
+          "cpu_encode_ms": 2.4507500017666666
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.626484027133333,
+          "completion_ms": 18.845583332366665,
+          "cpu_encode_ms": 2.792899998883333
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.563845833166667,
+          "completion_ms": 16.76448333405,
+          "cpu_encode_ms": 2.7783833341666666
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.49976527675,
+          "completion_ms": 18.358183333366668,
+          "cpu_encode_ms": 2.447550000966667
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.457232638466667,
+          "completion_ms": 16.3110666673,
+          "cpu_encode_ms": 2.43943333385
+        }
+      },
+      {
+        "control": {
+          "gpu_ms": 15.470998610783333,
+          "completion_ms": 18.74055000081667,
+          "cpu_encode_ms": 2.83728333185
+        },
+        "screen-gradient": {
+          "gpu_ms": 13.370105555083333,
+          "completion_ms": 16.58031666745,
+          "cpu_encode_ms": 2.7804333340833334
+        }
+      }
+    ],
+    "variants": {
+      "control": {
+        "frames": 900,
+        "gpu_ms": {
+          "mean": 14.99211888883,
+          "median": 15.514250001
+        },
+        "completion_ms": {
+          "mean": 17.768283333627778,
+          "median": 18.285999999
+        },
+        "cpu_encode_ms": {
+          "mean": 2.3621322219044445,
+          "median": 2.256000007
+        }
+      },
+      "screen-gradient": {
+        "frames": 900,
+        "gpu_ms": {
+          "mean": 12.962729768325556,
+          "median": 13.353020833,
+          "window_saving_ms_range": [
+            1.357317361583334,
+            2.1480618063999994
+          ],
+          "faster_windows": 15
+        },
+        "completion_ms": {
+          "mean": 15.72337888921,
+          "median": 16.1339999975,
+          "window_saving_ms_range": [
+            1.3376499984333332,
+            2.1988833327999995
+          ],
+          "faster_windows": 15
+        },
+        "cpu_encode_ms": {
+          "mean": 2.348503333577778,
+          "median": 2.2404999985,
+          "window_saving_ms_range": [
+            -0.033083332216666594,
+            0.05684999776666677
+          ],
+          "faster_windows": 10
+        }
+      }
+    }
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/adjacent-relief-2.tsv",
+    "frames": 1800,
+    "windows_120_frames": [
+      {
+        "screen-gradient": {
+          "gpu_ms": 9.273227083716666,
+          "completion_ms": 11.70678333195,
+          "cpu_encode_ms": 2.009699998133333
+        },
+        "control": {
+          "gpu_ms": 10.7144048603,
+          "completion_ms": 13.137533333083333,
+          "cpu_encode_ms": 2.007550000366667
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.561540972583334,
+          "completion_ms": 16.728549999733332,
+          "cpu_encode_ms": 2.6326833335
+        },
+        "control": {
+          "gpu_ms": 15.675242362333334,
+          "completion_ms": 18.754466665466666,
+          "cpu_encode_ms": 2.6535833344666666
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.673154861466667,
+          "completion_ms": 16.29326666635,
+          "cpu_encode_ms": 2.21279999845
+        },
+        "control": {
+          "gpu_ms": 15.871756248383333,
+          "completion_ms": 18.5590666673,
+          "cpu_encode_ms": 2.2834166666166666
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.364959027533333,
+          "completion_ms": 15.909683333716666,
+          "cpu_encode_ms": 2.1236833333
+        },
+        "control": {
+          "gpu_ms": 15.500815277533333,
+          "completion_ms": 18.0397000001,
+          "cpu_encode_ms": 2.1380000015166667
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.6461034721,
+          "completion_ms": 16.434933332766665,
+          "cpu_encode_ms": 2.377483333633333
+        },
+        "control": {
+          "gpu_ms": 15.820472223016667,
+          "completion_ms": 18.62945000005,
+          "cpu_encode_ms": 2.3924833336333333
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.570925693783334,
+          "completion_ms": 16.266833333316665,
+          "cpu_encode_ms": 2.2831333321000002
+        },
+        "control": {
+          "gpu_ms": 15.71962847255,
+          "completion_ms": 18.375550001216666,
+          "cpu_encode_ms": 2.2543999994
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.160297915166666,
+          "completion_ms": 16.060333334183333,
+          "cpu_encode_ms": 2.490266667216667
+        },
+        "control": {
+          "gpu_ms": 15.398469444533333,
+          "completion_ms": 18.31758333385,
+          "cpu_encode_ms": 2.5020499995333334
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.055289582316666,
+          "completion_ms": 15.666933332733333,
+          "cpu_encode_ms": 2.208566665633333
+        },
+        "control": {
+          "gpu_ms": 15.17208124985,
+          "completion_ms": 17.72775,
+          "cpu_encode_ms": 2.15731666565
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.55150138825,
+          "completion_ms": 16.741949999616665,
+          "cpu_encode_ms": 2.7712833340166667
+        },
+        "control": {
+          "gpu_ms": 15.7113590266,
+          "completion_ms": 18.895550000666667,
+          "cpu_encode_ms": 2.7665500007833335
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.00624166635,
+          "completion_ms": 15.710716666516667,
+          "cpu_encode_ms": 2.302116665883333
+        },
+        "control": {
+          "gpu_ms": 15.03039444485,
+          "completion_ms": 17.74265000055,
+          "cpu_encode_ms": 2.30098333365
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.045644442916666,
+          "completion_ms": 15.5382333345,
+          "cpu_encode_ms": 2.0889333339833334
+        },
+        "control": {
+          "gpu_ms": 15.109568056466667,
+          "completion_ms": 17.68196666698333,
+          "cpu_encode_ms": 2.1681833325833333
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.436923611616667,
+          "completion_ms": 16.189650001183335,
+          "cpu_encode_ms": 2.3444333336666667
+        },
+        "control": {
+          "gpu_ms": 15.637544444033333,
+          "completion_ms": 18.46809999975,
+          "cpu_encode_ms": 2.4224333343
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.339016666383333,
+          "completion_ms": 15.782933334966666,
+          "cpu_encode_ms": 2.0460500010333336
+        },
+        "control": {
+          "gpu_ms": 15.388339583816666,
+          "completion_ms": 17.819866665883332,
+          "cpu_encode_ms": 2.0289999998
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 12.631890970866667,
+          "completion_ms": 15.0479333332,
+          "cpu_encode_ms": 2.019483334133333
+        },
+        "control": {
+          "gpu_ms": 14.66879930615,
+          "completion_ms": 17.144733333433333,
+          "cpu_encode_ms": 2.0804999998
+        }
+      },
+      {
+        "screen-gradient": {
+          "gpu_ms": 13.040178473116667,
+          "completion_ms": 15.94348333215,
+          "cpu_encode_ms": 2.4818999995833333
+        },
+        "control": {
+          "gpu_ms": 15.052363193083334,
+          "completion_ms": 18.028716667083334,
+          "cpu_encode_ms": 2.5495499989166666
+        }
+      }
+    ],
+    "variants": {
+      "screen-gradient": {
+        "frames": 900,
+        "gpu_ms": {
+          "mean": 13.023793055211112,
+          "median": 13.314541677000001,
+          "window_saving_ms_range": [
+            1.4411777765833342,
+            2.2381715293666673
+          ],
+          "faster_windows": 15
+        },
+        "completion_ms": {
+          "mean": 15.73481444445889,
+          "median": 16.0665000005,
+          "window_saving_ms_range": [
+            1.4307500011333332,
+            2.278449998566664
+          ],
+          "faster_windows": 15
+        },
+        "cpu_encode_ms": {
+          "mean": 2.2928344442844444,
+          "median": 2.2024999925,
+          "window_saving_ms_range": [
+            -0.05124999998333335,
+            0.07924999859999993
+          ],
+          "faster_windows": 9
+        }
+      },
+      "control": {
+        "frames": 900,
+        "gpu_ms": {
+          "mean": 15.098082546233334,
+          "median": 15.383083336999999
+        },
+        "completion_ms": {
+          "mean": 17.82151222236111,
+          "median": 18.1819999925
+        },
+        "cpu_encode_ms": {
+          "mean": 2.313733333401111,
+          "median": 2.220500013
+        }
+      }
+    }
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/pump-power.tsv",
+    "frames": 1440,
+    "blocks": [
+      {
+        "block": 1,
+        "variant": "control",
+        "gpu_ms": 13.6641552075875,
+        "completion_ms": 18.811608333454167,
+        "cpu_encode_ms": 4.507900000445833
+      },
+      {
+        "block": 2,
+        "variant": "normal-off",
+        "gpu_ms": 13.1408706601125,
+        "completion_ms": 15.920958332958334,
+        "cpu_encode_ms": 2.3477166664291667
+      },
+      {
+        "block": 3,
+        "variant": "relief-off",
+        "gpu_ms": 13.137646006841667,
+        "completion_ms": 15.783299999558333,
+        "cpu_encode_ms": 2.226991666225
+      },
+      {
+        "block": 4,
+        "variant": "relief-off",
+        "gpu_ms": 14.878240451258334,
+        "completion_ms": 21.374291666191667,
+        "cpu_encode_ms": 5.8467916664083335
+      },
+      {
+        "block": 5,
+        "variant": "normal-off",
+        "gpu_ms": 15.778419270979168,
+        "completion_ms": 22.6892250001875,
+        "cpu_encode_ms": 6.2482708333
+      },
+      {
+        "block": 6,
+        "variant": "control",
+        "gpu_ms": 15.158244617658333,
+        "completion_ms": 18.3094333335375,
+        "cpu_encode_ms": 2.711095833775
+      }
+    ],
+    "variants": {
+      "control": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 14.411199912622916,
+          "block_range": [
+            13.6641552075875,
+            15.158244617658333
+          ],
+          "median": 15.1708124975,
+          "histogram_1ms": {
+            "8": 55,
+            "9": 9,
+            "10": 4,
+            "11": 1,
+            "12": 3,
+            "13": 7,
+            "14": 93,
+            "15": 251,
+            "16": 48,
+            "17": 4,
+            "18": 4,
+            "19": 1
+          }
+        },
+        "completion_ms": {
+          "mean": 18.560520833495833,
+          "block_range": [
+            18.3094333335375,
+            18.811608333454167
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 3.6094979171104162,
+          "block_range": [
+            2.711095833775,
+            4.507900000445833
+          ]
+        }
+      },
+      "normal-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 14.459644965545834,
+          "block_range": [
+            13.1408706601125,
+            15.778419270979168
+          ],
+          "median": 15.1429166655,
+          "histogram_1ms": {
+            "7": 15,
+            "8": 6,
+            "9": 12,
+            "10": 19,
+            "11": 14,
+            "12": 24,
+            "13": 68,
+            "14": 46,
+            "15": 164,
+            "16": 87,
+            "17": 20,
+            "18": 3,
+            "19": 1,
+            "20": 1
+          }
+        },
+        "completion_ms": {
+          "mean": 19.305091666572917,
+          "block_range": [
+            15.920958332958334,
+            22.6892250001875
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 4.297993749864584,
+          "block_range": [
+            2.3477166664291667,
+            6.2482708333
+          ]
+        }
+      },
+      "relief-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 14.00794322905,
+          "block_range": [
+            13.137646006841667,
+            14.878240451258334
+          ],
+          "median": 15.020729165999999,
+          "histogram_1ms": {
+            "6": 19,
+            "7": 17,
+            "8": 10,
+            "9": 8,
+            "10": 14,
+            "11": 23,
+            "12": 33,
+            "13": 30,
+            "14": 84,
+            "15": 148,
+            "16": 73,
+            "17": 15,
+            "18": 4,
+            "19": 2
+          }
+        },
+        "completion_ms": {
+          "mean": 18.578795832875,
+          "block_range": [
+            15.783299999558333,
+            21.374291666191667
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 4.0368916663166665,
+          "block_range": [
+            2.226991666225,
+            5.8467916664083335
+          ]
+        }
+      }
+    },
+    "rounds": [
+      {
+        "control": {
+          "gpu_ms": 14.411199912622916,
+          "completion_ms": 18.560520833495833
+        },
+        "normal-off": {
+          "gpu_ms": 14.459644965545834,
+          "completion_ms": 19.305091666572917
+        },
+        "relief-off": {
+          "gpu_ms": 14.00794322905,
+          "completion_ms": 18.578795832875
+        }
+      }
+    ]
+  },
+  {
+    "path": "wiki/measurements/yawl-runtime-f87a44f/qos-power.tsv",
+    "frames": 1440,
+    "blocks": [
+      {
+        "block": 1,
+        "variant": "control",
+        "gpu_ms": 13.728213194425,
+        "completion_ms": 17.696020833475,
+        "cpu_encode_ms": 3.4931291663583335
+      },
+      {
+        "block": 2,
+        "variant": "normal-off",
+        "gpu_ms": 13.608422743729166,
+        "completion_ms": 16.3035124992,
+        "cpu_encode_ms": 2.2852583329791667
+      },
+      {
+        "block": 3,
+        "variant": "relief-off",
+        "gpu_ms": 13.525176735741667,
+        "completion_ms": 16.220495833125,
+        "cpu_encode_ms": 2.2872833335541665
+      },
+      {
+        "block": 4,
+        "variant": "relief-off",
+        "gpu_ms": 13.344155381583333,
+        "completion_ms": 15.999129167058333,
+        "cpu_encode_ms": 2.246462500475
+      },
+      {
+        "block": 5,
+        "variant": "normal-off",
+        "gpu_ms": 13.218321700775,
+        "completion_ms": 15.846233333525,
+        "cpu_encode_ms": 2.2183541670458333
+      },
+      {
+        "block": 6,
+        "variant": "control",
+        "gpu_ms": 13.704492187345833,
+        "completion_ms": 17.8327166673125,
+        "cpu_encode_ms": 3.6511000004583334
+      }
+    ],
+    "variants": {
+      "control": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 13.716352690885417,
+          "block_range": [
+            13.704492187345833,
+            13.728213194425
+          ],
+          "median": 14.427416667,
+          "histogram_1ms": {
+            "8": 66,
+            "9": 30,
+            "10": 6,
+            "11": 9,
+            "12": 10,
+            "13": 46,
+            "14": 142,
+            "15": 113,
+            "16": 32,
+            "17": 10,
+            "18": 7,
+            "19": 6,
+            "20": 3
+          }
+        },
+        "completion_ms": {
+          "mean": 17.76436875039375,
+          "block_range": [
+            17.696020833475,
+            17.8327166673125
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 3.572114583408333,
+          "block_range": [
+            3.4931291663583335,
+            3.6511000004583334
+          ]
+        }
+      },
+      "normal-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 13.413372222252082,
+          "block_range": [
+            13.218321700775,
+            13.608422743729166
+          ],
+          "median": 14.519562501,
+          "histogram_1ms": {
+            "7": 32,
+            "8": 24,
+            "9": 11,
+            "10": 8,
+            "11": 23,
+            "12": 37,
+            "13": 52,
+            "14": 177,
+            "15": 93,
+            "16": 23
+          }
+        },
+        "completion_ms": {
+          "mean": 16.0748729163625,
+          "block_range": [
+            15.846233333525,
+            16.3035124992
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 2.2518062500125,
+          "block_range": [
+            2.2183541670458333,
+            2.2852583329791667
+          ]
+        }
+      },
+      "relief-off": {
+        "blocks": 2,
+        "gpu_ms": {
+          "mean": 13.4346660586625,
+          "block_range": [
+            13.344155381583333,
+            13.525176735741667
+          ],
+          "median": 14.361374997,
+          "histogram_1ms": {
+            "6": 18,
+            "7": 15,
+            "8": 6,
+            "9": 9,
+            "10": 11,
+            "11": 31,
+            "12": 72,
+            "13": 54,
+            "14": 108,
+            "15": 152,
+            "16": 3,
+            "17": 1
+          }
+        },
+        "completion_ms": {
+          "mean": 16.109812500091667,
+          "block_range": [
+            15.999129167058333,
+            16.220495833125
+          ]
+        },
+        "cpu_encode_ms": {
+          "mean": 2.266872917014583,
+          "block_range": [
+            2.246462500475,
+            2.2872833335541665
+          ]
+        }
+      }
+    },
+    "rounds": [
+      {
+        "control": {
+          "gpu_ms": 13.716352690885417,
+          "completion_ms": 17.76436875039375
+        },
+        "normal-off": {
+          "gpu_ms": 13.413372222252082,
+          "completion_ms": 16.0748729163625
+        },
+        "relief-off": {
+          "gpu_ms": 13.4346660586625,
+          "completion_ms": 16.109812500091667
+        }
+      }
+    ]
+  }
+]

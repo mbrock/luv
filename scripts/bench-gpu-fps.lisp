@@ -607,6 +607,10 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
   (assert (member *benchmark-mode* '(:default :native-1x :native-4x)))
   (assert (null (uiop:getenv "BENCH_MSAA")) () "Use BENCH_MODE=native-1x or native-4x instead of BENCH_MSAA")
   (setf luv::*canvas-watchdog-fatal-seconds* nil
+        ;; A bounded offscreen batch intentionally holds the event thread.
+        ;; Do not launch native process sampling into an unprofiled benchmark.
+        luv::*canvas-watchdog-sample-seconds* most-positive-single-float
+        luv::*canvas-watchdog-warn-seconds* most-positive-single-float
         luv::*canvas-dispatch-timeout* 600.0
         luv::*offscreen-render-scale* nil
         luv::*fixed-render-scale* (unless (eq *benchmark-mode* :default) 1.0)

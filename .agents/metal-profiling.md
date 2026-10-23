@@ -71,6 +71,16 @@ experimental code. Read the harness before use and keep experiments out of
 the user's durable Lisp image. Do not run benchmarks alongside a profiler
 or leave orphan replay processes competing for the GPU.
 
+Check benchmark logs for native watchdog sampling too: a long offscreen
+request can look like a stalled canvas. Two archived relief runs actually
+launched `sample` during measurement. The isolated benchmark now suppresses
+that sampler; do not disable the production game's watchdog to benchmark it.
+Multi-second A/B blocks can also hide a shader gain when GPU frequency varies
+by roughly 2×. The [adjacent-frame runtime experiment](../wiki/measurements/yawl-runtime-f87a44f/README.org)
+records power telemetry, a null control, reversed order, and the limits of
+comparing variants under a shared governor state. Do not translate those
+mixed-workload timings directly into displayed FPS or candidate-only clocks.
+
 For an independent control, Apple's
 [Rendering a Scene with Deferred Lighting in C++](https://developer.apple.com/documentation/metal/rendering-a-scene-with-deferred-lighting-in-c++)
 worked. Its Debug build included line tables and recorded sources. Our SDK
