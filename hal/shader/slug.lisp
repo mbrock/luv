@@ -200,9 +200,9 @@ not the band-texture font renderer.  #OWR8OZ"
 (shader:define-live-shader slug-atlas-fragment-specification
     (:stage :fragment
      :inputs ((render-coordinate :vec2 :location 0)
-              (atlas-base :vec2 :location 1)
+              (atlas-base :vec2 :location 1 :interpolation :flat)
               (band-bounds :vec4 :location 2)
-              (band-counts :vec2 :location 3)
+              (band-counts :vec2 :location 3 :interpolation :flat)
               (render-color :vec4 :location 4))
      :resources ((band-data :uint-texture-2d :binding 0)
                  (curve-data :texture-2d :binding 1))

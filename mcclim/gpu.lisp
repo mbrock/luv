@@ -363,9 +363,9 @@ triangles emitted by luv. Direct polygon calls are named :DIRECT-POLYGON."
               (color-input :vec3 :location 5))
      :outputs ((clip-position :vec4 :built-in :position)
                (render-coordinate :vec2 :location 0)
-               (render-atlas-base :vec2 :location 1)
+               (render-atlas-base :vec2 :location 1 :interpolation :flat)
                (render-band-bounds :vec4 :location 2)
-               (render-band-counts :vec2 :location 3)
+               (render-band-counts :vec2 :location 3 :interpolation :flat)
                (render-color :vec4 :location 4)))
   (let* ()
     (shader:set-output

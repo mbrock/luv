@@ -2132,6 +2132,14 @@
                        append (mapcar #'spv:instruction-name
                                       (spv:spir-v-basic-block-instructions
                                        block))))))
+    ;; These are per-glyph integer addresses carried in float vertex data.
+    ;; Perspective interpolation can turn N into N-epsilon before UINT,
+    ;; selecting another glyph's curves and stippling world-space text.
+    (dolist (location '(1 3))
+      (true (eq :flat
+                (shader:shader-interface-interpolation
+                 (find location (shader:shader-specification-inputs specification)
+                       :key #'shader:shader-interface-location)))))
     (dolist (name '(d-pdx d-pdy select image-fetch))
       (true (find name names :test #'string-equal)))
     (true (= #x07230203
