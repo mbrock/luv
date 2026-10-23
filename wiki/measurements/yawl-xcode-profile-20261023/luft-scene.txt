@@ -1,0 +1,66 @@
+Name      Summary                        Actions
+────────  ─────────────────────────────  ───────
+commands  1164 commands, sorted by cost       go
+heatmap                                       go
+counters                                      go
+(3 items)
+
+Links:
+  :d   /commands/cb0/re1
+  :pt  /performance/timeline/encoders/re1
+Name      Summary                        Actions
+────────  ─────────────────────────────  ───────
+commands  1164 commands, sorted by cost       go
+heatmap                                       go
+counters                                      go
+(3 items)
+
+Links:
+  :d   /commands/cb0/re1
+  :pt  /performance/timeline/encoders/re1
+Encoder type:  Render
+Tile size:     32 x 32
+Commands:      13
+Duration:      12.8092 ms
+Cost:          91.35%
+  Vertex:      30.62%
+  Fragment:    60.72%
+Instructions:  3997549239
+
+-- Performance --
+Occupancy Manager Target         59,85%
+VS Occupancy                     2,22%
+FS Occupancy                     14,88%
+F32 Limiter                      64,92%
+Instruction Throughput Limiter   61,42%
+Cull Unit Limiter                31,33%
+Clip Unit Limiter                26,19%
+Integer and Conditional Limiter  16,11%
+Name                  Label                 Summary      Actions
+────────────────────  ────────────────────  ───────────  ────────
+performance_limiters  Performance Limiters  36 counters  go, info
+memory                Memory                67 counters  go, info
+vertices              Vertices              3 counters   go, info
+vertex_shader         Vertex Shader         25 counters  go, info
+primitives            Primitives            21 counters  go, info
+pre-fragment_stage    Pre-Fragment Stage    12 counters  go, info
+fragment_shader       Fragment Shader       33 counters  go, info
+post-fragment_stage   Post-Fragment Stage   12 counters  go, info
+compute_kernel        Compute Kernel        13 counters  go, info
+texture               Texture               42 counters  go, info
+ray_tracing           Ray Tracing           3 counters   go, info
+(11 items)
+Name                  Label                 Summary      Actions
+────────────────────  ────────────────────  ───────────  ────────
+performance_limiters  Performance Limiters  36 counters  go, info
+memory                Memory                67 counters  go, info
+vertices              Vertices              3 counters   go, info
+vertex_shader         Vertex Shader         25 counters  go, info
+primitives            Primitives            21 counters  go, info
+pre-fragment_stage    Pre-Fragment Stage    12 counters  go, info
+fragment_shader       Fragment Shader       33 counters  go, info
+post-fragment_stage   Post-Fragment Stage   12 counters  go, info
+compute_kernel        Compute Kernel        13 counters  go, info
+texture               Texture               42 counters  go, info
+ray_tracing           Ray Tracing           3 counters   go, info
+(11 items)

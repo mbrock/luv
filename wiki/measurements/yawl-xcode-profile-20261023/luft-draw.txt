@@ -1,0 +1,63 @@
+Name                                         Summary      Actions
+───────────────────────────────────────────  ───────────  ───────
+fs_alu_instructions                          516 340 100     info
+fs_alu_float_instructions                    78,79%          info
+fs_alu_half_instructions                     1,33%           info
+fs_alu_complex_instructions                  0,88%           info
+fs_alu_integer_and_conditional_instructions  8,60%           info
+fs_alu_convert_instructions                  9,91%           info
+fs_alu_integer_arithmetic_instructions       0,48%           info
+fs_alu_interpolation_instructions                            info
+fs_gemm_operations_issued                                    info
+fs_gemm_instructions                                         info
+fs_alu_inefficiency                          53,17%          info
+(11 items)
+Name   FS ALU Inefficiency
+Value  53,17% Percentage of ALU instructions issued
+Scope  command
+Description
+Percentage ALU instructions predicated out due to divergent control flow or partial SIMD Groups in a fragment shader or rendering primitives that are smaller than a 2x2 or the primitives don't cover entire 2x2 quads
+Name   FS ALU Instructions
+Value  516 340 100 ALU Instructions
+Scope  command
+Description
+Number of ALU instructions in the fragment shader
+Name      Summary  Actions
+────────  ───────  ───────
+heatmap                 go
+counters                go
+(2 items)
+
+Links:
+  :d   /commands/cb0/re1/draw652
+  :pt  /performance/timeline/encoders/re1
+  :pe  /performance/encoders/re1/commands/draw652
+  :a   /api_calls/api1580
+Name         Label                           Summary                          Actions
+───────────  ──────────────────────────────  ───────────────────────────────  ───────────
+pipeline     "luft site streams"             @rps6                                   info
+vertex       "terrain_vertex_specification"  7 buffers, 1 texture, 1 sampler           go
+fragment     "star_fragment_specification"   7 buffers, 1 texture, 1 sampler           go
+color0       "luft SCENE"                    @tex83 1920x1080 RGBA16Float     info, fetch
+depth        "luft DEPTH"                    @tex82 1920x1080 Depth32Float    info, fetch
+indexBuffer  "MTLBuffer 3"                   @buf2                            info, fetch
+(6 items)
+
+Links:
+  :pe  /performance/encoders/re1/commands/draw652
+  :pc  /performance/commands/draw0
+  :a   /api_calls/api1580
+-[MTL4RenderCommandEncoder drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferLength:instanceCount:baseVertex:baseInstance:]
+  primitiveType:      Triangle
+  indexCount:         54
+  indexType:          UInt32
+  indexBuffer:        @buf2 "MTLBuffer 3" offset=1560
+  indexBufferLength:  216
+  instanceCount:      4166
+  baseVertex:         0
+  baseInstance:       1306
+
+-- Encoder State --
+Cull mode             None
+Front facing winding  Clockwise
+Depth stencil state   @dss0 "luft site streams depth state"

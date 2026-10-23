@@ -1,0 +1,88 @@
+Name                                         Summary         Actions
+───────────────────────────────────────────  ──────────────  ───────
+fs_invocations                               2 235 904          info
+fs_invocation_utilization                    0,09%              info
+average_pixel_overdraw                                          info
+fs_invocations_per_primitive                 1                  info
+fs_helper_invocations                        1 298 176          info
+fs_helper_invocations_inefficiency           36,73%             info
+fs_tiles_processed                           2 040              info
+samples_shaded_per_tile                      1 096              info
+primitives_per_tile                          472                info
+sampler_calls/fs_invocation                  13                 info
+fragment_generator_pixel_processing          0,37%              info
+fs_texture_cache_miss_rate                   0,57%              info
+fs_occupancy                                 14,88%             info
+fs_alu_instructions                          10 046 350 000     info
+fs_alu_float_instructions                    80,93%             info
+fs_alu_half_instructions                                        info
+fs_alu_complex_instructions                  0,83%              info
+fs_alu_integer_and_conditional_instructions  8,54%              info
+fs_alu_convert_instructions                  9,12%              info
+fs_alu_integer_arithmetic_instructions       0,00%              info
+(showing 20 of 33 — use list N-M or list --all for more)
+Name   FS Helper Invocations
+Value  1 298 176 FS Helper Invocations
+Scope  encoder
+Description
+Number of times the fragment shader is invoked for helper threads. Fragments are processed in 2x2 quads to allow the GPU to compute derivatives for texturing. However if only a fraction of the quad is covered by primitive edge, rest of pixels will need helper threads. Helper threads indicate inefficiency for quads
+Name   FS Helper Invocations Inefficiency
+Value  36,73% Percentage of total FS Invocations
+Scope  encoder
+Description
+Percentage of fragment shader helper threads invoked out of total fragment shader threads including helper and valid fragment shader threads. Fragments are processed in 2x2 quads to allow the GPU to compute derivatives for texturing. However if only a fraction of the quad is covered by primitive edge, rest of pixels will need helper threads. Helper threads indicate inefficiency for quads. Higher values indicate greater inefficiency
+Name   FS Invocations
+Value  2 235 904 Invocations
+Scope  encoder
+Description
+Number of times the fragment shader is invoked
+Name                                 Summary  Actions
+───────────────────────────────────  ───────  ───────
+occupancy_manager_target             59,85%      info
+instruction_throughput_limiter       61,42%      info
+instruction_throughput_utilization   22,46%      info
+alu_utilization                      42,49%      info
+f32_limiter                          64,92%      info
+f32_utilization                      62,66%      info
+f16_limiter                                      info
+f16_utilization                                  info
+integer_and_complex_limiter          13,40%      info
+integer_and_complex_utilization      10,24%      info
+integer_and_conditional_limiter      16,11%      info
+integer_and_conditional_utilization  12,06%      info
+neural_accelerator_limiter                       info
+neural_accelerator_utilization                   info
+texture_read_limiter                 6,11%       info
+texture_read_utilization             3,05%       info
+texture_write_limiter                0,44%       info
+texture_write_utilization            0,44%       info
+mmu_limiter                          1,42%       info
+mmu_utilization                      1,42%       info
+(showing 20 of 36 — use list N-M or list --all for more)
+Name   F32 Limiter
+Value  64,92% Percentage of Peak Performance
+Scope  encoder
+Description
+Measures the time during which F32 work is attempted to execute as a percentage of peak performance. A value of 100% indicates F32 execution pipeline has reached full capacity and cannot process more F32 instructions in parallel
+Name   Instruction Throughput Limiter
+Value  61,42% Percentage of Peak Performance
+Scope  encoder
+Description
+Measures the time during which shader instructions are attempted to be processed as a percentage of peak shader execution pipeline performance. If the instruction throughput limiter is low, you can push more ALU and non-ALU instructions from the sub-blocks that are not fully limited. As an example if the instruction throughput limiter is less than 100%, but 100% F16 limited but less than 100% limited by F32, Integer and Complex or Integer and Conditional, then there is an opportunity to push ALU instructions from these ALU sub-blocks to execute in parallel
+Name          Summary                   Actions
+────────────  ────────────────────────  ───────────
+cost          Shader Execution Cost     info, fetch
+alu           ALU Cost                  info, fetch
+nonalu        Non-ALU Cost              info, fetch
+duration      SIMD Group Latency        info, fetch
+divergence    Thread Divergence         info, fetch
+count         Number of SIMDs           info, fetch
+scheduling    SIMD Scheduling Overhead  info, fetch
+instr_count   Instruction Count         info, fetch
+overdraw      Overdraw                  info, fetch
+draw_mapping  Draw ID                   info, fetch
+raytracing    Raytracing Latency        info, fetch
+(11 items)
+Fetched:
+  /Users/mbrock/luv/.amp/in/artifacts/branch-lowering/scene-fragment-cost.png (219 KiB)
+  /Users/mbrock/luv/.amp/in/artifacts/branch-lowering/re1_fragment_cost_top100.json (12.0 KiB)

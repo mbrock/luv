@@ -1536,6 +1536,10 @@ counts do not establish which procedural field dominates execution.
 Raw counters, reproducible probes and limitations live in
 [[file:measurements/yawl-gpudebug-7480638/README.org][the headless Metal measurement bundle]].
 
+Follow-up: #45005M obtains nonzero shader costs, occupancy and heatmaps through
+Xcode-exported profiles. The historical CLI limitation above is not a hardware
+limitation. #O523R1 is the continuing campaign ledger.
+
 ******* DONE Measure relief's repeated fragment work before removing detail
 :PROPERTIES:
 :ID: 57KXBH

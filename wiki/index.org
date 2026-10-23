@@ -130,6 +130,9 @@ The following are starting paths rather than a table of settled doctrine.
   pacing, submission completion, and eventual GPU timestamps.  It records the
   current luvcraft/Metal trace and the backend-neutral command seam exposed by
   that work.
+- [[file:luft-rendering-campaign.org][The Luft rendering campaign]] is the basecamp for geometry, material, and
+  shader-compiler optimization: real Xcode profiling, retained counter evidence,
+  negative results, and the next bounded experiments.
 - [[file:mathematical-shaders.org][Mathematical shaders as live Lisp objects]] records the typed expression
   language above the literal SPIR-V assembler, its deterministic CLOS
   lowering, and the McCLIM presentation browser connecting source to SSA.

@@ -59,6 +59,10 @@ Apple's [[https://developer.apple.com/documentation/xcode/inspecting-shaders][Sh
 control-flow and synchronization metrics, but this CLI run did not supply
 them. The collection/analysis limitation remains unresolved.
 
+Later follow-up: #45005M records the working Xcode-profile/export/CLI-load
+route on this same capture. Preserve the failure above as history, not as a
+current claim that Luft cannot produce shader costs or heatmaps.
+
 Ordinary runs have 180 warmup and 300 timed frames each. They were serial,
 without an active GPU replay, in before/after/after/before order:
 

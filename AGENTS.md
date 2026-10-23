@@ -152,6 +152,20 @@ use Parinfer as a tree/indentation diagnostic rather than a formatter:
 `--diff` shows the tree implied by indentation. `--write` repairs validated
 unbalanced source but refuses to rewrite balanced, merely suspicious code.
 
+## Profile before optimizing rendering
+
+For Metal captures, shader costs, or heatmaps, read
+[the agent profiling runbook](.agents/metal-profiling.md) first. On the
+validated Xcode/macOS versions, CLI collection could return all-zero shader
+costs despite embedded source; profiling in Xcode and exporting with
+**Embed performance data** produced usable CLI evidence. Do not rediscover
+this through repeated compiler-flag or permission experiments.
+
+[The Luft rendering campaign](wiki/luft-rendering-campaign.org) collects the
+measured results, failed approaches, and next experiments. Preserve the
+distinction between replay, sampled costs, isolated counters, and unprofiled
+runtime gains.
+
 ## The wiki is part of the source
 
 `wiki/*.org` is the design memory behind the code and the source for

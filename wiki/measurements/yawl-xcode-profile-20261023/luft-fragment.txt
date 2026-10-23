@@ -1,0 +1,45 @@
+
+Links:
+  :pt  /performance/timeline/shaders/frag1
+Stage        fragment
+Cost         55.28%
+Invocations  1163
+SIMD groups  129160
+
+-- Compiler --
+Instructions                8887
+ALU                         8510
+Branch                      125
+Wait                        2
+FP16                        0
+FP32                        7995
+INT16                       4
+INT32                       14
+Texture reads               9
+Texture writes              0
+Device loads                0
+Device stores               0
+Device atomics              0
+Threadgroup loads           0
+Threadgroup stores          0
+Threadgroup atomics         0
+Threadgroup memory (bytes)  528
+Temp registers              106
+Uniform registers           100
+Spilled bytes               0
+
+Links:
+  :pt  /performance/timeline/shaders/frag1
+list     Show children of current node
+go       Navigate to a node
+info     Show details of a node
+fetch    Download resource contents
+find     Search across the trace
+next     Move to next sibling
+prev     Move to previous sibling
+status   Show session state
+wait     Wait for background operation
+profile  Profile session commands
+help     Show available commands
+exit     Exit gpudebug
+:        Follow cross-tree link

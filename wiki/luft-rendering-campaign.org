@@ -1,0 +1,179 @@
+#+title: Luft rendering campaign: measure the work, then remove it
+#+startup: overview
+
+* A basecamp for rendering and compiler experiments
+:PROPERTIES:
+:ID: O523R1
+:END:
+
+Make Luft materially faster without losing its near-field appearance,
+manifold boundaries, lighting, or live-editing behavior. This page is the
+campaign ledger, not another renderer architecture. Keep the next experiment
+small, its counterfactual explicit, and its failed results easy to find.
+
+Start with the [[file:../.agents/metal-profiling.md][agent Metal profiling runbook]] for the shortest known path to
+real counters, heatmaps, and source costs. #4C7L3C defines the fixed-target
+runtime measurement contract; #E6JYVE records the earlier Metal System Trace
+investigation. The geometry/compiler experiments remain beside their design
+history on [[file:luft.org][the Luft page]]. This page connects their conclusions.
+
+Origin: [[https://ampcode.com/threads/T-01a16974-f1f6-7698-9082-658f7825c505][the terrain, compiler, and Xcode investigation]], 2026-10-23.
+
+* DONE Recover real shader profiling before guessing again
+:PROPERTIES:
+:ID: 45005M
+:END:
+
+On yawl (Apple M5, macOS 27.2, Xcode 27.1 build 27A9275), =gpudebug= 1.0
+could return replay timing and counters while leaving shader cost weights
+zero, shader timelines empty, and the heatmap builder unavailable. Embedded
+MSL and =full= profile mode were already present. A zero weight was missing
+evidence, not free execution.
+
+The same symptom survived a tiny handwritten shader compiled through both
+runtime Metal APIs and an offline library with explicit line tables. It
+also affected Moppe's C++ application and Apple's deferred-lighting sample.
+An application bundle or another compiler flag was not the missing proof.
+
+The working path was Xcode's =Profile after replay=, then =File → Export=
+with =Embed performance data=. All three applications produced nonzero
+costs and heatmaps in Xcode. Both Luft and Moppe exports then loaded with
+real shader weights and heatmaps in the CLI. The exact difference in CLI
+collection versus GUI collection remains unknown; we have a workaround,
+not a diagnosed Apple bug. The runbook records the permission layers,
+navigation traps, session cleanup, and precise commands.
+
+* The current measured frame is arithmetic-heavy, with many helper fragments
+:PROPERTIES:
+:ID: EFKH0C
+:END:
+
+This is the #YH5LWK candidate capture: seed-7 settled live-alpine, native
+1920×1080, no temporal reconstruction, nine scene residents, merged shadow
+rectangles, original instanced scene geometry. Its capture metadata says
+baseline revision =4909081= plus then-local branch-lowering changes later
+committed as [[https://github.com/mbrock/luv/commit/bd55997][bd55997]]. Do not describe it as an untouched baseline checkout.
+The [[file:../wiki/measurements/yawl-xcode-profile-20261023/capture.sexp][capture record]] is provenance, not a useful one-frame timing benchmark.
+
+Xcode replay used medium performance state and overlapping execution. It
+reported 14.00 ms effective GPU time and only 3/10 sampled cores (Apple's
+sample had 9/10, Moppe 2/10). Sampling coverage, repeatability, and clocks
+must be resolved before treating the following as precise comparative
+budgets. Encoder counters are isolated measurements, not an additive
+breakdown of the sampled replay.
+
+| Measurement | Observed value | Meaning |
+|-
+| Terrain fragment shader cost | 55.28% | Share of sampled shader cost |
+| Terrain vertex shader cost | 30.62% | Share of sampled shader cost |
+| Scene FP32 limiter | 64.92% | Relative to that unit's peak, not frame time |
+| Scene instruction-throughput limiter | 61.42% | Relative to instruction pipeline peak |
+| Scene texture-read limiter | 6.11% | Much lower than arithmetic in this replay |
+| Scene valid fragment invocations | 2,235,904 | Scene encoder includes sky |
+| Scene helper fragment invocations | 1,298,176 | Extra lanes for partially covered quads |
+| Helper fraction | 36.73% | Helpers / (valid + helpers) |
+| Terrain fragment compiled instructions | 8,887 | Static program count, not per-pixel execution |
+| Temporary / uniform registers | 106 / 100 | Compiler statistics; zero spilled bytes |
+
+The source editor displayed real costs, but attributed 71.31% to the
+fragment function declaration and other costs to surprising source lines.
+That is not enough to identify which material expression dominates. Its
+hover reported 41.28% divergence; the expensive draw's hardware ALU
+inefficiency was 53.17%. Neither number isolates branch divergence from
+partial SIMD groups or uncovered quad lanes.
+
+[[file:measurements/yawl-xcode-profile-20261023/luft-heatmap.png]]
+
+[[file:measurements/yawl-xcode-profile-20261023/luft-source-cost.png]]
+
+** Evidence that survives the scratch directory
+:PROPERTIES:
+:ID: 9HP35K
+:END:
+
+The [[file:../wiki/measurements/yawl-xcode-profile-20261023/luft-shaders.txt][shader ranking]], [[file:../wiki/measurements/yawl-xcode-profile-20261023/luft-fragment.txt][fragment compiler statistics]],
+[[file:../wiki/measurements/yawl-xcode-profile-20261023/luft-scene.txt][encoder overview]], [[file:../wiki/measurements/yawl-xcode-profile-20261023/luft-counters.txt][full selected counter groups]], and
+[[file:../wiki/measurements/yawl-xcode-profile-20261023/counter-definitions.txt][counter definitions]] are verbatim CLI responses from the GUI-exported trace.
+The [[file:../wiki/measurements/yawl-xcode-profile-20261023/luft-draw.txt][expensive draw record]] relates cost to an actual draw and explains ALU
+inefficiency. [[file:../wiki/measurements/yawl-xcode-profile-20261023/moppe-terrain.txt][Moppe's terrain record]] reports 1,298 static fragment instructions,
+but different shading, geometry, and sampling make this no speed ratio.
+
+Large captures remain local to the source checkout, deliberately not in Git:
+=.amp/in/artifacts/branch-lowering/gui-profiled.gputrace= (153 MiB) and
+=.amp/in/artifacts/moppe-profile/gui-profiled.gputrace= (237 MiB). Their
+[[file:../wiki/measurements/yawl-xcode-profile-20261023/capture-files.sha256][file hashes]] identify the exact exported inputs if recovered later.
+These paths are provenance, not a promise that a fresh clone contains them.
+Recreate a capture and use the runbook if they are unavailable.
+
+* Keep the negative results in the plan
+:PROPERTIES:
+:ID: 47JDVB
+:END:
+
+| Experiment | Established result | What it did not establish |
+|-
+| Shadow coplanar rectangles, #5UH08L | 1,679 → 16 shadow draws; lower CPU encoding | A whole-frame GPU improvement |
+| Scene batching, #7B19HJ | 1,163 → 9 scene draws; lower CPU encoding | Faster scene GPU execution; reference streams increased vertex reads |
+| Coplanar scene merging, #FIW26N | 41.7% fewer triangles; lower vertex replay time | Comparable fragment savings: total fragment invocations fell only 1.7% |
+| 16-cell visibility probe, #FIW26N | About 1.03M fewer vertex invocations; identical terrain pixels | Moving-camera selection/upload cost; selection was frozen |
+| Screen-gradient relief, #57KXBH | Fewer repeated fields and faster fragment replay | Ordinary runtime improvement or close/grazing/moving-view quality |
+| Branch-local value conditionals, #YH5LWK | Correct control-flow ownership across four lowerings | Runtime speedup: 13.284 ms before, 13.341 ms after |
+
+The new helper count does not overturn the measured merging result. Removing
+coplanar interior triangles left most expensive fragments and helper lanes
+in place. Geometry simplification must target the geometry responsible for
+work, not merely maximize the percentage reduction in triangle count.
+The original atlas already reuses indexed vertices and instances stars;
+replacing that representation can spend the saved work on memory traffic.
+
+* NEXT Establish repeatable sampling and useful source attribution
+:PROPERTIES:
+:ID: QVJVRZ
+:END:
+
+Repeat the same capture with recorded GPU state and sampled-core coverage.
+Explain the low coverage before drawing close comparisons. Use a small
+known shader to check whether instruction-to-source attribution is correct;
+then inspect optimized MSL/AIR and native statistics for the real shader.
+Do not disable optimization and call the resulting profile production cost.
+
+A DSL source map or =#line= emission is useful only after generated-MSL
+mapping is trustworthy. Source embedding, line mapping, sample collection,
+and cost interpretation are separate contracts. Keep compiler correctness
+work separate from application-level approximations, and retain native
+validation of nested branches, folds, and values crossing their boundaries.
+
+Done when: repeated profiles explain their coverage and the cost of a known
+shader operation lands on a meaningful source region; an agent can repeat
+the extraction without rediscovering GUI navigation or permissions.
+
+* NEXT Retire distant material work, not just its visible amplitude
+:PROPERTIES:
+:ID: 35AVAY
+:END:
+
+Continue #IE3WMY with a narrowly scoped shading experiment. The strongest
+current candidates are sharing the repeated relief evaluation (#57KXBH),
+or selecting a cheap distant material tier before procedural fields run.
+Do not do both in the first comparison. Measure executed work, shader size,
+register pressure, fragment invocations, and unprofiled frame time together.
+
+Moppe offers useful precedents: small terrain LOD decision units, filtering
+unresolved material detail, and removing inactive geometry before vertex
+work. Its heightfield parent-grid morph is not a cave-safe Luft simplifier;
+its old forest hierarchy is not its current renderer. Preserve mean material
+appearance as detail retires. Fading a computed field toward zero need not
+skip its evaluation. A blanket conversion to half precision risks world coordinates,
+derivatives, and noise hashes; any precision experiment needs a bounded
+numeric domain and independent image checks.
+
+For geometry, investigate feature-sized bevel retirement or finer visibility
+only with shared-boundary rules. Independent chunk bevel widths previously
+opened seams. Keep the original indexed path as the control, and charge
+selection, preparation, uploads, and retirement memory to the candidate.
+
+Done when: interleaved unprofiled control/candidate runs show a repeatable
+gain, and near/far, grazing, camera-motion, temporal, material-boundary,
+chunk-boundary, cave, and shadow checks preserve the intended appearance.
+Record a failed result here too. No approximate shading tier or new scene
+compression path is approved for the default renderer by this page alone.

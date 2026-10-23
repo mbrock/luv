@@ -1,0 +1,51 @@
+Session 95 created.
+gpudebug -s 95 -c <command> to send commands.
+1 profiling session:
+  [0] yawl (Apple M5, macOS 27.2) [perf-state: medium, overlapping, 2026-10-23 23:24, 00008142-001A24C80A63C01C]
+Profile data loaded. (5.8s)
+Name    Function                        Pipeline                        Cost    Invocations  Actions
+──────  ──────────────────────────────  ──────────────────────────────  ──────  ──────────  ────────
+frag0   star_fragment_specification     @rps6 "luft site streams"       55.28%  1163        go, info
+vert0   terrain_vertex_specification    @rps6 "luft site streams"       30.62%  1163        go, info
+frag1   present_fragment_specification  @rps5 "luft HDR presentation"    6.30%  1           go, info
+frag2   luvcraft_sky_fragment_speci...  @rps8 "Luvcraft shared atmo...   5.43%  1           go, info
+frag3   hdr_copy_fragment_specifica...  @rps0 "luft HDR composite c...   0.59%  1           go, info
+vert1   terrain_shadow_rectangle_ve...  @rps7 "luft sun shadow sites"    0.48%  16          go, info
+frag4   sun_shaft_fragment_specific...  @rps4 "luft sun shafts"          0.34%  1           go, info
+frag5   bloom_bright_fragment_speci...  @rps1 "luft bloom bright pass"   0.21%  1           go, info
+frag6   slug_atlas_fragment_specifi...  @rps15 "direct McCLIM Slug ...   0.21%  1           go, info
+frag7   bloom_horizontal_fragment_s...  @rps2 "luft bloom horizonta...   0.14%  2           go, info
+frag8   bloom_vertical_fragment_spe...  @rps3 "luft bloom vertical ...   0.13%  2           go, info
+frag9   roundrect_fragment_specific...  @rps9 "direct McCLIM analytic"   0.09%  8           go, info
+frag10  gradient_roundrect_fragment...  @rps10 "direct McCLIM gradi...   0.06%  5           go, info
+frag11  roundrect_fragment_specific...  @rps14 "direct McCLIM analy...   0.03%  2           go, info
+frag12  slug_atlas_fragment_specifi...  @rps12 "direct McCLIM Slug ...   0.01%  9           go, info
+vert2   direct_mirror_slug_vertex_s...  @rps12 "direct McCLIM Slug ...   0.00%  9           go, info
+vert3   direct_widget_analytic_vert...  @rps9 "direct McCLIM analytic"   0.00%  8           go, info
+vert4   direct_widget_analytic_vert...  @rps14 "direct McCLIM analy...   0.00%  2           go, info
+frag13  image_roundrect_fragment_sp...  @rps13 "direct McCLIM image"     0.00%  3           go, info
+vert5   direct_widget_gradient_vert...  @rps10 "direct McCLIM gradi...   0.00%  5           go, info
+(showing 20 of 31 — use list N-M or list --all for more)
+Name    Function                        Pipeline                        Cost    Invocations  Actions
+──────  ──────────────────────────────  ──────────────────────────────  ──────  ──────────  ────────
+frag0   star_fragment_specification     @rps6 "luft site streams"       55.28%  1163        go, info
+vert0   terrain_vertex_specification    @rps6 "luft site streams"       30.62%  1163        go, info
+frag1   present_fragment_specification  @rps5 "luft HDR presentation"    6.30%  1           go, info
+frag2   luvcraft_sky_fragment_speci...  @rps8 "Luvcraft shared atmo...   5.43%  1           go, info
+frag3   hdr_copy_fragment_specifica...  @rps0 "luft HDR composite c...   0.59%  1           go, info
+vert1   terrain_shadow_rectangle_ve...  @rps7 "luft sun shadow sites"    0.48%  16          go, info
+frag4   sun_shaft_fragment_specific...  @rps4 "luft sun shafts"          0.34%  1           go, info
+frag5   bloom_bright_fragment_speci...  @rps1 "luft bloom bright pass"   0.21%  1           go, info
+frag6   slug_atlas_fragment_specifi...  @rps15 "direct McCLIM Slug ...   0.21%  1           go, info
+frag7   bloom_horizontal_fragment_s...  @rps2 "luft bloom horizonta...   0.14%  2           go, info
+frag8   bloom_vertical_fragment_spe...  @rps3 "luft bloom vertical ...   0.13%  2           go, info
+frag9   roundrect_fragment_specific...  @rps9 "direct McCLIM analytic"   0.09%  8           go, info
+frag10  gradient_roundrect_fragment...  @rps10 "direct McCLIM gradi...   0.06%  5           go, info
+frag11  roundrect_fragment_specific...  @rps14 "direct McCLIM analy...   0.03%  2           go, info
+frag12  slug_atlas_fragment_specifi...  @rps12 "direct McCLIM Slug ...   0.01%  9           go, info
+vert2   direct_mirror_slug_vertex_s...  @rps12 "direct McCLIM Slug ...   0.00%  9           go, info
+vert3   direct_widget_analytic_vert...  @rps9 "direct McCLIM analytic"   0.00%  8           go, info
+vert4   direct_widget_analytic_vert...  @rps14 "direct McCLIM analy...   0.00%  2           go, info
+frag13  image_roundrect_fragment_sp...  @rps13 "direct McCLIM image"     0.00%  3           go, info
+vert5   direct_widget_gradient_vert...  @rps10 "direct McCLIM gradi...   0.00%  5           go, info
+(showing 20 of 31 — use list N-M or list --all for more)
