@@ -456,10 +456,14 @@ relief costs nothing measurable: a 1920 by 1080 frame of the alpine world
 on chapel's Vulkan takes 4.1 to 4.3 ms of GPU with every relief on or every
 relief off, at the queue's whole-millisecond resolution, so nothing is
 baked.  Grass and sand now have grain, bark ridges, leaves clump, and
-terrace edges catch the light.  Still to judge: whether each of the 72 kinds
-is recognizably itself, grass hanging over the top of its sides, and
-Luvcraft's stone,
-whose atlas mean is a cold lavender grey beside Luft's warmer rock.
+terrace edges catch the light.  Wool and tapestry have a ninth field,
+cloth: rounded threads crossing over and under.  Luvcraft's stone family is
+moved toward a warm grey of the same brightness by
+[[lisp:luvcraft.luft::*block-tone-adjustments*]], so its rock sits beside
+Luft's.  Still to judge: grass hanging over the top of its sides, iron
+plate, which still reads blue-grey under the sky's fill, the dark kinds
+that separate only by relief, and the kinds that want a body or a pattern
+of their own -- terminals, fountains, hay, thatch, cactus.
 
 A material may also be laid: [[lisp:luft.terrain:material-kind-pattern]]
 names a bond, grid, shingle, or checker, its rows per cell, element length,
@@ -470,10 +474,20 @@ the length of a wall and wrap its corners, every brick or tile has its own
 hashed tone, and joints are grooves in the relief that hold shade.  The
 pattern fades to its mean tone where its joints would be finer than pixels.
 Luvcraft's bricks, stone bricks, roof tiles, slate shingles, marble and blue
-tiles, mosaic, checker floor, boards, and parquet are laid this way.  Objects
-rather than surfaces -- lanterns, barrels, bookshelves, lit windows -- are
-not patterns: lanterns become surface attachments with a drawn body, and
-barrels small drawn fixtures.
+tiles, mosaic, checker floor, boards, and parquet are laid this way.  Four
+laid shapes depend on the face: a shelf of book spines on the sides and
+boards on top, a lit window of glowing panes in a grooved frame, half-timber
+posts and braces, and a wainscot's raised panel.  The second row's sixth
+word carries their accent tone and their glow.
+
+Objects rather than surfaces are drawn as bodies.  A lantern cell becomes a
+surface attachment standing on the cell below it or hanging from the one
+above, with an iron and glass body, and lights the world around it.  A
+barrel or crate cell stays solid for walking and light, but the mesher
+leaves it out and the chunk carries a staved, hooped barrel or a framed,
+boarded crate instead.  On the merged engine, a seed-7 yard with all of
+them renders by day and night; at night the lanterns and windows light the
+yard, but the bodies take only sun and sky, so crates go nearly black.
 
 ** NEXT Start Luvcraft as a game on the engine
 :PROPERTIES:
