@@ -19,7 +19,7 @@
   (:documentation
    "Bind one lens-chain STAGE (:bright, :horizontal, :vertical, or :shafts)
 to its SOURCE view and the frame's CAMERA uniform."))
-(defgeneric make-presentation-binding (finishing device scene depth camera bloom shafts))
+(defgeneric make-presentation-binding (finishing device scene depth camera bloom shafts panel-color panel-depth))
 (defgeneric encode-composite (finishing pass binding))
 (defgeneric encode-lens-stage (finishing stage pass binding))
 (defgeneric encode-presentation (finishing pass binding))
@@ -41,11 +41,12 @@ to its SOURCE view and the frame's CAMERA uniform."))
                         :camera-state camera))
 
 (defmethod make-presentation-binding
-    ((finishing image-finishing) device scene depth camera bloom shafts)
+    ((finishing image-finishing) device scene depth camera bloom shafts panel-color panel-depth)
   (make-program-binding (finishing-present-program finishing) device
                         :scene scene :scene-sampler (finishing-sampler finishing)
                         :scene-depth depth :camera-state camera
-                        :bloom bloom :shafts shafts))
+                        :bloom bloom :shafts shafts
+                        :panel-color panel-color :panel-depth panel-depth))
 
 (defmethod encode-composite ((finishing image-finishing) pass binding)
   (encode-program (finishing-composite-program finishing) pass binding

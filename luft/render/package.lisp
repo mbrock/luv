@@ -211,7 +211,8 @@
            ;; What a game hosted in a viewer specializes and calls.
            #:viewer-overlays #:add-viewer-overlay #:remove-viewer-overlay
            #:attach-viewer-overlay #:refresh-viewer-overlay #:advance-viewer-overlay
-           #:viewer-overlay-stage #:encode-viewer-overlay #:handle-viewer-overlay-event
+           #:viewer-overlay-stage #:viewer-world-panel-depth
+           #:encode-viewer-overlay #:handle-viewer-overlay-event
            #:quiesce-viewer-overlay #:release-viewer-overlay #:evict-viewer-overlay-frame-key
            #:viewer-overlay-focus-insets
            #:viewer-modal-focus #:focus-viewer #:unfocus-viewer

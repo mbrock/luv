@@ -1431,7 +1431,9 @@ the figure stays clear and only its far reaches recede."
                  (camera-state :uniform-block :binding 3
                   :members #.(scene-uniform-prefix 31))
                  (bloom :texture-2d :binding 4 :sample-transfer :identity)
-                 (shafts :texture-2d :binding 5 :sample-transfer :identity)))
+                 (shafts :texture-2d :binding 5 :sample-transfer :identity)
+                 (panel-color :texture-2d :binding 6 :sample-transfer :identity)
+                 (panel-depth :depth-texture-2d :binding 7)))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
          (auto-exposure (swizzle sky-color-vector :w))
@@ -1639,10 +1641,21 @@ the figure stays clear and only its far reaches recede."
                (* (swizzle (sample shafts scene-sampler uv) :xyz)
                   (swizzle lens-parameters :z)))
             :quantity quantities:scene-radiance :unit :one))
+         ;; Like the original Luvcraft world-panel layer: native analytic
+         ;; commands bypass reconstruction, AO, tilt shift and the lens chain.
+         ;; Compare only their completed depth, never coplanar command depths.
+         (panel (sample panel-color scene-sampler uv))
+         (panel-z (swizzle (sample panel-depth scene-sampler uv) :x))
+         (panel-visible (if (< panel-z depth) 1.0 0.0))
+         (panel-alpha (* (swizzle panel :w) panel-visible))
+         (scene-share (assume-quantity (- 1.0 panel-alpha) :unit :one))
+         (panel-radiance
+           (assume-quantity (* (swizzle panel :xyz) panel-visible)
+                            :quantity quantities:scene-radiance :unit :one))
          (exposed-radiance
-           (+ (interpret (* radiance auto-exposure)
+           (+ (interpret (* (+ panel-radiance (* radiance scene-share)) auto-exposure)
                          :quantity quantities:scene-radiance :unit :one)
-              lens))
+              (* lens scene-share)))
          (graded
            (representation (paper-grade (paper-tonemap exposed-radiance))))
          ;; A restrained corner falloff; the frame should feel printed, not

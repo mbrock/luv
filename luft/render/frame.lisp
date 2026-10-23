@@ -15,6 +15,8 @@
 
 (defvar *renderer-scene-overlay-encoder* nil
   "Optional host replay callback, called with the open depth-tested scene pass.")
+(defvar *renderer-world-panel-encoder* nil
+  "Optional host replay callback for native-density world panels.")
 
 (defun camera-clip-function (data)
   "Project a world point to the camera's homogeneous clip, as MESH-VIEW-CLIP."
@@ -162,6 +164,21 @@ final pass."
                    (renderer-exposure-binding renderer)
                    (renderer-frame-index renderer))
   (encode-renderer-lens renderer frame encoder)
+  (let ((pass
+          (begin-render-pass
+           encoder
+           (make-render-pass-descriptor
+            :label "native world panels"
+            :color-attachments
+            `((:view ,(renderer-panel-color-view renderer)
+               :load-op :clear :store-op :store :clear-value #(0.0 0.0 0.0 0.0)))
+            :depth-stencil-attachment
+            `(:view ,(renderer-panel-depth-view renderer)
+              :depth-load-op :clear :depth-store-op :store :depth-clear-value 1.0)))))
+    (when *renderer-world-panel-encoder* (funcall *renderer-world-panel-encoder* pass))
+    (end-pass pass))
+  (prepare-texture encoder (renderer-panel-color-texture renderer) :texture-binding)
+  (prepare-texture encoder (renderer-panel-depth-texture renderer) :texture-binding)
   (encode-renderer-presentation renderer frame encoder surface-texture overlay-encoder))
 
 (defun upload-renderer-frame (renderer frame camera-uniform-data effect-time)

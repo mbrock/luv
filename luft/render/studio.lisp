@@ -14,6 +14,9 @@
 (defgeneric viewer-overlay-stage (overlay)
   (:documentation "Return :SCENE, :WORLD-PANEL, :HUD, or :NONE.")
   (:method (overlay) (declare (ignore overlay)) :none))
+(defgeneric viewer-world-panel-depth (overlay viewer)
+  (:documentation "Camera-forward distance for far-to-near panel ordering.")
+  (:method (overlay viewer) (declare (ignore overlay viewer)) 0))
 (defgeneric encode-viewer-overlay (overlay viewer pass surface-texture)
   (:documentation "Replay prepared state into the host's open PASS.")
   (:method (overlay viewer pass surface-texture)
@@ -60,8 +63,12 @@
   overlay)
 
 (defun encode-viewer-overlays (viewer stage pass surface-texture)
-  (dolist (overlay (viewer-overlays viewer))
-    (when (eq stage (viewer-overlay-stage overlay))
+  (let ((overlays (remove-if-not (lambda (overlay) (eq stage (viewer-overlay-stage overlay)))
+                                 (viewer-overlays viewer))))
+    (when (eq stage :world-panel)
+      (setf overlays (stable-sort overlays #'> :key (lambda (overlay)
+                                                     (viewer-world-panel-depth overlay viewer)))))
+    (dolist (overlay overlays)
       (encode-viewer-overlay overlay viewer pass surface-texture))))
 
 (defun unfocus-viewer (viewer)
@@ -545,7 +552,9 @@ before the operation boundary, or it would encode through resources which the
          (renderer (prepare-viewer-frame-renderer viewer))
          (*renderer-scene-overlay-encoder*
            (lambda (pass)
-             (encode-viewer-overlays viewer :scene pass surface-texture)
+             (encode-viewer-overlays viewer :scene pass surface-texture)))
+         (*renderer-world-panel-encoder*
+           (lambda (pass)
              (encode-viewer-overlays viewer :world-panel pass surface-texture)))
          (inspection
            (and (or inspector-p
@@ -562,7 +571,8 @@ before the operation boundary, or it would encode through resources which the
      :ink-strength (if (and inspection (viewer-inspection-ink-p viewer)) 1.0 0.0)
      :bevel-width (viewer-bevel-width viewer)
      :fixed-exposure (viewer-fixed-exposure viewer)
-     :first-person-p (typep (viewer-mode viewer) 'first-person-mode)
+     :first-person-p (and (typep (viewer-mode viewer) 'first-person-mode)
+                          (null (viewer-modal-focus viewer)))
      :effect-time (or *flame-time* (viewer-last-timestamp viewer) 0.0)
      ;; Dense lattice dots are a close-study diagnostic, not a terrain view:
      ;; streamed chunks can each contain more than a million markers. The
@@ -586,13 +596,13 @@ before the operation boundary, or it would encode through resources which the
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
-(clim:define-command-table luft-atelier-window :inherit-from (luft-window))
+(clim:define-command-table luft-atelier-window :inherit-from (luft-window) :inherit-menu t)
 ;;; Walking, jumping, flight, and the workbench's tools belong to any game
 ;;; played in a viewer; the atelier's own instruments inherit them.
 (clim:define-command-table luft-play)
 (clim:define-command-table luft-play-release)
-(clim:define-command-table luft-atelier :inherit-from (luft-play))
-(clim:define-command-table luft-atelier-release :inherit-from (luft-play-release))
+(clim:define-command-table luft-atelier :inherit-from (luft-play) :inherit-menu t)
+(clim:define-command-table luft-atelier-release :inherit-from (luft-play-release) :inherit-menu t)
 
 (defconstant +site-inspector-width+ 372)
 (defconstant +site-inspector-height+ 306)

@@ -4,6 +4,16 @@
 ;;; only ownership, frame uniforms and coordinates, not their visual language.
 ;;; #HN9MI5 #5JDNKF
 
+(defclass presentation-camera (luvcraft:fly-camera) ()
+  (:metaclass luv.arithmetic.records:quantity-class))
+
+(defmethod luvcraft:camera-uniform-data :around ((camera presentation-camera) width height)
+  (let ((data (call-next-method)))
+    ;; Every retained primitive must use the terrain's depth projection.
+    (setf (aref data 18) (/ 600.0 (- 600.0 0.1))
+          (aref data 19) (/ (* -600.0 0.1) (- 600.0 0.1)))
+    data))
+
 (defclass companion-presentation ()
   ((environment :initarg :environment :reader presentation-environment)
    (layout :initarg :layout :reader presentation-layout)
@@ -22,7 +32,7 @@
                  :label "original companion scene uniforms"
                  :entries '((:binding 2 :type :uniform-buffer)))))
              (environment (make-instance 'luvcraft:luvcraft-session
-                                         :camera (make-instance 'luvcraft:fly-camera))))
+                                         :camera (make-instance 'presentation-camera))))
         (render:add-viewer-overlay
          viewer (make-instance 'companion-presentation :layout layout
                                                       :environment environment)))))
@@ -111,6 +121,9 @@
 (defmethod render:viewer-focus-score
     ((overlay mcluv:luvcraft-widget-overlay) (viewer luvcraft-viewer))
   (luvcraft:luvcraft-focus-score overlay viewer))
+(defmethod render::viewer-world-panel-depth
+    ((overlay mcluv:luvcraft-world-widget-overlay) (viewer luvcraft-viewer))
+  (luvcraft:luvcraft-world-panel-depth overlay viewer))
 (defmethod render:viewer-focus-entered
     ((overlay mcluv:luvcraft-widget-overlay) (viewer luvcraft-viewer))
   (luvcraft:luvcraft-focus-entered overlay viewer))
@@ -135,7 +148,7 @@
 (defmethod mcluv::luvcraft-widget-render-target
     ((overlay mcluv:luvcraft-world-widget-overlay) (viewer luvcraft-viewer) surface)
   (declare (ignore overlay surface))
-  (render::renderer-scene-texture (render:viewer-renderer viewer)))
+  (render::renderer-panel-color-texture (render:viewer-renderer viewer)))
 
 (defmethod luvcraft.agent::sdf-agent-pipeline-layout ((viewer luvcraft-viewer))
   (presentation-layout (companion-presentation viewer)))
@@ -157,12 +170,9 @@
                 (list group buffer)))))
          (extent (render::renderer-render-extent (render:viewer-renderer viewer)))
          (environment (presentation-environment state)))
-    ;; Identical camera and sky packer to the original game. Match Luft's far
-    ;; plane so the retained bodies test against the same terrain depth.
+    ;; Identical camera and sky packer to the original game.
     (luvcraft:luvcraft-session-camera viewer)
     (let ((data (luvcraft::frame-uniform-data environment (first extent) (second extent))))
-      (setf (aref data 18) (/ 600.0 (- 600.0 0.1))
-            (aref data 19) (/ (* -600.0 0.1) (- 600.0 0.1)))
       (luv:write-buffer (second frame) data))
     (first frame)))
 
