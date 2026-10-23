@@ -514,10 +514,11 @@ sines and three hashes. Its nap fades independently of the larger laid
 pattern, so a tapestry's gold lozenges and a bale's bindings remain when
 their fibers disappear. Slate, basalt, obsidian, and black wool separate
 by cool, warm, violet, and neutral tones as well as cleavage, grain, gloss,
-and nap. Iron, copper, and gold put colour into a stronger sun reflection
-and a view-dependent sky/ground reflection, with only a small diffuse coat;
-iron's old warm-grey adjustment is gone. Iron still looks rather blue under
-this sky: the cheap two-hemisphere reflection is not a metal environment map.
+and nap. Iron, copper, and gold put colour into a stronger sun reflection,
+with only a small diffuse coat; iron's old warm-grey adjustment is gone.
+The attempted two-hemisphere coloured reflection made iron blue. It is now
+neutral ambient energy, not a pretend environment map. Reel flanges and
+barrel hoops likewise use achromatic ambient energy and a sun highlight.
 
 A material may also be laid: [[lisp:luft.terrain:material-kind-pattern]]
 names a bond, grid, shingle, or checker, its rows per cell, element length,
@@ -534,12 +535,26 @@ boards on top, a lit window of glowing panes in a grooved frame, half-timber
 posts and braces, and a wainscot's raised panel.  The second row's sixth
 word carries their accent tone and their glow.
 
-Five further cell-sized motifs use the same descriptor rows: phosphor
-screens for terminal and urbit, hub/spoke flanges for tape and film,
-figured weaving, bale bindings, and stone-rimmed water or lava basins.
-They are arithmetic, not new texture reads or drawing passes. The screen
-marks are static, not terminal contents; the reels remain cubes with reel
-faces; the basins have no flowing water or lava volume.
+Figured weaving and bale bindings use cell-sized arithmetic motifs. Terminal,
+urbit, tape, film, fountain and lava-spring have instead joined the fixture
+bodies: inset phosphor panels, upright spools with actual openings between
+their spokes and wound medium between the flanges, and open stone bowls
+with liquid below their lips and a rising central flow. The existing frame
+clock scrolls phosphor rows and advects liquid streaks. These are animated
+diagnostic screens, not connected terminal clients, and the liquid is a
+shaded mesh volume rather than a fluid simulation. Their old cube motifs
+are no longer selected by the game palette.
+
+The original-renderer comparison also exposed lost substance colours and
+details. Blue tiles are blue again; mosaic elements take different hues,
+not just different brightnesses. Sand and clay no longer share gravel's
+large normal excursions. Chiseled stone is figured, marble has continuous
+veins, granite has dark inclusions, mossy bricks have green variation, and
+flowers have coloured flecks. The last two pattern codes append :VEIN and
+:FLECK without moving any existing code or changing descriptor word layouts.
+Grass carries its top tone down a ragged band at the top of side faces.
+Wool loses a redundant broad noise evaluation, has shallower threads, and
+filters its nap by both distance and grazing angle.
 
 =scripts/material-sampler.lisp= captures all 72 kinds plus the film
 stand-in, twelve small block groups per page, and real seed-7 alpine and
@@ -547,9 +562,14 @@ meadow 32 by 32 regions raised through Luvcraft's generator. Lanterns sit
 as attachments on stone supports. Run it with =./env sbcl
 --dynamic-space-size 8192 --script scripts/material-sampler.lisp DIR=;
 an optional second directory loads baseline =materials.lisp=,
-=shaders.lisp=, and =palette.lisp= saved with =git show=. The compared
-1440 by 900 daylight captures hold exposure at 1.0 and were inspected
-before and after on offscreen software Vulkan. At eight measured frames
+=shaders.lisp=, and =palette.lisp= saved with =git show=, and optional
+=fixture-body.lisp= and =fixture-shaders.lisp=. A second argument =old=
+renders the same occupied cells and camera in original Luvcraft on Vulkan,
+including the film stand-in and lantern attachments. =new motion= adds
+60-frame continuous camera traverses of wool and animated fixtures at
+30 Hz. The 1440 by 900 daylight captures hold exposure at 1.0 and were
+inspected before and after on offscreen software Vulkan. In the earlier
+pass, at eight measured frames
 after two warmups, median synchronous render/readback time was 108 to 94 ms
 for alpine and 100 to 94 ms for meadow. These are wall times without PNG
 encoding, not GPU timestamps; the software backend's coarse timing and
@@ -557,15 +577,39 @@ run-to-run variation cannot establish a hardware-GPU speedup. The star
 fragment module shrank from 80,245 to 63,832 SPIR-V words: the fragment now
 shares its center height and laid motif with the normal calculation rather
 than evaluating them again. There are three height evaluations, not four.
-The full build and 32 available test suites pass with two workers (Ghostty
+That pass's full build and 32 available test suites passed with two workers (Ghostty
 and terminal suites unavailable), including both =luft/render/test= shards;
 the build/test process tree's maximum RSS was about 1.03 GiB, with no heap
 exhaustion. This orb's system =foot= needs its inherited Nix library path
 cleared for the Wayland test, as well as =XDG_RUNTIME_DIR= set.
 
-Still open: grass overhang, moving-camera judgement of distant wool,
-iron's overly blue cast, and actual terminal, reel, and fountain bodies
-and behaviour. The sampler improves recognition, not that whole promise.
+The October follow-up's [[https://ampcode.com/threads/T-01a167f8-cd76-77be-ab60-b0b656e6daab][comparison evidence]] includes all seven
+old-versus-Luft pages, the seed-7 worlds, before/after pages and moving-camera
+clips. Its measured baseline is 63,868 star-fragment SPIR-V words and the
+result after the sky integration rebase is 62,155, down 1,713 words (2.7%).
+The isolated material pass was 62,150. All object animation remains in
+the fixture stage. The same eight-frame synchronous render/readback samples
+give alpine medians 82 to 80 ms and meadow 86 to 88 ms; these small software
+Vulkan differences establish no hardware speedup. Object-heavy sheets pay
+for the actual bodies: the reel sheet rises from 52 to 56 ms, mixed fixtures
+from 72 to 76 ms, and film from 44 to 48 ms. =make= and =make test=
+pass, as do all 33 available ASDF suites with two workers, including both
+=luft/render/test= shards. Maximum measured process RSS is about 968 MiB,
+without heap exhaustion. Ghostty and terminal are the two unavailable
+suites. =scripts/wiki dangling= still reports the two pre-existing portrait
+references TR4VLR and H1GHLD; this material work adds no unresolved ID.
+
+This is still not a blanket claim of parity: the screens have no live
+contents, the springs have no simulated spray, and distant wool's near-flat
+filtered finish trades detail for stability. The shallow weave has no gross
+moire or sparkle in the inspected traverse; subtle subpixel crawl remains a
+reason to judge it on hardware too. The old atlas's painted ornaments are
+not reproduced pixel for pixel: thatch and parquet remain plainer, and the
+weathered brick is not a fractured atlas tile. The side-by-side worlds also
+expose Luft's brighter finish and cool atmospheric cast in shadow, notably
+on obsidian and black wool. Neutral metal ambient removes the false
+sky/ground reflection, not that shared atmospheric grade; changing the sky
+and finishing is a separate experiment.
 
 Objects rather than surfaces are drawn as bodies.  A lantern cell becomes a
 surface attachment standing on the cell below it or hanging from the one

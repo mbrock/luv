@@ -17,15 +17,28 @@
     ;; palette annotations.  All fit the existing two descriptor rows.
     (loop for (name relief pattern) in
             '((:hay-bale 10 12) (:thatch 10 0) (:cactus 11 0)
-              (:iron-plate 12 8) (:terminal 8 9) (:urbit 8 9)
-              (:tape 12 10) (:film 12 10) (:tapestry 9 11)
-              (:fountain 8 13) (:lava-spring 8 13))
+              (:iron-plate 12 8) (:terminal 8 0) (:urbit 8 0)
+              (:tape 12 0) (:film 12 0) (:tapestry 9 11)
+              (:fountain 8 0) (:lava-spring 8 0) (:marble 8 14) (:granite 2 15))
           for placement = (find name (luv.domains:identity-vocabulary-members vocabulary)
                                 :key #'terrain:material-placement-name)
           for row = (* 8 (1+ (luv.domains:identity-vocabulary-offset
                              vocabulary placement)))
           do (is = relief (ldb (byte 4 0) (aref words (+ row 3))))
              (is = pattern (ldb (byte 4 0) (aref words (+ row 4)))))))
+
+(define-test object-materials-use-fixture-bodies
+  (let ((placements (luv.domains:identity-vocabulary-members
+                     (game:luvcraft-palette-vocabulary game:*luvcraft-palette*))))
+    (loop for (name body) in
+            '((:barrel :barrel) (:crate :crate)
+              (:tape :reel) (:film :reel)
+              (:terminal :screen) (:urbit :screen)
+              (:fountain :fountain) (:lava-spring :lava-spring)
+              (:iron-plate :none) (:blue-wool :none))
+          for placement = (find name placements :key #'terrain:material-placement-name)
+          do (is eq body (terrain:material-kind-body
+                          (terrain:material-placement-kind placement))))))
 
 (defun luvcraft-oracle-world (little height edits chunk-keys)
   "A Luvcraft world over LITTLE whose CHUNK-KEYS were loaded as Luvcraft streams them."

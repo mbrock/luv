@@ -53,6 +53,7 @@ warmer, lighter grey (#HYBFRT).  Unnamed kinds keep their atlas tone.")
 (defparameter *block-tone-overrides*
   '((:hay-bale 0.55 0.36 0.085) (:thatch 0.42 0.27 0.07)
     (:iron-plate 0.30 0.31 0.32)
+    (:blue-tiles 0.025 0.07 0.38) (:mosaic 0.55 0.42 0.12)
     (:slate 0.085 0.105 0.13) (:basalt 0.055 0.045 0.035)
     (:obsidian 0.025 0.018 0.035) (:black-wool 0.018 0.018 0.018))
   "Scene-linear substance colours, not atlas paintings averaged together.
@@ -60,7 +61,9 @@ Iron is neutral, not warmed; the dark family separates by hue and finish.")
 
 (defun block-face-tone (kind face)
   "The tone of KIND's FACE, one of :TOP, :SIDE, or :BOTTOM, adjusted."
-  (or (cdr (assoc (luvcraft:block-kind-name kind) *block-tone-overrides*))
+  (or (and (eq (luvcraft:block-kind-name kind) :flowers) (eq face :top)
+           '(0.10 0.32 0.025))
+      (cdr (assoc (luvcraft:block-kind-name kind) *block-tone-overrides*))
       (adjusted-tone (luvcraft:block-kind-name kind) (atlas-face-tone kind face))))
 
 (defun atlas-face-tone (kind face)
@@ -89,8 +92,10 @@ Iron is neutral, not warmed; the dark family separates by hue and finish.")
   '((:grass 0.8 0.9 0.5 :grass :moss :flowers)
     (:straw 0.7 0.95 0.3 :hay-bale :thatch)
     (:cactus 0.9 0.8 0.2 :cactus)
-    (:grain 0.6 0.95 0.3 :dirt :sand :gravel :clay :mud :sandstone)
-    (:grain 0.25 0.9 0.5 :plaster :concrete)
+    (:grain 0.6 0.95 0.3 :gravel)
+    (:grain 0.35 0.95 0.3 :dirt :mud)
+    (:grain 0.12 0.95 0.3 :sand :clay :sandstone)
+    (:grain 0.05 0.9 0.5 :plaster :concrete)
     (:stone 0.8 0.8 0.7 :stone :cobblestone :granite :limestone
      :mossy-stone-bricks :cracked-stone-bricks :stone-bricks :bricks
      :roof-tiles :slate-shingles :terracotta :chiseled-stone)
@@ -102,7 +107,7 @@ Iron is neutral, not warmed; the dark family separates by hue and finish.")
     (:planks 0.7 0.7 0.6 :planks :dark-planks :birch-planks :parquet :wainscot
      :crate)
     (:snow 0.5 0.6 0.4 :snow)
-    (:cloth 0.35 0.97 0.25 :red-wool :orange-wool :yellow-wool :lime-wool
+    (:cloth 0.12 0.97 0.25 :red-wool :orange-wool :yellow-wool :lime-wool
      :light-blue-wool :blue-wool :purple-wool :pink-wool :white-wool
      :black-wool :tapestry)
     (:metal 0.15 0.28 0.9 :copper :gold :iron-plate :tape :film)
@@ -121,7 +126,21 @@ these choose the closest of the shader's world-space fields.")
      :bricks)
     ((:bond :courses 2 :aspect 2 :mortar-width 0.10
       :mortar-tone (0.20 0.20 0.21) :variance 0.12)
-     :stone-bricks :mossy-stone-bricks :cracked-stone-bricks :chiseled-stone)
+     :stone-bricks)
+    ((:bond :courses 2 :aspect 2 :mortar-width 0.10
+      :mortar-tone (0.10 0.14 0.045) :variance 0.25
+      :accent-tone (0.055 0.16 0.02))
+     :mossy-stone-bricks)
+    ((:bond :courses 2 :aspect 2 :mortar-width 0.18
+      :mortar-tone (0.07 0.065 0.06) :variance 0.5
+      :accent-tone (0.08 0.07 0.06))
+     :cracked-stone-bricks)
+    ((:figured :courses 2 :mortar-tone (0.12 0.12 0.11)
+      :accent-tone (0.055 0.05 0.045))
+     :chiseled-stone)
+    ((:vein :courses 3 :accent-tone (0.11 0.13 0.12)) :marble)
+    ((:fleck :courses 4 :accent-tone (0.025 0.02 0.02)) :granite)
+    ((:fleck :courses 1 :accent-tone (0.85 0.45 0.75)) :flowers)
     ((:shingle :courses 4 :aspect 1 :mortar-width 0.08
       :mortar-tone (0.10 0.06 0.05) :variance 0.18)
      :roof-tiles)
@@ -132,7 +151,8 @@ these choose the closest of the shader's world-space fields.")
       :mortar-tone (0.55 0.55 0.52) :variance 0.06)
      :marble-tiles :blue-tiles)
     ((:grid :courses 6 :aspect 1 :mortar-width 0.10
-      :mortar-tone (0.45 0.43 0.40) :variance 0.30)
+      :mortar-tone (0.45 0.43 0.40) :variance 0.30
+      :accent-tone (0.55 0.025 0.06))
      :mosaic)
     ((:checker :courses 2 :aspect 1 :mortar-width 0.02
       :mortar-tone (0.05 0.05 0.05) :variance 0.03)
@@ -158,26 +178,11 @@ these choose the closest of the shader's world-space fields.")
     ((:panel :courses 1 :mortar-width 0.04
       :mortar-tone (0.075 0.08 0.085) :variance 0.0)
      :iron-plate)
-    ((:screen :courses 12 :mortar-tone (0.035 0.04 0.035)
-      :accent-tone (0.16 0.85 0.26))
-     :terminal)
-    ((:screen :courses 12 :mortar-tone (0.045 0.035 0.055)
-      :accent-tone (0.65 0.40 0.9))
-     :urbit)
-    ((:reel :courses 2 :mortar-tone (0.03 0.025 0.02)
-      :accent-tone (0.65 0.58 0.42))
-     :tape :film)
     ((:figured :courses 2 :mortar-tone (0.48 0.27 0.055)
       :accent-tone (0.65 0.30 0.07))
      :tapestry)
     ((:bound :courses 2 :mortar-tone (0.12 0.065 0.02))
      :hay-bale)
-    ((:basin :courses 2 :mortar-tone (0.23 0.24 0.22)
-      :accent-tone (0.025 0.30 0.55))
-     :fountain)
-    ((:basin :courses 2 :mortar-tone (0.085 0.065 0.055)
-      :accent-tone (1.0 0.18 0.015))
-     :lava-spring)
     ((:grid :courses 4 :aspect 1 :mortar-width 0.05
       :mortar-tone (0.10 0.07 0.04) :variance 0.15)
      :parquet))
@@ -185,7 +190,10 @@ these choose the closest of the shader's world-space fields.")
 boards, or a face-aware one of books, panes, timbers, or panels, and how.
 The kind's tone is the elements'; mortar has its own.")
 
-(defparameter *block-bodies* '((:barrel . :barrel) (:crate . :crate))
+(defparameter *block-bodies*
+  '((:barrel . :barrel) (:crate . :crate) (:tape . :reel) (:film . :reel)
+    (:terminal . :screen) (:urbit . :screen)
+    (:fountain . :fountain) (:lava-spring . :lava-spring))
   "Block kinds drawn as fixture bodies rather than cubical surfaces.")
 
 (defun block-pattern (name)
@@ -200,7 +208,12 @@ The kind's tone is the elements'; mortar has its own.")
    'terrain:material-kind
    :name (luvcraft:block-kind-name kind)
    :base-tone (block-face-tone kind :side)
-   :top-tone (block-face-tone kind :top)
+   :top-tone (case (luvcraft:block-kind-name kind)
+               (:terminal '(0.16 0.85 0.26))
+               (:urbit '(0.65 0.40 0.9))
+               (:fountain '(0.025 0.30 0.55))
+               (:lava-spring '(1.0 0.18 0.015))
+               (otherwise (block-face-tone kind :top)))
    :side-tone (block-face-tone kind :side)
    :bottom-tone (block-face-tone kind :bottom)
    :light-opacity (luvcraft::block-kind-light-opacity kind)

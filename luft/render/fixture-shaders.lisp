@@ -1,6 +1,6 @@
 (in-package #:luft.render.shaders)
 
-;;; Fixture bodies (fixture-body.lisp): canonical barrel and crate triangles,
+;;; Fixture bodies (fixture-body.lisp): canonical object triangles,
 ;;; instanced at body cells and lit like the stars around them.  An instance
 ;;; is four Vec4 rows: cell corner and code, side tone and yaw, top tone and
 ;;; seed, sampled voxel light. A vertex is two: position/part and normal/U.
@@ -189,6 +189,22 @@
         (fixture-iron-tone local seed)
         (if (< (abs (- part 3.0)) 0.5) (* side 0.6) wood))))
 
+(define-shader-function fixture-object-tone (part local side top time)
+  "Object finishes; the clock advects fluid streaks and scrolls phosphor rows."
+  (if (< part 7.5) (* side 0.45)
+      (if (< part 8.5)
+          (let* ((row (floor (+ (* (swizzle local :z) 24.0) (floor (* time 2.0)))))
+                 (mark (* (step 0.3 (fract (* (swizzle local :z) 24.0)))
+                          (step 0.35 (fract (+ (* (swizzle local :x) 31.0)
+                                               (* row 0.37)))))))
+            (+ (vec3 0.005 0.008 0.006) (* top mark)))
+          (if (< part 9.5) (vec3 0.35 0.34 0.31)
+              (if (< part 10.5) (vec3 0.035 0.022 0.014)
+                  (if (< part 11.5) (* side 0.7)
+                      (* top (+ 0.65 (* 0.35 (sin (+ (* (swizzle local :z) 45.0)
+                                                     (* time -7.0)
+                                                     (* (swizzle local :x) 18.0))))))))))))
+
 (define-live-shader fixture-body-fragment-specification
     (:stage :fragment
      :inputs ((world-position :vec3 :location 0
@@ -223,23 +239,34 @@
          (part (swizzle part-info :x))
          (seed (swizzle part-info :y))
          (local (swizzle local-coordinates :xyz))
-         (tone (fixture-part-tone part local (swizzle local-coordinates :w)
-                                  normal seed side-tone top-tone))
+         (tone (if (< part 6.5)
+                   (fixture-part-tone part local (swizzle local-coordinates :w)
+                                      normal seed side-tone top-tone)
+                   (fixture-object-tone part local side-tone top-tone
+                                        (swizzle atmosphere-parameters :x))))
          ;; Where a body meets the ground its foot gathers shade.
          (contact (mix 0.55 1.0 (smoothstep 0.0 0.22 (swizzle local :z))))
-         (roughness (if (< part 0.5) 0.8 (if (< part 1.5) 0.35 0.85)))
+         (metal (or (< (abs (- part 1.0)) 0.5) (< (abs (- part 9.0)) 0.5)))
+         (roughness (if (> part 11.5) 0.18
+                        (if metal 0.28 0.85)))
          (eye (representation camera-position))
          (forward (representation (swizzle camera-forward :xyz)))
          (divisor (swizzle (representation render-parameters) :z))
          (view (normalize (mix (- forward) (- (swizzle eye :xyz) world)
                                divisor)))
          (radiance
-           (+ (paper-surface-radiance
-               (* tone contact) normal world visibility sun sun-color
-               (representation (swizzle sky-color-vector :xyz))
-               (representation (swizzle ground-color-vector :xyz)))
+           (+ (if metal
+                  (* tone (* contact
+                             (dot (representation (swizzle sky-color-vector :xyz))
+                                  (vec3 0.2126 0.7152 0.0722))))
+                  (paper-surface-radiance
+                   (* tone contact) normal world visibility sun sun-color
+                   (representation (swizzle sky-color-vector :xyz))
+                   (representation (swizzle ground-color-vector :xyz))))
               (* sun-color
                  (* visibility (material-specular normal view sun roughness)))
+              (* tone (if (< (abs (- part 8.0)) 0.5) 1.0
+                          (if (> part 12.5) 1.8 0.0)))
               (* (* tone contact)
                  (* voxel-light-gain (* voxel-light voxel-light)))))
          (final

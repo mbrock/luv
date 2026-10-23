@@ -72,9 +72,10 @@
           for y = (luft:site-y cell)
           for z = (luft:site-z cell)
           for seed = (fixture-body-seed x y z)
-          for yaw = (if (eq (nth code +material-bodies+) :barrel)
-                        (* seed (/ (* 2 pi) 16))
-                        (* (floor (* seed 4)) (/ pi 2)))
+          for yaw = (case (nth code +material-bodies+)
+                      (:barrel (* seed (/ (* 2 pi) 16)))
+                      ((:screen :reel) 0.0)
+                      (otherwise (* (floor (* seed 4)) (/ pi 2))))
           do (replace data
                       (mapcar (lambda (value) (coerce value 'single-float))
                               (list x y z code

@@ -285,13 +285,23 @@ The variation is the pane's lamplight, brighter toward its lower edge."
                             (floor (+ (swizzle face :z) 0.5))))
           frame 0.0)))
 
+(define-shader-function mineral-pattern (pattern world)
+  "A cut through veined stone or its dark mineral inclusions, without UV seams."
+  (let* ((phase (+ (dot world (vec3 7.0 4.0 5.0))
+                   (* 1.8 (sin (dot world (vec3 1.3 2.1 0.7))))))
+         (ink (if (< (swizzle pattern :x) 14.5)
+                  (smoothstep 0.88 0.99 (sin phase))
+                  (step 0.85 (paper-hash (floor (* world (* 4.75 (swizzle pattern :y)))))))))
+    (vec4 1.0 ink 0.0 0.0)))
+
 (define-shader-function face-laid-pattern (pattern normal world)
   "Return a face-aware pattern's height, variation, frame, and recess."
   (let* ((shape (swizzle pattern :x))
          (face (face-coordinates normal world))
          (top (> (abs (swizzle normal :z)) 0.7)))
     (if (> shape 8.5)
-        (motif-face shape face top)
+        (if (> shape 13.5) (mineral-pattern pattern world)
+            (motif-face shape face top))
         (if top
             (if (< shape 5.5)
                 (board-face face)
@@ -451,7 +461,7 @@ length where it rides over a crossing, by how far OVER it rides."
 Threads run along all three axes; the lattice is offset half a thread so a
 face's own axis sits at a crossing's crown, where its threads are lower than
 the face's two, and drop out of the maximum.  Alternating crossings lift the
-warp then the weft; broad felting varies the nap."
+warp then the weft. Distant and grazing nap is filtered by the caller."
   (let* ((q (+ (* point 8.0) (vec3 0.5 0.5 0.5)))
          (cell (floor q))
          (offset (fract q))
@@ -463,8 +473,7 @@ warp then the weft; broad felting varies the nap."
          (along-x (cloth-thread y z x over))
          (along-y (cloth-thread x z y (- 1.0 over)))
          (along-z (cloth-thread x y z over)))
-    (+ (* 0.8 (max along-x (max along-y along-z)))
-       (* 0.2 (paper-noise (* point 1.7))))))
+    (+ 0.1 (* 0.8 (max along-x (max along-y along-z))))))
 
 (define-shader-function fiber-height (code point)
   "Straw's broken stems, cactus ribs, or brushed metal; one noise at most."
@@ -905,7 +914,8 @@ NIL leaves the atelier's direct light unchanged.")
                                      (/ (pattern-fineness (representation material-pattern)) 4.0)))))
          ;; Fine nap filters independently: a tapestry's large figure and a
          ;; bale's bindings must survive after individual fibers disappear.
-         (nap-fade (- 1.0 (smoothstep 12.0 40.0 distance)))
+         (nap-fade (- 1.0 (smoothstep 12.0 40.0
+                                    (/ distance (max 0.2 (abs (dot normal (normalize to-eye))))))))
          (laid (laid-pattern (representation material-pattern) normal world))
          (height (surface-height relief (representation material-pattern) world fade nap-fade laid))
          (bent (relief-normal normal world relief strength
@@ -915,7 +925,11 @@ NIL leaves the atelier's direct light unchanged.")
            (* (if (> (swizzle laid :w) 0.5)
                   (if (> (swizzle (representation material-pattern) :x) 3.5)
                       mortar-tone material-tone)
-                  material-tone)
+                  (if (> (dot (swizzle (representation material-accent) :xyz) (vec3 1.0 1.0 1.0)) 0.001)
+                      (if (< (swizzle (representation material-pattern) :x) 1.5)
+                          (mix material-tone (swizzle (representation material-accent) :xyz) (swizzle laid :y))
+                          (book-tone (swizzle (representation material-accent) :xyz) material-tone (swizzle laid :y)))
+                      material-tone))
               (+ 1.0 (* 2.0 (swizzle (representation material-mortar) :w)
                         (- (swizzle laid :y) 0.5)))))
          (joint-tone (if (> (swizzle (representation material-pattern) :x) 3.5)
@@ -933,21 +947,25 @@ NIL leaves the atelier's direct light unchanged.")
                                  laid-tone fade))))
          ;; Hollows of the relief hold shade and dirt; convex edges are
          ;; worn lighter and concave ones gather darker (#HYBFRT).
-         (tone (* base-tone
+         (fringe (if (< (abs (- relief 1.0)) 0.5)
+                     (* (smoothstep 0.78 0.94
+                                    (+ (fract (- (swizzle world :z) 0.001))
+                                       (* 0.08 (- height 0.5))))
+                        (- 1.0 (abs (swizzle normal :z))))
+                     0.0))
+         (tone (* (mix base-tone (swizzle (representation material-accent) :xyz) fringe)
                   (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear))))
          (view (normalize (mix (- forward) (- (swizzle eye :xyz) world)
                                divisor)))
-         ;; Conductors put their colour in the reflection, not a blue-lit
-         ;; diffuse coat.  A hemispherical environment approximation keeps
-         ;; this in the same pass, without reflection rays or texture reads.
+         ;; Conductors use neutral ambient energy and a coloured sun lobe.
+         ;; Two sky/ground colours are not an environment map: reflecting
+         ;; their hue painted every iron face blue, including upward ones.
          (metal (if (> relief 11.5) 1.0 0.0))
          (sky (* (swizzle (representation voxel-light) :w)
                  (representation (swizzle sky-color-vector :xyz))))
          (ground (* (swizzle (representation voxel-light) :w)
                     (representation (swizzle ground-color-vector :xyz))))
-         (reflected-z (- (* 2.0 (dot bent view) (swizzle bent :z))
-                         (swizzle view :z)))
-         (environment (mix ground sky (smoothstep -0.2 0.4 reflected-z)))
+         (environment (* (swizzle (representation voxel-light) :w) 0.38))
          (radiance
            (+ (paper-surface-radiance
                (* tone (- 1.0 (* metal 0.9))) bent world visibility sun sun-color
@@ -1112,7 +1130,12 @@ NIL leaves the atelier's direct light unchanged.")
          ;; The accent tone, and the surface emission it glows by over 4.
          (material-accent
            (assume-quantity
-            (vec4 (unpack-terrain-tone (swizzle pattern-row :z))
+            (vec4 (unpack-terrain-tone
+                   (if (and (= (ldb #.(luft.terrain::terrain-descriptor-byte :relief-code)
+                                    (swizzle surface-row :w)) (uint 1.0))
+                            (= (ldb #.(luft.terrain::terrain-descriptor-byte :pattern-code)
+                                    (swizzle pattern-row :x)) (uint 0.0)))
+                       (swizzle surface-row :x) (swizzle pattern-row :z)))
                   (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :emission)
                                  (swizzle pattern-row :z)))
                      #.(luft.terrain::terrain-descriptor-divisor :emission)))

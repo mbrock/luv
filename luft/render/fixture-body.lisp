@@ -1,6 +1,6 @@
 (in-package #:luft.render)
 
-;;; Canonical fixture bodies: a coopered barrel and a framed crate, each an
+;;; Canonical fixture bodies: barrels, crates, reels, screens and springs, an
 ;;; expanded triangle stream in one unit cell, Z up, corner at the origin.
 ;;; Each vertex is two Vec4 rows: local position and PART, then local normal
 ;;; and U.  For a stave U is its index plus the position across it, so the
@@ -225,8 +225,65 @@ It runs corner to corner of the face's opening, standing OUTER out of it."
       (dotimes (side 2)
         (emit-side-brace data axis side 0.018 0.11)))))
 
+(defun emit-reel (data)
+  "An upright spool: two open flanges, a hub, and the wound medium."
+  (let ((start (length data)))
+    (flet ((cylinder (part radius low high)
+             (emit-lathe-band data part 40 low high
+                              (constantly radius) (constantly 0))
+             (emit-annulus data part 40 low 0.075 radius nil)
+             (emit-annulus data part 40 high 0.075 radius t)))
+      (cylinder 10 0.32 0.38 0.62)
+      (cylinder 9 0.105 0.32 0.68)
+      (dolist (z '(0.34 0.64))
+        (emit-lathe-band data 9 40 z (+ z 0.025)
+                         (constantly 0.46) (constantly 0))
+        (emit-annulus data 9 40 z 0.39 0.46 nil)
+        (emit-annulus data 9 40 (+ z 0.025) 0.39 0.46 t)
+        ;; Openings between six radial spokes are real holes, not dark ink.
+        (dotimes (spoke 6)
+          (let ((begin (length data)) (angle (coerce (* spoke (/ pi 3)) 'single-float)))
+            (emit-box data 9 (list 0.5 0.475 z) (list 0.92 0.525 (+ z 0.025)))
+            (loop for offset from begin below (length data) by 8
+                  do (let ((x (- (aref data offset) 0.5))
+                           (y (- (aref data (+ offset 1)) 0.5))
+                           (nx (aref data (+ offset 4)))
+                           (ny (aref data (+ offset 5))))
+                       (setf (aref data offset) (+ 0.5 (- (* x (cos angle)) (* y (sin angle))))
+                             (aref data (+ offset 1)) (+ 0.5 (+ (* x (sin angle)) (* y (cos angle))))
+                             (aref data (+ offset 4)) (- (* nx (cos angle)) (* ny (sin angle)))
+                             (aref data (+ offset 5)) (+ (* nx (sin angle)) (* ny (cos angle))))))))))
+    ;; Lathe axis Z becomes horizontal Y; the circular flange stands on Z=0.
+    (loop for offset from start below (length data) by 8
+          do (rotatef (aref data (+ offset 1)) (aref data (+ offset 2)))
+             (rotatef (aref data (+ offset 5)) (aref data (+ offset 6)))
+             (setf (aref data (+ offset 1)) (- 1.0 (aref data (+ offset 1)))
+                   (aref data (+ offset 5)) (- (aref data (+ offset 5)))))))
+
+(defun emit-screen (data)
+  (emit-box data 7 '(0.04 0.13 0.02) '(0.96 0.87 0.93))
+  ;; Front and back: the sampler and a player can inspect either side.
+  (dolist (y '(0.125 0.875))
+    (fixture-emit-oriented-quad
+     data 8 (list 0.13 y 0.18) (list 0.87 y 0.18)
+     (list 0.87 y 0.81) (list 0.13 y 0.81)
+     (if (< y 0.5) '(0 -1 0) '(0 1 0)))))
+
+(defun emit-basin (data liquid)
+  "An open stone bowl, liquid below its lip, and a rising central flow."
+  (emit-lathe-band data 11 32 0.0 0.48
+                   (constantly 0.47) (constantly 0))
+  (emit-annulus data 11 32 0.48 0.38 0.47 t)
+  (emit-lathe-band data 11 32 0.28 0.48
+                   (constantly 0.38) (constantly 0) :inward t)
+  (emit-annulus data liquid 40 0.34 0.0 0.38 t)
+  (emit-lathe-band data liquid 24 0.34 0.92
+                   (lambda (z) (+ 0.035 (* 0.22 (expt (- 0.92 z) 2))))
+                   (lambda (z) (* -0.44 (- 0.92 z))))
+  (emit-annulus data liquid 24 0.92 0.0 0.035 t))
+
 (defun %make-fixture-body-vertex-data ()
-  "The barrel's vertices, then the crate's, and each body's vertex range."
+  "Canonical triangles and each body's vertex range, indexed by body code."
   (let ((data (make-fixture-body-builder))
         (ranges (make-array (length luft.terrain::+material-bodies+)
                             :initial-element '(0 0))))
@@ -238,7 +295,13 @@ It runs corner to corner of the face's opening, standing OUTER out of it."
                                        +fixture-body-vertex-scalar-count+)
                                     first))))))
       (body (position :barrel luft.terrain::+material-bodies+) #'emit-barrel)
-      (body (position :crate luft.terrain::+material-bodies+) #'emit-crate))
+      (body (position :crate luft.terrain::+material-bodies+) #'emit-crate)
+      (body (position :reel luft.terrain::+material-bodies+) #'emit-reel)
+      (body (position :screen luft.terrain::+material-bodies+) #'emit-screen)
+      (body (position :fountain luft.terrain::+material-bodies+)
+            (lambda (data) (emit-basin data 12)))
+      (body (position :lava-spring luft.terrain::+material-bodies+)
+            (lambda (data) (emit-basin data 13))))
     (values (make-array (length data) :element-type 'single-float
                                       :initial-contents data)
             ranges)))
