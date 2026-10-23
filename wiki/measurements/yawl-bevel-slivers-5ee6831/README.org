@@ -134,6 +134,9 @@ everything or a promise of a 2× production improvement.
 
 * Reproduce
 
+For the exact measured source plus scripts, use [[https://github.com/mbrock/luv/commit/6917dce][6917dce]]. Concurrent material
+color/lighting fixes were merged afterwards; these are not post-merge timings.
+
 #+begin_src sh
 BENCH_LIBRARY=1 BLOCK_LIBRARY=1 INTERLEAVED_LIBRARY=1 BENCH_MODE=native-1x \
 BENCH_SIZES=1920x1080 BENCH_SCENES=live-alpine BENCH_REPEATS=1 \

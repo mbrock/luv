@@ -150,6 +150,10 @@ image was not redefined and remained stopped-playing.
 
 * Reproduce in disposable processes
 
+[[https://github.com/mbrock/luv/commit/6917dce][6917dce]] contains the measured production source and both experiment bundles,
+before concurrent material color/lighting fixes were merged. A run on newer
+source is a new measurement cohort, not an exact reproduction of this table.
+
 Run =make= first. From the checkout root:
 
 #+begin_src sh
