@@ -8,10 +8,11 @@
 ;;;; live-alpine,live-meadow,atelier). BENCH_CAPTURE_DIR optionally saves PNGs.
 ;;;; BENCH_REPEATS (1) repeats the matrix; BENCH_SKY_OFF / BENCH_TERRAIN_OFF
 ;;;; opt into controlled ablations (do not compare them to full-frame FPS).
-;;;; BENCH_MSAA (4) controls Luft's non-temporal samples; old Luvcraft uses1.
+;;;; BENCH_MSAA (4) controls Luft's non-temporal samples; old Luvcraft uses 1.
 ;;;; Native 720p and 1080p, TAA and dynamic resolution OFF on both renderers.
 ;;;; No swapchain/readback in the timed loop: serialized completion throughput,
 ;;;; NOT monitor presentation FPS. CPU encode and GPU execution are separate.
+;;;; Methodology, machine results and limitations: #4C7L3C.
 (require :asdf)
 (asdf:load-system "luvcraft/luft/game")
 (asdf:load-system "luvcraft")
@@ -452,6 +453,13 @@ The old renderer relights the same occupied cells with its own light solver."
           do (sleep 0.1)
           finally (error "Live terrain never settled"))))
 
+(defun capture-case (kind backend width height host old-p)
+  (when (uiop:getenv "BENCH_CAPTURE_DIR")
+    (let ((path (merge-pathnames (format nil "~(~A~)-~(~A~)-~Dx~D.png" kind backend width height)
+                                 (uiop:ensure-directory-pathname (uiop:getenv "BENCH_CAPTURE_DIR")))))
+      (if old-p (old:capture-luvcraft-screenshot host path)
+          (r:capture-viewer-frame path host)))))
+
 (defun run-live-case (kind backend width height)
   "Actual unbounded seed-7 game residency, or the actual default atelier.
 Unlike the finite cell-matched fixtures, host residency footprints differ."
@@ -490,10 +498,13 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
                    (settle-live-viewer host)))
              (let ((phases (phase-summary)) (setup (- (now) started)))
                (setf *phase-table* nil)
-               (append (list :scene kind :backend backend :setup-seconds setup :setup-profile phases
-                             :resident-chunks (if old-p (hash-table-count (old::luvcraft-session-chunk-products host))
-                                                  (hash-table-count (ter:streaming-scene-loaded (r:viewer-source host)))))
-                       (measure kind host old-p width height)))))
+               (let ((result
+                       (append (list :scene kind :backend backend :setup-seconds setup :setup-profile phases
+                                     :resident-chunks (if old-p (hash-table-count (old::luvcraft-session-chunk-products host))
+                                                          (hash-table-count (ter:streaming-scene-loaded (r:viewer-source host)))))
+                               (measure kind host old-p width height))))
+                 (capture-case kind backend width height host old-p)
+                 result))))
       (when host (if old-p (old:stop-luvcraft host) (r:stop-viewer host))))))
 
 (defun run-case (kind backend width height)
@@ -547,11 +558,7 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
                    (let ((result (append (list :scene kind :backend backend :setup-seconds startup
                                                :setup-profile phases)
                                          (measure kind host old-p width height))))
-                     (when (uiop:getenv "BENCH_CAPTURE_DIR")
-                       (let ((path (merge-pathnames (format nil "~(~A~)-~(~A~)-~Dx~D.png" kind backend width height)
-                                                    (uiop:ensure-directory-pathname (uiop:getenv "BENCH_CAPTURE_DIR")))))
-                         (if old-p (old:capture-luvcraft-screenshot host path)
-                             (r:capture-viewer-frame path host))))
+                     (capture-case kind backend width height host old-p)
                      result))))
           (when host (if old-p (old:stop-luvcraft host) (r:stop-viewer host))))))))
 
