@@ -23,6 +23,10 @@
                     (#:v #:luv.arithmetic.lisp.vec3) (#:old #:luvcraft)))
 (in-package #:gpu-fps)
 
+(defparameter *source-revision*
+  (string-trim '(#\Newline #\Return)
+               (uiop:run-program '("git" "rev-parse" "HEAD") :output :string)))
+
 (cffi:defcstruct timespec (seconds :long) (nanoseconds :long))
 (cffi:defcfun ("clock_gettime" clock-gettime) :int (clock :int) (time :pointer))
 (defun now ()
@@ -56,6 +60,7 @@
          (progn
            (dolist (name '(luft:mesh-star-chunk r::make-render-population
                            r::star-lattice-light-words r::%upload-render-population
+                           old::make-block-mesh-snapshot old::mesh-block-snapshot-halo
                            old::relight-block-world ter::finish-scene-builder))
              (let ((original (symbol-function name)) (key name))
                (push (cons name original) saved)
@@ -582,6 +587,7 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
                (assert (and (= 2 (length size)) (every #'plusp size)))
                (dolist (backend (if (eq scene :atelier) '(:atelier) '(:luft :old)))
                  (let ((result (append (list :repeat (1+ repeat) :host (machine-instance)
+                                            :source-revision *source-revision*
                                             :frames (env-integer "BENCH_FRAMES" 300)
                                             :warmup (env-integer "BENCH_WARMUP" 60))
                                        (run-case scene backend (first size) (second size)))))
