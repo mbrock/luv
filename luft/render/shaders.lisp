@@ -768,7 +768,7 @@ the figure stays clear and only its far reaches recede."
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 50))
+                  :members #.(scene-uniform-prefix 34))
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
@@ -835,15 +835,6 @@ the figure stays clear and only its far reaches recede."
                  (* visibility (material-specular bent view sun roughness)))
               (face-pattern-glow material-pattern laid normal material-accent
                                  fade)
-              ;; Lanterns and torches nearby (point-lights.lisp).
-              (* tone
-                 (point-lights-radiance
-                  world bent
-                  point-light-0 point-light-color-0 point-light-1 point-light-color-1
-                  point-light-2 point-light-color-2 point-light-3 point-light-color-3
-                  point-light-4 point-light-color-4 point-light-5 point-light-color-5
-                  point-light-6 point-light-color-6 point-light-7 point-light-color-7))
-
               ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
               ;; and lava, warm by night and lost in the sun by day.  The
               ;; square keeps a light's falloff from flattening into a wash.

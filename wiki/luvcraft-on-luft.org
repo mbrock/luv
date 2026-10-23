@@ -134,11 +134,13 @@ decoration now realizes each owner's attachments into frames at their face
 chart point, and a material with an /attachment form/ becomes one when a
 world source materializes it: a Luvcraft lantern block stands on the solid
 cell below it, or hangs from the one above, as a drawn iron-and-glass
-lantern whose cell is its clearance.  The renderer lights the scene with
-the eight attachment lights nearest the eye, unoccluded, in the star and
-body shaders; the voxel light field still gets no attachment seeds, and a
-lantern placed by an atelier edit is still a cube until its chunk is
-materialized again.
+lantern whose cell is its clearance.  Lanterns seed the streamed voxel field
+at that realized clearance cell; the unoccluded eight-nearest point lights
+are removed and the scene uniform is back to 136 floats.  Stars, fixture
+bodies, and attachment bodies read the accepted field.  Placing a supported
+lantern through either game's edit path realizes its attachment before the
+next remesh, retaining the original placement in the source's edit overlay
+for reloads.  Unsupported lanterns remain cubes, as on initial materialization.
 
 A game's palette reaches the terrain in two places.  A scene builder takes
 a material vocabulary and the placements a cell gets by default, and a
@@ -521,9 +523,17 @@ surface attachment standing on the cell below it or hanging from the one
 above, with an iron and glass body, and lights the world around it.  A
 barrel or crate cell stays solid for walking and light, but the mesher
 leaves it out and the chunk carries a staved, hooped barrel or a framed,
-boarded crate instead.  On the merged engine, a seed-7 yard with all of
-them renders by day and night; at night the lanterns and windows light the
-yard, but the bodies take only sun and sky, so crates go nearly black.
+boarded crate instead.  Bodies now take the streamed light as well as sun
+and sky: a fourth instance row holds the RGB light joined at the solid
+cell's corners, where the terrain also samples incident air.  Decoration
+copies the rows when relighting; geometry reuse retains neither stale body
+light nor a mutable alias of the previous publication.  Torch and lantern
+frames sample their clearance cells, keeping the form code above RGB4.
+Matched offscreen software-Vulkan night captures of seed 7, with a staged
+plank deck, lantern, barrel, and crate, change black silhouettes into warm,
+readable wood.  Voxel-only light loses the small directional point-light
+hotspot but keeps the yard lit without shining through walls; it is not
+clearly worse, so the point-light fallback is gone (#BQMYNU).
 
 ** NEXT Start Luvcraft as a game on the engine
 :PROPERTIES:
@@ -669,9 +679,20 @@ Luvcraft seed 7's spawn window (16 owners, 36 tiles, 4,133 cave-crystal
 sources) a cohort meshes in 204 ms with light against 72 ms without;
 tiles cost 124 ms cold and nothing cached, the sidecar 132 ms; materializing
 those chunks takes 13.7 s.  The atelier's large world has no emitters and
-pays nothing.  Open: attachments still light from their authored face, not a
-realized frame; Luvcraft's solver is not deleted; sky light is not yet
-regional; tile solving should move off the cohort's critical path.
+pays nothing.  Lanterns now seed their realized attachment cell, standing
+or hanging, and both fixtures and attachment bodies sample the published
+field.  A placed lantern takes that path on the next remesh, without a
+residency rebuild.  The regression
+=placed-lanterns-light-streamed-bodies-without-a-residency-rebuild= checks
+placement, a lit fixture, an unlit distant control, and a wall blocking
+light; =body-relighting-survives-reused-star-geometry= checks body-only
+relighting through the renderer's geometry cache.  Headless seed-7 night
+captures also exercise the viewer's live edit/schedule/publication path.
+Open: off-centre torches still use the authored flat frame; Luvcraft's
+solver is not deleted; sky light is not yet regional; tile solving should
+move off the cohort's critical path.  The voxel pool is softer than the
+removed point lights and body light is one RGB value per cell, not a
+directional irradiance field.
 
 ** TODO Carry a block, and fill an inventory
 :PROPERTIES:

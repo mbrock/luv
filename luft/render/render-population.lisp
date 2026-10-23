@@ -176,10 +176,12 @@ an owner far from any changed tile keeps its whole population."
                        (luft:surface-mesh-voxel-light
                         (prepared-render-mesh-mesh previous)))
                    (render-population-light-words population)
-                   (star-lattice-light-words mesh))))
+                   (star-lattice-light-words mesh)))
+             (bodies (luft:surface-mesh-bodies mesh)))
         (%make-prepared-render-mesh
          mesh
-         (if (equalp lights (render-population-light-words population))
+         (if (and (equalp lights (render-population-light-words population))
+                  (equalp bodies (render-population-body-data population)))
              population
              (%make-render-population
               (render-population-instance-words population)
@@ -187,7 +189,7 @@ an owner far from any changed tile keeps its whole population."
               (render-population-descriptor-words population)
               (render-population-site-count population)
               lights
-              (render-population-body-data population)))))
+              bodies))))
       (prepare-render-mesh mesh)))
 
 (defmethod streamed-mesh-preparation-signature

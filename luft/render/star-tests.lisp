@@ -40,10 +40,10 @@
       (let ((uniform (render::camera-uniform-data
                       view view '(0.0 0.0 0.0 0.0) 0.0
                       (and body (render::character-render-lanes body)))))
-        (true (= 200 (length uniform)))
+        (true (= 136 (length uniform)))
         (true (equalp (if body #(-1.0 0.0 0.6 0.8) #(0.0 1.0 0.0 1.0))
                       (subseq uniform 96 100)))))
-    (true (= 50 (length shaders::*scene-uniform-members*)))))
+    (true (= 34 (length shaders::*scene-uniform-members*)))))
 
 (define-test camera-input-is-translated-only-at-the-viewer-boundary
   (dolist (case '((0.0 1.0 0.0 1.0 0.0)

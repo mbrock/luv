@@ -129,26 +129,8 @@
        ((:xyz :quantity quantities:world-direction :unit :one)))
       ;; Star brightness, moon disc radiance, moon angular radius, and the
       ;; galaxy band's strength.
-      (night-parameters :vec4)
-      ;; The eight attachment lights nearest the eye: position and reach in
-      ;; cells, then scene-linear radiance.  A zero reach is no light.
-      (point-light-0 :vec4)
-      (point-light-color-0 :vec4)
-      (point-light-1 :vec4)
-      (point-light-color-1 :vec4)
-      (point-light-2 :vec4)
-      (point-light-color-2 :vec4)
-      (point-light-3 :vec4)
-      (point-light-color-3 :vec4)
-      (point-light-4 :vec4)
-      (point-light-color-4 :vec4)
-      (point-light-5 :vec4)
-      (point-light-color-5 :vec4)
-      (point-light-6 :vec4)
-      (point-light-color-6 :vec4)
-      (point-light-7 :vec4)
-      (point-light-color-7 :vec4))
-    "The quantity-declared 200-float scene environment shared by all stages.")
+      (night-parameters :vec4))
+    "The quantity-declared 136-float scene environment shared by all stages.")
 
   (defun scene-uniform-prefix (count)
     "The first COUNT members of the canonical scene uniform ledger."

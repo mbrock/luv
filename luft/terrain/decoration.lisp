@@ -3,7 +3,7 @@
 ;;; Finalize star-mesh appearance and light metadata, then record the exact
 ;;; outputs as a SCENE-MESH-GENERATION. Static compilation also combines the
 ;;; region into one root. Each owner carries the frames of the attachments its
-;;; chunk supports; attachment light is not yet seeded into the voxel field.
+;;; chunk supports, with light sampled from the same field as its stars.
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
@@ -22,12 +22,12 @@ hanging one."
   (let ((value (* (sin (+ (* x 0.1731) (* y 0.1173) (* z 0.2357))) 43758.5453)))
     (- value (floor value))))
 
-(defun surface-attachment-frame-data (attachment)
+(defun surface-attachment-frame-data (attachment field)
   "ATTACHMENT's realized frame: twelve floats in the renderer's torch frame
 order -- origin and seed, outward normal and flags, tangent and scale.
 
 The origin is the face's centre moved by the chart point U and V, half a cell
-each.  FLAGS holds the material's packed RGB4 emission in bits 0-11 and the
+each.  FLAGS holds sampled packed RGB4 light in bits 0-11 and the
 drawn-body code (SURFACE-ATTACHMENT-FORM-CODE) from bit 12."
   (let* ((support (surface-attachment-support-cell attachment))
          (clearance (surface-attachment-clearance-cell attachment))
@@ -44,7 +44,7 @@ drawn-body code (SURFACE-ATTACHMENT-FORM-CODE) from bit 12."
                           (t '(0 0 1))))
          (u (* 0.5 (surface-attachment-chart-u attachment)))
          (v (* 0.5 (surface-attachment-chart-v attachment)))
-         (flags (logior (surface-attachment-light-emission attachment)
+         (flags (logior (luft:voxel-light-at-site field clearance)
                         (ash (surface-attachment-form-code attachment nz) 12))))
     (map '(simple-array single-float (12))
          (lambda (value) (coerce value 'single-float))
@@ -56,14 +56,38 @@ drawn-body code (SURFACE-ATTACHMENT-FORM-CODE) from bit 12."
                (first tangent) (second tangent) (third tangent)
                1.0))))
 
-(defun scene-owner-attachment-frames (scene key)
+(defun scene-owner-attachment-frames (scene key field)
   "Frames of SCENE's attachments supported in chunk KEY, or all for NIL."
   (loop for attachment across (scene-attachments scene)
         when (or (null key)
                  (not (integerp key))
                  (= key (luft:site-chunk-key
                          (surface-attachment-support-cell attachment))))
-          collect (surface-attachment-frame-data attachment)))
+          collect (surface-attachment-frame-data attachment field)))
+
+(defun light-fixture-bodies (bodies field)
+  "Copy BODIES and sample their surface cells from the accepted light FIELD.
+
+Bodies remain opaque to propagation. Join their corner samples, just as the
+terrain samples incident air at lattice points, rather than reading darkness
+from inside their solid cell. Never mutate a cached geometry product."
+  (let ((data (copy-seq bodies)))
+    (loop for base from 0 below (length data) by +fixture-body-scalar-count+
+          for x = (round (aref data base))
+          for y = (round (aref data (+ base 1)))
+          for z = (round (aref data (+ base 2)))
+          for light = 0
+          do (dotimes (dx 2)
+               (dotimes (dy 2)
+                 (dotimes (dz 2)
+                   (setf light
+                         (luft:voxel-light-componentwise-max
+                          light (luft:voxel-light-at-lattice-point
+                                 field (+ x dx) (+ y dy) (+ z dz)))))))
+             (setf (aref data (+ base 12)) (/ (float (luft:voxel-light-red light)) 15.0)
+                   (aref data (+ base 13)) (/ (float (luft:voxel-light-green light)) 15.0)
+                   (aref data (+ base 14)) (/ (float (luft:voxel-light-blue light)) 15.0)))
+    data))
 
 (defun scene-mesh-light-generation (scene &optional reusable-light-generation)
   "Retain the exact material-source light generation for the current star mesh."
@@ -74,7 +98,24 @@ drawn-body code (SURFACE-ATTACHMENT-FORM-CODE) from bit 12."
                    (scene-mesh-generation-scene
                     reusable-light-generation)))))
     (error "A reusable scene generation belongs to a different authored light input."))
-  (let* ((seeds (make-realized-light-seeds #() #()))
+  (let* ((sources
+           (when (scene-voxel-light-propagation-p scene)
+             (attachment-signature-sources
+              (scene-domain scene)
+              (loop for a across (scene-attachments scene)
+                    when (plusp (surface-attachment-light-emission a))
+                      collect (list (surface-attachment-support-cell a)
+                                    (surface-attachment-clearance-cell a)
+                                    (surface-attachment-chart-u a)
+                                    (surface-attachment-chart-v a)
+                                    (surface-attachment-light-emission a)
+                                    (material-kind-attachment-form
+                                     (surface-attachment-material a))))
+              (lambda (cell)
+                (nth-value 1 (material-cell-at (scene-material-cells scene) cell))))))
+         (seeds (make-realized-light-seeds
+                 (mapcar (lambda (source) (ldb (byte 48 0) source)) sources)
+                 (mapcar (lambda (source) (ldb (byte 12 48) source)) sources)))
          (stamp
            (make-realized-light-stamp
             (scene-authored-light-provenance scene)
@@ -167,8 +208,8 @@ LIGHT-GENERATION, when given, is an already solved regional generation
 
 Each owner's mesh carries the frames of the attachments whose support cell
 lies in its chunk (SURFACE-ATTACHMENT-FRAME-DATA); an independent drawing,
-such as the renderer's torches and lanterns, consumes them.  The frames do not
-yet seed the realized voxel light."
+such as the renderer's torches and lanterns, consumes them. Its packed light
+is sampled only after the region's attachment sources have been solved."
   (check-type owners list)
   (let* ((light-generation
            (zone :luft/realize-light
@@ -194,13 +235,15 @@ yet seed the realized voxel light."
                      (compile-surface-mesh-appearance
                       surface (scene-material-cells scene) descriptors))
                    (setf (luft:surface-mesh-voxel-light surface) field
+                         (luft:surface-mesh-bodies surface)
+                         (light-fixture-bodies (luft:surface-mesh-bodies surface) field)
                          (luft:surface-mesh-attachments surface) nil)
                    (dolist (companion (luft:surface-mesh-companions surface))
                      (initialize companion))))
           (dolist (entry owners)
             (initialize (cdr entry))
             (setf (luft:surface-mesh-attachments (cdr entry))
-                  (scene-owner-attachment-frames scene (car entry)))))))
+                  (scene-owner-attachment-frames scene (car entry) field))))))
     ;; Snapshot only after appearance and light metadata are final.
     (values
      owners

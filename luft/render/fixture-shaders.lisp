@@ -2,8 +2,8 @@
 
 ;;; Fixture bodies (fixture-body.lisp): canonical barrel and crate triangles,
 ;;; instanced at body cells and lit like the stars around them.  An instance
-;;; is three Vec4 rows: cell corner and code, side tone and yaw, top tone and
-;;; seed.  A vertex is two: local position and part, local normal and U.
+;;; is four Vec4 rows: cell corner and code, side tone and yaw, top tone and
+;;; seed, sampled voxel light. A vertex is two: position/part and normal/U.
 
 (define-shader-function fixture-turn (local yaw)
   "LOCAL turned by YAW about its cell's vertical centre line."
@@ -41,13 +41,14 @@
                (local-output :vec4 :location 5)
                (part-output :vec4 :location 6 :interpolation :flat)
                (side-tone-output :vec3 :location 7 :interpolation :flat)
-               (top-tone-output :vec3 :location 8 :interpolation :flat))
+               (top-tone-output :vec3 :location 8 :interpolation :flat)
+               (voxel-light-output :vec3 :location 9 :interpolation :flat))
      :resources
      ((fixture-bodies :storage-buffer :binding 0 :element :vec4)
       (fixture-body-vertices :storage-buffer :binding 1 :element :vec4)
       (camera-state :uniform-block :binding 2
        :members #.(scene-uniform-prefix 23))))
-  (let* ((body-base (* instance-index (uint 3.0)))
+  (let* ((body-base (* instance-index (uint 4.0)))
          (corner-row (buffer-element fixture-bodies body-base))
          (side-row (buffer-element fixture-bodies (+ body-base (uint 1.0))))
          (top-row (buffer-element fixture-bodies (+ body-base (uint 2.0))))
@@ -100,7 +101,9 @@
     (set-output part-output
                 (vec4 (swizzle position-row :w) (swizzle top-row :w) 0.0 0.0))
     (set-output side-tone-output (swizzle side-row :xyz))
-    (set-output top-tone-output (swizzle top-row :xyz))))
+    (set-output top-tone-output (swizzle top-row :xyz))
+    (set-output voxel-light-output
+                (swizzle (buffer-element fixture-bodies (+ body-base (uint 3.0))) :xyz))))
 
 (define-live-shader fixture-body-shadow-vertex-specification
     (:stage :vertex
@@ -112,7 +115,7 @@
       (fixture-body-vertices :storage-buffer :binding 1 :element :vec4)
       (camera-state :uniform-block :binding 2
        :members #.(scene-uniform-prefix 23))))
-  (let* ((body-base (* instance-index (uint 3.0)))
+  (let* ((body-base (* instance-index (uint 4.0)))
          (corner-row (buffer-element fixture-bodies body-base))
          (side-row (buffer-element fixture-bodies (+ body-base (uint 1.0))))
          (position-row
@@ -200,7 +203,8 @@
               (local-coordinates :vec4 :location 5)
               (part-info :vec4 :location 6 :interpolation :flat)
               (side-tone :vec3 :location 7 :interpolation :flat)
-              (top-tone :vec3 :location 8 :interpolation :flat))
+              (top-tone :vec3 :location 8 :interpolation :flat)
+              (voxel-light :vec3 :location 9 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -235,7 +239,9 @@
                (representation (swizzle sky-color-vector :xyz))
                (representation (swizzle ground-color-vector :xyz)))
               (* sun-color
-                 (* visibility (material-specular normal view sun roughness)))))
+                 (* visibility (material-specular normal view sun roughness)))
+              (* (* tone contact)
+                 (* #.*voxel-light-gain* (* voxel-light voxel-light)))))
          (final
            (atmospheric-surface
             radiance world eye divisor

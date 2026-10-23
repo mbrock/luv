@@ -91,7 +91,9 @@ emitters; a worker may warm this memo when it materializes a chunk."
                         (surface-attachment-clearance-cell attachment)
                         (surface-attachment-chart-u attachment)
                         (surface-attachment-chart-v attachment)
-                        emission)))
+                        emission
+                        (material-kind-attachment-form
+                         (surface-attachment-material attachment)))))
 
 (defun attachment-canonical-wick (support clearance u v)
   "The wick of an attachment drawn flat on its face at chart point U, V.
@@ -113,17 +115,23 @@ face's tangents by U and V, and the canonical half-cell wick off it."
 
 (defun attachment-signature-sources (domain signature occupied-p)
   "Discretize each attachment of SIGNATURE into packed voxel-light sources."
-  (loop for (support clearance u v emission) in signature
+  (loop for (support clearance u v emission form) in signature
         nconc
-        (handler-case
-            (let ((seeds (realized-attachment-light-seeds
-                          domain occupied-p
-                          (attachment-canonical-wick support clearance u v)
-                          emission)))
-              (map 'list #'luft:make-voxel-light-source
-                   (realized-light-seeds-sites seeds)
-                   (realized-light-seeds-lights seeds)))
-          (unrealizable-attachment-light-source () nil))))
+        ;; A realized lantern occupies its clearance cell, standing or
+        ;; hanging. It seeds that air cell, never the solid support or an
+        ;; additional unoccluded renderer light.
+        (if (eq form :lantern)
+            (unless (funcall occupied-p clearance)
+              (list (luft:make-voxel-light-source clearance emission)))
+            (handler-case
+                (let ((seeds (realized-attachment-light-seeds
+                              domain occupied-p
+                              (attachment-canonical-wick support clearance u v)
+                              emission)))
+                  (map 'list #'luft:make-voxel-light-source
+                       (realized-light-seeds-sites seeds)
+                       (realized-light-seeds-lights seeds)))
+              (unrealizable-attachment-light-source () nil)))))
 
 ;;; Inputs
 

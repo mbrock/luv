@@ -417,6 +417,25 @@
                                           (/ (first key) length)))
                                   1e-6)))))))))))
 
+(define-test body-relighting-survives-reused-star-geometry
+  ;; No stars change here: a body-only owner must still upload its new light.
+  (let* ((domain (luft:make-world-domain :x-bits 6 :y-bits 6))
+         (sites (make-array 0 :element-type '(unsigned-byte 32)))
+         (dark (luft:make-surface-mesh domain sites))
+         (lit (luft:make-surface-mesh domain sites))
+         (bodies (make-array 16 :element-type 'single-float :initial-element 0.0)))
+    (setf (aref bodies 3) 2.0
+          (luft:surface-mesh-bodies dark) bodies
+          (luft:surface-mesh-bodies lit) (copy-seq bodies)
+          (aref (luft:surface-mesh-bodies lit) 12) 0.8)
+    (let* ((previous (render::prepare-render-mesh dark))
+           (next (render::prepare-streamed-mesh
+                  render::+render-population-preparer+ lit previous)))
+      (true (= 0.8 (aref (render::render-population-body-data
+                          (render::prepared-render-mesh-population next)) 12)))
+      (true (= 0.0 (aref (render::render-population-body-data
+                          (render::prepared-render-mesh-population previous)) 12))))))
+
 (define-test sites-sort-by-star-with-their-appearance
   (let* ((stars '(7 3 7 200 3 7))
          (instances (make-array (* 4 (length stars)) :element-type '(unsigned-byte 32)))

@@ -174,9 +174,6 @@
           (%torch-body-emit-triangle data a b c down part)
           (%torch-body-emit-triangle data a c d down part))))))
 
-(defparameter *lantern-core-height* 0.22f0
-  "Height of a standing lantern's glowing core above its frame origin.")
-
 (defun %lantern-body-emit-cage (data &optional flip-z)
   (let ((post 0.026) (corner 0.135))
     ;; Base plate, glass, and core.
@@ -213,13 +210,6 @@
         (%lantern-body-emit-cage data))
     (make-array (length data) :element-type 'single-float :initial-contents data)))
 
-(defun lantern-core-local-height (form-code)
-  "The local height of FORM-CODE's glowing core, where its light comes from."
-  (ecase form-code
-    (0 (+ +torch-flame-wick-offset+ (* 0.35 +torch-flame-length+)))
-    (1 *lantern-core-height*)
-    (2 (+ 0.30 (- 0.665 *lantern-core-height*)))))
-
 (defun %make-attachment-body-vertex-data ()
   "Every drawn body padded to one stride: the torch, then the standing and
 hanging lanterns, in form-code order.  Padding vertices sit at the frame
@@ -248,48 +238,3 @@ origin, so their triangles have no area."
 (defun attachment-body-vertex-data ()
   "A fresh copy of every drawn attachment body at its form's stride."
   (copy-seq *attachment-body-vertex-data*))
-
-;;; Each frame's light shines from its core: a torch's flame, a lantern's
-;;; glass.  Its RGB4 emission sets the colour and, in cells, the reach.
-
-(defparameter *attachment-light-strength* 2.2
-  "Scene-linear radiance of a full RGB4 level-15 attachment light.")
-
-(defun write-attachment-point-lights (frame-data eye-x eye-y eye-z uniform)
-  "Write the attachment lights of FRAME-DATA nearest the eye into UNIFORM.
-
-Unused lights get a zero reach.  Returns the number written."
-  (let* ((stride +torch-flame-instance-scalar-count+)
-         (frames
-           (loop for offset from 0 below (length frame-data) by stride
-                 for flags = (aref frame-data (+ offset 7))
-                 for light = (unpack-torch-body-frame-flags flags)
-                 for height = (lantern-core-local-height (torch-frame-form-code flags))
-                 for scale = (aref frame-data (+ offset 11))
-                 for x = (+ (aref frame-data offset)
-                            (* height scale (aref frame-data (+ offset 4))))
-                 for y = (+ (aref frame-data (+ offset 1))
-                            (* height scale (aref frame-data (+ offset 5))))
-                 for z = (+ (aref frame-data (+ offset 2))
-                            (* height scale (aref frame-data (+ offset 6))))
-                 unless (zerop light)
-                   collect (list (+ (expt (- x eye-x) 2) (expt (- y eye-y) 2)
-                                    (expt (- z eye-z) 2))
-                                 x y z light)))
-         (nearest (subseq (sort frames #'< :key #'first)
-                          0 (min +point-light-count+ (length frames)))))
-    (fill uniform 0.0f0 :start +point-light-uniform-offset+
-                        :end (+ +point-light-uniform-offset+ +point-light-scalar-count+))
-    (loop for (nil x y z light) in nearest
-          for base from +point-light-uniform-offset+ by 8
-          for red = (ldb (byte 4 0) light)
-          for green = (ldb (byte 4 4) light)
-          for blue = (ldb (byte 4 8) light)
-          for strength = (/ *attachment-light-strength* 15.0)
-          do (replace uniform
-                      (mapcar (lambda (value) (coerce value 'single-float))
-                              (list x y z (1+ (max red green blue))
-                                    (* red strength) (* green strength)
-                                    (* blue strength) 0.0))
-                      :start1 base))
-    (length nearest)))

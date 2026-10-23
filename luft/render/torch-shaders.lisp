@@ -1,5 +1,9 @@
 (in-package #:luft.render.shaders)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *lantern-glass-emission* 1.0
+    "HDR strength of a lantern's lit glass, over its glow profile."))
+
 ;;; Shared attachment transforms, the opaque body and its shadow, then the
 ;;; flame field and its vertex/fragment entry points. All read the frame ABI
 ;;; in torch-frame.lisp; composition and GPU ownership live in torch-drawing.
@@ -240,7 +244,7 @@ brightest beside it and dims toward the frame."
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 50))
+                  :members #.(scene-uniform-prefix 34))
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
@@ -263,19 +267,12 @@ brightest beside it and dims toward the frame."
          (form (floor (/ (+ code 0.5) 4.0)))
          (part (- code (* 4.0 form)))
          (metal (if (> form 0.5) (vec3 0.045 0.040 0.036) (vec3 0.47 0.17 0.04)))
-         (local-light (* 0.45 (* voxel-light voxel-light)))
-         (nearby
-           (point-lights-radiance
-            (representation world-position) normal
-            point-light-0 point-light-color-0 point-light-1 point-light-color-1
-            point-light-2 point-light-color-2 point-light-3 point-light-color-3
-            point-light-4 point-light-color-4 point-light-5 point-light-color-5
-            point-light-6 point-light-color-6 point-light-7 point-light-color-7))
+         (local-light (* #.*voxel-light-gain* (* voxel-light voxel-light)))
          (lit
            (* metal
               (+ (* ambient 0.72)
                  (* sun-color (* visibility facing))
-                 local-light nearby)))
+                 local-light)))
          (radiance
            (if (> part 0.5)
                (* (lantern-glass-radiance body-local) #.*lantern-glass-emission*)

@@ -257,7 +257,4 @@ CAMERA-UNIFORM-DATA or ENCODE-RENDERER-VIEW as its FIGURE."
                 character
                 (light-uniform-data (current-light) (frame-view-position view) exposure)
                 previous-character character-direction
-                (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))
-                ;; The renderer writes the attachment lights at upload.
-                (make-list +point-light-scalar-count+ :initial-element 0.0)))))))
-
+                (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))))))))

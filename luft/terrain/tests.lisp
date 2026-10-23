@@ -215,6 +215,61 @@
       (unwind-protect (funcall function scene system)
         (production:stop-production-system system)))))
 
+(define-test placed-lanterns-light-streamed-bodies-without-a-residency-rebuild
+  (let* ((lamp (make-instance 'terrain:material-placement
+                              :name :lantern
+                              :kind (make-instance 'terrain:material-kind
+                                                   :name :lantern
+                                                   :base-tone '(0.5 0.4 0.2)
+                                                   :attachment-form :lantern
+                                                   :light-emission '(15 12 4))))
+         (crate (make-instance 'terrain:material-placement
+                               :name :crate
+                               :kind (make-instance 'terrain:material-kind
+                                                    :name :crate :body :crate
+                                                    :base-tone '(0.5 0.3 0.1))))
+         (palette (domains:make-identity-vocabulary-domain
+                   :members (list *stone* lamp crate) :limit #xff))
+         (builder (terrain:make-scene-builder
+                   :horizontal-bits 6 :material-vocabulary palette
+                   :ground-material *stone* :architecture-material *stone*)))
+    (dotimes (x 64) (dotimes (y 64) (terrain:scene-builder-cell builder x y 0)))
+    ;; A full-height return blocks light; the only way around is out of reach.
+    (dotimes (y 64)
+      (loop for z from 1 to 20 do (terrain:scene-builder-cell builder 12 y z)))
+    (terrain:scene-builder-cell builder 10 11 1 :material crate)
+    (terrain:scene-builder-cell builder 30 30 1 :material crate)
+    (let* ((scene (terrain:make-streaming-scene (terrain:finish-scene-builder builder)))
+           (domain (terrain:scene-domain scene))
+           (cell (luft:make-site domain 10 10 1 luft:+cell-extent+ 1))
+           (key (luft:site-chunk-key cell))
+           (system (production:make-single-worker-production-system
+                    :name "placed lantern test")))
+      (setf (gethash key (terrain:streaming-scene-loaded scene)) 1)
+      (unwind-protect
+           (progn
+             (is eq :edited (nth-value 1 (terrain:edit-streaming-scene-cell scene cell lamp)))
+             (is = 1 (length (terrain:scene-attachments scene)))
+             (is = 0 (terrain:scene-cell-bit scene 10 10 1))
+             (true (not (nth-value 1 (terrain:material-cell-at
+                                     (terrain:scene-material-cells scene) cell))))
+             (let* ((mesh (cdr (assoc key (stream-cohort scene system (list key)))))
+                    (field (luft:surface-mesh-voxel-light mesh))
+                    (bodies (luft:surface-mesh-bodies mesh))
+                    (frame (first (luft:surface-mesh-attachments mesh))))
+               (is = (luft:pack-voxel-light 15 12 4) (luft:voxel-light-at-site field cell))
+               (is = (luft:voxel-light-at-site field cell)
+                   (ldb (byte 12 0) (round (aref frame 7))))
+               (is = 0 (luft:voxel-light-at field 13 10 1))
+               (is = 32 (length bodies))
+               (true (plusp (aref bodies 12)))
+               (is = 0.0 (aref bodies 28))
+               ;; Relighting must not alter the cached instance data in place.
+               (let ((old (copy-seq bodies)))
+                 (stream-cohort scene system (list key))
+                 (is equalp old bodies))))
+        (production:stop-production-system system)))))
+
 (define-test streaming-without-a-preparer-yields-meshes
   (call-with-streamed-scene
    (lambda (scene system)

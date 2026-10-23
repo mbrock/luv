@@ -6,8 +6,8 @@
 ;;; shown those cells as air, so neighbours face them properly, and each such
 ;;; cell of an owner chunk becomes one body instance for the renderer.
 
-(defconstant +fixture-body-scalar-count+ 12
-  "Floats per body: cell corner and code, side tone and yaw, top tone and seed.")
+(defconstant +fixture-body-scalar-count+ 16
+  "Floats per body: corner/code, side/yaw, top/seed, and sampled voxel light.")
 
 (defun material-body-table (placement-vocabulary)
   "A vector by placement offset of NIL or (CODE SIDE-TONE TOP-TONE)."
@@ -76,6 +76,7 @@
                       (mapcar (lambda (value) (coerce value 'single-float))
                               (list x y z code
                                     (first side) (second side) (third side) yaw
-                                    (first top) (second top) (third top) seed))
+                                    (first top) (second top) (third top) seed
+                                    0 0 0 0))
                       :start1 offset))
     data))

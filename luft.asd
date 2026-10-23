@@ -73,6 +73,7 @@
                              (:file "materials")
                              (:file "realized-light")
                              (:file "scene")
+                             (:file "fixtures")
                              (:file "decoration")
                              (:file "bodies")
                              (:file "rays")
@@ -80,7 +81,6 @@
                              (:file "streaming-state")
                              (:file "streamed-light")
                              (:file "streaming")
-                             (:file "fixtures")
                              (:file "streaming-mesh")
                              (:file "streaming-publication"))))
   :in-order-to ((test-op (test-op "luft/terrain/test"))))
@@ -107,7 +107,6 @@
                 :serial t
                 :components ((:file "package")
                              (:file "frame-quantities")
-                             (:file "point-lights")
                              (:file "lighting")
                              (:file "shaders")
                              (:file "world-text-shaders")

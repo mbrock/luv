@@ -180,11 +180,26 @@ published."
         (when (and new-placement (null new-offset))
           (return-from edit-streaming-scene-cell
             (values nil :unknown-material nil)))
-        (let* ((unchanged-products
+        (let* ((attachment
+                 (when (and new-placement
+                            (material-kind-attachment-form
+                             (material-placement-kind new-placement)))
+                   (let ((nearby (make-hash-table :test #'eql)))
+                     (setf (gethash cell nearby) new-offset)
+                     (dolist (dz '(-1 1))
+                       (let ((neighbor (luft:step-site domain cell :z dz)))
+                         (when neighbor
+                           (multiple-value-bind (offset present-p)
+                               (material-cell-at (scene-material-cells scene) neighbor)
+                             (when present-p (setf (gethash neighbor nearby) offset))))))
+                     (first (realize-fixture-cells
+                             domain (scene-material-vocabulary scene) nearby)))))
+               (unchanged-products
                  (streaming-products-outside-cell scene cell))
                (material-cells (material-store-with-cell
-                                (scene-material-cells scene) cell new-offset))
-               (bit (if new-placement 1 0))
+                                (scene-material-cells scene) cell
+                                (unless attachment new-offset)))
+               (bit (if (and new-placement (not attachment)) 1 0))
                (key (luft:site-chunk-key cell))
                (old-chunk (streaming-store-fibers
                            scene key (luft:make-chunk-fibers domain key)))
@@ -198,7 +213,7 @@ published."
                    (let ((sources
                            (remove cell (copy-seq (scene-authored-light-sources scene))
                                    :key #'luft::%voxel-light-source-cell)))
-                     (when new-placement
+                     (when (and new-placement (not attachment))
                        (let ((emission (material-kind-packed-light-emission
                                         (material-placement-kind new-placement))))
                          (unless (zerop emission)
@@ -236,6 +251,10 @@ published."
             ;; the old store, fibers, hash table, and light generation.
             (setf (scene-solid scene) new-solid
                   (scene-material-cells scene) material-cells
+                  (scene-attachments scene)
+                  (if attachment
+                      (concatenate 'vector (scene-attachments scene) (vector attachment))
+                      (scene-attachments scene))
                   (scene-authored-light-sources scene) sources
                   (scene-authored-light-revision scene) light-revision
                   (scene-authored-light-generation scene) base-generation
@@ -255,7 +274,8 @@ published."
                          (incf (streaming-scene-next-incarnation scene))
                          new-chunk local-materials
                          (let ((old (gethash key (streaming-scene-store scene))))
-                           (and old (resident-cell-chunk-attachments old))))))
+                           (append (and old (resident-cell-chunk-attachments old))
+                                   (when attachment (list attachment)))))))
                 (if (luft:fibers-empty-p new-chunk)
                     (remhash key (streaming-scene-store scene))
                     (setf (gethash key (streaming-scene-store scene))
