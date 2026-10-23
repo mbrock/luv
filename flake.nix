@@ -514,7 +514,9 @@
             LUV_NATIVE_LIBRARY_PATH = slimNativeLibraryPath;
             LUV_MESA_LIBRARY_PATH = mesaLibraryPath;
             LUV_BASH = "${pkgs.bashInteractive}/bin/bash";
-            LUV_SLYNK_DIR = "${slyRoot}/slynk";
+            # Slynk's Lisp sources are unchanged by the Emacs package build.
+            # Headless orbs need the server, not Emacs and its build closure.
+            LUV_SLYNK_DIR = "${pkgs.emacsPackages.sly.src}/slynk";
             LUV_SWASH = "${swashPackage}/bin/swash";
             LUV_FFMPEG_LIBDIR = ffmpegLibraryDirectory;
             CL_SOURCE_REGISTRY = "${mcclim}//:${clSdl3WithoutMixer}//";
