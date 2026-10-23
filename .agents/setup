@@ -93,10 +93,19 @@ configure_luv_cache() {
     fi
   done
 
-  if [[ $changed == true ]]; then
-    # A stale orb snapshot may already have a running daemon.  Restart it when
-    # active; an inactive socket-activated daemon reads this on first use.
-    sudo systemctl try-restart nix-daemon.service
+  # Determinate's nix.conf includes nix.custom.conf; the preinstalled
+  # single-user orb Nix ships a nix.conf that does not.
+  if ! sudo grep -Eqx '!?include[[:space:]]+(/etc/nix/)?nix\.custom\.conf' \
+    /etc/nix/nix.conf 2>/dev/null; then
+    printf '!include nix.custom.conf\n' | sudo tee -a /etc/nix/nix.conf >/dev/null
+    changed=true
+  fi
+
+  # A multi-user daemon reads its configuration at start.  Restart it when it
+  # is running under systemd; a single-user store has no daemon to restart.
+  if [[ $changed == true ]] \
+    && systemctl is-active --quiet nix-daemon.service 2>/dev/null; then
+    sudo systemctl restart nix-daemon.service
   fi
 
   effective_config=$(nix config show)
