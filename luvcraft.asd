@@ -227,7 +227,9 @@
   :author "Mikael Brockman"
   ;; The birthday meadow's save kind lives with the party; its saves play too.
   :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
-  :components ((:file "luvcraft/luft/game")))
+  :serial t
+  :components ((:file "luvcraft/luft/game")
+               (:file "luvcraft/luft/animals")))
 
 (defsystem "luvcraft/luft/test"
   :description "Luvcraft on Luft against Luvcraft's own streaming, cell for cell."

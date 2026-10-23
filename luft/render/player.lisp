@@ -1,28 +1,140 @@
 (in-package #:luft.render)
 
-;;; The player is a ray-marched character drawn into the scene pass. Its body,
-;;; gait, surface detail, and tracing program live below this GPU interface.
-;;; The frame supplies camera/pose uniforms and the sun's shadow map; this
-;;; component owns only its program. NIL in its place omits the character.
+;;; A game opts into this stage. Wizards use the original ray-marched robe;
+;;; box figures use depth-writing triangles. Poses belong to presentation-slot
+;;; storage, never scene uniforms, and each draw run may contain many figures.
 
-(defclass player-drawing (pipeline-scene-drawing) ())
+(defclass figure-drawing (pipeline-scene-drawing)
+  ((box-program :accessor figure-box-program)
+   (box-vertices :accessor figure-box-vertices)))
 
-(defun make-player-drawing (device target-formats sample-count)
-  (make-pipeline-scene-drawing
-   'player-drawing device :label "luft player sdf"
-   :vertex (shaders:player-sdf-vertex-specification)
-   :fragment (shaders:player-sdf-fragment-specification)
-   :targets (loop for format in target-formats
-                  for first = t then nil
-                  collect `(:format ,format
-                            ,@(when first '(:blend :premultiplied-alpha))))
-   :sample-count sample-count :depth-compare :less :vertex-count 6))
+(defconstant +figure-scalar-count+ 20)
+
+(defun pack-figure-instances (figures)
+  "Pack five vec4 rows per figure: current and previous center/gait,
+headings, half extents/kind (0 wizard, 1 box), and linear albedo.
+There is no population limit. FIGURE-LANES constructs the wizard kind."
+  (make-array (* +figure-scalar-count+ (length figures))
+              :element-type 'single-float
+              :initial-contents
+              (loop for figure in figures append
+                (loop for row in figure append
+                  (mapcar (lambda (x) (coerce x 'single-float)) row)))))
+
+(defun box-figure (center previous-center heading-x heading-y half-extents color)
+  "One oriented box of a game's figure, in Z-up world coordinates."
+  (flet ((point (p) (list (vec3-x p) (vec3-y p) (vec3-z p) 0.0)))
+    (list (point center) (point previous-center)
+          (list heading-x heading-y heading-x heading-y)
+          (list (first half-extents) (second half-extents) (third half-extents) 1.0)
+          (append color '(0.0)))))
+
+(defmethod encode-scene-drawing ((drawing figure-drawing) pass binding)
+  (dolist (run (figure-binding-runs binding))
+    (destructuring-bind (kind first count) run
+      (encode-program (if (= kind 1) (figure-box-program drawing) (scene-drawing-program drawing))
+                      pass (if (= kind 1) (figure-binding-box-binding binding)
+                               (figure-binding-program-binding binding))
+                      (make-gpu-draw-command :vertex-count (if (= kind 1) 36 6)
+                                            :first-instance first :instance-count count)))))
+
+(defclass figure-binding (gpu-resource-owner)
+  ((buffer :accessor figure-binding-buffer)
+   (program-binding :accessor figure-binding-program-binding)
+   (box-binding :accessor figure-binding-box-binding)
+   (runs :initform nil :accessor figure-binding-runs)
+   (capacity :initform 0 :accessor figure-binding-capacity)
+   (count :initform 0 :accessor figure-binding-count)
+   (inputs :initarg :inputs :reader figure-binding-inputs)))
+
+(defun upload-figure-instances (drawing binding data)
+  "Update only a fence-safe presentation slot; grow its storage as needed."
+  (let ((count (/ (length data) +figure-scalar-count+)))
+    (when (> count (figure-binding-capacity binding))
+      (let ((capacity (max count (* 2 (figure-binding-capacity binding)))))
+        ;; Invalidate first: a failed release or allocation must retry the
+        ;; entire upload cohort, never serve a partially destroyed binding.
+        (setf (figure-binding-capacity binding) 0
+              (figure-binding-count binding) 0
+              (figure-binding-runs binding) nil)
+        (release-owned-gpu-resources binding)
+        (destructuring-bind (device camera shadow sampler) (figure-binding-inputs binding)
+          (setf (figure-binding-buffer binding)
+              (own-gpu-resource binding device
+                                (make-buffer-descriptor
+                                 :label "figure instances"
+                                 :size (* 4 +figure-scalar-count+ capacity)
+                                 :usage '(:storage :copy-dst)))
+              (figure-binding-program-binding binding)
+              (own-gpu-object binding
+                              (make-program-binding
+                               (scene-drawing-program drawing) device
+                               :camera-state camera :shadow-map shadow
+                               :shadow-sampler sampler :figure-instances (figure-binding-buffer binding)))
+              (figure-binding-box-binding binding)
+              (own-gpu-object binding
+                              (make-program-binding
+                               (figure-box-program drawing) device :camera-state camera
+                               :figure-instances (figure-binding-buffer binding)
+                               :box-vertices (figure-box-vertices drawing)))))
+        (setf (figure-binding-capacity binding) capacity)))
+    (when (plusp count) (write-buffer (figure-binding-buffer binding) data))
+    (setf (figure-binding-runs binding)
+          (let ((runs nil))
+            (dotimes (index count)
+              (let ((kind (round (aref data (+ (* index +figure-scalar-count+) 15)))))
+                (if (and runs (= kind (caar runs)))
+                    (incf (third (car runs)))
+                    (push (list kind index 1) runs))))
+            (nreverse runs)))
+    (setf (figure-binding-count binding) count)))
+
+(defun figure-box-vertex-data ()
+  "Canonical outward cube triangles, position/normal rows, in [-1,1]."
+  (let ((data nil))
+    (dolist (normal '((1 0 0) (-1 0 0) (0 1 0) (0 -1 0) (0 0 1) (0 0 -1)))
+      (let* ((axis (position-if-not #'zerop normal))
+             (u (mod (1+ axis) 3)) (v (mod (+ axis 2) 3)))
+        (dolist (corner '((-1 -1) (1 -1) (1 1) (-1 -1) (1 1) (-1 1)))
+          (let ((point (copy-list normal)))
+            (setf (nth u point) (first corner)
+                  (nth v point) (* (nth axis normal) (second corner)))
+            (setf data (append data point '(0) normal '(0)))))))
+    (make-array (length data) :element-type 'single-float
+                :initial-contents (mapcar (lambda (x) (float x 1.0)) data))))
+
+(defun make-figure-drawing (device target-formats sample-count)
+  (let ((drawing (make-pipeline-scene-drawing
+                  'figure-drawing device :label "luft wizard figures"
+                  :vertex (shaders:player-sdf-vertex-specification)
+                  :fragment (shaders:player-sdf-fragment-specification)
+                  :targets (loop for format in target-formats
+                                 for first = t then nil
+                                 collect `(:format ,format
+                                           ,@(when first '(:blend :premultiplied-alpha))))
+                  :sample-count sample-count :depth-compare :less :vertex-count 6)))
+    (with-gpu-construction (drawing)
+      (let ((vertices (figure-box-vertex-data)))
+        (setf (figure-box-vertices drawing)
+              (own-gpu-resource drawing device
+                                (make-buffer-descriptor :label "figure box vertices"
+                                                        :size (* 4 (length vertices))
+                                                        :usage '(:storage :copy-dst))))
+        (write-buffer (figure-box-vertices drawing) vertices))
+      (setf (figure-box-program drawing)
+            (own-gpu-object drawing
+                            (make-drawing-program
+                             device :label "figure boxes"
+                             :vertex (shaders::figure-box-vertex-specification)
+                             :fragment (shaders::figure-box-fragment-specification)
+                             :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
+                             :sample-count sample-count
+                             :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                                              :depth-compare :less)))))))
 
 (defmethod make-scene-drawing-binding
-    ((drawing player-drawing) device camera-buffer shadow-view shadow-sampler)
-  (make-program-binding (scene-drawing-program drawing) device
-                        :camera-state camera-buffer
-                        :shadow-map shadow-view :shadow-sampler shadow-sampler))
+    ((drawing figure-drawing) device camera-buffer shadow-view shadow-sampler)
+  (make-instance 'figure-binding :inputs (list device camera-buffer shadow-view shadow-sampler)))
 
 (in-package #:luft.render.shaders)
 
@@ -808,7 +920,8 @@ that he is standing on something."
 
 (define-live-shader player-sdf-vertex-specification
     (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
      :outputs ((clip-position :vec4 :built-in :position)
                (proxy-world-position-output :vec3 :location 0
                                             :quantity quantities:world-position
@@ -817,12 +930,19 @@ that he is standing on something."
                ;; packing seam; each side unpacks its checked constituents.
                (center-radius-output :vec4 :location 1)
                (current-clip-output :vec4 :location 2)
-               (previous-clip-output :vec4 :location 3))
+               (previous-clip-output :vec4 :location 3)
+               (pose-output :vec4 :location 4 :interpolation :flat)
+               (heading-output :vec4 :location 5 :interpolation :flat))
      :resources ((camera-state :uniform-block :binding 0
                   :members #.*scene-uniform-members*)
                  (shadow-map :depth-texture-2d :binding 1)
-                 (shadow-sampler :sampler :binding 2)))
-  (let* ((index (float vertex-index))
+                 (shadow-sampler :sampler :binding 2)
+                 (figure-instances :storage-buffer :binding 3 :element :vec4)))
+  (let* ((base (* instance-index (uint 5)))
+         (pose (buffer-element figure-instances base))
+         (old-pose (buffer-element figure-instances (+ base (uint 1))))
+         (heading (buffer-element figure-instances (+ base (uint 2))))
+         (index (float vertex-index))
          (right-corner (if (= index 2.0) 1.0
                            (if (= index 3.0) 1.0
                                (if (= index 5.0) 1.0 0.0))))
@@ -840,9 +960,11 @@ that he is standing on something."
             (vec2 (* across 1.45)
                   (if (> vertical 0.0) (* vertical 1.85) vertical))
             :unit :one))
-         (center (swizzle character-parameters :xyz))
+         (center (assume-quantity (swizzle pose :xyz)
+                                  :quantity quantities:world-position :unit quantities:cell))
          (previous-center
-           (swizzle previous-character-parameters :xyz))
+           (assume-quantity (swizzle old-pose :xyz)
+                            :quantity quantities:world-position :unit quantities:cell))
          (radius
            (quantity 2.05 :quantity quantities:world-distance
                           :unit quantities:cell))
@@ -898,6 +1020,8 @@ that he is standing on something."
     (set-output proxy-world-position-output proxy-world-position)
     (set-output center-radius-output
                 (vec4 (representation center) (representation radius)))
+    (set-output pose-output pose)
+    (set-output heading-output heading)
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)))
 
@@ -908,7 +1032,9 @@ that he is standing on something."
                                     :unit quantities:cell)
               (center-radius :vec4 :location 1)
               (current-clip :vec4 :location 2)
-              (previous-clip :vec4 :location 3))
+              (previous-clip :vec4 :location 3)
+              (pose :vec4 :location 4 :interpolation :flat)
+              (figure-heading :vec4 :location 5 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 0
@@ -925,14 +1051,12 @@ that he is standing on something."
                             :unit quantities:cell))
          (center (representation center-point))
          (radius (representation radius-distance))
-         (gait (swizzle (representation character-parameters) :w))
+         (gait (swizzle pose :w))
          ;; The game controller rotates world space into the traveler's local
          ;; forward frame below, so the hermit's authored stride always runs
          ;; along local +Y.
          (direction 1.0)
-         (heading
-           (representation
-            (normalize (swizzle character-direction :xy))))
+         (heading (normalize (swizzle figure-heading :xy)))
          (player-right (vec2 (swizzle heading :y)
                              (- (swizzle heading :x))))
          (ray-direction
@@ -1086,3 +1210,69 @@ that he is standing on something."
                 (vec4 (+ (* radiance coverage) shade-color) composite-alpha))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
+
+;;; Box figures use real triangles and depth, not the wizard's translucent
+;;; proxy. Overlapping shell slabs and legs must occlude one another.
+(define-live-shader figure-box-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
+     :outputs ((clip-position :vec4 :built-in :position)
+               (normal-output :vec3 :location 0)
+               (tone-output :vec3 :location 1 :interpolation :flat)
+               (current-output :vec4 :location 2)
+               (previous-output :vec4 :location 3))
+     :resources ((camera-state :uniform-block :binding 0 :members #.*scene-uniform-members*)
+                 (figure-instances :storage-buffer :binding 1 :element :vec4)
+                 (box-vertices :storage-buffer :binding 2 :element :vec4)))
+  (let* ((base (* instance-index (uint 5)))
+         (pose (buffer-element figure-instances base))
+         (old-pose (buffer-element figure-instances (+ base (uint 1))))
+         (heading (buffer-element figure-instances (+ base (uint 2))))
+         (shape (buffer-element figure-instances (+ base (uint 3))))
+         (tone (buffer-element figure-instances (+ base (uint 4))))
+         (vertex-base (* vertex-index (uint 2)))
+         (local (* (swizzle (buffer-element box-vertices vertex-base) :xyz)
+                   (swizzle shape :xyz)))
+         (local-normal (swizzle (buffer-element box-vertices (+ vertex-base (uint 1))) :xyz))
+         (world (assume-quantity
+                 (+ (swizzle pose :xyz) (player-world-direction local (swizzle heading :xy)))
+                 :quantity quantities:world-position :unit quantities:cell))
+         (old-world (assume-quantity
+                     (+ (swizzle old-pose :xyz) (player-world-direction local (swizzle heading :zw)))
+                     :quantity quantities:world-position :unit quantities:cell))
+         (divisor (swizzle (representation render-parameters) :z))
+         (current (mesh-view-clip world camera-position camera-right camera-up
+                                  camera-forward camera-projection divisor))
+         (previous (mesh-view-clip old-world previous-camera-position previous-camera-right
+                                   previous-camera-up previous-camera-forward
+                                   previous-camera-projection divisor))
+         (jitter (representation (swizzle temporal-parameters :xy))))
+    (set-output clip-position
+                (vec4 (+ (swizzle current :x) (* (swizzle jitter :x) (swizzle current :w)))
+                      (+ (swizzle current :y) (* (swizzle jitter :y) (swizzle current :w)))
+                      (swizzle current :z) (swizzle current :w)))
+    (set-output normal-output (player-world-direction local-normal (swizzle heading :xy)))
+    (set-output tone-output (swizzle tone :xyz))
+    (set-output current-output current)
+    (set-output previous-output previous)))
+
+(define-live-shader figure-box-fragment-specification
+    (:stage :fragment
+     :inputs ((normal :vec3 :location 0)
+              (tone :vec3 :location 1 :interpolation :flat)
+              (current :vec4 :location 2)
+              (previous :vec4 :location 3))
+     :outputs ((color-output :vec4 :location 0) (motion-output :vec2 :location 1))
+     :resources ((camera-state :uniform-block :binding 0 :members #.*scene-uniform-members*)))
+  (let* ((n (normalize normal))
+         (sun (representation (swizzle sun-vector :xyz)))
+         (direct (smoothstep 0.0 0.72 (max 0.0 (dot n sun))))
+         (upness (swizzle n :z))
+         (light (+ (* (representation (swizzle sun-color-vector :xyz)) direct)
+                   (* (representation (swizzle sky-color-vector :xyz))
+                      (+ 0.15 (* 0.54 (+ 0.5 (* 0.5 upness)))))
+                   (* (representation (swizzle ground-color-vector :xyz))
+                      (+ 0.05 (* 0.34 (- 0.5 (* 0.5 upness))))))))
+    (set-output color-output (vec4 (* tone light) 1.0))
+    (set-output motion-output (mesh-temporal-motion previous current))))

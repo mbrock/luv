@@ -17,7 +17,9 @@
 
 (define-test player-shaders-compile-for-both-backends
   (dolist (specification (list (shaders:player-sdf-vertex-specification)
-                               (shaders:player-sdf-fragment-specification)))
+                               (shaders:player-sdf-fragment-specification)
+                               (shaders::figure-box-vertex-specification)
+                               (shaders::figure-box-fragment-specification)))
     (true (luv.msl:compile-msl specification))
     (true (luv.spir-v:compile-shader-specification specification))))
 
@@ -32,18 +34,32 @@
           (render::character-heading-y player) 0.0
           (render::character-gait player) 2.0)
     (let ((lanes (render::character-render-lanes player)))
-      (true (= 3 (length lanes)))
+      (true (= 5 (length lanes)))
       (true (equalp '(5.0 3.0 5.48 2.0) (first lanes)))
       (true (equalp '(2.0 3.0 5.48 0.0) (second lanes)))
       (true (equalp '(-1.0 0.0 0.6 0.8) (third lanes))))
     (dolist (body (list nil player))
       (let ((uniform (render::camera-uniform-data
                       view view '(0.0 0.0 0.0 0.0) 0.0
-                      (and body (render::character-render-lanes body)))))
+                      (and body (first (render::character-render-lanes body))))))
         (true (= 136 (length uniform)))
-        (true (equalp (if body #(-1.0 0.0 0.6 0.8) #(0.0 1.0 0.0 1.0))
+        (true (equalp #(0.0 1.0 0.0 1.0)
                       (subseq uniform 96 100)))))
     (true (= 34 (length shaders::*scene-uniform-members*)))))
+
+(define-test figure-instances-pack-independent-poses-and-kinds
+  (let* ((wizard (render:figure-lanes (make-vec3 10.0 20.0 3.0) (make-vec3 9.0 18.0 2.0)
+                                     1.5 0.75 1.0 0.0 0.0 1.0))
+         (box (render:box-figure (make-vec3 40.0 50.0 6.0) (make-vec3 39.0 48.0 5.0)
+                                0.0 -1.0 '(0.2d0 0.3d0 0.4d0) '(0.1 0.2 0.3)))
+         (data (render:pack-figure-instances (list wizard box))))
+    (true (= 40 (length data)))
+    (true (typep data '(simple-array single-float (*))))
+    (true (equalp #(10.0 20.0 4.48 1.5 9.0 18.0 3.48 0.75 1.0 0.0 0.0 1.0)
+                  (subseq data 0 12)))
+    (true (equalp #(40.0 50.0 6.0 0.0 39.0 48.0 5.0 0.0 0.0 -1.0 0.0 -1.0 0.2 0.3 0.4 1.0 0.1 0.2 0.3 0.0)
+                  (subseq data 20)))
+    (true (zerop (length (render:pack-figure-instances nil))))))
 
 (define-test camera-input-is-translated-only-at-the-viewer-boundary
   (dolist (case '((0.0 1.0 0.0 1.0 0.0)

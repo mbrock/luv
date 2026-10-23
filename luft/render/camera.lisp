@@ -204,29 +204,30 @@ ray leaves the screen plane parallel to the view, as *PROJECTION* draws."
 
 (defun figure-lanes (feet previous-feet gait previous-gait
                      heading-x heading-y previous-heading-x previous-heading-y)
-  "The figure stage's three vec4 lanes: where it stands now and a frame ago,
-each with its gait phase, and its present and previous heading.
+  "The figure stage's five vec4 lanes: current and previous position/gait,
+present and previous heading, wizard kind, and reserved extent/tone data.
 
 FEET and PREVIOUS-FEET are where the figure's feet touch the ground; the
-robed figure's own origin sits above them.  A game passes the result to
-CAMERA-UNIFORM-DATA or ENCODE-RENDERER-VIEW as its FIGURE."
+robed figure's own origin sits above them. A game includes the result in
+ENCODE-RENDERER-VIEW's FIGURES, alongside any other instances."
   (flet ((position-lane (position gait)
            (list (vec3-x position) (vec3-y position)
                  (+ (vec3-z position) 1.48) gait)))
     (list (position-lane feet gait)
           (position-lane previous-feet previous-gait)
-          (list heading-x heading-y previous-heading-x previous-heading-y))))
+          (list heading-x heading-y previous-heading-x previous-heading-y)
+          '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0))))
 
 (defun camera-uniform-data
-    (view previous inspection-parameters ink-strength figure
+    (view previous inspection-parameters ink-strength focus
      &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0) first-person-p)
-  "Pack VIEW, PREVIOUS, and FIGURE (FIGURE-LANES, or NIL) as scene uniforms."
+  "Pack camera/light uniforms. FOCUS is a position lane for haze and tilt
+shift, not a drawing instance. Former pose rows remain reserved in the ABI."
   (flet ((lane (vector fourth)
            (list (vec3-x vector) (vec3-y vector)
                  (vec3-z vector) fourth)))
     (destructuring-bind (character previous-character character-direction)
-        (or figure
-            '((0.0 0.0 0.0 0.0) (0.0 0.0 0.0 0.0) (0.0 1.0 0.0 1.0)))
+        '((0.0 0.0 0.0 0.0) (0.0 0.0 0.0 0.0) (0.0 1.0 0.0 1.0))
       (make-array
        (shaders::scene-uniform-scalar-count) :element-type 'single-float
        :initial-contents
@@ -254,7 +255,7 @@ CAMERA-UNIFORM-DATA or ENCODE-RENDERER-VIEW as its FIGURE."
                       (aref (frame-view-jitter previous) 0)
                       (aref (frame-view-jitter previous) 1))
                 (coerce inspection-parameters 'list)
-                character
+                (or focus character)
                 (light-uniform-data (current-light) (frame-view-position view) exposure)
                 previous-character character-direction
                 (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))))))))

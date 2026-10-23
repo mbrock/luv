@@ -103,7 +103,8 @@
            #:make-fixed-exposure #:make-automatic-exposure
            #:exposure-value #:advance-exposure
            #:make-exposure-binding #:encode-exposure #:release-exposure
-           #:scene-drawing #:make-sky-drawing #:make-player-drawing
+           #:scene-drawing #:make-sky-drawing #:make-figure-drawing
+           #:box-figure #:pack-figure-instances #:viewer-figures #:advance-viewer-game
            #:make-scene-drawing-binding #:encode-scene-drawing
            #:release-scene-drawing
            #:torch-drawing #:make-framed-torch-drawing

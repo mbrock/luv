@@ -179,14 +179,15 @@ study capture asks for the frame to itself.  The walking character, its
 controllers, and the world clock sit in =luft/simulation=, generic enough
 that the wizard uses them as they are (#CERUZY).
 
+Figures are now a stage a game adds, with per-instance storage rather
+than one pose in the scene uniforms. The wizard and Luvcraft's turtles
+use it (#CS2DOF); hands, held devices, and agent bodies still need stages.
+
 What still sits on the wrong side of the line:
 
 - The atelier's follow camera, first-person eyes, and orbit stay in its
   studio; the wizard wrote its own follow in a dozen lines over the
   renderer's camera, which is where a game's camera behaviour belongs.
-- The renderer's figure stage draws exactly one robed figure, from lanes
-  in the scene uniforms.  A second character, or a figure that is not the
-  wizard, needs the figure to become a drawing stage a game adds (#CS2DOF).
 - The atelier shares =luft.render= with the renderer, which is why it
   attaches =luft.world= at load rather than in a package definition.
 
@@ -215,12 +216,14 @@ atelier's internals.
    continuity, exposure, uniforms, then every pass -- was the studio's
    =encode-viewer-frame=.  It is now
    [[lisp:luft.render:encode-renderer-view]], which the atelier and the
-   wizard both call with their own camera, projection, and figure.
-4. *The figure is lanes, not a character.*  The uniform packing read a
-   =walking-character= directly.  It now takes
+   wizard both call with their own camera, projection, and figure list.
+4. *The figure is instances, not a character.* The uniform packing once read a
+   =walking-character= directly. A game now submits a list of
    [[lisp:luft.render:figure-lanes]] -- feet now and a frame ago, gait, and
-   headings -- so the renderer does not know what a character is, and a
-   frame without one passes NIL.
+   headings -- or [[lisp:luft.render:box-figure]] records to an optional
+   [[lisp:luft.render:make-figure-drawing]] stage. The renderer does not know
+   what a character is; a frame without figures passes NIL. Scene uniforms
+   retain a focus point for haze and tilt shift, not a drawing pose.
 
 The scene's =player-p= was the fifth: the renderer drew the figure only when
 the terrain said so.  The terrain no longer says (#S5POD8).
@@ -588,6 +591,18 @@ the roof where it stood.  The old Luvcraft program cannot render there (its
 render pass is unsupported by lavapipe), so the same file was checked only
 through Luvcraft's own loader.
 
+Six turtles now settle around a fresh player's resident patch. Their minds,
+deterministic choices, turning, resting, and animated shell/head/leg boxes
+are Luvcraft's existing =critters.lisp=; a small contact adapter sweeps their
+Y-up bodies through Luft's Z-up terrain, and Luft rays find their initial
+ground. They never query Luvcraft's block world. The host calls
+[[lisp:luft.render:advance-viewer-game]] after simulation and asks
+[[lisp:luft.render:viewer-figures]] for the visible inhabitants even in first
+person. Their =:luft-critters= inhabitant entry saves pose, velocity, seed,
+decision count, resting spell, and gait, while other inhabitants pass
+through. Animals in nonresident chunks freeze and remain in the save,
+rather than falling through missing cells or despawning (#L4OMIZ).
+
 To host the game the studio gave up three atelier assumptions, now protocol
 in =luft.render=: the playing commands -- walk, jump, fly, M-x, metabar,
 lobby -- moved into =luft-play=, which the atelier's table inherits; key
@@ -706,7 +721,7 @@ placement draw from it.
 /Done when./ Place, mine, and pick follow what the player carries, and the
 old inventory code is deleted.
 
-** IDEA Grow drawing stages one device at a time
+** NEXT Grow drawing stages one device at a time
 :PROPERTIES:
 :ID: CS2DOF
 :END:
@@ -719,6 +734,22 @@ stages.
 
 /Done when./ One held device works in Luvcraft on Luft and its old host is
 gone.
+
+/Evidence./ The first stage is figures, before held devices. Games opt into
+=:figure-factory= with [[lisp:luft.render:make-figure-drawing]]; a bare
+renderer has no figures. [[lisp:luft.render:pack-figure-instances]] packs
+five vec4 rows per instance: present and previous center/gait, headings,
+half extents and kind, and linear tone. Each fence-safe presentation slot
+owns a growable instance buffer and its bindings. The original robed wizard
+is one kind; oriented, depth-writing box figures compose the turtle's
+existing model, with no fixed renderer population limit. A packing test
+checks mixed kinds and independent current/previous poses; both shader
+backends compile. Headless SDL with software Vulkan captures five turtles
+on seed 7's meadow and the original wizard on his isle. The live turtles
+walk and rest, and their descriptions round-trip through Luvcraft's own save
+reader. Still open: turtle atlas relief rather than flat tones, shadows
+cast by animal boxes, riding, agent bodies, and held-device stages. The old
+critter renderer remains because old Luvcraft still plays through it.
 
 ** IDEA Keep block behaviour in a game's table
 :PROPERTIES:

@@ -58,7 +58,7 @@
                     (make-instance 'replacement-terrain)))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)
                                          :terrain-factory factory :lattice-factory nil
-                                         :sky-factory nil :player-factory nil :torch-factory nil))
+                                         :sky-factory nil :figure-factory nil :torch-factory nil))
          (frame (render::make-renderer-frame-state renderer))
          (pass (make-instance 'gpu-test-encoder))
          (builder (render::make-world-scene-builder)))
@@ -184,7 +184,7 @@
 (define-test lattice-diagnostics-draw-the-current-star-mesh
   (let* ((device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)
-                                         :sky-factory nil :player-factory nil :torch-factory nil))
+                                         :sky-factory nil :figure-factory nil :torch-factory nil))
          (frame (test-renderer-frame renderer))
          (pass (make-instance 'gpu-test-encoder))
          (builder (render::make-world-scene-builder)))

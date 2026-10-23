@@ -1,7 +1,7 @@
 (in-package #:luft.render.tests)
 
 (define-test scene-drawings-roll-back-every-construction-prefix
-  (dolist (factory '(render:make-sky-drawing render:make-player-drawing))
+  (dolist (factory '(render:make-sky-drawing render:make-figure-drawing))
     (let* ((device (make-instance 'gpu-test-device))
            (drawing (funcall factory device '(:rgba16-float :rg16-float) 4))
            (allocations (test-gpu-attempts device)))
@@ -18,7 +18,7 @@
 (define-test renderer-can-omit-both-scene-drawings
   (let* ((device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)
-                                         :sky-factory nil :player-factory nil)))
+                                         :sky-factory nil :figure-factory nil)))
     (unwind-protect
          (progn
            (true (null (render::renderer-sky renderer)))
@@ -70,7 +70,7 @@
                drawing)))
       (let* ((renderer (render:make-renderer
                         device :bgra8-unorm '(640 480)
-                        :sky-factory (factory sky) :player-factory (factory player)))
+                        :sky-factory (factory sky) :figure-factory (factory player)))
              (frame (render::make-renderer-frame-state renderer))
              (pass (make-instance 'gpu-test-encoder)))
         (unwind-protect
@@ -94,7 +94,7 @@
   (let ((device (make-instance 'gpu-test-device)))
     (fail (render:make-renderer
            device :bgra8-unorm '(640 480)
-           :player-factory (lambda (&rest inputs)
+           :figure-factory (lambda (&rest inputs)
                              (declare (ignore inputs))
                              (error "Replacement player could not be built."))))
     (dolist (resource (test-gpu-resources device))
@@ -112,7 +112,7 @@
   (let* ((drawing (make-instance 'binding-free-test-drawing :name :none))
          (device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)
-                                         :sky-factory nil :player-factory nil))
+                                         :sky-factory nil :figure-factory nil))
          (frame (render::make-renderer-frame-state renderer)))
     (unwind-protect
          (progn

@@ -45,7 +45,7 @@
                         (finishing-factory 'make-image-finishing)
                         (exposure-factory 'make-automatic-exposure)
                         (sky-factory 'make-sky-drawing)
-                        (player-factory 'make-player-drawing)
+                        figure-factory
                         (torch-factory 'make-framed-torch-drawing)
                         (world-text-factory 'make-world-text-drawing))
   "Compose the renderer's independently owned subsystems.
@@ -63,7 +63,7 @@ choices. Resident geometry and resized targets are published independently."
            (list :terrain-factory terrain-factory :shadow-factory shadow-factory
                  :lattice-factory lattice-factory :reconstruction-factory reconstruction-factory
                  :finishing-factory finishing-factory :exposure-factory exposure-factory
-                 :sky-factory sky-factory :player-factory player-factory :torch-factory torch-factory
+                 :sky-factory sky-factory :figure-factory figure-factory :torch-factory torch-factory
                  :world-text-factory world-text-factory)))
         (completed-p nil))
     (unwind-protect
@@ -90,7 +90,7 @@ choices. Resident geometry and resized targets are published independently."
                    (renderer-sky renderer)
                    (component sky-factory 'scene-drawing device formats samples)
                    (renderer-player renderer)
-                   (component player-factory 'scene-drawing device formats samples)
+                   (component figure-factory 'scene-drawing device formats samples)
                    (renderer-torches renderer)
                    (component torch-factory 'torch-drawing device formats samples)
                    (renderer-world-text renderer)

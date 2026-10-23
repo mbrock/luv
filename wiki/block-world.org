@@ -522,6 +522,14 @@ species, position, heading, and seed.  The open question is what the world
 description owes an animal that has wandered into a chunk which is no longer
 resident.
 
+Luvcraft on Luft now writes its turtles as a =:luft-critters= inhabitant
+entry (#CS2DOF, #J3WZZS), including velocity, decision count, resting spell,
+and gait as well as identity and pose. Nonresident animals freeze but stay
+in the population and in the save; other inhabitant entries pass through.
+A live five-animal population round-trips through Luvcraft's own reader.
+This is the new game's persistence, not yet riding or the old program's
+population save, so this figure remains TODO.
+
 *Done when.*  Riding a turtle, checkpointing, restarting, and finding the
 same animal where it was left, with a test that round-trips a population
 through a save description.

@@ -41,6 +41,10 @@ quickbar begins: things to build a house with, colours, and a lamp.")
    (resume :initarg :resume :initform nil :reader luvcraft-viewer-resume)
    (inhabitants :initarg :inhabitants :initform nil
                 :reader luvcraft-viewer-inhabitants)
+   (animals :initform nil :accessor viewer-animals)
+   (animal-previous-figures :initform (make-hash-table :test #'eq)
+                            :reader viewer-animal-previous-figures)
+   (animals-initialized-p :initform nil :accessor viewer-animals-initialized-p)
    (hotbar :initarg :hotbar :accessor luvcraft-viewer-hotbar))
   (:command-table (luvcraft-viewer
                    :inherit-from (render:luft-window render:luft-window-release
@@ -154,7 +158,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
     (game:luvcraft-save-description
      (streaming-source viewer) (luvcraft-viewer-world viewer)
      :resume (luvcraft-viewer-resume viewer)
-     :inhabitants (luvcraft-viewer-inhabitants viewer)
+     :inhabitants (viewer-inhabitant-descriptions viewer)
      :position (and player
                     (let ((position (render:body-position
                                      (render:character-body player))))

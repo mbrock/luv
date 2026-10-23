@@ -8,6 +8,8 @@
     terrain-shadow-vertex-specification
     player-sdf-vertex-specification
     player-sdf-fragment-specification
+    figure-box-vertex-specification
+    figure-box-fragment-specification
     lattice-point-vertex-specification
     lattice-point-fragment-specification
     present-vertex-specification

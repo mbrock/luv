@@ -139,6 +139,12 @@ This is the only part of an animal a new species really has to think about;
 terrain contact is the shared body protocol and appearance is
 MAP-CRITTER-BOXES."))
 
+(defgeneric move-critter-axis (critter world axis amount)
+  (:documentation "Sweep the animal through its host's terrain; return whether blocked."))
+
+(defmethod move-critter-axis ((critter critter) world axis amount)
+  (move-body-axis critter world axis amount))
+
 (defgeneric map-critter-boxes (critter function)
   (:documentation
    "Call FUNCTION for each textured box of CRITTER's model.
@@ -290,8 +296,8 @@ diagonal share a gait phase and the other pair is half a stride behind.")
             (critter-velocity-z turtle) (* speed (cos yaw)))
       (let ((distance-x (* (critter-velocity-x turtle) seconds))
             (distance-z (* (critter-velocity-z turtle) seconds)))
-        (when (or (move-body-axis turtle world :x distance-x)
-                  (move-body-axis turtle world :z distance-z))
+        (when (or (move-critter-axis turtle world :x distance-x)
+                  (move-critter-axis turtle world :z distance-z))
           (turtle-turn-away turtle))
         (when walking-p
           (incf (turtle-gait-phase turtle)
@@ -301,7 +307,7 @@ diagonal share a gait phase and the other pair is half a stride behind.")
       (setf (critter-velocity-y turtle)
             (max +critter-terminal-fall-speed+ (critter-velocity-y turtle))
             (critter-grounded-p turtle) nil)
-      (move-body-axis turtle world :y
+      (move-critter-axis turtle world :y
                       (* (critter-velocity-y turtle) seconds))))
   turtle)
 

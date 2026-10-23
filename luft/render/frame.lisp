@@ -75,7 +75,7 @@
 
 (defun encode-renderer-view
     (renderer context encoder surface-texture surface-view extent camera
-     &key (projection *projection*) figure (pointer '(0.5 0.5))
+     &key (projection *projection*) figures (pointer '(0.5 0.5))
        (ink-strength 0.0) (bevel-width luft:+mesh-bevel-width+)
        fixed-exposure first-person-p construction-p overlay-encoder
        (effect-time
@@ -85,11 +85,12 @@
 This is a game's whole frame: the camera's view under PROJECTION, temporal
 jitter and history continuity, exposure, and the scene uniforms, then every
 pass.  SURFACE-TEXTURE is the presentation slot from CONTEXT that
-SURFACE-VIEW views, and EXTENT its size in pixels.  FIGURE, from
-FIGURE-LANES, draws the robed figure.  POINTER, as fractions of the screen,
+SURFACE-VIEW views, and EXTENT its size in pixels. FIGURES is a list of
+per-instance records, from FIGURE-LANES or BOX-FIGURE. POINTER, as fractions of the screen,
 and INK-STRENGTH fill the inspection lanes.  FIXED-EXPOSURE replaces
 measured exposure.  OVERLAY-ENCODER receives the
 final pass."
+  (ensure-renderer-extent renderer extent)
   (let* ((*projection* projection)
          (frame (renderer-frame-state-for renderer context surface-texture))
          (render-extent (renderer-render-scale-extent renderer extent))
@@ -106,6 +107,11 @@ final pass."
                (advance-exposure (renderer-exposure-control renderer)))))
     (unless (frame-views-continuous-p (renderer-previous-view renderer) view)
       (setf (renderer-history-valid-p renderer) nil))
+    (when (typep (renderer-player renderer) 'figure-drawing)
+      (upload-figure-instances
+       (renderer-player renderer)
+       (renderer-frame-drawing-binding renderer frame (renderer-player renderer))
+       (pack-figure-instances figures)))
     (encode-renderer-frame
      renderer frame encoder surface-view extent
      (camera-uniform-data
@@ -114,9 +120,9 @@ final pass."
               (coerce (second pointer) 'single-float)
               (coerce (/ width) 'single-float)
               (coerce (/ height) 'single-float))
-      ink-strength figure bevel-width exposure first-person-p)
+      ink-strength (first (first figures)) bevel-width exposure first-person-p)
      :jitter jitter :view view
-     :player-p (and figure t)
+     :player-p (and figures t)
      :effect-time effect-time
      :construction-p construction-p
      :overlay-encoder overlay-encoder)))

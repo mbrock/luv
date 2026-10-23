@@ -210,7 +210,7 @@ not let the wizard fall through that gap while the first meshes are built."
      (wizard-renderer wizard) (wizard-context wizard) encoder surface
      (wizard-surface-view wizard surface) extent (wizard-camera wizard)
      :projection :isometric
-     :figure (wizard-figure wizard)
+     :figures (list (wizard-figure wizard))
      :bevel-width *wizard-bevel-width*
      :effect-time (or (wizard-last-timestamp wizard) 0.0)
      :overlay-encoder (lambda (pass) (encode-wizard-hud wizard pass surface)))))
@@ -352,6 +352,7 @@ not let the wizard fall through that gap while the first meshes are built."
                                     :yaw 2.2455373 :pitch *wizard-camera-pitch*)))
         (setf renderer (render:make-renderer
                         device (canvas-format context) (canvas-extent context)
+                        :figure-factory 'render:make-figure-drawing
                         :lattice-factory nil)
               production-system (production:make-single-worker-production-system
                                  :name "wizard mesh producer"))

@@ -436,6 +436,14 @@ before the operation boundary, or it would encode through resources which the
   (or (viewer-renderer viewer)
       (error "LUFT viewer has no renderer after frame-boundary publication.")))
 
+(defgeneric viewer-figures (viewer)
+  (:documentation "The game's figure instances for this frame, including any visible player."))
+
+(defmethod viewer-figures ((viewer t))
+  (let ((player (and (not (typep (viewer-mode viewer) 'first-person-mode))
+                     (viewer-player viewer))))
+    (when player (list (character-render-lanes player)))))
+
 (defun encode-viewer-frame
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
@@ -443,16 +451,14 @@ before the operation boundary, or it would encode through resources which the
          (inspection
            (and (or inspector-p
                     (viewer-mode-inspection-p (viewer-mode viewer)))
-                (update-viewer-inspection viewer)))
-         (player (and (not (typep (viewer-mode viewer) 'first-person-mode))
-                      (viewer-player viewer))))
+                (update-viewer-inspection viewer))))
     ;; Frame-boundary state is now published. Encoding below only replays
     ;; prepared GPU commands against the renderer borrowed afterward.
     (encode-renderer-view
      renderer (viewer-context viewer) encoder surface-texture
      (viewer-surface-view viewer surface-texture) extent (viewer-camera viewer)
      :projection (viewer-projection viewer)
-     :figure (and player (character-render-lanes player))
+     :figures (viewer-figures viewer)
      :pointer (viewer-pointer-fraction viewer)
      :ink-strength (if (and inspection (viewer-inspection-ink-p viewer)) 1.0 0.0)
      :bevel-width (viewer-bevel-width viewer)
@@ -816,6 +822,12 @@ before the operation boundary, or it would encode through resources which the
     (values (+ (* (cos yaw) forward) (* (sin yaw) right))
             (- (* (sin yaw) forward) (* (cos yaw) right)))))
 
+(defgeneric advance-viewer-game (viewer seconds)
+  (:documentation "Advance game-owned inhabitants after the host's simulation step."))
+
+(defmethod advance-viewer-game ((viewer t) seconds)
+  (declare (ignore seconds)))
+
 (defun advance-viewer-world (viewer timestamp)
   "Submit local input, then advance the whole world, even without a player."
   (let* ((last (viewer-last-timestamp viewer))
@@ -843,6 +855,7 @@ before the operation boundary, or it would encode through resources which the
     (unless (or (typep (viewer-mode viewer) 'free-camera-mode)
                 (not (viewer-player-ground-resident-p viewer)))
       (advance-world-simulation (viewer-simulation viewer) dt))
+    (advance-viewer-game viewer dt)
     (values dt (null last))))
 
 (defun viewer-player-ground-resident-p (viewer)
@@ -1494,7 +1507,7 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
                        fixed-exposure
                        (exposure-factory 'make-automatic-exposure)
                        (sky-factory 'make-sky-drawing)
-                       (player-factory 'make-player-drawing)
+                       (figure-factory 'make-figure-drawing)
                        (torch-factory 'make-framed-torch-drawing)
                        (terrain-factory 'make-terrain-drawing)
                        (shadow-factory 'make-sun-shadow)
@@ -1592,7 +1605,7 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
                              (make-fixed-exposure fixed-exposure))
                            exposure-factory)
                        :sky-factory sky-factory
-                       :player-factory player-factory
+                       :figure-factory figure-factory
                        :torch-factory torch-factory
                        :terrain-factory terrain-factory :shadow-factory shadow-factory
                        :lattice-factory lattice-factory
