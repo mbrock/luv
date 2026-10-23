@@ -260,11 +260,13 @@ Lane 19 is the original tile identity, not a sampled or averaged colour."
 
 (defun encode-creatures (drawing pass binding shadow-p)
   (when (plusp (creature-count binding))
-    (luv:set-vertex-buffer pass 0 (creature-vertices binding))
-    (render:encode-program
-     (if shadow-p (creature-shadow drawing) (creature-surface drawing)) pass
-     (if shadow-p (creature-shadow-binding binding) (creature-surface-binding binding))
-     (luv:make-gpu-draw-command :vertex-count (creature-count binding)))))
+    (let ((program (if shadow-p (creature-shadow drawing) (creature-surface drawing))))
+      (luv:set-pipeline pass (render::program-pipeline program))
+      (luv:set-bind-group
+       pass 0 (if shadow-p (creature-shadow-binding binding) (creature-surface-binding binding)))
+      ;; Metal's vertex slots belong to the selected pipeline's argument table.
+      (luv:set-vertex-buffer pass 0 (creature-vertices binding))
+      (luv:draw pass (creature-count binding)))))
 
 (defmethod render::encode-scene-drawing :around
     ((drawing creature-figure-drawing) pass (binding creature-figure-binding))
