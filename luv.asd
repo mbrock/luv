@@ -284,7 +284,7 @@
   :description "Protocol claims, and a real foot window served headlessly."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/wayland" "luv/test-support")
+  :depends-on ("luv/wayland" "luv/test-support" (:require "sb-posix"))
   :components ((:file "wayland/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

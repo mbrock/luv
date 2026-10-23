@@ -52,77 +52,95 @@ there was nothing new to claim."
   (prog1 (wl:call-with-surface-snapshot (wl:toplevel-surface toplevel) function)
     (wl:call-in-server #'wl:send-frame-callbacks :server server)))
 
+(defun call-with-runtime-directory (function)
+  "Call FUNCTION where libwayland can create its socket.  A login session
+provides XDG_RUNTIME_DIR; a service or CI runner may not, so lend it a
+private temporary one for the duration."
+  (if (uiop:getenv "XDG_RUNTIME_DIR")
+      (funcall function)
+      (let ((directory (sb-posix:mkdtemp
+                        (format nil "~A/luv-wayland-XXXXXX"
+                                (string-right-trim
+                                 "/" (or (uiop:getenv "TMPDIR") "/tmp"))))))
+        (sb-posix:setenv "XDG_RUNTIME_DIR" directory 1)
+        (unwind-protect (funcall function)
+          (sb-posix:unsetenv "XDG_RUNTIME_DIR")
+          (uiop:delete-directory-tree
+           (uiop:ensure-directory-pathname directory) :validate t)))))
+
 (define-test foot-draws-a-window-of-the-configured-size
   (let ((foot (foot-program)))
     (if (null foot)
         (skip "foot is not on PATH" (true nil))
-        (let* ((server (wl:start-server
-                        :initargs '(:initial-toplevel-size (640 400))))
-               (process nil))
-          (unwind-protect
-               (progn
-                 (setf process
-                       (sb-ext:run-program
-                        foot (list "--override=main.resize-by-cells=no"
-                                   "sh" "-c" "echo luvland; sleep 30")
-                        :wait nil :output nil :error nil
-                        :environment
-                        (append (list (format nil "WAYLAND_DISPLAY=~A"
-                                              (wl:server-socket-name server)))
-                                (remove-if (lambda (entry)
-                                             (or (uiop:string-prefix-p "WAYLAND_DISPLAY=" entry)
-                                                 (uiop:string-prefix-p "DISPLAY=" entry)))
-                                           (sb-ext:posix-environ)))))
-                 (let ((toplevel
-                         (wait-for
-                          (lambda ()
-                            (find-if (lambda (toplevel)
-                                       (and (wl:toplevel-mapped-p toplevel)
-                                            (wl:surface-snapshot
-                                             (wl:toplevel-surface toplevel))))
-                                     (wl:server-toplevels server))))))
-                   (true toplevel)
-                   (when toplevel
-                     (let ((snapshot (wl:surface-snapshot (wl:toplevel-surface toplevel))))
-                       (is string= "foot" (wl:toplevel-app-id toplevel))
-                       (is = 640 (wl:snapshot-width snapshot))
-                       (is = 400 (wl:snapshot-height snapshot)))
-                     ;; The first commit is bare background.  Play the host:
-                     ;; send frame callbacks and claim each new snapshot
-                     ;; until the shell's text is drawn.
-                     (true (wait-for
-                            (lambda ()
-                              (host-frame server toplevel
-                                          (lambda (snapshot)
-                                            (> (distinct-pixels (wl:snapshot-pixels snapshot))
-                                               2))))))
-                     ;; Typing echoes through the tty, so each key is a commit.
-                     ;; However many commits arrive, the surface reuses a
-                     ;; handful of arrays instead of allocating per commit.
-                     (let ((surface (wl:toplevel-surface toplevel))
-                           (serials '()))
-                       (wl:call-in-server (lambda () (wl:focus-keyboard surface))
-                                          :server server)
-                       (dotimes (index 12)
-                         (wl:call-in-server (lambda ()
-                                              (wl:send-key 30 t)
-                                              (wl:send-key 30 nil))
-                                            :server server)
-                         (wait-for (lambda ()
-                                     (host-frame server toplevel
-                                                 (lambda (snapshot)
-                                                   (pushnew (wl:snapshot-serial snapshot)
-                                                            serials))))
-                                   :timeout 2))
-                       (true (>= (length serials) 8))
-                       (true (<= (wl:snapshot-pool-allocated
-                                  (wl:surface-snapshot-pool surface))
-                                 3)))
-                     (wl:call-in-server (lambda () (wl:close-toplevel toplevel))
-                                        :server server)
-                     (true (wait-for (lambda () (not (sb-ext:process-alive-p process)))
-                                     :timeout 5)))))
-            (when (and process (sb-ext:process-alive-p process))
-              (sb-ext:process-kill process 15))
-            (wl:stop-server server)
-            (false (wl:server-running-p server)))))))
+        (call-with-runtime-directory
+         (lambda ()
+           (let* ((server (wl:start-server
+                           :initargs '(:initial-toplevel-size (640 400))))
+                  (process nil))
+             (unwind-protect
+                  (progn
+                    (setf process
+                          (sb-ext:run-program
+                           foot (list "--override=main.resize-by-cells=no"
+                                      "sh" "-c" "echo luvland; sleep 30")
+                           :wait nil :output nil :error nil
+                           :environment
+                           (append (list (format nil "WAYLAND_DISPLAY=~A"
+                                                 (wl:server-socket-name server)))
+                                   (remove-if (lambda (entry)
+                                                (or (uiop:string-prefix-p "WAYLAND_DISPLAY=" entry)
+                                                    (uiop:string-prefix-p "DISPLAY=" entry)))
+                                              (sb-ext:posix-environ)))))
+                    (let ((toplevel
+                            (wait-for
+                             (lambda ()
+                               (find-if (lambda (toplevel)
+                                          (and (wl:toplevel-mapped-p toplevel)
+                                               (wl:surface-snapshot
+                                                (wl:toplevel-surface toplevel))))
+                                        (wl:server-toplevels server))))))
+                      (true toplevel)
+                      (when toplevel
+                        (let ((snapshot (wl:surface-snapshot (wl:toplevel-surface toplevel))))
+                          (is string= "foot" (wl:toplevel-app-id toplevel))
+                          (is = 640 (wl:snapshot-width snapshot))
+                          (is = 400 (wl:snapshot-height snapshot)))
+                        ;; The first commit is bare background.  Play the host:
+                        ;; send frame callbacks and claim each new snapshot
+                        ;; until the shell's text is drawn.
+                        (true (wait-for
+                               (lambda ()
+                                 (host-frame server toplevel
+                                             (lambda (snapshot)
+                                               (> (distinct-pixels (wl:snapshot-pixels snapshot))
+                                                  2))))))
+                        ;; Typing echoes through the tty, so each key is a commit.
+                        ;; However many commits arrive, the surface reuses a
+                        ;; handful of arrays instead of allocating per commit.
+                        (let ((surface (wl:toplevel-surface toplevel))
+                              (serials '()))
+                          (wl:call-in-server (lambda () (wl:focus-keyboard surface))
+                                             :server server)
+                          (dotimes (index 12)
+                            (wl:call-in-server (lambda ()
+                                                 (wl:send-key 30 t)
+                                                 (wl:send-key 30 nil))
+                                               :server server)
+                            (wait-for (lambda ()
+                                        (host-frame server toplevel
+                                                    (lambda (snapshot)
+                                                      (pushnew (wl:snapshot-serial snapshot)
+                                                               serials))))
+                                      :timeout 2))
+                          (true (>= (length serials) 8))
+                          (true (<= (wl:snapshot-pool-allocated
+                                     (wl:surface-snapshot-pool surface))
+                                    3)))
+                        (wl:call-in-server (lambda () (wl:close-toplevel toplevel))
+                                           :server server)
+                        (true (wait-for (lambda () (not (sb-ext:process-alive-p process)))
+                                        :timeout 5)))))
+               (when (and process (sb-ext:process-alive-p process))
+                 (sb-ext:process-kill process 15))
+               (wl:stop-server server)
+               (false (wl:server-running-p server)))))))))
