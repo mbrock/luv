@@ -62,6 +62,13 @@
   :components ((:file "domains/package")
                (:file "domains/domains")))
 
+(defsystem "luv/frontier"
+  :description "Inspectable frontier programs and specialized scalar realizations."
+  :depends-on ("luv/arithmetic")
+  :serial t
+  :components ((:file "frontiers/package")
+               (:file "frontiers/frontier")))
+
 (defsystem "luv/arithmetic"
   :description "Semantic quantities and their inspectable Lisp and shader arithmetic."
   :version "0.0.1"

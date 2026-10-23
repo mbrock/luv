@@ -1,5 +1,6 @@
 (defpackage #:luvcraft.frontier
-  (:use #:cl #:luvcraft.world)
+  (:use #:cl #:luvcraft.world #:luv.frontier)
+  (:shadow #:compile-frontier-program #:do-voxel-frontier-relations)
   (:local-nicknames (#:lang #:luv.arithmetic.language)
                     (#:lisp #:luv.arithmetic.lisp)
                     (#:math #:luv.arithmetic)

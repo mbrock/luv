@@ -20,7 +20,7 @@
   :description "Inspectable frontier programs compiled over packed world fields."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/arithmetic" "luvcraft/world")
+  :depends-on ("luv/frontier" "luvcraft/world")
   :serial t
   :components ((:file "luvcraft/frontier-package")
                (:file "luvcraft/frontier")))

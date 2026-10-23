@@ -306,6 +306,13 @@ cohort was introduced. The room/skylight regression compares all 128 by 128 by
 closed, and partially opaque. Zero mismatches; old publications retain their
 previous values. The seed-7 edit benchmark retains 15/16 geometry arrays.
 
+Luft is now the forcing second frontier client (#C5HWIZ): =luv/frontier=
+owns the language below both games. Page-column invalidation plus the RGB4
+addition program repairs only the bounded edit influence, not nine whole
+tiles; #WLLATM measures 16–20 ms light repair and 152–168 ms prepared cohorts.
+Exact RGB burst and existing whole-domain sky checks remain at zero
+mismatches. Sidecar packing is now the larger measured edit cost.
+
 Noon/dusk software-Vulkan captures cover a natural Luvcraft cave near
 (1001,1086,8) and the atelier citadel gate near (1462,650,22). The latter is
 deliberately not the open heightfield at atelier spawn. #WLLATM records costs:

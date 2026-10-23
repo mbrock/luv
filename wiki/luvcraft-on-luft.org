@@ -712,13 +712,14 @@ generator, and the mesh claims in =luvcraft/core/test= retired with it.
 :END:
 
 /Intent./ Turn #JDB26Y back on as an engine facility: regional sky and
-block light in the streamed world, extracting the frontier language under
-#LX8GZ2 if Luft's own solver cannot be streamed cheaply.
+block light in the streamed world. Luft now forces the frontier extraction
+under #LX8GZ2; #C5HWIZ records the shared language and bounded edit repair.
 
 /Done when./ Torches and lanterns light the streamed world in every game,
-and Luvcraft's light solver is deleted.
+with exact incremental frontier programs. Retiring old Luvcraft's solver is
+a separate adapter decision, not permission to change its boundary laws.
 
-/Evidence./ Luft's own solver streams; no frontier language was needed.  A
+/Evidence./ The first implementation streamed Luft's handwritten solver. A
 light value loses at least one level per step and starts at fifteen, while
 a chunk column is sixty-four cells wide, so the exact light over one column
 depends only on the emitters, attachments, and opacities of its 3 by 3
@@ -785,6 +786,40 @@ and inspected the seed-7 natural cave and atelier citadel gate at noon and
 The software captures retain temporal blur/dither; they are not GPU timings.
 #JDB26Y remains open for separately revised fields and broader publication
 evidence, rather than declaring the whole facility done.
+
+/Shared-frontier follow-up./ =luv/frontier= now owns the program, family,
+binding, packed-buffer, and compiler vocabulary; =luvcraft/frontier= is the
+chunk-window and field-declaration adapter. Luft's RGB4 transfer, join, and
+priority are one native packed program, bound to sparse 8-cubed u16 pages.
+Sky interface seeds use that same transfer. The realization preserves dynamic
+priority, region pruning, and the implicit direct-column baseline.
+
+Edits conservatively invalidate page-aligned columns within fourteen cells
+of changed cells or attachment brackets, then re-add only that patch. Sky
+repairs span the full height because one roof can darken a column to bedrock.
+Unchanged pages remain shared, replacement zeroes actually remove light, and
+identity-only table replacements simply restamp the tile's inputs. Arrival,
+departure, or changed guard membership still warrants a fresh tile solve.
+This is bounded invalidation, not componentwise dependency tracing. #WLLATM
+records the reduced edit cost and the now-dominant sidecar packing.
+
+The RGB burst regression compares nine complete 128 by 128 by 6 fields
+(884,736 readings) with the whole-domain solver: zero mismatches, competing
+colors, emitter removal/re-addition, occlusion, distant edits, retained old
+publications, and identity-only input replacement. The three sky states still
+compare 491,520 readings with explicit whole-domain direct seeds exactly.
+=scripts/capture-frontier-light.lisp= runs a seed-7 night cave landing with a
+lantern, waits 25 real-time seconds, places a nearby occluder through the live
+viewer, and captures both publications. Inspected software-Vulkan frames show
+the lantern and changed pool; the foreground sample changes RGB4 1915 to 1913.
+
+Old Luvcraft could use the packed solver after an axis/site adapter, white
+scalar-to-RGB4 encoding, and explicit resident/open/closed boundary sources.
+Its direct sky has a direction-specific zero-loss transfer, whereas Luft's
+diffuse program always loses one and keeps direct sky implicit. Reusing the
+language is complete; replacing Luvcraft's incremental reconciler requires
+preserving those boundary and residency contracts against its existing oracle.
+The tested old production path therefore remains, using the shared language.
 
 ** NEXT Carry a block, and fill an inventory
 :PROPERTIES:

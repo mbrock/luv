@@ -82,12 +82,13 @@
    #:voxel-light-field-baseline #:voxel-light-field-skylight
    #:voxel-light-field-visits #:voxel-light-field-pushes
    #:voxel-light-field-stale-pops
-   #:make-voxel-light-source #:solve-voxel-light
+   #:make-voxel-light-source #:solve-voxel-light #:voxel-light-transfer
    #:voxel-light-at #:voxel-light-at-site
    #:voxel-light-at-lattice-point #:voxel-light-at-mesh-point
    #:voxel-sky-at-lattice-point
    #:map-voxel-light-pages #:voxel-light-page-present-p
    #:join-voxel-light-fields
+   #:replace-voxel-light-region
    ;; Manifold-sheet mesh.
    #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-instance-word-count+
    #:+mesh-instance-stock-bit-count+

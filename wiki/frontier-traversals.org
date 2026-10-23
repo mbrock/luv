@@ -783,6 +783,11 @@ itself.  Realizations are cached per bound field and invalidated by the
 definition's revision, so redefining the program in a running image
 recompiles on next use.
 
+The engine extraction and native packed-field realization are now #C5HWIZ.
+That lowering inlines Lisp bitfield laws rather than claiming that the scalar
+quantity checker understands RGB4 ordering. Its explicit join is a lattice
+join, not the maximum of the packed integer encoding.
+
 * Terminal walls are the second compiled client
 :PROPERTIES:
 :ID: 55IRJO
@@ -1129,3 +1134,57 @@ and edit case above.  All hold.  The subsequent retirement cut removed the
 legacy incremental reconciler altogether; =light-matches-reference-p= now asks
 the separate =luvcraft/light-reference= system for a from-scratch oracle and
 compares that result with the production compiled path.
+
+* Luft forces the neutral language and bounded invalidation
+:PROPERTIES:
+:ID: C5HWIZ
+:END:
+
+=luv/frontier= owns the language, field bindings, packed buffers, execution
+evidence, and scalar compiler. It depends on arithmetic, not either game.
+=luvcraft/frontier= retains only the old world's chunk-neighbour macro and
+field-declaration method; its public names continue to reach the same shared
+definitions. The quantity-checked compiler now receives its neighbour operator
+and face-direction form explicitly instead of importing a game package.
+
+Luft is a second physical realization of the same program vocabulary:
+
+#+begin_src lisp
+(luv.frontier:define-frontier-program rgb4-light-addition
+  :family :monotone-max-fixpoint
+  :frontier-layout (:buckets 15)
+  :neighborhood :voxel-face-relations
+  :fields ((level :relaxed t) opacity)
+  :transfer (%attenuate-voxel-light (level source) (1+ (opacity target)))
+  :join (voxel-light-componentwise-max current candidate)
+  :priority (%voxel-light-priority value))
+#+end_src
+
+=with-frontier-kernel= specializes native packed laws into inline lexical
+operations; =frontier-field-access= specializes read/write templates from an
+ordinary =frontier-field-binding=. The sparse binding reads stored pages
+joined with the implicit baseline and allocates an 8-cubed u16 page only on
+write. The physical loop owns packed sites and queue snapshots. A successful
+RGB join can retain a bright old lane while admitting a previously dim color,
+so the sixteen-bucket scheduler must move its current priority upward again.
+This lowering uses ordinary Lisp representation checks, not the scalar
+quantity checker. Explicit packed joins are rejected by that other lowering,
+never silently interpreted as scalar maximum. Redefining a native law requires
+recompiling its containing realization, as with other macro-specialized code.
+
+The invalidation program admits page columns in a conservative influence box.
+Finite diffuse reach proves that replacing only pages within fourteen cells
+of changed evidence is sufficient; page alignment may conservatively enlarge
+that box. Sky extends it through the whole column. Re-addition considers the
+current sources and material capture with the same transfer program and
+region pruning. The patch /replaces/, rather than joins, old pages so source
+removal can darken them. Every unaffected page remains immutable and shared;
+the new sky baseline describes the full tile without retaining a chain of old
+baseline closures. Residency changes still start from a fresh tile.
+
+#BQMYNU records exact whole-domain and seam evidence; #WLLATM records costs.
+The seed-7 roof edit now spends 16–20 ms repairing light and 152–168 ms
+preparing its cohort, versus 216–220 ms previously. Packing, 132–144 ms, is
+the next larger cost. Cold solving is unchanged. This is a shared language and
+a bounded repair, not a claim that Luft now runs Luvcraft's chunk loop, or
+that the native lowering already provides SIMD/GPU or quantity-checked RGB.

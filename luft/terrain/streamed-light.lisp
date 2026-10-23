@@ -18,8 +18,8 @@
 ;;;                stars sample cells one step past its seams
 ;;;
 ;;; Tiles are solved on the mesh worker beside the meshes and cached by the
-;;; exact identity of their inputs, so an edit re-solves the nine tiles around
-;;; it and a residency change only the tiles whose neighbourhood changed.  A
+;;; exact identity of their inputs. Edits invalidate only page columns within
+;;; fourteen cells of changed evidence; residency changes solve fresh tiles. A
 ;;; seam is consistent because both owners meeting there read the same tile.
 ;;; The owner thread decides which published owners must be relit before it
 ;;; schedules a cohort (STREAMING-LIGHT-DIRTY-OWNERS); no GPU is involved.
@@ -162,6 +162,65 @@ face's tangents by U and V, and the canonical half-cell wick off it."
                      (equal (third a) (third b))))
               left right)))
 
+(defun changed-light-columns (old new memo)
+  "Bounds of changed cells, memoized for this immutable capture only."
+  (let ((pair (cons old new)))
+    (multiple-value-bind (bounds present-p) (gethash pair memo)
+      (if present-p bounds
+          (setf (gethash pair memo)
+                (let ((x0 most-positive-fixnum) (y0 most-positive-fixnum)
+                      (x1 0) (y1 0))
+                  (labels ((changed (cell)
+                             (setf x0 (min x0 (luft:site-x cell))
+                                   y0 (min y0 (luft:site-y cell))
+                                   x1 (max x1 (1+ (luft:site-x cell)))
+                                   y1 (max y1 (1+ (luft:site-y cell))))))
+                    (maphash (lambda (cell value)
+                               (multiple-value-bind (other found) (gethash cell new)
+                                 (unless (and found (= value other)) (changed cell)))) old)
+                    (maphash (lambda (cell value)
+                               (declare (ignore value))
+                               (unless (nth-value 1 (gethash cell old)) (changed cell))) new))
+                  (when (< x0 x1) (list x0 y0 x1 y1))))))))
+
+(defun light-edit-region (domain key old new memo)
+  "Page-aligned influence bounds, NIL if disjoint, or :FULL for residency.
+
+Sky changes can reach the bottom of their column, so the invalidation spans
+the full height, but never unrelated horizontal columns. Changed attachments
+include every possible bracket seed, even ones currently blocked by solids."
+  (unless (equal (mapcar #'first old) (mapcar #'first new))
+    (return-from light-edit-region :full))
+  (let ((bounds nil))
+    (flet ((include (box)
+             (when box
+               (setf bounds (if bounds
+                                (list (min (first bounds) (first box))
+                                      (min (second bounds) (second box))
+                                      (max (third bounds) (third box))
+                                      (max (fourth bounds) (fourth box))) box)))))
+      (loop for (nil before attachments-before) in old
+            for (nil after attachments-after) in new do
+        (unless (eq before after)
+          (unless (and before after) (return-from light-edit-region :full))
+          (include (changed-light-columns before after memo)))
+        (unless (equal attachments-before attachments-after)
+          (dolist (source (attachment-signature-sources
+                           domain (append attachments-before attachments-after)
+                           (constantly nil)))
+            (let ((cell (ldb (byte 48 0) source)))
+              (include (list (luft:site-x cell) (luft:site-y cell)
+                             (1+ (luft:site-x cell)) (1+ (luft:site-y cell)))))))))
+    (when bounds
+      (destructuring-bind (tx0 ty0 tx1 ty1) (light-tile-region key)
+        (destructuring-bind (x0 y0 x1 y1) bounds
+          (let ((box (list (max tx0 (* 8 (floor (- x0 14) 8)))
+                           (max ty0 (* 8 (floor (- y0 14) 8)))
+                           (min tx1 (* 8 (ceiling (+ x1 14) 8)))
+                           (min ty1 (* 8 (ceiling (+ y1 14) 8))))))
+            (when (and (< (first box) (third box)) (< (second box) (fourth box)))
+              box)))))))
+
 ;;; Solving
 
 (defun light-tile-region (key)
@@ -241,16 +300,17 @@ seam frontier must read the regional guard on the mesh worker."
                               (when (or (= x 0) (= y 0) (= x 63) (= y 63))
                                 (push cell fringe))
                               (let ((candidate
-                                      (- (max (direct (1- x) y z) (direct (1+ x) y z)
-                                              (direct x (1- y) z) (direct x (1+ y) z)
-                                              (direct x y (1- z)) (direct x y (1+ z)))
-                                         loss)))
+                                      (luft:voxel-light-transfer
+                                       (max (direct (1- x) y z) (direct (1+ x) y z)
+                                            (direct x (1- y) z) (direct x (1+ y) z)
+                                            (direct x y (1- z)) (direct x y (1+ z)))
+                                       (1- loss))))
                                 (when (> candidate level)
                                   (push (luft:make-voxel-light-source cell candidate) sources)))))))))))
               (cons sources fringe)))))
 
 (zdefun (solve-sky-tile :zone :luft/solve-sky-tile :value key)
-    (scene key inputs)
+    (scene key inputs &optional solve-region)
   "Exact sky over KEY, with closed unknown columns and open domain top.
 
 Only direct/diffuse interfaces seed the ordinary bounded frontier. Open
@@ -310,29 +370,32 @@ atmosphere is an implicit column reading, not millions of queued cells."
                                     (direct x (1- y) z) (direct x (1+ y) z)
                                     (direct x y (1- z)) (direct x y (1+ z)))))
                 (when (> incoming (1+ level))
-                  (let* ((loss (1+ (multiple-value-bind (index present-p) (material cell)
-                                    (if present-p (aref closed-opacity index) 0))))
-                         (candidate (max 0 (- incoming loss))))
+                  (let* ((opacity (multiple-value-bind (index present-p) (material cell)
+                                    (if present-p (aref closed-opacity index) 0)))
+                         (candidate (luft:voxel-light-transfer incoming opacity)))
                     (when (> candidate level)
                       (vector-push-extend
                        (luft:make-voxel-light-source cell candidate) sources)))))))))
       (let* ((solved (luft:solve-voxel-light
                       domain #'material closed-opacity sources
-                      :region region :hashed-p t :baseline #'direct))
-             (field (luft:join-voxel-light-fields domain (list solved) :region region)))
+                      :region (or solve-region region) :hashed-p t :baseline #'direct))
+             (field (luft:join-voxel-light-fields domain (list solved)
+                                                 :region (or solve-region region))))
         (setf (luft:voxel-light-field-baseline field) #'direct)
         field))))
 
 (zdefun (solve-light-tile :zone :luft/solve-light-tile :value key)
-    (scene key inputs)
+    (scene key inputs &optional cached solve-region)
   "Solve KEY's exact tile from INPUTS over SCENE's captured materials."
   (let* ((domain (scene-domain scene))
          (vocabulary (scene-material-vocabulary scene))
          (materials (scene-material-cells scene))
-         (region (light-tile-region key))
+         (region (or solve-region (light-tile-region key)))
          (occupied-p (lambda (cell) (nth-value 1 (material-cell-at materials cell))))
          (sources nil))
-    (destructuring-bind (x0 y0 x1 y1) region
+    ;; Retain the tile's complete source census even for a small repair;
+    ;; the realization itself prunes seeds which cannot reach REGION.
+    (destructuring-bind (x0 y0 x1 y1) (light-tile-region key)
       (flet ((consider (source)
                ;; Sources too far or too dim to reach the tile seed nothing.
                (let* ((cell (ldb (byte 48 0) source))
@@ -351,30 +414,45 @@ atmosphere is an implicit column reading, not millions of queued cells."
             (map nil #'consider (chunk-emitter-sources table vocabulary)))
           (mapc #'consider
                 (attachment-signature-sources domain attachments occupied-p)))))
-    (%make-light-tile
-     key inputs
-     (when sources
-       (luft:join-voxel-light-fields
-        domain
-        (list (luft:solve-voxel-light
-               domain (material-cell-reader materials)
-               (scene-authored-light-opacity-table scene)
-               (coerce sources '(simple-array (unsigned-byte 64) (*)))
-               :region region :hashed-p t))
-        :region region))
-     (length sources)
-     (solve-sky-tile scene key inputs))))
+    (let ((field
+            (when sources
+              (luft:join-voxel-light-fields
+               domain
+               (list (luft:solve-voxel-light
+                      domain (material-cell-reader materials)
+                      (scene-authored-light-opacity-table scene)
+                      (coerce sources '(simple-array (unsigned-byte 64) (*)))
+                      :region region :hashed-p t))
+               :region region)))
+          (sky (solve-sky-tile scene key inputs region)))
+      (%make-light-tile
+       key inputs
+       (if (and cached (light-tile-field cached))
+           (luft:replace-voxel-light-region domain (light-tile-field cached) field region)
+           field)
+       (length sources)
+       (if cached
+           (luft:replace-voxel-light-region domain (light-tile-sky cached) sky region)
+           sky)))))
 
 (zdefun (realize-streaming-light-tiles :zone :luft/realize-light-tiles
                                        :value (length keys))
     (scene keys cache)
   "Return the tiles of KEYS over frozen SCENE, reusing CACHE's exact ones."
-  (loop for key in keys
-        for inputs = (chunk-light-inputs scene key)
-        for cached = (and cache (gethash key cache))
-        collect (if (and cached (light-inputs= inputs (light-tile-inputs cached)))
-                    cached
-                    (solve-light-tile scene key inputs))))
+  (let ((changes (make-hash-table :test #'equal)))
+    (loop for key in keys
+          for inputs = (chunk-light-inputs scene key)
+          for cached = (and cache (gethash key cache))
+          collect
+          (cond ((and cached (light-inputs= inputs (light-tile-inputs cached))) cached)
+                ((null cached) (solve-light-tile scene key inputs))
+                (t (let ((region (light-edit-region (scene-domain scene) key
+                                                   (light-tile-inputs cached) inputs changes)))
+                     (cond ((eq region :full) (solve-light-tile scene key inputs))
+                           (region (solve-light-tile scene key inputs cached region))
+                           (t (%make-light-tile key inputs (light-tile-field cached)
+                                                (light-tile-source-count cached)
+                                                (light-tile-sky cached))))))))))
 
 (defun light-tiles-generation (scene tiles revision)
   "One realized-light generation whose field joins TILES' fields."

@@ -364,6 +364,75 @@
                    (is = 0 (luft:voxel-light-at (field meshes west) 61 10 1))))))
         (production:stop-production-system system)))))
 
+(define-test incremental-rgb-tiles-match-whole-domain-after-edit-bursts
+  ;; Distinct color lanes, removals, occlusion, and two distant edit regions.
+  ;; Cached publications must stay immutable and carry the new input identity.
+  (let* ((blue (make-instance 'terrain:material-placement
+                              :name :blue
+                              :kind (make-instance 'terrain:material-kind
+                                                   :name :blue :light-opacity 0
+                                                   :light-emission '(1 3 15))))
+         (palette (domains:make-identity-vocabulary-domain
+                   :members (list *stone* *glow* blue) :limit #xff))
+         (builder (terrain:make-scene-builder :horizontal-bits 7
+                                               :material-vocabulary palette
+                                               :ground-material *stone*)))
+    (dotimes (x 128) (dotimes (y 128) (terrain:scene-builder-cell builder x y 0)))
+    (terrain:scene-builder-cell builder 61 63 1 :material *glow*)
+    (terrain:scene-builder-cell builder 67 63 1 :material blue)
+    (terrain:scene-builder-cell builder 110 110 1 :material blue)
+    (let* ((scene (terrain:make-streaming-scene (terrain:finish-scene-builder builder)))
+           (domain (terrain:scene-domain scene))
+           (keys (loop for x in '(0 64) nconc
+                   (loop for y in '(0 64) collect (luft:chunk-key-at x y))))
+           (cache (make-hash-table :test #'eql)))
+      (labels ((realize ()
+                 (let ((tiles (terrain:realize-streaming-light-tiles scene keys cache)))
+                   (dolist (tile tiles)
+                     (setf (gethash (terrain::light-tile-key tile) cache) tile))
+                   tiles))
+               (compare-whole-domain (tiles)
+                 (let* ((sources (loop for key in keys
+                                       append (coerce (terrain::chunk-emitter-sources
+                                                       (terrain::streaming-scene-chunk-material-table scene key)
+                                                       palette) 'list)))
+                        (oracle (luft:solve-voxel-light
+                                 domain (terrain:material-cell-reader (terrain:scene-material-cells scene))
+                                 (terrain:scene-authored-light-opacity-table scene) sources))
+                        (field (terrain:realized-light-generation-field
+                                (terrain::light-tiles-generation scene tiles 0)))
+                        (mismatches 0))
+                   (dotimes (x 128)
+                     (dotimes (y 128)
+                       (dotimes (z 6)
+                         (unless (= (luft:voxel-light-at oracle x y z)
+                                    (luft:voxel-light-at field x y z))
+                           (incf mismatches)))))
+                   (is = 0 mismatches))))
+        (let* ((initial (realize))
+               (old (terrain::light-tile-field (first initial)))
+               (old-value (luft:voxel-light-at old 61 63 1)))
+          (compare-whole-domain initial)
+          (loop for (x y material) in
+                  (list (list 61 63 nil) (list 64 63 *stone*) (list 61 63 blue)
+                        (list 110 110 nil) (list 64 63 nil) (list 67 63 nil)
+                        (list 61 63 nil) (list 110 110 *glow*))
+                do (terrain:edit-streaming-scene-cell
+                    scene (luft:make-site domain x y 1 luft:+cell-extent+ 1) material)
+                   (let ((tiles (realize)))
+                     (compare-whole-domain tiles)
+                     (is = old-value (luft:voxel-light-at old 61 63 1))
+                     (true (every #'eq tiles (realize)))))
+          ;; Identity-only replacements of a table cannot dirty any light page.
+          (let* ((before (realize))
+                 (key (first keys))
+                 (table (terrain::streaming-scene-chunk-material-table scene key)))
+            (setf (gethash key (terrain::material-store-chunks (terrain:scene-material-cells scene)))
+                  (alexandria:copy-hash-table table))
+            (let ((after (realize)))
+              (true (every #'eq (mapcar #'terrain::light-tile-field before)
+                               (mapcar #'terrain::light-tile-field after))))))))))
+
 (define-test streamed-sky-roof-skylight-and-replacement
   ;; An enclosed room spans the x=64 seam. Its central skylight admits
   ;; direct sun; the surrounding roof admits only attenuated lateral sky.

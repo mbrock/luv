@@ -79,8 +79,28 @@
           (unless (eq status :edited) (error "Roof edit refused: ~S" status)))
         (let* ((edit-ms (milliseconds start))
                (dirty (terrain:streaming-light-dirty-owners scene owners))
+               (tile-start (get-internal-real-time))
+               (allocated (sb-ext:get-bytes-consed))
+               (old (terrain:streaming-scene-light-tiles scene))
+               (realized (terrain:realize-streaming-light-tiles scene tiles old))
+               (tile-ms (milliseconds tile-start))
+               (tile-bytes (- (sb-ext:get-bytes-consed) allocated))
                (start (get-internal-real-time))
                (meshes (prepare-cohort scene owners)))
+          ;; Independent trial, like the cold tile/cohort measurements above.
+          ;; Do not install REALIZED before PREPARE-COHORT: that would hide the
+          ;; reconciliation work from the prepared cohort's timing.
+          (format t "LIGHT-EDIT edit=~D tiles-ms=~,1F allocated-MiB=~,2F replaced-rgb=~D replaced-sky=~D/~D~%"
+                  edit tile-ms (/ tile-bytes 1048576.0)
+                  (count-if (lambda (tile)
+                              (not (eq (terrain::light-tile-field tile)
+                                       (terrain::light-tile-field
+                                        (gethash (terrain::light-tile-key tile) old))))) realized)
+                  (count-if (lambda (tile)
+                              (not (eq (terrain::light-tile-sky tile)
+                                       (terrain::light-tile-sky
+                                        (gethash (terrain::light-tile-key tile) old))))) realized)
+                  (length realized))
           (format t "LIGHT-BURST edit=~D edit-ms=~,1F prepared-ms=~,1F dirty=~D reused-geometry=~D/~D~%"
                   edit edit-ms (milliseconds start) (length dirty)
                   (count-if (lambda (entry)

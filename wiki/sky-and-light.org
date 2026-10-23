@@ -1014,6 +1014,32 @@ over RGB-only/. Diffuse tiles and packing still sit on the prepared cohort's
 critical path; do not weaken the stable guard to hide them. Exact differential
 checks and inspected day/dusk cave/gate captures are recorded in #BQMYNU.
 
+/Frontier edit measurements./ #C5HWIZ moves the language below both games and
+replaces nine whole-tile edit solves with bounded invalidation/re-addition.
+Same seed-7 script and orb, milliseconds; cold tile and cohort are independent
+trials, and packing is separate from the mesh row:
+
+| CPU stage                   | Before extraction | Frontier / bounded repair |
+|-----------------------------+-------------------+---------------------------|
+| Cold tiles                  |               188 |                   180–188 |
+| Cold mesh cohort            |               276 |                   276–364 |
+| Warm mesh, no geometry cache |                92 |                    92–104 |
+| Sidecar packing             |           136–140 |                   132–144 |
+| Roof edit owner CPU         |               0–4 |                       0–4 |
+| Roof edit prepared cohort   |           216–220 |                   152–168 |
+| Roof edit light repair      |      not isolated |                     16–20 |
+
+Repair allocates about 2.0–2.2 MiB and replaces patches in four of thirty-six
+tiles for this near-corner edit, retaining the other fields and 15/16 geometry
+arrays. Cold RGB visits/pushes remain exactly 193,911; packing retains
+3,951,600 bytes. Three after trials include one 364 ms cold-cohort outlier;
+there is no demonstrated cold latency improvement. The measured improvement
+is editing. Sidecar packing is now much larger than the 16–20 ms light repair and
+remains on the prepared cohort's critical path. These are worker CPU timings,
+not GPU or end-to-end publication latency. Renderer tests were also run with
+a 3 GiB SBCL heap and observed process high-water memory below 1 GiB, rather
+than silently relying on an unbounded test heap.
+
 Next experiment: add an end-to-end edit/residency publication trace and sky
 frontier counters, then let one regional light generation retain prepared owners whose
 sample envelopes are provably disjoint from the edited light influence.  Keep

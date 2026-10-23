@@ -319,6 +319,29 @@ many mesh points in one derived render population."
             (error "Material index ~D has no voxel-light opacity." material))
         0)))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (luv.frontier:define-frontier-program rgb4-light-addition
+    :family :monotone-max-fixpoint
+    :frontier-layout (:buckets 15)
+    :neighborhood :voxel-face-relations
+    :fields ((level :relaxed t) opacity)
+    :transfer (%attenuate-voxel-light (level source) (1+ (opacity target)))
+    :join (voxel-light-componentwise-max current candidate)
+    :priority (%voxel-light-priority value))
+  (defparameter *rgb4-paged-field-binding*
+    (luv.frontier:make-frontier-field-binding 'level
+      :read '(light-at x y z)
+      :write '(setf (aref (the voxel-light-page (page-for-write x y z))
+                         (%voxel-light-page-index x y z)) value))))
+
+(declaim (inline voxel-light-transfer))
+(defun voxel-light-transfer (light opacity)
+  "The light program's transfer for seed interfaces and virtual sources."
+  (luv.frontier:with-frontier-kernel
+      (rgb4-light-addition
+       (transfer :transfer (((level source) value) ((opacity target) loss))))
+    (transfer light opacity)))
+
 (defun solve-voxel-light
     (domain material-cells opacity-table sources
      &key (revision 0) region hashed-p baseline)
@@ -343,6 +366,11 @@ baseline can improve a neighbour; only improvements over it enter the queue."
   (check-type material-cells (or hash-table function))
   (check-type opacity-table (vector (unsigned-byte 8)))
   (check-type revision (integer 0 *))
+  (luv.frontier:with-frontier-kernel
+      (rgb4-light-addition
+       (transfer :transfer (((level source) light) ((opacity target) opacity)))
+       (join :join ((current old) (candidate proposed)))
+       (priority :priority ((value light))))
   (multiple-value-bind (pages direct-p x-pages y-pages)
       (%make-voxel-light-page-storage domain hashed-p)
     (let ((buckets (make-array 16))
@@ -405,17 +433,17 @@ baseline can improve a neighbour; only improvements over it enter the queue."
                  (+ (max 0 (- region-x0 x) (- x (1- region-x1)))
                     (max 0 (- region-y0 y) (- y (1- region-y1)))))
                (admit (cell x y z proposed)
-                 (let* ((old (light-at x y z))
+                 (let* ((old (luv.frontier:frontier-field-access
+                             *rgb4-paged-field-binding* :read (x x) (y y) (z z)))
                         (joined
-                          (voxel-light-componentwise-max old proposed)))
+                          (join old proposed)))
                    (unless (or (= old joined)
-                               (<= (%voxel-light-priority proposed)
+                               (<= (priority proposed)
                                    (region-distance x y)))
-                     (setf (aref (the voxel-light-page
-                                      (page-for-write x y z))
-                                 (%voxel-light-page-index x y z))
-                           joined)
-                     (let ((priority (%voxel-light-priority joined)))
+                     (luv.frontier:frontier-field-access
+                      *rgb4-paged-field-binding* :write
+                      (x x) (y y) (z z) (value joined))
+                     (let ((priority (priority joined)))
                        (vector-push-extend
                         (logior cell (ash joined 48))
                         (aref buckets priority))
@@ -443,11 +471,9 @@ baseline can improve a neighbour; only improvements over it enter the queue."
                                   (make-site domain target-x target-y target-z +cell-extent+ 1)
                                   (+ cell (ash dx +x-local-shift+)
                                      (ash dy +y-local-shift+) (ash dz +z-shift+))))
-                            (loss
-                              (1+ (%material-opacity
-                                   material-cells opacity-table target)))
                             (candidate
-                              (%attenuate-voxel-light light loss)))
+                              (transfer light (%material-opacity
+                                               material-cells opacity-table target))))
                        (unless (zerop candidate)
                          (admit target target-x target-y target-z
                                 candidate)))))))
@@ -488,7 +514,7 @@ baseline can improve a neighbour; only improvements over it enter the queue."
                       domain pages direct-p x-pages y-pages page-count revision
                       visits pushes stale-pops)))
           (setf (voxel-light-field-baseline field) baseline)
-          field)))))
+          field))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Regional fields
@@ -587,3 +613,48 @@ part of its field it is exact over."
                               :key (lambda (baseline) (funcall baseline x y z))
                               :initial-value 0)))))
         result))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (luv.frontier:define-frontier-program bounded-light-invalidation
+    :family :invalidation
+    :frontier-layout :lifo-stack
+    :neighborhood :page-columns
+    :fields ((level :invalidated t))
+    :constants (x0 y0 x1 y1)
+    :admission (and (<= x0 x) (< x x1) (<= y0 y) (< y y1))))
+
+(defun replace-voxel-light-region (domain old replacement region)
+  "Invalidate page-aligned REGION in OLD and install its re-added REPLACEMENT.
+
+Unchanged pages remain shared with the immutable old generation. Removed
+pages are not joined back: zero in REPLACEMENT really removes old light.
+The caller proves REGION contains the complete influence of its changes.
+REPLACEMENT's implicit baseline must describe the whole retained tile."
+  (destructuring-bind (x0 y0 x1 y1) region
+    (unless (every (lambda (x) (zerop (mod x 8))) region)
+      (error "Light invalidation bounds must be page aligned: ~S." region))
+    (luv.frontier:with-frontier-kernel
+        (bounded-light-invalidation
+         (invalid-p :admission ((x px) (y py) (x0 low-x) (y0 low-y) (x1 high-x) (y1 high-y))))
+      (multiple-value-bind (pages direct-p xp yp)
+          (%make-voxel-light-page-storage domain t)
+        (declare (ignore direct-p))
+        (when old
+          (map-voxel-light-pages
+           (lambda (x y z page)
+             (unless (invalid-p x y x0 y0 x1 y1)
+               (setf (gethash (%voxel-light-page-key x y z) pages) page))) old))
+        (when replacement
+          (map-voxel-light-pages
+           (lambda (x y z page)
+             (when (invalid-p x y x0 y0 x1 y1)
+               (setf (gethash (%voxel-light-page-key x y z) pages) page))) replacement))
+        (let ((field (%make-voxel-light-field
+                      domain pages nil xp yp (hash-table-count pages) 0
+                      (if replacement (voxel-light-field-visits replacement) 0)
+                      (if replacement (voxel-light-field-pushes replacement) 0)
+                      (if replacement (voxel-light-field-stale-pops replacement) 0))))
+          (when replacement
+            (setf (voxel-light-field-baseline field)
+                  (voxel-light-field-baseline replacement)))
+          field)))))
