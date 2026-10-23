@@ -207,6 +207,22 @@ keep SDL's native driver selection."
   #-linux
   nil)
 
+(defun initialize-sdl-video ()
+  "Initialize SDL video, falling back to the offscreen driver on Linux.
+
+A desktop session whose monitors are all off still names its compositor, yet
+SDL finds no display there.  Rendering and capture need no display, so when
+no driver was chosen explicitly the offscreen one is tried once.  It is
+chosen by hint, because SDL reads its own copy of the environment, and the
+hint is reset afterwards so a later canvas tries the desktop again."
+  (or (with-runtime-signal-handlers-preserved (sdl3:init :video))
+      #+linux
+      (when (null (uiop:getenv "SDL_VIDEODRIVER"))
+        (sdl3:set-hint "SDL_VIDEO_DRIVER" "offscreen")
+        (unwind-protect
+             (with-runtime-signal-handlers-preserved (sdl3:init :video))
+          (sdl3:reset-hint "SDL_VIDEO_DRIVER")))))
+
 (defun call-with-sdl-main-thread (function)
   "Call FUNCTION where synchronous SDL canvas work can use the native main thread.
 
@@ -1679,8 +1695,7 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
                (progn
                  (prepare-sdl-canvas-host canvas)
                  (select-sdl-video-driver)
-                 (unless (with-runtime-signal-handlers-preserved
-                           (sdl3:init :video))
+                 (unless (initialize-sdl-video)
                    (error "SDL video initialization failed: ~A"
                           (sdl3:get-error)))
                  (setf sdl-initialized-p t)

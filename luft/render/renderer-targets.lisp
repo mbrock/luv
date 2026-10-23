@@ -271,7 +271,9 @@ starts over."
                  (usage (if shader-p '(:render-attachment :texture-binding) '(:texture-binding))
                         (and scaler (gpu-temporal-scaler-output-usage scaler))))
           (when shader-p
-            (image :history :rgba16-float extent '(:render-attachment :texture-binding))
+            (image :history :rgba16-float extent
+                   ;; Cleared before its first use, a transfer on Vulkan.
+                   '(:render-attachment :texture-binding :copy-dst))
             (image :bounds-low :rgba16-float render-extent '(:render-attachment :texture-binding))
             (image :bounds-high :rgba16-float render-extent '(:render-attachment :texture-binding))))
         (image :composite :rgba16-float extent '(:render-attachment :texture-binding))
