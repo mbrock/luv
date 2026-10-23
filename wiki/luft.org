@@ -1177,7 +1177,9 @@ scene transactions; the playable sanctuary now exercises it as its ordinary
 path.  The next application slice is not another input loop: it is a visible
 material chooser and geometric placement preview expressed through this same
 frame.  Parameter prompting remains #OL2JZ1, and no luvcraft gameplay path has
-yet crossed with its old owner removed.
+yet crossed with its old owner removed.  #BBKLUG inventories the whole
+crossing: every Luvcraft feature against Luft, the five seams that carry the
+cost, and an order.
 
 In October 2026 four luvcraft features crossed into LUFT in their LUFT form:
 the alpine relief now raises the large world (the same ranges for the same
