@@ -33,6 +33,19 @@
 (defvar *pass-records* nil)
 (defvar *pass-starts* (make-hash-table :test #'eq))
 
+#+darwin
+(defmethod luv:show-canvas :around ((canvas luv::sdl-canvas))
+  ;; Batch Cocoa cannot activate an application with activation policy zero.
+  ;; This benchmark never presents; retain the already-created hidden window.
+  canvas)
+
+(defclass fixture-scene (ter:scene)
+  ((source :initarg :source :reader fixture-source)))
+(defmethod ter:streaming-scene-source ((scene fixture-scene))
+  ;; Companion presentation needs the original world's coordinate conversion,
+  ;; not a streaming worker. The finite fixture retains that source explicitly.
+  (fixture-source scene))
+
 #+linux
 (progn
   ;; Benchmark-local Vulkan ABI: no instrumentation on production frames.
@@ -114,12 +127,13 @@
 (defun worlds (kind)
   "Finite identical 32x32 terrain, with generated seed-7 light on Luft.
 The old renderer relights the same occupied cells with its own light solver."
-  (let* ((builder (ter:make-scene-builder
+  (let* ((builder (ter:make-scene-builder :horizontal-bits 11
                    :material-vocabulary (g:luvcraft-palette-vocabulary g:*luvcraft-palette*)))
          (world (old::make-block-world :source (make-instance 'old::gazetteer-open-sky-source))))
     (labels ((cell (x y z block)
                (when block
-                 (ter:scene-builder-cell builder x z y :material (g:block-placement block))
+                 (ter:scene-builder-cell builder (+ 1024 x) (+ 1024 z) y
+                                         :material (g:block-placement block))
                  (old::ensure-world-chunk world (floor x 16) (floor y 16) (floor z 16))
                  (setf (old:world-block-at world x y z) block))))
       (if (member kind '(:alpine :meadow))
@@ -141,9 +155,84 @@ The old renderer relights the same occupied cells with its own light solver."
               (loop for x from 12 to 20 do
                 (loop for y from 4 to 8 do (cell x y 16 old::*terminal-block*))))))
       (old::relight-block-world world)
-      (values (ter:finish-scene-builder builder :voxel-light-propagation-p nil) world))))
+      (values (change-class (ter:finish-scene-builder builder) 'fixture-scene
+                            :source (g:make-luvcraft-world-source :seed 7 :offset 1024
+                                                                 :relief (if (eq kind :alpine) :alpine :meadow)))
+              world))))
 
-(defun measure (host old-p width height)
+(defun fixture-physics (host old-p)
+  (if old-p (old::luvcraft-session-physics host) (h::viewer-physics host)))
+
+(defun prepare-fixture (kind host old-p world)
+  (case kind
+    (:balls
+     ;; Same solver and exact cells on both hosts. Keep 100 bodies awake so
+     ;; the warmup cannot turn this into a sleeping/static ball benchmark.
+     (let ((physics (old::make-physics-world :terrain world)))
+       (dotimes (i 100)
+         (old::spawn-physics-body physics (+ 12 (* 0.7 (mod i 10)))
+                                 (+ 5 (* 0.6 (floor i 100)))
+                                 (+ 10 (* 0.7 (mod (floor i 10) 10)))
+                                 :radius 0.25 :never-sleep-p t))
+       (if old-p (setf (old::luvcraft-session-physics host) physics)
+           (setf (h::viewer-physics host) physics))))
+    (:turtle
+     (let* ((animal (make-instance 'old::turtle :seed 7
+                                  :position (v:make-vec3 16d0 4d0 12d0)
+                                  :yaw 0d0 :heading 0d0))
+            (ride (old::activate-luvcraft-critter animal host))
+            (pose (old::luvcraft-focus-camera-pose ride host)))
+       (if old-p
+           (progn
+             (setf (fill-pointer (old::critter-population-critters (old::luvcraft-session-critters host))) 0)
+             (old::add-critter (old::luvcraft-session-critters host) animal)
+             (setf (old::luvcraft-session-modal-focus host) ride)
+             (old::set-camera-pose (old:luvcraft-session-camera host) pose))
+           (let ((camera (r:viewer-camera host)))
+             (setf (h::viewer-animals host) (list animal)
+                   (h::viewer-animals-initialized-p host) t
+                   (r:viewer-modal-focus host) ride
+                   (r:camera-position camera) (h::host-position host (old::camera-pose-position pose))
+                   (r:camera-yaw camera) (- (/ pi 2) (old::camera-pose-yaw pose))
+                   (r:camera-pitch camera) (old::camera-pose-pitch pose)
+                   (r:camera-field-of-view camera) (old::camera-pose-field-of-view pose))))))
+    (:terminal
+     (luv.ghostty:load-libghostty-vt)
+     (if old-p
+         (let ((terminal (old::open-terminal-display host 16 6 16 :back :fixture "")))
+           (old::attach-terminal-display-shell terminal)
+           (old:focus-luvcraft-session host terminal))
+         (progn
+           (assert (r::focus-viewer-terminal host))
+           (dotimes (i 120) (r::advance-viewer-camera host (/ 1d0 60) nil))
+           (r::advance-viewer-world-text host))))
+    (:companion
+     (let* ((turn (make-instance 'luv.application-agent:turn :prompt "Benchmark thought"))
+            (agent
+              (if old-p
+                  (make-instance 'luvcraft.agent:gnome :session host
+                                 :position (v:make-vec3 16d0 4d0 12d0) :x 16 :y 4 :z 12)
+                  (let ((inhabitant (h::make-inhabitant host :gnome (v:make-vec3 1040d0 1036d0 4d0))))
+                    (push inhabitant (h::viewer-agents host))
+                    (setf (h::viewer-agents-initialized-p host) t)
+                    (h::ensure-inhabitant-presentation host inhabitant)))))
+       (setf (luv.application-agent:turn-thought turn)
+             "I am thinking about the light in this little block world."
+             (luv.application-agent:turn-status turn) :thinking
+             (luv.application-agent:turn-started turn) (get-internal-real-time))
+       (when old-p (old:add-luvcraft-overlay host agent))
+       (luvcraft.agent::ensure-gnome-cloud agent turn)))))
+
+(defun advance-fixture (kind host old-p)
+  (case kind
+    (:balls (old::step-physics-world (fixture-physics host old-p) (/ 1f0 60)))
+    (:terminal
+     (unless old-p (r::advance-viewer-world-text host)))
+    (:companion
+     (unless old-p
+       (dolist (overlay (r::viewer-overlays host)) (r::refresh-viewer-overlay overlay host))))))
+
+(defun measure (kind host old-p width height)
   (let* ((canvas (if old-p (old:luvcraft-session-canvas host) (r:viewer-canvas host)))
          (device (if old-p (old:luvcraft-session-device host)
                      (r::renderer-device (r:viewer-renderer host))))
@@ -155,7 +244,8 @@ The old renderer relights the same occupied cells with its own light solver."
                                     :label "benchmark target" :dimensions :2d
                                     :size (list width height 1) :format :bgra8-unorm-srgb
                                     :usage '(:render-attachment :copy-src :copy-dst :texture-binding))))
-         (cpu nil) (wall nil) (gpu nil) (passes (make-hash-table :test #'equal)))
+         (cpu nil) (wall nil) (gpu nil) (simulation nil)
+         (passes (make-hash-table :test #'equal)))
     (declare (ignorable reader))
     (format t "~&DEVICE ~S SDL=~A ~Dx~D~%" description (sdl3:get-current-video-driver) width height)
     (when (getf description :device-type)
@@ -167,6 +257,9 @@ The old renderer relights the same occupied cells with its own light solver."
                       (commands nil))
                  (unwind-protect
                       (progn
+                        (let ((before (now)))
+                          (advance-fixture kind host old-p)
+                          (when record-p (push (* 1000 (- (now) before)) simulation)))
                         #+linux
                         (progn (reset-query-pool (luv::vulkan-command-encoder-command-buffer encoder) timer 0 256)
                                (stamp encoder))
@@ -192,9 +285,16 @@ The old renderer relights the same occupied cells with its own light solver."
                                   (push (duration (second pass) (third pass))
                                         (gethash (first pass) passes)))))
                             #-linux
-                            (when reader
-                              (let ((seconds (funcall reader submission)))
-                                (when seconds (push (* 1000 seconds) gpu)))))))
+                            (progn
+                              (assert reader () "Backend has no GPU timestamp reader")
+                              ;; MTL4 commit feedback trails the completion event.
+                              ;; The completed wall time above excludes this wait.
+                              (loop with deadline = (+ (now) 5d0)
+                                    for seconds = (funcall reader submission)
+                                    when seconds do (push (* 1000 seconds) gpu) (return)
+                                    do (when (> (now) deadline)
+                                         (error "GPU feedback missing for submission ~D" submission))
+                                       (sleep 0.001))))))
                    (when commands (luv:destroy commands))
                    (luv:destroy encoder)))))
       (unwind-protect
@@ -203,8 +303,10 @@ The old renderer relights the same occupied cells with its own light solver."
             (lambda ()
               (dotimes (i (env-integer "BENCH_WARMUP" 60)) (frame nil))
               (dotimes (i (env-integer "BENCH_FRAMES" 300)) (frame t))
+              (assert (= (length gpu) (env-integer "BENCH_FRAMES" 300)))
               (list :device description :extent (list width height) :taa nil :dynamic-resolution nil
                     :cpu-encode-ms (summary cpu) :completion-ms (summary wall)
+                    :simulation-ms (summary simulation)
                     :completion-fps (/ 1000 (getf (summary wall) :mean))
                     :gpu-ms (summary gpu)
                     :gpu-passes (loop for label being the hash-keys of passes using (hash-value values)
@@ -234,8 +336,10 @@ The old renderer relights the same occupied cells with its own light solver."
                          (r:start-game-host
                           :solid scene :player-p nil :width width :height height :frames-per-second 1
                           :world-pathname nil :fixed-exposure 0.45
-                          :camera (r:make-fly-camera :position (apply #'v:make-vec3 eye)
-                                                     :yaw yaw :pitch pitch :field-of-view 0.85)
+                          :camera (r:make-fly-camera
+                                   :position (v:make-vec3 (+ 1024 (first eye))
+                                                         (+ 1024 (second eye)) (third eye))
+                                   :yaw yaw :pitch pitch :field-of-view 0.85)
                           :sky-factory 'h::make-luvcraft-sky-drawing
                           :terrain-factory 'h::make-luvcraft-terrain-drawing
                           :torch-factory 'h::make-luvcraft-torch-drawing
@@ -251,9 +355,10 @@ The old renderer relights the same occupied cells with its own light solver."
                          (r:viewer-mode host) (make-instance 'r:first-person-mode)
                          (old::sky-clock-pinned-day-fraction (h::viewer-sky-clock host)) 0.5))
                  (when old-p (old::wait-for-luvcraft-products host :minimum (hash-table-count (old::luvcraft-session-desired-chunks host)) :timeout 120d0))
+                 (luv::call-on-sdl-canvas-thread canvas (lambda () (prepare-fixture kind host old-p world)))
                  (let ((startup (- (now) started)))
                    (append (list :scene kind :backend backend :setup-seconds startup)
-                           (measure host old-p width height)))))
+                           (measure kind host old-p width height)))))
           (when host (if old-p (old:stop-luvcraft host) (r:stop-viewer host))))))))
 
 (defun main ()
