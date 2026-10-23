@@ -154,10 +154,12 @@
        (let ((center (vec3:make-vec3 (+ (vec3:vec3-x p) (* (cos yaw) x) (* (sin yaw) z))
                                     (+ (vec3:vec3-y p) (- (* (sin yaw) x)) (* (cos yaw) z))
                                     (+ (vec3:vec3-z p) y)))
-             (tone (cond ((eq tile luvcraft::+turtle-carapace-tile+) '(0.19 0.29 0.075))
-                         ((eq tile luvcraft::+turtle-plastron-tile+) '(0.48 0.40 0.19))
-                         (t '(0.36 0.45 0.17)))))
-         (push (render:box-figure center center (sin yaw) (cos yaw) (list hx hz hy) tone) figures))))
+             (figure nil))
+         (setf figure (render:box-figure center center (sin yaw) (cos yaw)
+                                         (list hx hz hy) '(0.0 0.0 0.0))
+               (fourth (fourth figure)) 4.0
+               (fifth figure) (list 0.0 0.0 0.0 (float (luvcraft::block-atlas-tile-offset tile) 1.0)))
+         (push figure figures))))
     (nreverse figures)))
 
 (defmethod render:viewer-figures ((viewer luvcraft-viewer))

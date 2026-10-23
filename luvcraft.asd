@@ -233,6 +233,7 @@
                (:file "luvcraft/luft/animals")
                (:file "luvcraft/luft/balls")
                (:file "luvcraft/luft/ball-drawing")
+               (:file "luvcraft/luft/creature-drawing")
                (:file "luvcraft/luft/agents")
                (:file "luvcraft/luft/agent-tools")
                (:file "luvcraft/luft/presentation")

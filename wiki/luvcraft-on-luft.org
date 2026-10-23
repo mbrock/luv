@@ -295,7 +295,7 @@ the layer of #W9QMPT that owns the feature afterwards.
 | Place, mine, pick | in =app.lisp= | done, with undo and bevel-face rim (#7O90OS) | terrain edits, game rules | carried kind, reach rules |
 | Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | shared old instruments (#291ELY) | game | host protocol; both inventory modes and profiles |
 | Physics, balls | 3.7k | reused solver, throws, live fountain/lava sources (#0JMB9O, #PXUPMA) | physics, game | shared emitter, resident Luft queries |
-| Critters, riding | 0.7k | original turtles and rides (#DEHFD4) | game | Luft contact adapter, figure bodies, neutral focus |
+| Critters, riding | 0.7k | original turtles, atlas surfaces, sun shadows and rides (#TG0JJU, #DEHFD4) | game | Luft contact adapter, original mesh/shaders, neutral focus |
 | Particles | 0.2k | reused mining burst, material-tinted figures (#7O90OS) | game simulation, figure stage | old motion and bounded population, Luft tones |
 | First-person hands, held items | 1k | original bounded hands and ball (#DEHFD4) | game, native HDR viewmodel stage | original animation, geometry and shaders |
 | Sky, clock, night | 0.4k | original atmosphere/profile/clock + Luft night (#S84HR6) | game, renderer | shared shader functions; game-owned clock and engine knobs |
@@ -1014,11 +1014,50 @@ checks mixed kinds and independent current/previous poses; both shader
 backends compile. Headless SDL with software Vulkan captures five turtles
 on seed 7's meadow and the original wizard on his isle. The live turtles
 walk and rest, and their descriptions round-trip through Luvcraft's own save
-reader. Still open: turtle atlas relief rather than flat tones, shadows
-cast by animal boxes, and further held-device stages. Riding and hands now
+reader. The flat-tone body port is superseded by the original atlas surfaces
+and sun-map casters (#TG0JJU). Further held-device stages remain. Riding and hands now
 reuse the original implementations (#DEHFD4). Agent bodies now use
 their original SDF stage (#JZWPAI). The old critter renderer remains because old
 Luvcraft still plays through it.
+
+*** DONE Keep the original creature surfaces and cast into the shared sun map
+:PROPERTIES:
+:ID: TG0JJU
+:END:
+
+The creature figure kind retains the original atlas tile identity for every
+shell slab, belly, head, tail and leg. =creature-drawing.lisp= expands those
+poses through =emit-critter-box=, not a replacement cube mesh or sampled
+colour. The original colour atlas, normal atlas, face texture scales,
+underside occlusion, relief filtering, roughness, weathering and complete
+block-surface fragment shader remain authoritative. The host appends only
+its projection/jitter and current/previous vertex motion to that program;
+it does not copy the surface implementation. Native and temporal interfaces
+compile to both SPIR-V and MSL.
+
+Each fence-safe frame owns its growable mesh, motion positions and adapted
+environment. The adapter translates the actual Luft camera, sun and shadow
+rows into the old Y-up shader ABI. The original depth shader casts those
+same vertices into Luft's existing sun map, beside terrain and sphere figures;
+the original surface samples that map too. There is no creature-only shadow
+map or painted contact smear. Global exposure, contrast and grading are
+unchanged. The current light lanes still assume open sky/no blocklight for
+creatures; sampling their streamed voxel light is separate work.
+
+=scripts/capture-luvcraft-creatures.lisp= compares old and new native software
+Vulkan at 1000 by 700, seed 7, the same turtle pose and camera, 60-degree FOV
+and frozen 10:00 sun, on a staged grass deck. TAA and dynamic resolution are
+off and the canvas watchdog's fatal timeout is disabled. Inspected captures
+show the same shell/skin detail; the shared finish and terrain remain
+different. A caster-disabled control retains the turtle but removes its
+ground shadow and self-shadowing. The shadow is soft at the shared map's
+resolution; an amplified RGB difference makes its footprint unambiguous.
+A supplementary TAA-on capture also renders correctly. The mesh regression
+compares all 5,040 scalars with the original emitter, checks the three
+distinct tile identities and independent previous poses. =make= and
+=make test= pass, including all 33 available suites; Ghostty and terminal
+are unavailable in the slim closure. The system foot test needs its Nix
+library path cleared, and shader validation needs spirv-val on PATH.
 
 *** DONE Ride the original turtles with the original hands
 :PROPERTIES:
@@ -1050,8 +1089,8 @@ hands, ball, mounted and descending states in both hosts. With the fatal
 canvas watchdog disabled for these slow captures, 600 equal ride steps take
 both turtles from height 10 to 8, with matching position and gait. Geometry
 is reused, not visually substituted; lighting is not pixel-identical, and
-the ball is mostly hidden by the shared hotbar. Turtle atlas relief and
-shadows remain the earlier figure port's limitations, not riding changes.
+the ball is mostly hidden by the shared hotbar. The earlier figure port's
+turtle atlas/shadow limitations are subsequently closed by #TG0JJU.
 
 *** DONE Give Luvcraft companions bodies and tools on Luft
 :PROPERTIES:
@@ -1328,8 +1367,8 @@ Luft's existing capture scripts and text batches serve current comparisons.
 
 /Left./ Tape download/activation; film projection, playback, rewind and
 soundtrack; Urbit activation; detailed companion construction previews, transcript
-cassettes, agent walls and the remaining old tool vocabulary; turtle atlas
-relief and cast shadows rather than the current box figures. View bob and
+cassettes, agent walls and the remaining old tool vocabulary. Turtle atlas
+relief and cast shadows are now restored (#TG0JJU). View bob and
 landing dip belong with the old player-body phase and are noted for the
 hands/riding owner rather than independently changing locomotion here.
 

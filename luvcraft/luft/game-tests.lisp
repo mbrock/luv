@@ -262,3 +262,25 @@
                                         :timestamp 0 :x 400 :y 300 :button :left))
              (is = 18 (luvcraft::block-particle-count (host::viewer-particles viewer)))))
       (luv.production:stop-production-system producer))))
+
+(define-test creature-figures-retain-original-atlas-and-mesh
+  (let* ((animal (make-instance 'luvcraft::turtle :seed 7 :yaw 0.65d0
+                                :position (luv.arithmetic.lisp.vec3:make-vec3 8d0 4d0 6d0)))
+         (figures (host::animal-figures animal))
+         (data (render:pack-figure-instances figures))
+         (actual (host::creature-figure-vertices data))
+         (expected (make-array (length actual) :element-type 'single-float :fill-pointer 0)))
+    ;; The original emitter is the oracle, including UV scale, body-part tile,
+    ;; face shading, normals and winding. Packing loses only float precision.
+    (luvcraft::map-critter-boxes
+     animal (lambda (x y z hx hy hz tile)
+              (luvcraft::emit-critter-box expected animal x y z hx hy hz tile 1.0 0.0)))
+    (is = 5040 (length actual))
+    (is = (length expected) (length actual))
+    (true (loop for a across actual for b across expected always (< (abs (- a b)) 0.0002)))
+    (is = 3 (length (remove-duplicates (mapcar (lambda (figure) (fourth (fifth figure))) figures))))
+    ;; A prior pose belongs to this presentation, not a shared model or the
+    ;; current pose. Temporal reconstruction must see the animal's motion.
+    (incf (aref data 4) 1.0)
+    (let ((previous (host::creature-figure-vertices data t)))
+      (true (< (abs (- (- (aref previous 0) (aref actual 0)) 1.0)) 0.0002)))))

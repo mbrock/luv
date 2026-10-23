@@ -200,6 +200,11 @@ final pass."
           (aref camera-uniform-data 122) (/ 1.0f0 (first extent))
           (aref camera-uniform-data 123) (/ 1.0f0 (second extent))))
   (write-buffer (renderer-frame-state-camera-buffer frame) camera-uniform-data)
+  (when (renderer-player renderer)
+    (upload-scene-drawing-environment
+     (renderer-player renderer)
+     (renderer-frame-drawing-binding renderer frame (renderer-player renderer))
+     camera-uniform-data))
   (upload-torch-frame (renderer-torches renderer)
                       (renderer-frame-state-flame-effect-buffer frame) effect-time))
 

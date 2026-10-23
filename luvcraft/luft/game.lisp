@@ -395,7 +395,7 @@ LUFT.RENDER:START-GAME-HOST."
                  :title *title*
                  :sky-factory 'make-luvcraft-sky-drawing
                  :terrain-factory 'make-luvcraft-terrain-drawing
-                 :figure-factory 'make-ball-figure-drawing
+                 :figure-factory 'make-creature-figure-drawing
                  :world-pathname (and (or loaded-p pathname-p
                                           (and pathname (null seed)))
                                       pathname)

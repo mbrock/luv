@@ -9,7 +9,8 @@
    (layout :accessor program-layout)
    (pipeline :accessor program-pipeline)))
 
-(defclass vertex-drawing-program (drawing-program) ())
+(defclass vertex-drawing-program (drawing-program)
+  ((vertex-buffers :initarg :vertex-buffers :initform nil :reader program-vertex-buffers)))
 
 (defgeneric encode-program (program pass binding command)
   (:documentation "Select PROGRAM and BINDING, then encode its draw COMMAND."))
@@ -43,7 +44,7 @@
   (release-program program))
 
 (defun make-drawing-program
-    (device &key label vertex fragment targets (sample-count 1) depth-stencil)
+    (device &key label vertex fragment targets (sample-count 1) depth-stencil vertex-buffers)
   "Build a vertex program from its checked shader interface.
 A vertex stage is required. Descriptor set zero is supported; invalid
 stages, sets, and conflicting inputs fail before GPU allocation."
@@ -58,7 +59,7 @@ stages, sets, and conflicting inputs fail before GPU allocation."
                           (remove nil (list geometry fragment))))
            (entries (mapcar #'program-input-layout-entry inputs))
            (program (make-instance 'vertex-drawing-program
-                                   :inputs inputs)))
+                                   :inputs inputs :vertex-buffers vertex-buffers)))
       (with-gpu-construction (program)
         (labels ((own (descriptor) (own-gpu-resource program device descriptor))
                  (shader (specification)
@@ -81,7 +82,8 @@ stages, sets, and conflicting inputs fail before GPU allocation."
 (defmethod program-pipeline-descriptor
     ((program vertex-drawing-program) geometry-module &rest state)
   (apply #'make-render-pipeline-descriptor
-         :vertex `(:module ,geometry-module) :primitive '(:topology :triangle-list) state))
+         :vertex `(:module ,geometry-module :buffers ,(program-vertex-buffers program))
+         :primitive '(:topology :triangle-list) state))
 
 (defun program-input-layout-entry (resource)
   (unless (zerop (luv.shader:shader-resource-descriptor-set resource))
