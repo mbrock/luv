@@ -434,7 +434,10 @@
           # tools exercised by ordinary builds, but not optional workstation
           # programs or Ghostty's large Zig closure.  The Ghostty binding can
           # still be compiled and inspected; explicitly loading libghostty-vt
-          # requires the full environment.
+          # requires the full environment.  Every orb downloads this closure
+          # before its first command, so tools that tests use only "when
+          # present" stay out: Zig (1.3 GB, for the wiki's Typst plugin),
+          # Typst, DXC, spirv-tools, and the Vulkan tools and layers.
           slimDevelopmentPackages = [
             pkgs.bashInteractive
             lisp
@@ -447,15 +450,8 @@
             pkgs.nodejs # Execute ParenScript browser parity tests.
             pkgs.pkg-config
             pkgs.sdl3
-            pkgs.spirv-tools
-            # DXC validates the HLSL lowering, as spirv-tools does SPIR-V.
-            pkgs.directx-shader-compiler
             swashPackage
-            pkgs.typst
             pkgs.vulkan-headers
-            pkgs.vulkan-tools
-            pkgs.vulkan-validation-layers
-            pkgs.zig
           ];
           # The `nix run` programs build from what they actually load, not
           # from the workstation shell: no Go, Zig, Node, Typst, MuPDF,
@@ -523,8 +519,6 @@
             LUV_ASDF_CACHE_KEY = builtins.baseNameOf slimDevelopmentClosure;
             PKG_CONFIG_PATH = "${ffmpeg.dev}/lib/pkgconfig";
             CPATH = "${pkgs.vulkan-headers}/include";
-            VK_LAYER_PATH =
-              "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
           } // nixpkgs.lib.optionalAttrs (lavapipeIcd != null) {
             LUV_LAVAPIPE_ICD =
               "${pkgs.mesa}/share/vulkan/icd.d/${lavapipeIcd}";

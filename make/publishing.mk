@@ -22,10 +22,15 @@ wiki-cli:
 typst-prty-plugin:
 	./scripts/build-typst-prty-plugin
 
+# The slim shell leaves out Zig's 1.3 GB toolchain; skip there.
 typst-prty-test:
-	@zig build --build-file wiki/typst-prty-zig/build.zig \
-		--cache-dir build/typst-prty-zig/cache \
-		--prefix build/typst-prty-zig test
+	@if command -v zig >/dev/null 2>&1; then \
+		zig build --build-file wiki/typst-prty-zig/build.zig \
+			--cache-dir build/typst-prty-zig/cache \
+			--prefix build/typst-prty-zig test; \
+	else \
+		echo "typst-prty: skipped, zig is not on PATH."; \
+	fi
 
 wiki:
 	./scripts/wiki build
