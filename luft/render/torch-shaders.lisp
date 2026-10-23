@@ -41,6 +41,24 @@
         (* bitangent (swizzle local-normal :y))
         (* normal (swizzle local-normal :z))))))
 
+(define-shader-function attachment-body-vertex-base (frame-flags vertex-index)
+  "The first body-buffer row of VERTEX-INDEX in the body FRAME-FLAGS names."
+  (* (+ (* (ldb (byte 4 #.luft.render::+torch-body-light-bit-count+) frame-flags)
+           (uint #.luft.render::+attachment-body-vertex-stride+))
+        vertex-index)
+     (uint #.luft.render::+torch-body-vertex-row-count+)))
+
+(define-shader-function lantern-glass-radiance (body-local)
+  "The glow a lantern's flame casts through its glass at local BODY-LOCAL.
+
+The flame sits on the lantern's axis at its core height; the glass is
+brightest beside it and dims toward the frame."
+  (let* ((core-height (if (> (swizzle body-local :z) 0.5) 0.745 0.22))
+         (offset (- (swizzle body-local :xyz) (vec3 0.0 0.0 core-height)))
+         (spread (* offset (vec3 1.0 1.0 0.55)))
+         (glow (exp (* -60.0 (dot spread spread)))))
+    (* (vec3 1.0 0.50 0.16) (+ 0.18 (* 2.4 glow)))))
+
 (define-live-shader torch-body-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
@@ -57,7 +75,8 @@
                (shadow-sample-output :vec3 :location 6
                                      :quantity quantities:shadow-coordinate
                                      :unit :one)
-               (voxel-light-output :vec3 :location 9))
+               (voxel-light-output :vec3 :location 9)
+               (body-local-output :vec4 :location 10))
      :resources
      ((torch-frames :storage-buffer :binding 0 :element :vec4)
       (torch-body-vertices :storage-buffer :binding 1 :element :vec4)
@@ -98,8 +117,7 @@
                     (float (ldb (byte 4 8) packed-light)))
               15.0))
          (vertex-base
-           (* vertex-index
-              (uint #.luft.render::+torch-body-vertex-row-count+)))
+           (attachment-body-vertex-base frame-flags vertex-index))
          (local-position-row
            (buffer-element torch-body-vertices vertex-base))
          (local-normal-row
@@ -152,7 +170,13 @@
                        (+ (* (swizzle light-clip :y) 0.5) 0.5)
                        (swizzle light-clip :z))
                  :quantity quantities:shadow-coordinate :unit :one))
-    (set-output voxel-light-output voxel-light)))
+    (set-output voxel-light-output voxel-light)
+    ;; Local position and, in W, the part plus four times the form.
+    (set-output body-local-output
+                (vec4 (swizzle local-position-row :xyz)
+                      (+ (swizzle local-position-row :w)
+                         (* 4.0 (float (ldb (byte 4 #.luft.render::+torch-body-light-bit-count+)
+                                            frame-flags))))))))
 
 (define-live-shader torch-body-shadow-vertex-specification
     (:stage :vertex
@@ -187,8 +211,8 @@
                             :quantity quantities:spatial-scale
                             :unit quantities:cell))
          (vertex-base
-           (* vertex-index
-              (uint #.luft.render::+torch-body-vertex-row-count+)))
+           (attachment-body-vertex-base
+            (uint (swizzle frame-normal-row :w)) vertex-index))
          (local-position-row
            (buffer-element torch-body-vertices vertex-base))
          (world-position
@@ -211,11 +235,12 @@
               (previous-clip :vec4 :location 5)
               (shadow-sample :vec3 :location 6
                              :quantity quantities:shadow-coordinate :unit :one)
-              (voxel-light :vec3 :location 9))
+              (voxel-light :vec3 :location 9)
+              (body-local :vec4 :location 10))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
-                  :members #.(scene-uniform-prefix 30))
+                  :members #.(scene-uniform-prefix 50))
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
@@ -232,13 +257,29 @@
          (upness (swizzle normal :z))
          (sky-weight (+ 0.5 (* 0.5 upness)))
          (ambient (+ (* ground (- 1.0 sky-weight)) (* sky sky-weight)))
-         (bronze (vec3 0.47 0.17 0.04))
+         ;; W is the part plus four times the form: a torch's bronze, a
+         ;; lantern's blackened iron, or (part 1) its lit glass.
+         (code (swizzle body-local :w))
+         (form (floor (/ (+ code 0.5) 4.0)))
+         (part (- code (* 4.0 form)))
+         (metal (if (> form 0.5) (vec3 0.045 0.040 0.036) (vec3 0.47 0.17 0.04)))
          (local-light (* 0.45 (* voxel-light voxel-light)))
-         (radiance
-           (* bronze
+         (nearby
+           (point-lights-radiance
+            (representation world-position) normal
+            point-light-0 point-light-color-0 point-light-1 point-light-color-1
+            point-light-2 point-light-color-2 point-light-3 point-light-color-3
+            point-light-4 point-light-color-4 point-light-5 point-light-color-5
+            point-light-6 point-light-color-6 point-light-7 point-light-color-7))
+         (lit
+           (* metal
               (+ (* ambient 0.72)
                  (* sun-color (* visibility facing))
-                 local-light)))
+                 local-light nearby)))
+         (radiance
+           (if (> part 0.5)
+               (* (lantern-glass-radiance body-local) #.*lantern-glass-emission*)
+               lit))
          (final
            (atmospheric-surface
             radiance (representation world-position)
@@ -422,8 +463,15 @@
            (assume-quantity (representation scale)
                             :quantity quantities:world-distance
                             :unit quantities:cell))
+         ;; Only torches burn in the open; a lantern's flame is its glass.
+         (torch-p
+           (if (> (ldb (byte 4 #.luft.render::+torch-body-light-bit-count+)
+                       (uint (swizzle normal-row :w)))
+                  (uint 0.0))
+               0.0 1.0))
          (proxy-radius
-           (* #.luft.render::+torch-flame-proxy-radius+ world-scale))
+           (* #.luft.render::+torch-flame-proxy-radius+ world-scale
+              (assume-quantity torch-p :unit :one)))
          (volume-center
            (+ origin
               (interpret

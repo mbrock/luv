@@ -29,7 +29,7 @@
     :initform t
     :reader scene-voxel-light-propagation-p
     :type boolean)
-   (attachments :initarg :attachments :initform #() :reader scene-attachments)
+   (attachments :initarg :attachments :initform #() :accessor scene-attachments)
    (player-p :initarg :player-p :initform nil :reader scene-player-p))
   (:documentation
    "One authored solid and its cell-material field.
@@ -314,10 +314,10 @@ the author names none."
 X/Y/Z's outward AXIS/SIDE face.
 
 The attachment is not voxel occupancy. The adjacent cell is reserved clearance;
-U and V retain normalized coordinates in the oriented face chart. The current
-star mesher does not yet realize these requests into body/flame frames or wick
-light sources. Keeping authoring separate lets a future surface query supply
-those frames to an independent drawing such as the renderer's torches."
+U and V retain normalized coordinates in the oriented face chart.  Mesh
+decoration realizes each request as a frame at that point of the face
+(SURFACE-ATTACHMENT-FRAME-DATA) for an independent drawing such as the
+renderer's torches and lanterns; it does not yet seed voxel light."
   (check-type axis luft:axis)
   (check-type side luft:side)
   (check-type material material-kind)

@@ -159,6 +159,7 @@ this package draws; the renderer and the ateliers use it.")
            #:material-cell-at
            #:material-cell-reader
            #:material-kind
+           #:material-kind-attachment-form
            #:material-kind-base-tone
            #:material-kind-oriented-tones
            #:material-kind-pattern
@@ -188,6 +189,7 @@ this package draws; the renderer and the ateliers use it.")
            #:request-character-jump
            #:reset-streaming-scene-publication
            #:resident-cell-chunk
+           #:resident-cell-chunk-attachments
            #:resident-cell-chunk-fibers
            #:resident-cell-chunk-material-cells
            #:retarget-authored-world
@@ -274,6 +276,8 @@ this package draws; the renderer and the ateliers use it.")
            #:streaming-scene-source
            #:streaming-scene-store
            #:surface-attachment
+           #:surface-attachment-clearance-cell
+           #:surface-attachment-face
            #:surface-attachment-light-emission
            #:surface-attachment-material
            #:surface-mesh-tree-manifest

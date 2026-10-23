@@ -72,8 +72,8 @@
                          (lambda (command) (typep command 'luv::gpu-draw-command))
                          (reverse (test-gpu-commands pass)))))
              (true (= 3 (length draws)))
-             (true (equal (list (render::torch-body-vertex-count)
-                               (render::torch-body-vertex-count) 6)
+             (true (equal (list render::+attachment-body-vertex-stride+
+                               render::+attachment-body-vertex-stride+ 6)
                           (mapcar #'luv::gpu-draw-command-vertex-count draws)))
              (true (every (lambda (draw) (= 2 (luv::gpu-draw-command-instance-count draw))) draws)))
            (dolist (binding (list shadow body flame))
@@ -97,13 +97,49 @@
            (true (= 1 (test-gpu-release-attempts old-binding))))
       (render:destroy-renderer renderer))))
 
-(define-test authored-torch-requests-are-retained-without-fabricating-star-surface-frames
+(define-test authored-torches-are-realized-as-frames-on-their-face
   (let ((builder (render::make-world-scene-builder)))
     (render::scene-builder-cell builder 10 10 0)
     (render::scene-builder-torch builder 10 10 0 :z :high)
     (let ((scene (render::finish-scene-builder builder)))
       (true (= 1 (length (render::scene-attachments scene))))
       (multiple-value-bind (mesh generation) (render::make-render-mesh scene)
-        (true (null (luft:surface-mesh-attachments mesh)))
+        (let ((frames (render::surface-mesh-torch-frame-data mesh)))
+          (true (= render:+torch-flame-instance-scalar-count+ (length frames)))
+          (multiple-value-bind (x y z seed nx ny nz flags tx ty tz scale)
+              (render:unpack-torch-flame-frame frames)
+            (declare (ignore seed))
+            ;; The top face's centre, facing up, drawn as a torch.
+            (true (equalp '(10.5 10.5 1.0 0.0 0.0 1.0 1.0 0.0 0.0 1.0)
+                          (list x y z nx ny nz tx ty tz scale)))
+            (true (= 0 (render::torch-frame-form-code flags)))
+            (true (= (luft:pack-voxel-light 15 9 3)
+                     (render:unpack-torch-body-frame-flags flags)))))
         (true (eq (render::scene-authored-light-generation scene)
                   (render::scene-mesh-generation-light-generation generation)))))))
+
+(define-test lanterns-stand-and-hang-with-their-own-bodies
+  (true (<= (/ (length (render::torch-body-vertex-data))
+               render:+torch-body-vertex-scalar-count+)
+            render::+attachment-body-vertex-stride+))
+  (true (= (* render::+attachment-body-form-count+
+              render::+attachment-body-vertex-stride+
+              render:+torch-body-vertex-scalar-count+)
+           (length (render::attachment-body-vertex-data))))
+  (let ((uniform (make-array 200 :element-type 'single-float :initial-element 0.0))
+        (standing (render:pack-torch-flame-frame
+                   2.5 2.5 1.0 0.5 0.0 0.0 1.0
+                   (render:pack-torch-body-frame-flags (luft:pack-voxel-light 14 10 5) 1)
+                   1.0 0.0 0.0 1.0))
+        (hanging (render:pack-torch-flame-frame
+                  9.5 2.5 4.0 0.5 0.0 0.0 -1.0
+                  (render:pack-torch-body-frame-flags (luft:pack-voxel-light 14 10 5) 2)
+                  1.0 0.0 0.0 1.0)))
+    (true (= 2 (render::write-attachment-point-lights
+                (concatenate '(simple-array single-float (*)) hanging standing)
+                0.0 0.0 0.0 uniform)))
+    ;; The nearer standing lantern comes first, its light at its glass.
+    (true (equalp (list 2.5 2.5 (+ 1.0 render::*lantern-core-height*) 15.0)
+                  (coerce (subseq uniform 136 140) 'list)))
+    (true (< (aref uniform 146) 4.0))
+    (true (= 0.0 (aref uniform 155)))))

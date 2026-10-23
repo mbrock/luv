@@ -553,7 +553,9 @@ the selector is the whole of the difference."
                 character
                 (light-uniform-data (current-light) (frame-view-position view) exposure)
                 previous-character character-direction
-                (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))))))))
+                (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))
+                ;; The renderer writes the attachment lights at upload.
+                (make-list +point-light-scalar-count+ :initial-element 0.0)))))))
 
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))

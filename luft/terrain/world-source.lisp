@@ -27,13 +27,16 @@ worker, so it must read only SOURCE's immutable description."))
 
 (defstruct (resident-cell-chunk
              (:constructor %make-resident-cell-chunk
-                 (key incarnation fibers material-cells))
+                 (key incarnation fibers material-cells &optional attachments))
              (:copier nil))
-  "One immutable, evictable materialization of an authored source chunk."
+  "One immutable, evictable materialization of an authored source chunk.
+
+ATTACHMENTS are the surface attachments its fixture cells became."
   (key 0 :type luft:chunk-key :read-only t)
   (incarnation 0 :type (integer 1 *) :read-only t)
   (fibers nil :type luft:chunk-fibers :read-only t)
-  (material-cells nil :type hash-table :read-only t))
+  (material-cells nil :type hash-table :read-only t)
+  (attachments nil :type list :read-only t))
 
 (defgeneric world-source-spawn (source)
   (:documentation
@@ -96,6 +99,46 @@ materializes and the descriptors the scene compiles name the same palette."
      (world-source-edits source))
     edits))
 
+;;; A fixture is a cell whose material has an attachment form: a lantern is a
+;;; block in Luvcraft's world but a small drawn body here.  It stands on the
+;;; solid cell below it, else hangs from the one above; a fixture is no
+;;; support, and one with no support in its column stays a cube.  Its own cell
+;;; becomes the attachment's clearance.
+
+(defun realize-fixture-cells (domain vocabulary materials)
+  "Turn MATERIALS' supported fixture cells into attachments, in face order."
+  (let ((members (domains:identity-vocabulary-members vocabulary))
+        (fixtures (make-hash-table :test #'eql))
+        (attachments nil))
+    (flet ((kind-at (cell)
+             (material-placement-kind (aref members (gethash cell materials)))))
+      (maphash (lambda (cell offset)
+                 (declare (ignore offset))
+                 (when (material-kind-attachment-form (kind-at cell))
+                   (setf (gethash cell fixtures) (kind-at cell))))
+               materials)
+      (flet ((support-p (site)
+               (and site (nth-value 1 (gethash site materials))
+                    (not (gethash site fixtures)))))
+        (maphash
+         (lambda (cell kind)
+           (let ((below (luft:step-site domain cell :z -1))
+                 (above (luft:step-site domain cell :z 1)))
+             (multiple-value-bind (support face)
+                 (cond ((support-p below)
+                        (values below (luft:site-boundary-high domain below :z)))
+                       ((support-p above)
+                        (values above (luft:site-boundary-low domain above :z))))
+               (when support
+                 (push (make-instance 'surface-attachment
+                                      :support-cell support :face face
+                                      :clearance-cell cell :material kind)
+                       attachments)))))
+         fixtures))
+      (dolist (attachment attachments)
+        (remhash (surface-attachment-clearance-cell attachment) materials))
+      (sort attachments #'< :key #'surface-attachment-face))))
+
 (zdefun (materialize-world-source-chunk :zone :luft/materialize-source-chunk
                                         :value key)
     (source key incarnation &key edits)
@@ -120,7 +163,8 @@ materializes and the descriptors the scene compiles name the same palette."
             (setf (gethash (car edit) materials)
                   (domains:identity-vocabulary-offset vocabulary (cdr edit)))
             (remhash (car edit) materials))))
-    (let ((fibers (luft:make-chunk-fibers domain key)))
+    (let ((fibers (luft:make-chunk-fibers domain key))
+          (attachments (realize-fixture-cells domain vocabulary materials)))
       (zone :luft/assemble-source-fibers
         (maphash (lambda (cell offset)
                    (declare (ignore offset))
@@ -129,7 +173,7 @@ materializes and the descriptors the scene compiles name the same palette."
                           (luft:site-z cell))
                          1))
                  materials))
-      (%make-resident-cell-chunk key incarnation fibers materials))))
+      (%make-resident-cell-chunk key incarnation fibers materials attachments))))
 
 (defclass authored-chunk-load-request (production:production-request)
   ((scene :initarg :scene :reader authored-chunk-load-request-scene)
