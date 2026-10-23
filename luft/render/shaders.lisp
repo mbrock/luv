@@ -285,12 +285,15 @@ The variation is the pane's lamplight, brighter toward its lower edge."
                             (floor (+ (swizzle face :z) 0.5))))
           frame 0.0)))
 
-(define-shader-function mineral-pattern (pattern world)
-  "A cut through veined stone or its dark mineral inclusions, without UV seams."
-  (let* ((phase (+ (dot world (vec3 7.0 4.0 5.0))
-                   (* 1.8 (sin (dot world (vec3 1.3 2.1 0.7))))))
+(define-shader-function mineral-pattern (pattern normal world)
+  "Face-local warped veins, or world-space dark mineral inclusions."
+  (let* ((uv (* (fract (swizzle (face-coordinates normal world) :xy)) 16.0))
+         (x (swizzle uv :x))
+         (y (swizzle uv :y))
+         (phase (+ (* 0.55 x) (* 0.85 y) (* 2.2 (sin (* 0.45 y)))
+                   (* 1.3 (sin (* 0.6 x)))))
          (ink (if (< (swizzle pattern :x) 14.5)
-                  (smoothstep 0.88 0.99 (sin phase))
+                  (max 0.0 (- 1.0 (* 2.2 (abs (sin (* 0.5 phase))))))
                   (step 0.85 (paper-hash (floor (* world (* 4.75 (swizzle pattern :y)))))))))
     (vec4 1.0 ink 0.0 0.0)))
 
@@ -300,7 +303,7 @@ The variation is the pane's lamplight, brighter toward its lower edge."
          (face (face-coordinates normal world))
          (top (> (abs (swizzle normal :z)) 0.7)))
     (if (> shape 8.5)
-        (if (> shape 13.5) (mineral-pattern pattern world)
+        (if (> shape 13.5) (mineral-pattern pattern normal world)
             (motif-face shape face top))
         (if top
             (if (< shape 5.5)
@@ -491,8 +494,8 @@ warp then the weft. Distant and grazing nap is filtered by the caller."
   "The height, in [0, 1], of relief field CODE at world POINT.
 
 The codes follow +MATERIAL-RELIEFS+: none, grass, stone, grain, wood,
-leaves, planks, snow, gloss, cloth, straw, cactus, metal."
-  (if (< code 0.5) 0.5
+leaves, planks, snow, gloss, cloth, straw, cactus, metal, faceted."
+  (if (or (> code 12.5) (< code 0.5)) 0.5
       (if (< code 1.5)
           ;; Tufts: two scales of soft bumps, the finer one blade-sized.
           (+ (* 0.6 (paper-noise (* point 4.7)))
@@ -526,6 +529,18 @@ leaves, planks, snow, gloss, cloth, straw, cactus, metal."
                                       (if (< code 9.5)
                                           (cloth-height point)
                                           (fiber-height code point))))))))))))
+
+(define-shader-function faceted-tone (tone normal world fade)
+  "Bright diagonal facets and a rim on each cell face of a crystal."
+  (let* ((uv (fract (swizzle (face-coordinates normal world) :xy)))
+         (diagonal (min (abs (- (swizzle uv :x) (swizzle uv :y)))
+                        (abs (- (+ (swizzle uv :x) (swizzle uv :y)) 1.0))))
+         (facet (- 1.0 (smoothstep 0.0625 0.09375 diagonal)))
+         (edge (min (min (swizzle uv :x) (- 1.0 (swizzle uv :x)))
+                    (min (swizzle uv :y) (- 1.0 (swizzle uv :y)))))
+         (rim (- 1.0 (smoothstep 0.03125 0.0625 edge))))
+    (+ tone (* fade (+ (* (vec3 0.0 0.26 0.16) facet)
+                       (* (vec3 0.065 0.18 0.08) rim))))))
 
 (define-shader-function cross-product (a b)
   (- (* (swizzle a :yzx) (swizzle b :zxy))
@@ -875,6 +890,14 @@ NIL leaves the atelier's direct light unchanged.")
       `(,*terrain-cloud-visibility-function* ,point ,sun ,elapsed ,cloudiness ,origin)
       1.0))
 
+(defvar *terrain-blocklight-function* nil
+  "Optional game response to raw RGB blocklight and the shared light gain.")
+
+(define-shader-abstraction terrain-blocklight (light gain)
+  (if *terrain-blocklight-function*
+      `(,*terrain-blocklight-function* ,light ,gain)
+      `(* ,gain (* ,light ,light))))
+
 (define-live-shader star-fragment-specification
     (:stage :fragment
      :inputs ((world-position :vec3 :location 0
@@ -974,14 +997,17 @@ NIL leaves the atelier's direct light unchanged.")
                                        (* 0.08 (- height 0.5))))
                         (- 1.0 (abs (swizzle normal :z))))
                      0.0))
-         (tone (* (mix base-tone (swizzle (representation material-accent) :xyz) fringe)
+         (surface-tone (if (> relief 12.5)
+                           (faceted-tone base-tone normal world fade)
+                           base-tone))
+         (tone (* (mix surface-tone (swizzle (representation material-accent) :xyz) fringe)
                   (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear))))
          (view (normalize (mix (- forward) (- (swizzle eye :xyz) world)
                                divisor)))
          ;; Conductors use neutral ambient energy and a coloured sun lobe.
          ;; Two sky/ground colours are not an environment map: reflecting
          ;; their hue painted every iron face blue, including upward ones.
-         (metal (if (> relief 11.5) 1.0 0.0))
+         (metal (if (> relief 11.5) (if (< relief 12.5) 1.0 0.0) 0.0))
          (sky (* (swizzle (representation voxel-light) :w)
                  (representation (swizzle sky-color-vector :xyz))))
          (ground (* (swizzle (representation voxel-light) :w)
@@ -998,12 +1024,14 @@ NIL leaves the atelier's direct light unchanged.")
               (face-pattern-glow (representation material-pattern) laid normal
                                  (representation material-accent)
                                  fade)
+              (if (< (swizzle (representation material-pattern) :x) 0.5)
+                  (* tone (swizzle (representation material-accent) :w))
+                  (vec3 0.0 0.0 0.0))
               ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
               ;; and lava, warm by night and lost in the sun by day.  The
               ;; square keeps a light's falloff from flattening into a wash.
-              (* tone (* voxel-light-gain
-                         (* (swizzle (representation voxel-light) :xyz)
-                            (swizzle (representation voxel-light) :xyz))))))
+              (* tone (terrain-blocklight (swizzle (representation voxel-light) :xyz)
+                                         voxel-light-gain))))
          (final
            (atmospheric-surface
             radiance world
