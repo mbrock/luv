@@ -2,7 +2,8 @@
 ;;;; VK_DRIVER_FILES=/path/to/hardware_icd.json SDL_VIDEODRIVER=offscreen \
 ;;;;   ./env sbcl --script scripts/bench-gpu-fps.lisp
 ;;;; On macOS omit SDL_VIDEODRIVER. Optional environment: BENCH_FRAMES (300),
-;;;; BENCH_WARMUP (60), BENCH_OUTPUT (build/gpu-fps.sexp), BENCH_SCENES
+;;;; BENCH_WARMUP (60), BENCH_OUTPUT (build/gpu-fps.sexp), BENCH_SIZES
+;;;; (1280x720,1920x1080), BENCH_SCENES
 ;;;; (comma-separated alpine,meadow,cave,balls,turtle,terminal,companion,atelier).
 ;;;; Native 720p and 1080p, TAA and dynamic resolution OFF on both renderers.
 ;;;; No swapchain/readback in the timed loop: serialized completion throughput,
@@ -61,7 +62,8 @@
     (if *query-pool*
         (let* ((index (stamp encoder)) (start (now)) (pass (call-next-method)))
           (setf (gethash pass *pass-starts*)
-                (list index start (luv::gpu-descriptor-label descriptor)))
+                (list index start (or (luv::gpu-descriptor-label descriptor)
+                                      (format nil "pass-~D" (floor index 2)))))
           pass)
         (call-next-method)))
   (defmethod luv:end-pass :around ((pass luv::vulkan-gpu-render-pass-encoder))
@@ -224,7 +226,7 @@ The old renderer relights the same occupied cells with its own light solver."
                      (if old-p
                          (old:start-luvcraft
                           :world world :width width :height height :visible-p nil :high-pixel-density-p nil
-                          :frames-per-second nil :residency-radius 2
+                          :frames-per-second nil :residency-radius 3
                           :sky-clock (make-instance 'old::sky-clock :pinned-day-fraction 0.5)
                           :camera (make-instance 'old:fly-camera
                                                  :position (v:make-vec3 (first eye) (third eye) (second eye))
@@ -262,6 +264,10 @@ The old renderer relights the same occupied cells with its own light solver."
         r::*temporal-upscaling-p* nil
         r::*dynamic-resolution-frame-rate* nil)
   (let ((output (or (uiop:getenv "BENCH_OUTPUT") "build/gpu-fps.sexp"))
+        (sizes (mapcar (lambda (s)
+                         (mapcar #'parse-integer (uiop:split-string s :separator "x")))
+                       (uiop:split-string (or (uiop:getenv "BENCH_SIZES") "1280x720,1920x1080")
+                                          :separator ",")))
         (scenes (mapcar (lambda (s) (intern (string-upcase s) :keyword))
                         (uiop:split-string (or (uiop:getenv "BENCH_SCENES") "alpine,meadow,cave") :separator ","))))
     (ensure-directories-exist output)
@@ -270,7 +276,7 @@ The old renderer relights the same occupied cells with its own light solver."
       (luv:call-with-sdl-main-thread
        (lambda ()
          (dolist (scene scenes)
-           (dolist (size '((1280 720) (1920 1080)))
+           (dolist (size sizes)
              (dolist (backend '(:luft :old))
                (let ((result (run-case scene backend (first size) (second size))))
                  (print result stream) (terpri stream) (finish-output stream)
