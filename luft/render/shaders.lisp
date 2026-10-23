@@ -8,7 +8,9 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defvar *screen-ambient-occlusion-strength* 0.38)
   (defvar *screen-ambient-occlusion-radius* 0.95)
-  (defvar *ambient-pigment-strength* 0.82))
+  (defvar *ambient-pigment-strength* 0.82)
+  (defvar *voxel-light-gain* 0.7
+    "Radiance of full terrain voxel light on a surface of unit tone."))
 
 (define-shader-function unpack-terrain-tone (packed)
   "Decode one RGB8 terrain descriptor into scene-linear colour."
@@ -760,7 +762,9 @@ the figure stays clear and only its far reaches recede."
               (material-surface :vec4 :location 6 :interpolation :flat)
               (material-pattern :vec4 :location 7 :interpolation :flat)
               (material-mortar :vec4 :location 8 :interpolation :flat)
-              (material-accent :vec4 :location 9 :interpolation :flat))
+              (material-accent :vec4 :location 9 :interpolation :flat)
+
+              (voxel-light :vec3 :location 10))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -838,7 +842,12 @@ the figure stays clear and only its far reaches recede."
                   point-light-0 point-light-color-0 point-light-1 point-light-color-1
                   point-light-2 point-light-color-2 point-light-3 point-light-color-3
                   point-light-4 point-light-color-4 point-light-5 point-light-color-5
-                  point-light-6 point-light-color-6 point-light-7 point-light-color-7))))
+                  point-light-6 point-light-color-6 point-light-7 point-light-color-7))
+
+              ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
+              ;; and lava, warm by night and lost in the sun by day.  The
+              ;; square keeps a light's falloff from flattening into a wash.
+              (* tone (* #.*voxel-light-gain* (* voxel-light voxel-light)))))
          (final
            (atmospheric-surface
             radiance world
@@ -888,10 +897,13 @@ the figure stays clear and only its far reaches recede."
                (material-surface-output :vec4 :location 6 :interpolation :flat)
                (material-pattern-output :vec4 :location 7 :interpolation :flat)
                (material-mortar-output :vec4 :location 8 :interpolation :flat)
-               (material-accent-output :vec4 :location 9 :interpolation :flat))
+               (material-accent-output :vec4 :location 9 :interpolation :flat)
+
+               (voxel-light-output :vec3 :location 10))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (terrain-appearances :storage-buffer :binding 3 :element :uvec2)
+                 (terrain-lights :storage-buffer :binding 8 :element :uvec4)
                  (material-descriptors :storage-buffer :binding 6 :element :uvec4)
                  (terrain-normals :storage-buffer :binding 7 :element :vec4)
                  (camera-state :uniform-block :binding 2
@@ -975,6 +987,26 @@ the figure stays clear and only its far reaches recede."
          (material-accent
            (vec4 (unpack-terrain-tone (swizzle pattern-row :z))
                  (/ (float (ldb (byte 8 24) (swizzle pattern-row :z))) 63.75)))
+         ;; A vertex lies within a tick of one of the seven lattice points
+         ;; of the cube above its site; that point's RGB4 is its light.
+         (lights (buffer-element terrain-lights instance-index))
+         (point (+ (if (> (swizzle record :x) (uint 11.0)) (uint 1.0) (uint 0.0))
+                   (if (> (swizzle record :y) (uint 11.0)) (uint 2.0) (uint 0.0))
+                   (if (> (swizzle record :z) (uint 11.0)) (uint 4.0) (uint 0.0))))
+         (light-pair
+           (if (< point (uint 2.0)) (swizzle lights :x)
+               (if (< point (uint 4.0)) (swizzle lights :y)
+                   (if (< point (uint 6.0)) (swizzle lights :z)
+                       (swizzle lights :w)))))
+         (packed-light
+           (if (> (ldb (byte 1 0) point) (uint 0.0))
+               (ldb (byte 12 16) light-pair)
+               (ldb (byte 12 0) light-pair)))
+         (voxel-light
+           (/ (vec3 (float (ldb (byte 4 0) packed-light))
+                    (float (ldb (byte 4 4) packed-light))
+                    (float (ldb (byte 4 8) packed-light)))
+              15.0))
          (divisor (swizzle (representation render-parameters) :z))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection divisor))
@@ -1003,7 +1035,9 @@ the figure stays clear and only its far reaches recede."
     (set-output material-surface-output material-surface)
     (set-output material-pattern-output material-pattern)
     (set-output material-mortar-output material-mortar)
-    (set-output material-accent-output material-accent)))
+    (set-output material-accent-output material-accent)
+
+    (set-output voxel-light-output voxel-light)))
 
 (define-live-shader terrain-shadow-vertex-specification
     (:stage :vertex

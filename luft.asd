@@ -75,8 +75,10 @@
                              (:file "scene")
                              (:file "decoration")
                              (:file "bodies")
+                             (:file "rays")
                              (:file "world-source")
                              (:file "streaming-state")
+                             (:file "streamed-light")
                              (:file "streaming")
                              (:file "fixtures")
                              (:file "streaming-mesh")
@@ -136,6 +138,7 @@
                              (:file "renderer-targets")
                              (:file "renderer-frames")
                              (:file "world-text")
+                             (:file "camera")
                              (:file "frame")))))
 
 (defsystem "luft/world"
@@ -158,6 +161,32 @@
   :author "Mikael Brockman"
   :depends-on ("luft/terrain")
   :components ((:file "luft/terrain/simulation")))
+
+(defsystem "luft/wizard"
+  :description "The isometric wizard: a small game on the Luft engine alone."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  ;; The engine layers and nothing else: no atelier, no Luft world, no McCLIM.
+  :depends-on ("luft/renderer" "luft/simulation")
+  :serial t
+  :components ((:module "wizard"
+                :pathname "luft/wizard"
+                :serial t
+                :components ((:file "package")
+                             (:file "world")
+                             (:file "game"))))
+  :in-order-to ((test-op (test-op "luft/wizard/test"))))
+
+(defsystem "luft/wizard/test"
+  :description "The wizard's isle, and a click that walks him, without a GPU."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/wizard" "luv/test-support")
+  :components ((:file "luft/wizard/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.wizard.tests)))
 
 (defsystem "luft/render"
   :description "The McCLIM LUFT atelier over the packed-site renderer."

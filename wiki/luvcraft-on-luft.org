@@ -171,14 +171,57 @@ collides, where it can stand
 between ([[lisp:luft.terrain:search-walking-path]]); a game's character
 composes a body with its intentions and turns a path into its own route.
 
+The scene no longer says whether it has a player.  A game decides: the
+atelier's =start-viewer= takes =:player-p=, the wizard always walks, and a
+study capture asks for the frame to itself.  The walking character, its
+controllers, and the world clock sit in =luft/simulation=, generic enough
+that the wizard uses them as they are (#CERUZY).
+
 What still sits on the wrong side of the line:
 
-- The scene still carries a =player-p= flag.  The walking character, its
-  controllers, and the world clock sit in =luft/simulation=, generic enough
-  for now that a game can use them as they are, and the follow camera
-  lives in the atelier's studio.
+- The atelier's follow camera, first-person eyes, and orbit stay in its
+  studio; the wizard wrote its own follow in a dozen lines over the
+  renderer's camera, which is where a game's camera behaviour belongs.
+- The renderer's figure stage draws exactly one robed figure, from lanes
+  in the scene uniforms.  A second character, or a figure that is not the
+  wizard, needs the figure to become a drawing stage a game adds (#CS2DOF).
 - The atelier shares =luft.render= with the renderer, which is why it
   attaches =luft.world= at load rather than in a package definition.
+
+* What the wizard forced into the engine
+:PROPERTIES:
+:ID: CERUZY
+:END:
+
+The isometric wizard (#BJRZW2) first reached past the protocol in four
+places, and each became an engine function rather than an export of the
+atelier's internals.
+
+1. *A ray is a terrain query.*  The lattice ray walk lived in the studio and
+   returned an atelier =site-inspection=.  It is now
+   [[lisp:luft.terrain:raycast-face]], returning the face, the cell, the
+   point, and the distance, with [[lisp:luft.terrain:raycast-standing-cell]]
+   for a walking game's click: only the top of a solid cell promises
+   somewhere to stand.  The atelier's =raycast-site= wraps it in its
+   inspection.
+2. *Cameras are the renderer's.*  The fly camera, its eased yaw, its basis,
+   the two projections, temporal jitter, and the scene uniform packing moved
+   from the studio to the renderer's =camera.lisp=, with
+   [[lisp:luft.render:camera-pointer-ray]] for the ray through a point on
+   the screen under either projection.
+3. *A frame is one call.*  Turning a camera into a frame -- jitter, history
+   continuity, exposure, uniforms, then every pass -- was the studio's
+   =encode-viewer-frame=.  It is now
+   [[lisp:luft.render:encode-renderer-view]], which the atelier and the
+   wizard both call with their own camera, projection, and figure.
+4. *The figure is lanes, not a character.*  The uniform packing read a
+   =walking-character= directly.  It now takes
+   [[lisp:luft.render:figure-lanes]] -- feet now and a frame ago, gait, and
+   headings -- so the renderer does not know what a character is, and a
+   frame without one passes NIL.
+
+The scene's =player-p= was the fifth: the renderer drew the figure only when
+the terrain said so.  The terrain no longer says (#S5POD8).
 
 * Luvcraft is closer than its code suggests
 :PROPERTIES:
@@ -311,7 +354,7 @@ the game a child starts, until its Luft form replaces it; each feature that
 crosses is deleted from the old program rather than kept in parallel
 (#WO50UR).
 
-** NEXT Separate the terrain engine from the renderer and the atelier
+** DONE Separate the terrain engine from the renderer and the atelier
 :PROPERTIES:
 :ID: S5POD8
 :END:
@@ -345,9 +388,14 @@ terrain alone.  #TNOILN lists what remains; the fourth cut made
 torches one kind of surface attachment, so the terrain no longer names
 them.  The fifth moved collision, standing, and path search into the
 terrain, where =luft/terrain/test= routes a body around a wall it cannot
-climb.  The player flag is the piece left.
+climb.  The sixth removed the scene's =player-p=: the scene, its builder,
+streaming snapshots, and world-source scenes no longer carry it, and the
+atelier's =start-viewer= takes the choice instead, which the atelier and
+=luvcraft/luft= keep as before and study captures turn off.  The isometric
+wizard (#BJRZW2) then played over the engine alone, and what it needed moved
+below the games (#CERUZY).
 
-** TODO Make the isometric wizard a game of its own
+** DONE Make the isometric wizard a game of its own
 :PROPERTIES:
 :ID: BJRZW2
 :END:
@@ -359,6 +407,25 @@ the protocol for is a line in the wrong place.
 
 /Done when./ The wizard plays from its own system, and the engine changes
 it forced are protocol rather than special cases.
+
+/Evidence./ =luft/wizard=, in the =luft.wizard= package, depends on
+=luft/renderer= and =luft/simulation= and nothing else: no atelier, no Luft
+world, no McCLIM.  It brings an eight-placement palette (meadow, laid
+flagstone, standing stone, bedrock, sand, water, bark, leaves), a 256-cell
+isle as a =wizard-world-source= -- rolling meadow, a winding path, a ring of
+standing stones on a levelled green, a pond, scattered trees -- with its spawn
+on the path, a walking character drawn as the renderer's robed figure, an
+isometric camera that follows him and turns by eighths on Q and E, and
+click-to-walk.  It opens its own canvas, renderer, and mesh worker, streams
+the isle around him, and screenshots through luv's shared offscreen capture;
+=./sly play wizard= opens it.  =luft/wizard/test= raises part of the isle
+without a GPU, projects a cell up the path onto the screen by hand, casts the
+renderer's screen ray back through that point, finds the same cell with the
+terrain's ray, and walks him there through the simulation; it also checks
+that a standing stone's side and the sky name nowhere to stand.  What the
+wizard had to reach for became engine protocol (#CERUZY).  The atelier keeps
+its own isometric mode, which now shares that protocol rather than code with
+the wizard.
 
 ** NEXT Give materials tones, relief, and edge response
 :PROPERTIES:
@@ -495,7 +562,7 @@ and party through them.  It takes the old game's remaining features crossing
 first (#R1T4AY), the load half of =streaming.lisp= kept as Luvcraft's
 generator, and the mesh claims in =luvcraft/core/test= retired with it.
 
-** TODO Stream voxel light in the terrain engine
+** NEXT Stream voxel light in the terrain engine
 :PROPERTIES:
 :ID: BQMYNU
 :END:
@@ -506,6 +573,36 @@ block light in the streamed world, extracting the frontier language under
 
 /Done when./ Torches and lanterns light the streamed world in every game,
 and Luvcraft's light solver is deleted.
+
+/Evidence./ Luft's own solver streams; no frontier language was needed.  A
+light value loses at least one level per step and starts at fifteen, while
+a chunk column is sixty-four cells wide, so the exact light over one column
+depends only on the emitters, attachments, and opacities of its 3 by 3
+neighbourhood.  =luft/terrain/streamed-light.lisp= makes that a /light
+tile/: =solve-voxel-light= over the neighbourhood's sources, pruned by a new
+=:region= bound to the tile's own columns and kept only there.  A tile's
+identity is its neighbours' immutable material tables (by identity) and
+their emitting attachments (by =surface-attachment-light-emission=), so the
+mesh worker solves tiles beside the meshes and reuses every unchanged one;
+an owner's field joins the tiles its stars can sample by sharing their
+pages.  A seam is consistent because both owners meeting there read the same
+tile.  Before scheduling, the owner thread asks =streaming-light-dirty-owners=
+which published owners sit beside a tile whose inputs changed and which held
+or now has light; an edit or arrival relights those and nothing else, and a
+dark world relights nothing.  World-source scenes now build with
+propagation on.  The renderer packs each site's seven lattice-point lights
+(=voxel-light-at-lattice-point=, shared by every star meeting there) into a
+four-word sidecar the star shader adds as local radiance.  A differential
+check found 0 mismatches against the whole-domain solver over 3,099 lit
+cells across a four-chunk corner, and
+=streamed-light-crosses-a-chunk-seam-and-follows-edits= keeps that.  On
+Luvcraft seed 7's spawn window (16 owners, 36 tiles, 4,133 cave-crystal
+sources) a cohort meshes in 204 ms with light against 72 ms without;
+tiles cost 124 ms cold and nothing cached, the sidecar 132 ms; materializing
+those chunks takes 13.7 s.  The atelier's large world has no emitters and
+pays nothing.  Open: attachments still light from their authored face, not a
+realized frame; Luvcraft's solver is not deleted; sky light is not yet
+regional; tile solving should move off the cohort's critical path.
 
 ** TODO Carry a block, and fill an inventory
 :PROPERTIES:

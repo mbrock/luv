@@ -31,14 +31,15 @@
           (render::character-heading-x player) -1.0
           (render::character-heading-y player) 0.0
           (render::character-gait player) 2.0)
-    (let ((lanes (multiple-value-list (render::character-render-lanes player))))
+    (let ((lanes (render::character-render-lanes player)))
       (true (= 3 (length lanes)))
       (true (equalp '(5.0 3.0 5.48 2.0) (first lanes)))
       (true (equalp '(2.0 3.0 5.48 0.0) (second lanes)))
       (true (equalp '(-1.0 0.0 0.6 0.8) (third lanes))))
     (dolist (body (list nil player))
       (let ((uniform (render::camera-uniform-data
-                      view view '(0.0 0.0 0.0 0.0) 0.0 body)))
+                      view view '(0.0 0.0 0.0 0.0) 0.0
+                      (and body (render::character-render-lanes body)))))
         (true (= 200 (length uniform)))
         (true (equalp (if body #(-1.0 0.0 0.6 0.8) #(0.0 1.0 0.0 1.0))
                       (subseq uniform 96 100)))))
@@ -1075,7 +1076,9 @@
                                      (true (equalp (render::render-population-instance-words ap)
                                                   (render::render-population-instance-words bp)))
                                      (true (equalp (render::render-population-appearance-words ap)
-                                                  (render::render-population-appearance-words bp))))))
+                                                  (render::render-population-appearance-words bp)))
+                                     (true (equalp (render::render-population-light-words ap)
+                                                  (render::render-population-light-words bp))))))
                      (setf (render::streaming-scene-mesh-cache scene) saved)))))
         (let* ((first (compile-current))
                (far (cdr (assoc (car (last keys))

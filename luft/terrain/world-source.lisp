@@ -59,9 +59,9 @@ materializes and the descriptors the scene compiles name the same palette."
          (builder (make-scene-builder
                    :horizontal-bits (luft:world-domain-x-bits domain)
                    :material-vocabulary vocabulary))
-         ;; Regional voxel light is deliberately not begun by this stage.
+         ;; Its light is regional (#BQMYNU): no whole-world field exists.
          (empty (finish-scene-builder
-                 builder :player-p t :voxel-light-propagation-p nil)))
+                 builder :voxel-light-propagation-p nil)))
     (unless (= (luft:world-domain-x-bits domain) (luft:world-domain-y-bits domain))
       (error "A streamed world source needs a square domain, not ~S." domain))
     (make-instance
@@ -77,10 +77,10 @@ materializes and the descriptors the scene compiles name the same palette."
      :authored-light-provenance (scene-authored-light-provenance empty)
      :authored-light-generation (scene-authored-light-generation empty)
      :content-revision 0
-     :voxel-light-propagation-p nil
+     :voxel-light-propagation-p t
      :light-generation (scene-authored-light-generation empty)
+     :light-tiles (make-hash-table :test #'eql)
      :attachments #()
-     :player-p t
      :frames-per-load frames-per-load
      :residency-radius residency-radius
      :mesh-preparer mesh-preparer)))
@@ -173,6 +173,9 @@ materializes and the descriptors the scene compiles name the same palette."
                           (luft:site-z cell))
                          1))
                  materials))
+      ;; Find the chunk's emitters here, on the worker, before the owner
+      ;; thread asks which tiles its arrival may light.
+      (chunk-emitter-sources materials vocabulary)
       (%make-resident-cell-chunk key incarnation fibers materials attachments))))
 
 (defclass authored-chunk-load-request (production:production-request)

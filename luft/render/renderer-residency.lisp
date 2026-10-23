@@ -160,6 +160,7 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   ((population :initarg :population :reader resident-population-population)
    (instance-buffer :accessor resident-population-instance-buffer)
    (appearance-buffer :accessor resident-population-appearance-buffer)
+   (light-buffer :accessor resident-population-light-buffer)
    (descriptor-buffer :accessor resident-population-descriptor-buffer)
    ;; (STAR FIRST COUNT) for each star present, over the star-sorted sites.
    (star-runs :initform nil :accessor resident-population-star-runs)
@@ -308,13 +309,19 @@ cell of it on every axis, so the box is the sites' extent grown by one."
            (lambda (value) (coerce value 'single-float))
            (append (mapcar #'1- low) (mapcar #'1+ high))))))
 
-(defun sort-sites-by-star (instance-words appearance-words)
-  "Return INSTANCE-WORDS and APPEARANCE-WORDS reordered by star, and the runs.
+(defun sort-sites-by-star
+    (instance-words appearance-words
+     &optional (light-words (make-array (length instance-words)
+                                        :element-type '(unsigned-byte 32)
+                                        :initial-element 0)))
+  "Return INSTANCE-WORDS and APPEARANCE-WORDS reordered by star, the runs,
+and LIGHT-WORDS reordered with them.
 
-Each site is four instance words ending in its star and two appearance
-words; the two arrays keep their one-for-one order.  The runs are
+Each site is four instance words ending in its star, two appearance words,
+and four light words; the arrays keep their one-for-one order.  The runs are
 (STAR FIRST COUNT) for every star present, the instances one draw covers."
-  (declare (type (simple-array (unsigned-byte 32) (*)) instance-words appearance-words)
+  (declare (type (simple-array (unsigned-byte 32) (*))
+                 instance-words appearance-words light-words)
            (optimize (speed 3) (safety 1)))
   (let* ((sites (floor (length instance-words) 4))
          (counts (make-array 256 :element-type 'fixnum :initial-element 0))
@@ -322,7 +329,12 @@ words; the two arrays keep their one-for-one order.  The runs are
          (sorted-instances (make-array (length instance-words)
                                        :element-type '(unsigned-byte 32)))
          (sorted-appearances (make-array (length appearance-words)
-                                         :element-type '(unsigned-byte 32))))
+                                         :element-type '(unsigned-byte 32)))
+         (sorted-lights (make-array (length light-words)
+                                    :element-type '(unsigned-byte 32))))
+    (unless (= (length light-words) (length instance-words))
+      (error "~D light words do not have four per site (~D instance words)."
+             (length light-words) (length instance-words)))
     (flet ((star (site) (logand #xff (aref instance-words (+ 3 (* 4 site))))))
       (dotimes (site sites) (incf (aref counts (star site))))
       (loop with next fixnum = 0
@@ -338,8 +350,10 @@ words; the two arrays keep their one-for-one order.  The runs are
             (replace sorted-instances instance-words
                      :start1 (* 4 slot) :start2 (* 4 site) :end2 (* 4 (1+ site)))
             (replace sorted-appearances appearance-words
-                     :start1 (* 2 slot) :start2 (* 2 site) :end2 (* 2 (1+ site)))))
-        (values sorted-instances sorted-appearances runs)))))
+                     :start1 (* 2 slot) :start2 (* 2 site) :end2 (* 2 (1+ site)))
+            (replace sorted-lights light-words
+                     :start1 (* 4 slot) :start2 (* 4 site) :end2 (* 4 (1+ site)))))
+        (values sorted-instances sorted-appearances runs sorted-lights)))))
 
 (zdefun (%upload-render-population :zone :luft/upload-slot) (renderer population)
   "Own each buffer before uploading, so even a failed write rolls back."
@@ -353,13 +367,16 @@ words; the two arrays keep their one-for-one order.  The runs are
                  (when (plusp (length words)) (write-buffer buffer words))
                  buffer)))
         ;; One indexed draw per star covers a contiguous run of sites.
-        (multiple-value-bind (instances appearances runs)
+        (multiple-value-bind (instances appearances runs lights)
             (sort-sites-by-star (render-population-instance-words population)
-                                (render-population-appearance-words population))
+                                (render-population-appearance-words population)
+                                (render-population-light-words population))
           (setf (resident-population-instance-buffer resident)
                 (upload "luft resident site instances" instances)
                 (resident-population-appearance-buffer resident)
                 (upload "luft active-star appearance sidecars" appearances)
+                (resident-population-light-buffer resident)
+                (upload "luft active-star lattice light" lights)
                 (resident-population-descriptor-buffer resident)
                 (upload "luft terrain material descriptors"
                         (render-population-descriptor-words population))
@@ -577,9 +594,19 @@ words; the two arrays keep their one-for-one order.  The runs are
           (unless (and
                    (eq (scene-mesh-generation-scene generation)
                        (renderer-slot-provenance-scene provenance))
-                   (eq light-generation
-                       (renderer-slot-provenance-light-generation provenance))
-                   (surface-mesh-tree-uses-light-field-p mesh field)
+                   ;; Regional light (#BQMYNU) relights owners by tile, so a
+                   ;; retained owner keeps the generation it was lit with and
+                   ;; must still carry that generation's exact field.
+                   (if (scene-regional-light-p
+                        (scene-mesh-generation-scene generation))
+                       (surface-mesh-tree-uses-light-field-p
+                        mesh
+                        (realized-light-generation-field
+                         (renderer-slot-provenance-light-generation provenance)))
+                       (and (eq light-generation
+                                (renderer-slot-provenance-light-generation
+                                 provenance))
+                            (surface-mesh-tree-uses-light-field-p mesh field)))
                    (surface-mesh-tree-manifest-matches-p
                     (renderer-slot-provenance-tree provenance) mesh))
             (error "Renderer owner ~S does not retain its exact claimed mesh/light generation."
@@ -619,6 +646,9 @@ words; the two arrays keep their one-for-one order.  The runs are
           (setf (streaming-scene-mesh-cache scene)
                 (streaming-mesh-result-mesh-cache
                  (streaming-replacement-result replacement))))
+        (install-streaming-light-tiles
+         scene (streaming-mesh-result-light-tiles
+                (streaming-replacement-result replacement)))
         (setf (streaming-scene-replacement scene) nil)
         (length meshes)))))
 

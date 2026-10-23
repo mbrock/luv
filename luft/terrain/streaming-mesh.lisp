@@ -143,7 +143,9 @@ chunk is empty; excluding that owner drops real boundary triangles."
       scene output-keys bevel-width)
      realize-attachment-light-p
      (streaming-scene-light-generation scene)
-     (streaming-scene-mesh-cache scene))))
+     (streaming-scene-mesh-cache scene)
+     (let ((tiles (streaming-scene-light-tiles scene)))
+       (and tiles (alexandria:copy-hash-table tiles))))))
 
 (defun streaming-owner-input-signature (snapshot key)
   "Identity of an owner's immutable geometry/material inputs and compiler.
@@ -291,11 +293,12 @@ appearance reads authored cells directly and needs no meshed context owners."
                              (pack-fixture-bodies (chunk-body-cells key))))
                    (push (list key signature prepared) products)
                    mesh)))
-             (decorate-owners (owners)
+             (decorate-owners (owners light-generation)
                (decorate-scene-meshes
                 owners scene :appearance-prepared-p t
                 :generation-scene owner-scene
                 :request-stamp (streaming-mesh-snapshot-stamp snapshot)
+                :light-generation light-generation
                 :reusable-light-generation
                 (streaming-mesh-snapshot-reusable-light-generation snapshot)
                 :realize-attachment-light-p
@@ -318,9 +321,20 @@ appearance reads authored cells directly and needs no meshed context owners."
                  (streaming-mesh-snapshot-output-keys snapshot))
                (owners
                  (mapcar (lambda (key) (cons key (mesh-owner key)))
-                         output-keys)))
+                         output-keys))
+               ;; Regional light: the tiles every output's stars can sample.
+               (cache (streaming-mesh-snapshot-light-tiles snapshot))
+               (tiles
+                 (and cache
+                      (realize-streaming-light-tiles
+                       scene (streaming-mesh-snapshot-witness-keys snapshot)
+                       cache))))
           (multiple-value-bind (decorated generation)
-              (decorate-owners owners)
+              (decorate-owners
+               owners
+               (and cache
+                    (light-tiles-generation
+                     scene tiles (scene-content-revision scene))))
             (values
              decorated nil nil generation
              (when prepare-products-p
@@ -331,7 +345,8 @@ appearance reads authored cells directly and needs no meshed context owners."
                       key signature descriptors mesh
                       (prepare-streamed-mesh
                        (streaming-scene-mesh-preparer owner-scene)
-                       mesh previous)))))))))))
+                       mesh previous))))
+             tiles)))))))
 
 (defun make-scene-regional-meshes
     (scene bevel-width &key reusable-light-generation)
@@ -341,7 +356,7 @@ This is the fully resident static form of the regional compiler.  The returned
 alist retains canonical chunk ownership, while callers that require the legacy
 single-mesh surface can borrow it as a companion tree."
   (check-type scene scene)
-  (let* ((streaming (make-streaming-scene scene))
+  (let* ((streaming (make-streaming-scene scene :regional-light-p nil))
          (source-keys
            (sort (loop for key being the hash-keys of
                        (streaming-scene-store streaming)
@@ -440,7 +455,7 @@ generation before publication succeeds."
 (zdefmethod (production:perform-production-request
              :zone :luft/produce-mesh-region)
     ((request streaming-mesh-request))
-  (multiple-value-bind (meshes census diagnostics generation products)
+  (multiple-value-bind (meshes census diagnostics generation products tiles)
       (mesh-streaming-snapshot (streaming-mesh-request-snapshot request)
                                :prepare-products-p t)
     (declare (ignore meshes census diagnostics))
@@ -449,4 +464,4 @@ generation before publication succeeds."
                (cons (streaming-star-product-key product)
                      (streaming-star-product-prepared product)))
              products)
-     generation products)))
+     generation products tiles)))

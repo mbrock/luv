@@ -154,7 +154,7 @@ drawn-body code (SURFACE-ATTACHMENT-FORM-CODE) from bit 12."
                                 :value (length owners))
     (owners scene
      &key appearance-prepared-p
-       request-stamp reusable-light-generation
+       request-stamp reusable-light-generation light-generation
        (realize-attachment-light-p t)
        (generation-scene scene))
   "Finalize appearance and exact light metadata for a region of star meshes.
@@ -162,6 +162,8 @@ drawn-body code (SURFACE-ATTACHMENT-FORM-CODE) from bit 12."
 OWNERS is an alist of canonical chunk owner to finished mesh. The returned
 SCENE-MESH-GENERATION snapshots those exact outputs after metadata is final.
 APPEARANCE-PREPARED-P means their material arrays are already compiled.
+LIGHT-GENERATION, when given, is an already solved regional generation
+(#BQMYNU) and replaces the scene's whole-field realization.
 
 Each owner's mesh carries the frames of the attachments whose support cell
 lies in its chunk (SURFACE-ATTACHMENT-FRAME-DATA); an independent drawing,
@@ -170,14 +172,17 @@ yet seed the realized voxel light."
   (check-type owners list)
   (let* ((light-generation
            (zone :luft/realize-light
-             (if realize-attachment-light-p
-                 (scene-mesh-light-generation scene reusable-light-generation)
+             (cond
+               (light-generation light-generation)
+               (realize-attachment-light-p
+                 (scene-mesh-light-generation scene reusable-light-generation))
+               (t
                  (or (etypecase reusable-light-generation
                        (null nil)
                        (realized-light-generation reusable-light-generation)
                        (scene-mesh-generation
                         (scene-mesh-generation-light-generation reusable-light-generation)))
-                     (error "A non-realizing mesh request needs a reusable light generation.")))))
+                     (error "A non-realizing mesh request needs a reusable light generation."))))))
          (field (realized-light-generation-field light-generation)))
     (zone :luft/compile-appearance
       (let ((descriptors

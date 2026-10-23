@@ -35,6 +35,12 @@
    (light-generation
     :initarg :light-generation
     :accessor streaming-scene-light-generation)
+   (light-tiles
+    :initarg :light-tiles :initform nil
+    :reader streaming-scene-light-tiles
+    :documentation
+    "Published regional light tiles by chunk key, or NIL when this scene
+publishes one whole-scene light field instead (#BQMYNU).")
    (frame-counter :initform 0 :accessor streaming-scene-frame-counter)))
 
 (defstruct (streaming-mesh-snapshot
@@ -42,7 +48,7 @@
                  (scene input-scene output-keys witness-keys resident-source-keys
                   bevel-width union-neighborhood stamp
                   realize-attachment-light-p reusable-light-generation
-                  &optional mesh-cache)))
+                  &optional mesh-cache light-tiles)))
   "Immutable CPU input for one dependency-closed regional mesh request."
   (scene nil :read-only t)
   ;; The owning streaming scene remains mutable on the canvas thread.  Workers
@@ -64,7 +70,10 @@
   (reusable-light-generation nil
                              :type (or null realized-light-generation)
                              :read-only t)
-  (mesh-cache nil :type list :read-only t))
+  (mesh-cache nil :type list :read-only t)
+  ;; A private copy of the published regional light tiles, or NIL when the
+  ;; scene publishes one whole-scene field.
+  (light-tiles nil :type (or null hash-table) :read-only t))
 
 (defstruct (streaming-star-product
              (:constructor make-streaming-star-product
@@ -100,12 +109,13 @@ with the same star sites and appearance, which may be reused, or NIL.")
 
 (defstruct (streaming-mesh-result
              (:constructor %make-streaming-mesh-result
-                 (meshes generation &optional mesh-cache))
+                 (meshes generation &optional mesh-cache light-tiles))
              (:copier nil))
   "One worker-complete prepared owner cohort and its exact light generation."
   (meshes nil :type list :read-only t)
   (generation nil :type scene-mesh-generation :read-only t)
-  (mesh-cache nil :type list :read-only t))
+  (mesh-cache nil :type list :read-only t)
+  (light-tiles nil :type list :read-only t))
 
 (defstruct (streaming-replacement
              (:constructor make-streaming-replacement

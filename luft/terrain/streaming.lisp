@@ -15,13 +15,17 @@
 
 
 (defun make-streaming-scene
-    (scene &key (frames-per-load 15) (residency-radius 1) mesh-preparer)
+    (scene &key (frames-per-load 15) (residency-radius 1) mesh-preparer
+             (regional-light-p t))
   "Wrap SCENE in bounded camera-driven chunk residency.
 
 Every resident owner uses the same uniform width, or participates in one
 cohort-compiled material site policy. Distance-varying geometry was removed
 because independently selected chunk widths open their shared lattice sites;
-a future LoD must bring an explicit transition representation."
+a future LoD must bring an explicit transition representation.
+
+REGIONAL-LIGHT-P publishes streamed light tiles (#BQMYNU) when SCENE
+propagates light; otherwise every cohort shares SCENE's one field."
   (let ((streaming (make-instance
                     'streaming-scene
                     :solid (scene-solid scene)
@@ -41,8 +45,11 @@ a future LoD must bring an explicit transition representation."
                     :voxel-light-propagation-p
                     (scene-voxel-light-propagation-p scene)
                     :light-generation (scene-authored-light-generation scene)
+                    :light-tiles
+                    (and regional-light-p
+                         (scene-voxel-light-propagation-p scene)
+                         (make-hash-table :test #'eql))
                     :attachments (scene-attachments scene)
-                    :player-p (scene-player-p scene)
                     :frames-per-load frames-per-load
                     :residency-radius residency-radius
                     :mesh-preparer mesh-preparer)))
@@ -111,8 +118,7 @@ a future LoD must bring an explicit transition representation."
      :authored-light-generation (scene-authored-light-generation scene)
      :content-revision (scene-content-revision scene)
      :voxel-light-propagation-p (scene-voxel-light-propagation-p scene)
-     :attachments (scene-attachments scene)
-     :player-p (scene-player-p scene))))
+     :attachments (scene-attachments scene))))
 
 (defstruct (scene-edit
              (:constructor %make-scene-edit
@@ -202,14 +208,18 @@ published."
                                                        cell emission)))))))
                      (coerce (sort sources #'<)
                              '(simple-array (unsigned-byte 64) (*)))))
+                 ;; Regional light re-solves only the tiles around CELL when
+                 ;; the edit's cohort is meshed; one whole field is solved now.
                  (base-generation
-                   (solve-realized-light-generation
-                    domain material-cells
-                    (scene-authored-light-opacity-table scene)
-                    (if (scene-voxel-light-propagation-p scene) sources #())
-                    (scene-authored-light-provenance scene) light-revision
-                    (make-realized-light-seeds #() #())
-                    :field-revision light-revision))
+                   (if (scene-regional-light-p scene)
+                       (scene-authored-light-generation scene)
+                       (solve-realized-light-generation
+                        domain material-cells
+                        (scene-authored-light-opacity-table scene)
+                        (if (scene-voxel-light-propagation-p scene) sources #())
+                        (scene-authored-light-provenance scene) light-revision
+                        (make-realized-light-seeds #() #())
+                        :field-revision light-revision)))
                  (content-revision (1+ (scene-content-revision scene)))
                  (edit
                    (%make-scene-edit
@@ -229,8 +239,9 @@ published."
                   (scene-authored-light-sources scene) sources
                   (scene-authored-light-revision scene) light-revision
                   (scene-authored-light-generation scene) base-generation
-                  (scene-content-revision scene) content-revision
-                  (streaming-scene-light-generation scene) base-generation)
+                  (scene-content-revision scene) content-revision)
+            (unless (scene-regional-light-p scene)
+              (setf (streaming-scene-light-generation scene) base-generation))
             (if (streaming-scene-source scene)
                 (let ((local-materials
                         (gethash key (material-store-chunks material-cells))))
@@ -258,6 +269,8 @@ published."
   (check-type scene streaming-scene)
   (setf (streaming-scene-mesh-cache scene) nil)
   (clrhash (streaming-scene-loaded scene))
+  (when (streaming-scene-light-tiles scene)
+    (clrhash (streaming-scene-light-tiles scene)))
   (setf (streaming-scene-replacement scene) nil
         (streaming-scene-production-errors scene) nil
         (streaming-scene-focus scene) nil
@@ -373,8 +386,13 @@ silently empty the desired residency window."
                 (length
                  (streaming-scene-resident-attachment-support-keys
                   scene desired))))
+             ;; Regional light carries attachment light in its tiles, which
+             ;; STREAMING-LIGHT-DIRTY-OWNERS follows; one whole field must
+             ;; instead be re-realized for every owner.
+             (regional-p (scene-regional-light-p scene))
              (full-closure-p
-               (or width-changes attachment-residency-change-p))
+               (or width-changes
+                   (and attachment-residency-change-p (not regional-p))))
              (realize-attachment-light-p
                (not
                 (null
@@ -388,12 +406,20 @@ silently empty the desired residency window."
           (let ((affected
                   (if full-closure-p
                       desired-owner-keys
-                      (remove-if-not
-                       (lambda (key)
-                         (some (lambda (changed)
-                                 (chunk-keys-neighbor-p key changed))
-                               residency-changes))
-                       desired-owner-keys))))
+                      (union
+                       (remove-if-not
+                        (lambda (key)
+                          (some (lambda (changed)
+                                  (chunk-keys-neighbor-p key changed))
+                                residency-changes))
+                        desired-owner-keys)
+                       (and regional-p
+                            (set-difference
+                             (streaming-light-dirty-owners
+                              scene desired-owner-keys)
+                             ;; Leaving owners are removed, not relit.
+                             owner-removals))))))
+            (setf affected (sort (copy-list affected) #'<))
             (cond
               (affected
                (schedule-streaming-scene-cohort

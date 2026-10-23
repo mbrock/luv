@@ -45,19 +45,13 @@
   camera)
 
 (defun character-render-lanes (player)
-  "Return current, previous, and heading vec4 lanes for the GPU boundary."
-  (flet ((position-lane (position gait)
-           (list (vec3-x position) (vec3-y position)
-                 (+ (vec3-z position) 1.48) gait)))
-    (values
-     (position-lane (body-position (character-body player))
-                    (character-gait player))
-     (position-lane (body-previous-position (character-body player))
-                    (character-previous-gait player))
-     (list (character-heading-x player)
-           (character-heading-y player)
-           (character-previous-heading-x player)
-           (character-previous-heading-y player)))))
+  "Return PLAYER's FIGURE-LANES for the renderer's figure stage."
+  (let ((body (character-body player)))
+    (figure-lanes (body-position body) (body-previous-position body)
+                  (character-gait player) (character-previous-gait player)
+                  (character-heading-x player) (character-heading-y player)
+                  (character-previous-heading-x player)
+                  (character-previous-heading-y player))))
 
 (defparameter *inspection-ink-p* t
   "Whether a ray hit gets a blueprint reticle and local triangle-edge lens.")
@@ -65,74 +59,12 @@
 (defparameter *inspection-reach* 600.0
   "How far, in cells, the atelier's pointer ray may inspect.")
 
-(defparameter *projection* :isometric
-  "Either :PERSPECTIVE or :ISOMETRIC.
-
-An isometric picture has no vanishing point, so two chamfers the same width
-are the same width on screen wherever they sit.  That is what makes it the
-projection to judge a shape rule in.")
-
-(defparameter *isometric-height* 28.0
-  "How many world units of height an isometric frame spans.")
-
 (defparameter *character-time* nil
   "Animation clock, in seconds, to hold the traveler at, or NIL to run free.
 
 A character plate needs the same pose every time it is rendered.  The viewer
 otherwise derives the clock from its own frame counter, which no capture can
 predict.")
-
-(defconstant +orthographic-near+ -4096.0)
-(defconstant +orthographic-far+ 4096.0)
-(defconstant +camera-yaw-response-rate+ 8.0)
-
-(defclass fly-camera ()
-  ((position :initarg :position :accessor camera-position)
-   (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
-   (target-yaw :initarg :target-yaw :initform nil :accessor camera-target-yaw)
-   (pitch :initarg :pitch :initform 0.0 :accessor camera-pitch)
-   (field-of-view :initarg :field-of-view :initform (* 70.0 (/ pi 180))
-                  :accessor camera-field-of-view)))
-
-(defmethod initialize-instance :after ((camera fly-camera) &key)
-  (unless (camera-target-yaw camera)
-    (setf (camera-target-yaw camera) (camera-yaw camera))))
-
-(defmethod update-instance-for-redefined-class :after
-    ((camera fly-camera) added-slots discarded-slots property-list
-     &rest initargs)
-  (declare (ignore added-slots discarded-slots property-list initargs))
-  (unless (camera-target-yaw camera)
-    (setf (camera-target-yaw camera) (camera-yaw camera))))
-
-(defmethod (setf camera-yaw) :after (yaw (camera fly-camera))
-  "Keep an explicit camera pose assignment an immediate, settled cut."
-  (setf (camera-target-yaw camera) yaw))
-
-(defun shortest-angle-difference (target current)
-  (- (mod (+ (- target current) pi) (* 2 pi)) pi))
-
-(defun target-camera-yaw (camera yaw)
-  "Ask CAMERA to turn toward YAW without discontinuously changing its pose."
-  (setf (camera-target-yaw camera) (mod yaw (* 2 pi)))
-  camera)
-
-(defun advance-camera-response (camera seconds)
-  "Advance CAMERA's rendered pose toward its requested pose.
-
-The exact exponential response is independent of frame rate.  Pose setters
-remain cuts; camera behaviors use targets when motion should be visible."
-  (let* ((current (camera-yaw camera))
-         (difference
-           (shortest-angle-difference (camera-target-yaw camera) current)))
-    (setf (slot-value camera 'yaw)
-          (if (< (abs difference) 1.0e-5)
-              (camera-target-yaw camera)
-              (+ current
-                 (* difference
-                    (- 1.0
-                       (exp (- (* +camera-yaw-response-rate+ seconds)))))))))
-  camera)
 
 (defclass viewer-mode () ())
 
@@ -266,55 +198,11 @@ at the atelier boundary where a person has selected one site."))
        camera (+ (camera-target-yaw camera) (* direction (/ pi 4))))))
   viewer)
 
-(defun camera-basis (camera)
-  (let* ((yaw (camera-yaw camera))
-         (pitch (camera-pitch camera))
-         (forward (make-vec3 (* (cos yaw) (cos pitch))
-                             (* (sin yaw) (cos pitch))
-                             (sin pitch)))
-         (right (make-vec3 (sin yaw) (- (cos yaw)) 0.0))
-         (up (vec3-cross right forward)))
-    (values right up forward)))
-
-(defun add-scaled-directions (origin &rest direction-scales)
-  (let ((x (vec3-x origin))
-        (y (vec3-y origin))
-        (z (vec3-z origin)))
-    (loop for (direction scale) on direction-scales by #'cddr
-          do (incf x (* (vec3-x direction) scale))
-             (incf y (* (vec3-y direction) scale))
-             (incf z (* (vec3-z direction) scale)))
-    (make-vec3 x y z)))
-
 (defgeneric inspection-face-stock (source face)
   (:documentation "Return the atelier stock at FACE in SOURCE."))
 
 (defmethod inspection-face-stock ((source t) face)
   (default-face-stock face))
-
-(defun ray-axis-crossings (position direction)
-  "Return grid STEP, first crossing distance, and crossing interval."
-  (cond ((plusp direction)
-         (values 1 (/ (- (1+ (floor position)) position) direction)
-                 (/ direction)))
-        ((minusp direction)
-         (values -1 (/ (- position (floor position)) (- direction))
-                 (/ (- direction))))
-        (t (values 0 most-positive-single-float most-positive-single-float))))
-
-(defun ray-entry-face (solid cell-x cell-y cell-z axis step)
-  "Return the outward face through which a ray entered CELL along AXIS."
-  (let* ((domain (luft:fiber-store-domain solid))
-         (anchor-x (+ cell-x (if (and (eq axis :x) (minusp step)) 1 0)))
-         (anchor-y (+ cell-y (if (and (eq axis :y) (minusp step)) 1 0)))
-         (anchor-z (+ cell-z (if (and (eq axis :z) (minusp step)) 1 0)))
-         (extent (ecase axis
-                   (:x luft:+yz-face-extent+)
-                   (:y luft:+xz-face-extent+)
-                   (:z luft:+xy-face-extent+)))
-         (geometry (luft:make-site domain anchor-x anchor-y anchor-z extent 1))
-         (occupancy (lambda (x y z) (inspection-cell-bit solid x y z))))
-    (luft:orient-face-outward domain geometry occupancy)))
 
 (defun make-site-inspection (source face cell-x cell-y cell-z point distance)
   (let* ((solid (inspection-source-solid source))
@@ -334,59 +222,14 @@ at the atelier boundary where a person has selected one site."))
 
 (defun raycast-site (source origin direction
                      &key (max-distance *inspection-reach*))
-  "Return the first outward LUFT face met by a continuous lattice ray.
+  "Return the SITE-INSPECTION of the first outward face a ray meets.
 
-Tied edge and corner crossings advance together, so a ray never reports a
-cell it merely touches.  The returned SITE-INSPECTION is the one sparse object
-boundary over the chunk fibers and dense face records."
-  (let* ((solid (inspection-source-solid source))
-         (direction (vec3-normalize direction))
-         (x (floor (vec3-x origin)))
-         (y (floor (vec3-y origin)))
-         (z (floor (vec3-z origin)))
-         step-x step-y step-z
-         next-x next-y next-z
-         delta-x delta-y delta-z
-         (distance 0.0)
-         (entry-axis nil)
-         (entry-step 0))
-    (multiple-value-setq (step-x next-x delta-x)
-      (ray-axis-crossings (vec3-x origin) (vec3-x direction)))
-    (multiple-value-setq (step-y next-y delta-y)
-      (ray-axis-crossings (vec3-y origin) (vec3-y direction)))
-    (multiple-value-setq (step-z next-z delta-z)
-      (ray-axis-crossings (vec3-z origin) (vec3-z direction)))
-    (loop
-      (when (= 1 (inspection-cell-bit solid x y z))
-        (when entry-axis
-          (let* ((face (ray-entry-face solid x y z entry-axis entry-step))
-                 (point (add-scaled-directions origin direction distance)))
-            (when face
-              (return
-                (make-site-inspection source face x y z point distance))))))
-      (let ((next (min next-x next-y next-z)))
-        (when (> next max-distance) (return nil))
-        (setf distance next
-              entry-axis nil)
-        ;; Remember one carrier face for tied crossings, choosing the axis
-        ;; most aligned with the ray.  All tied cells still advance together.
-        (flet ((remember (axis step component)
-                 (when (or (null entry-axis)
-                           (> (abs component)
-                              (abs (vec3-component direction entry-axis))))
-                   (setf entry-axis axis entry-step step))))
-          (when (<= next-x (+ next 1.0e-6))
-            (incf x step-x)
-            (incf next-x delta-x)
-            (remember :x step-x (vec3-x direction)))
-          (when (<= next-y (+ next 1.0e-6))
-            (incf y step-y)
-            (incf next-y delta-y)
-            (remember :y step-y (vec3-y direction)))
-          (when (<= next-z (+ next 1.0e-6))
-            (incf z step-z)
-            (incf next-z delta-z)
-            (remember :z step-z (vec3-z direction))))))))
+The terrain's RAYCAST-FACE answers the query; the inspection is the one
+sparse object boundary over the chunk fibers and dense face records."
+  (multiple-value-bind (face x y z point distance)
+      (raycast-face source origin direction :max-distance max-distance)
+    (when face
+      (make-site-inspection source face x y z point distance))))
 
 (defun constrain-viewer-follow-camera (viewer)
   "Keep the following eye and its near plane on the player's side of walls.
@@ -426,137 +269,6 @@ wall. Corner rays reserve space for the near plane, even at grazing angles."
                   (add-scaled-directions aim delta (/ safe-distance distance))))))))
   viewer)
 
-(defun projection-lane (width height field-of-view near far)
-  "The four projection coefficients and the homogeneous-divisor selector.
-
-Both projections use the same three rows: clip X and Y are the view
-coordinates scaled, and clip Z is an affine function of view depth.  The
-perspective divisor is the view depth and the isometric divisor is one, so
-the selector is the whole of the difference."
-  (let ((aspect (/ (coerce width 'single-float) height)))
-    (ecase *projection*
-      (:perspective
-       (let ((focal (/ (tan (/ field-of-view 2.0)))))
-         (values (/ focal aspect) focal
-                 (/ far (- far near))
-                 (/ (- (* far near)) (- far near))
-                 1.0)))
-      (:isometric
-       (let ((half (/ *isometric-height* 2.0)))
-         (values (/ 1.0 (* half aspect)) (/ 1.0 half)
-                 (/ 1.0 (- far near))
-                 (/ (- near) (- far near))
-                 0.0))))))
-
-(defstruct (frame-view (:constructor %make-frame-view))
-  "One immutable camera sample shared by geometry and temporal motion."
-  position right up forward projection divisor jitter)
-
-(defun halton (index base)
-  (loop with fraction = (/ 1.0 base)
-        with value = 0.0
-        while (plusp index)
-        do (incf value (* fraction (mod index base)))
-           (setf index (floor index base)
-                 fraction (/ fraction base))
-        finally (return (coerce value 'single-float))))
-
-(defun temporal-jitter (frame-index width height)
-  "Sample the sixteen-position Halton(2,3) sequence in clip coordinates."
-  (let ((sample (1+ (mod frame-index 16))))
-    (vector (coerce (/ (* 2.0 (- (halton sample 2) 0.5))
-                       (max width 1))
-                    'single-float)
-            (coerce (/ (* 2.0 (- (halton sample 3) 0.5))
-                       (max height 1))
-                    'single-float))))
-
-(defun capture-frame-view (camera width height jitter)
-  (multiple-value-bind (right up forward) (camera-basis camera)
-    (let ((near (if (eq *projection* :isometric)
-                    +orthographic-near+ 0.1))
-          (far (if (eq *projection* :isometric)
-                   +orthographic-far+ 600.0)))
-      (multiple-value-bind (px py pz pw divisor)
-          (projection-lane width height (camera-field-of-view camera)
-                           near far)
-        (%make-frame-view
-         :position (let ((position (camera-position camera)))
-                     (make-vec3 (vec3-x position)
-                                (vec3-y position)
-                                (vec3-z position)))
-         :right right :up up :forward forward
-         :projection (vector px py pz pw)
-         :divisor divisor :jitter jitter)))))
-
-(defun frame-views-continuous-p (previous current)
-  "Whether PREVIOUS and CURRENT describe motion rather than a camera cut."
-  (and previous
-       (let* ((new-position (frame-view-position current))
-              (old-position (frame-view-position previous))
-              (delta (make-vec3
-                      (- (vec3-x new-position)
-                         (vec3-x old-position))
-                      (- (vec3-y new-position)
-                         (vec3-y old-position))
-                      (- (vec3-z new-position)
-                         (vec3-z old-position))))
-              (distance-squared (vec3-dot delta delta))
-              (facing (vec3-dot (frame-view-forward previous)
-                                (frame-view-forward current)))
-              (old-projection (frame-view-projection previous))
-              (new-projection (frame-view-projection current)))
-         (and (< distance-squared 64.0)
-              (> facing 0.5)
-              (< (abs (- (aref old-projection 1)
-                         (aref new-projection 1)))
-                 0.25)))))
-
-(defun camera-uniform-data
-    (view previous inspection-parameters ink-strength player
-     &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0) first-person-p)
-  (flet ((lane (vector fourth)
-           (list (vec3-x vector) (vec3-y vector)
-                 (vec3-z vector) fourth)))
-    (multiple-value-bind (character previous-character character-direction)
-        (if player
-            (character-render-lanes player)
-            (values '(0.0 0.0 0.0 0.0) '(0.0 0.0 0.0 0.0)
-                    '(0.0 1.0 0.0 1.0)))
-      (make-array
-       (shaders::scene-uniform-scalar-count) :element-type 'single-float
-       :initial-contents
-       (mapcar
-        (lambda (value) (coerce value 'single-float))
-        (append (lane (frame-view-position view) (if first-person-p 1.0 0.0))
-                (lane (frame-view-right view) 0.0)
-                (lane (frame-view-up view) 0.0)
-                (lane (frame-view-forward view) 0.0)
-                (coerce (frame-view-projection view) 'list)
-                (list (/ bevel-width luft:+mesh-cell-size+)
-                      *wireframe*
-                      (frame-view-divisor view) ink-strength)
-                (lane (frame-view-position previous) 0.0)
-                (lane (frame-view-right previous) 0.0)
-                (lane (frame-view-up previous) 0.0)
-                (lane (frame-view-forward previous) 0.0)
-                (coerce (frame-view-projection previous) 'list)
-                ;; MetalFX receives the current sample offset separately and
-                ;; its default motion-vector contract is unjittered.  Retain
-                ;; the previous lane shape for ABI stability, but only the
-                ;; current two components participate in rasterization.
-                (list (aref (frame-view-jitter view) 0)
-                      (aref (frame-view-jitter view) 1)
-                      (aref (frame-view-jitter previous) 0)
-                      (aref (frame-view-jitter previous) 1))
-                (coerce inspection-parameters 'list)
-                character
-                (light-uniform-data (current-light) (frame-view-position view) exposure)
-                previous-character character-direction
-                (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))
-                ;; The renderer writes the attachment lights at upload.
-                (make-list +point-light-scalar-count+ :initial-element 0.0)))))))
-
 (defun viewer-logical-extent (viewer)
   (let ((canvas (viewer-canvas viewer)))
     (list (canvas-width canvas) (canvas-height canvas))))
@@ -576,33 +288,13 @@ the selector is the whole of the difference."
 
 (defun viewer-pointer-ray (viewer)
   "Return the world-space origin and direction through VIEWER's pointer."
-  (let* ((*projection* (viewer-projection viewer))
-         (extent (viewer-logical-extent viewer))
-         (camera (viewer-camera viewer))
-         (width (first extent))
-         (height (second extent))
-         (view (capture-frame-view camera width height #(0.0 0.0)))
-         (projection (frame-view-projection view)))
+  (let ((*projection* (viewer-projection viewer))
+        (extent (viewer-logical-extent viewer)))
     (multiple-value-bind (pointer-x pointer-y)
         (viewer-pointer-position viewer)
-      (let* ((ndc-x (- (* 2.0 (/ pointer-x width)) 1.0))
-             (ndc-y (- 1.0 (* 2.0 (/ pointer-y height))))
-             (right-scale (/ ndc-x (aref projection 0)))
-             (up-scale (/ ndc-y (aref projection 1))))
-        (if (eq *projection* :perspective)
-            (values
-             (camera-position camera)
-             (vec3-normalize
-              (add-scaled-directions
-               (frame-view-forward view)
-               (frame-view-right view) right-scale
-               (frame-view-up view) up-scale)))
-            (values
-             (add-scaled-directions
-              (camera-position camera)
-              (frame-view-right view) right-scale
-              (frame-view-up view) up-scale)
-             (frame-view-forward view)))))))
+      (camera-pointer-ray (viewer-camera viewer)
+                          (first extent) (second extent)
+                          pointer-x pointer-y))))
 
 (defun site-inspection-adjacent-cell (inspection)
   "Return the empty-side cell immediately outside INSPECTION's face."
@@ -693,14 +385,13 @@ the selector is the whole of the difference."
       (when changed-p (refresh-viewer-inspector viewer))
       inspection)))
 
-(defun viewer-inspection-parameters (viewer extent)
+(defun viewer-pointer-fraction (viewer)
+  "Where VIEWER's pointer sits, as fractions of its logical extent."
   (let ((logical-extent (viewer-logical-extent viewer)))
     (multiple-value-bind (pointer-x pointer-y)
         (viewer-pointer-position viewer)
-      (vector (coerce (/ pointer-x (first logical-extent)) 'single-float)
-              (coerce (/ pointer-y (second logical-extent)) 'single-float)
-              (coerce (/ (first extent)) 'single-float)
-              (coerce (/ (second extent)) 'single-float)))))
+      (list (/ pointer-x (first logical-extent))
+            (/ pointer-y (second logical-extent))))))
 
 (declaim (ftype function load-luft-world-description
                 restore-luft-world-player
@@ -748,48 +439,25 @@ before the operation boundary, or it would encode through resources which the
 (defun encode-viewer-frame
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
-  (let* ((*projection* (viewer-projection viewer))
-         (renderer (prepare-viewer-frame-renderer viewer))
-         (frame
-           (renderer-frame-state-for
-            renderer (viewer-context viewer) surface-texture))
-         (surface-view (viewer-surface-view viewer surface-texture))
-         (render-extent (renderer-render-scale-extent renderer extent))
-         (width (first render-extent))
-         (height (second render-extent))
-         (jitter (if (renderer-temporal-p renderer)
-                     (temporal-jitter (renderer-frame-index renderer)
-                                      width height)
-                     #(0.0 0.0)))
-         (view (capture-frame-view (viewer-camera viewer)
-                                   width height jitter))
-         (previous (or (renderer-previous-view renderer) view))
+  (let* ((renderer (prepare-viewer-frame-renderer viewer))
          (inspection
            (and (or inspector-p
                     (viewer-mode-inspection-p (viewer-mode viewer)))
                 (update-viewer-inspection viewer)))
-         (player (viewer-player viewer))
-         (player-p (and player
-                        (not (typep (viewer-mode viewer) 'first-person-mode))
-                        (typep (viewer-source viewer) 'scene)
-                        (scene-player-p (viewer-source viewer))))
-         (exposure
-           (or (viewer-fixed-exposure viewer)
-               (advance-exposure (renderer-exposure-control renderer)))))
-    (unless (frame-views-continuous-p (renderer-previous-view renderer) view)
-      (setf (renderer-history-valid-p renderer) nil))
+         (player (and (not (typep (viewer-mode viewer) 'first-person-mode))
+                      (viewer-player viewer))))
     ;; Frame-boundary state is now published. Encoding below only replays
     ;; prepared GPU commands against the renderer borrowed afterward.
-    (encode-renderer-frame
-     renderer frame encoder surface-view extent
-     (camera-uniform-data
-      view previous (viewer-inspection-parameters viewer render-extent)
-      (if (and inspection *inspection-ink-p*) 1.0 0.0)
-      (and player-p player)
-      (viewer-bevel-width viewer)
-      exposure (typep (viewer-mode viewer) 'first-person-mode))
-     :jitter jitter :view view
-     :player-p player-p
+    (encode-renderer-view
+     renderer (viewer-context viewer) encoder surface-texture
+     (viewer-surface-view viewer surface-texture) extent (viewer-camera viewer)
+     :projection (viewer-projection viewer)
+     :figure (and player (character-render-lanes player))
+     :pointer (viewer-pointer-fraction viewer)
+     :ink-strength (if (and inspection *inspection-ink-p*) 1.0 0.0)
+     :bevel-width (viewer-bevel-width viewer)
+     :fixed-exposure (viewer-fixed-exposure viewer)
+     :first-person-p (typep (viewer-mode viewer) 'first-person-mode)
      :effect-time (or *flame-time* (viewer-last-timestamp viewer) 0.0)
      ;; Dense lattice dots are a close-study diagnostic, not a terrain view:
      ;; streamed chunks can each contain more than a million markers. The
@@ -1787,6 +1455,7 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
                        (reconstruction-factory 'make-reconstruction)
                        (finishing-factory 'make-image-finishing)
                        (camera (make-fly-camera :yaw 0.35))
+                       (player-p t)
                        (title
                          "LUFT — click to play · WASD move · Space jump, twice to fly · L/R edit · 1–8 material · Tab terminal · F5 camera · Esc release")
                        (width 1100) (height 800)
@@ -1816,7 +1485,9 @@ cohort. EXPOSURE-FACTORY receives the device and constructs a fresh exposure
 control. FIXED-EXPOSURE selects a constant control instead, omitting GPU
 measurement entirely for reproducible evidence.  When SOLID is the authored
 large world, WORLD-PATHNAME (NIL for none) is where its edits and player are
-loaded from and saved to; see persistence.lisp.
+loaded from and saved to; see persistence.lisp.  PLAYER-P is the
+atelier's own choice of whether a traveler walks SOLID: the terrain does not
+say, and a study scene may want the frame to itself.
 
 A game hosts itself in a viewer by naming its FRAME-CLASS, a subclass of
 VIEWER, with FRAME-INITARGS for its own slots; its SAVED-WORLD is a Luft save
@@ -1911,8 +1582,7 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
                                     canvas :name "LUFT viewer")
                                    :production-system production-system
                                    :camera camera :source solid
-                                   :player (and (typep solid 'scene)
-                                                (scene-player-p solid)
+                                   :player (and player-p
                                                 (make-scene-walking-character
                                                  solid))
                                    :bevel-width bevel-width
@@ -2677,7 +2347,8 @@ it makes no claim about which earlier render pass caused a discontinuity."
                     (unless (eq solid (viewer-source viewer))
                       (setf (viewer-simulation viewer) (make-world-simulation solid)
                             (viewer-player viewer)
-                            (and (typep solid 'scene) (scene-player-p solid)
+                            ;; The atelier keeps its decision to walk.
+                            (and (viewer-player viewer)
                                  (make-scene-walking-character solid))
                             (viewer-last-timestamp viewer) nil))
                     (setf (viewer-renderer viewer) renderer

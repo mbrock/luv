@@ -131,7 +131,7 @@ an intentional battlement rather than the accidental edge of a voxel field."
 
 (defun make-mountain-sanctuary-scene
     (&key (beacon-placement *beacon-material-placement*)
-      (stair-boundary :low-wall) (player-p t))
+      (stair-boundary :low-wall))
   "A broad Lonely-Mountains world carrying a bridge and walled sanctuary.
 
 This is the old Holm's architectural sentence with its material menagerie
@@ -315,7 +315,7 @@ turrets, an arcaded hall and a remote ridge beacon."
            builder sx sy
            (max 3 (- (mountain-sanctuary-terrain-height sx sy) depth))
            :material *crystal-material-placement*)))
-      (finish-scene-builder builder :player-p player-p)))
+      (finish-scene-builder builder)))
 
 (defun make-traveler-study-scene ()
   "A bare limestone dais under the traveler, clear from every direction.
@@ -326,7 +326,7 @@ his exact world position and his exact deck height and removes everything
 else, so a turnaround can be shot around him without moving him."
   (let ((builder (make-world-scene-builder :horizontal-bits 7)))
     (scene-builder-box builder 56 67 40 58 11 13 :architecture-p t)
-    (finish-scene-builder builder :player-p t)))
+    (finish-scene-builder builder)))
 
 (defun make-miter-study-scene ()
   "Build the wall-side stepped mountain used to judge mixed miters. #Z5NDTA

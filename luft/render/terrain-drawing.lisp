@@ -22,12 +22,12 @@
 
 (defgeneric make-terrain-binding
     (drawing device sites camera
-     &key appearances descriptors shadow-map shadow-sampler shadow-p))
+     &key appearances lights descriptors shadow-map shadow-sampler shadow-p))
 (defgeneric encode-terrain (drawing pass binding resident &key shadow-p))
 
 (defmethod make-terrain-binding
     ((drawing terrain-drawing) device sites camera
-     &key appearances descriptors shadow-map shadow-sampler shadow-p)
+     &key appearances lights descriptors shadow-map shadow-sampler shadow-p)
   (apply #'make-program-binding
          (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))
          device :sites sites :camera-state camera
@@ -35,7 +35,8 @@
              (list :terrain-vertices (terrain-shadow-vertices drawing))
              (list :terrain-vertices (terrain-scene-vertices drawing)
                    :terrain-normals (terrain-normals drawing)
-                   :terrain-appearances appearances :material-descriptors descriptors
+                   :terrain-appearances appearances :terrain-lights lights
+                   :material-descriptors descriptors
                    :shadow-map shadow-map :shadow-sampler shadow-sampler))))
 
 (defmethod encode-terrain ((drawing terrain-drawing) pass binding resident &key shadow-p)

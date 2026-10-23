@@ -122,7 +122,23 @@
            #:scene-edit-content-revision
            #:edit-streaming-scene-cell
            #:mesh-streaming-chunk
+           ;; A game's frame: its camera, the figure, the view, and residency.
            #:fly-camera
+           #:camera-target-yaw
+           #:camera-field-of-view
+           #:camera-basis
+           #:target-camera-yaw
+           #:advance-camera-response
+           #:camera-pointer-ray
+           #:figure-lanes
+           #:encode-renderer-view
+           #:renderer-history-valid-p
+           #:start-renderer-gpu-timing
+           #:pace-renderer-resolution
+           #:drain-streaming-scene-production
+           #:+render-population-preparer+
+           #:advance-sky-clock
+           #:*sky-hour*
            #:make-fly-camera
            #:camera-position
            #:physical-body
