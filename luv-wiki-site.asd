@@ -50,6 +50,7 @@
                  (:file "luft-star-figures")
                  (:file "luft-region-figures")
                  (:file "luft-world-worksheet")
+                 (:file "luvcraft-on-luft")
                  (:file "temporal-antialiasing")
                  (:file "wiki-site")
                  (:static-file "site.js")
