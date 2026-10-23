@@ -1,0 +1,334 @@
+#+title: Hardware GPU frame baselines
+#+startup: overview
+
+* Hardware completion timing, not a monitor FPS counter
+:PROPERTIES:
+:ID: 4C7L3C
+:END:
+
+=scripts/bench-gpu-fps.lisp= is the cross-platform fixed-target baseline for
+Luvcraft-on-Luft, old Luvcraft, and the actual default Luft atelier. It uses
+the real renderers, shader pipelines, scene resources, and queue completion.
+It does not use screenshots as a timing mechanism.
+
+Temple's independent M2 Pro / Metal 4 three-resolution measurements are
+recorded in #B4E7Z5, including its own source cohorts, AA controls and counter
+limitations. Compare like scene cohorts, not a finite island to a live world.
+
+** Reproduce
+
+Run =make= first. On Linux select a hardware Vulkan ICD explicitly: the Nix
+environment's default offscreen ICD can otherwise be lavapipe. For chapel:
+
+#+begin_src sh
+VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d/radeon_icd.x86_64.json \
+SDL_VIDEODRIVER=offscreen BENCH_FRAMES=600 BENCH_WARMUP=60 BENCH_REPEATS=2 \
+BENCH_OUTPUT=build/chapel-gpu.sexp \
+./env sbcl --script scripts/bench-gpu-fps.lisp
+#+end_src
+
+On macOS omit the two Linux driver variables. =BENCH_SIZES= is a comma-separated
+list such as =1280x720,1920x1080,6016x1692=. =BENCH_SCENES= selects any of
+=alpine,meadow,cave,balls,turtle,terminal,companion,live-alpine,live-meadow,atelier=.
+=BENCH_MSAA= defaults to 4 on Luft; use 1 for an explicitly single-sample
+comparison with old Luvcraft. =BENCH_SKY_OFF= and =BENCH_TERRAIN_OFF= are
+controlled draw ablations, not optimizations or full-frame FPS claims.
+=BENCH_CAPTURE_DIR= saves coverage images outside the measured interval.
+
+** Measurement contract
+
+Each measured frame advances the relevant fixture by a fixed 1/60 second,
+encodes into a fixed-size BGRA8 sRGB target, submits, and waits for completion.
+CPU frame time includes simulation and command encoding; CPU encode time
+excludes simulation. Completion time includes CPU work, submission, GPU
+execution and the completion wait. Completion FPS is 1000 divided by mean
+completion milliseconds. There is deliberately no CPU/GPU frame overlap.
+These are serialized offscreen throughput numbers, not displayed FPS,
+input-to-photon latency, or a prediction of an overlapping presentation loop.
+Command destruction and timestamp collection are outside completion timing.
+
+Vulkan uses 64-bit GPU timestamps at ALL_COMMANDS around the frame and each
+render pass, scaled by the device's timestamp period and valid-bit count.
+Repeated pass labels report per-invocation samples: multiply their mean by
+sample-count/frame-count before adding them into a frame budget. Metal uses
+MTL4 queue submission feedback; it waits for delayed feedback only after
+capturing completion time. There is no drawable acquisition in this path,
+so no scene/presentation split into separate submissions. Missing GPU samples
+fail the run rather than silently biasing the statistics. CPU pass encoding
+timings are available on both backends. Percentiles use nearest rank.
+
+TAA and dynamic resolution are OFF. The requested render extent is asserted,
+not inferred from window dimensions. Luft's non-temporal default is 4x MSAA;
+old Luvcraft is single-sample. Lighting, bevels, atmosphere and finishing are
+not visually equivalent implementations. Fixed Luft fixture exposure is
+0.45; the actual atelier retains automatic exposure. Old uses its host default.
+
+** Scene coverage and limits
+
+The seven finite fixtures use the same occupied 32x32 cells on both hosts,
+with seed 7 for alpine/meadow and corresponding coordinate/camera transforms.
+They are small cell-matched islands, not a claim about the game's full
+resident world. Cave has a roof, walls and one lantern. Balls keeps 100
+physics bodies awake and runs the same solver/terrain on both hosts. Turtle
+advances urge, contact, locomotion and carried rider pose. Terminal focuses
+the actual PTY-backed panel with 24 deterministic lines. Companion creates an
+actual gnome turn and visible thought cloud without a network AI provider.
+
+=live-alpine= and =live-meadow= use actual seed-7 game streaming, settled
+before measurement, with fixed corresponding cameras. Luft's nine 64-cell
+resident chunks and old Luvcraft's 169 16-cell chunks are different residency
+policies, not exact geometry matches. =atelier= invokes =start-viewer= with
+the default world, not a flat Luvcraft fixture. No player save is written.
+Its default first-person world and closed atelier drawer are retained; this
+is not a stress test with all editor panes open. Fresh captures verified the
+actual streamed landscape/control and the deterministic terminal fixture.
+
+Coverage captures were inspected. The cave is enclosed on both hosts, but
+Luft's lantern appears as a dark orange/bevelled cube without the obvious
+warm pool seen under the old bright lamp. Cave timings must not be described
+as equal lighting quality. Neither UI text, bevel geometry, exposure, nor
+viewmodel details are pixel-identical between renderers.
+
+** Chapel environment
+
+Chapel is Linux 7.2.0, Intel i7-10700K, AMD Radeon RX 6600 XT (NAVI23,
+PCI 1002:73ff), amdgpu and RADV Mesa 26.2.0. Vulkan reports a discrete device,
+10 ns timestamp period and 64 valid timestamp bits. Software device types
+are rejected. The machine has a Wayland socket, but its physical display
+connectors are disconnected. SDL's offscreen video driver and the real GPU
+are sufficient; there is no monitor presentation measurement here.
+
+Clocks/governors are not pinned: GPU performance level is auto, CPU governor
+is powersave. Existing desktop applications and unrelated Lisp images were
+left intact. Results describe this machine's ordinary shared session, not
+an exclusive clock-locked lab run.
+
+** DONE Chapel ordinary-session baseline, 2026-10-23
+
+Two independent matrix repetitions, each 60 warmup + 600 measured frames per
+case: 76 cases, 45,600 measured frames, all with GPU samples. The image loaded
+production revision [[https://github.com/mbrock/luv/commit/a596824][a596824]], including the Metal creature-binding fix. Its
+script snapshot additionally recorded sample-count/exposure metadata; those
+Linux timing paths are unchanged by [[https://github.com/mbrock/luv/commit/505455f][505455f]]. The later figure-stage lighting
+change was not loaded into that already-running image. Subsequent ablations
+stamp their own source revision and must not be mistaken for the exact same
+production image.
+
+Ranges below are the minimum and maximum of the two runs' statistics, NOT
+confidence intervals, pooled percentiles, or frame minima/maxima. CPU is
+mean simulation+encoding wall time; GPU mean, p50 and p95 are timestamp spans
+in milliseconds. FPS is serialized completion throughput. 720 means
+1280x720, 1080 means 1920x1080. Luft/atelier use 4 samples; old uses 1.
+
+| Scene | Renderer | Height | CPU mean ms | GPU mean ms | GPU p50 ms | GPU p95 ms | Completion FPS |
+|-------+----------+--------+-------------+-------------+------------+------------+----------------|
+| alpine | luft | 720 | 0.89–0.90 | 2.75–2.76 | 2.74–2.75 | 2.78–2.84 | 254.64–256.77 |
+| alpine | old | 720 | 0.96–0.97 | 1.89–1.95 | 1.86–1.93 | 2.20–2.27 | 318.37–324.61 |
+| alpine | luft | 1080 | 1.04–1.65 | 5.17–5.92 | 5.01–5.02 | 5.61–10.94 | 127.17–154.28 |
+| alpine | old | 1080 | 1.01–1.31 | 2.64–2.81 | 2.57–2.57 | 2.81–4.31 | 228.80–257.29 |
+| meadow | luft | 720 | 0.86–0.91 | 2.33–2.38 | 2.33–2.34 | 2.36–2.70 | 285.96–291.35 |
+| meadow | old | 720 | 0.93–1.02 | 1.72–2.16 | 1.65–2.11 | 2.15–2.75 | 302.60–335.79 |
+| meadow | luft | 1080 | 1.98–2.97 | 5.81–7.20 | 4.40–6.69 | 10.08–10.13 | 94.60–123.22 |
+| meadow | old | 1080 | 0.87–0.89 | 2.49–2.49 | 2.47–2.47 | 2.55–2.62 | 276.45–277.24 |
+| cave | luft | 720 | 3.61–3.78 | 10.67–10.91 | 11.29–11.47 | 14.48–14.58 | 65.86–67.60 |
+| cave | old | 720 | 0.90–0.91 | 1.96–2.11 | 1.92–2.10 | 2.15–2.43 | 307.65–321.57 |
+| cave | luft | 1080 | 3.93–4.27 | 16.28–16.43 | 16.44–16.62 | 17.95–18.43 | 47.08–48.27 |
+| cave | old | 1080 | 0.95–1.08 | 3.67–3.68 | 3.47–3.67 | 3.94–4.83 | 199.29–204.21 |
+| balls | luft | 720 | 1.39–1.53 | 2.86–3.66 | 2.79–3.44 | 3.07–7.17 | 182.96–221.36 |
+| balls | old | 720 | 1.08–1.20 | 2.48–2.73 | 2.49–2.69 | 2.71–3.03 | 239.26–263.24 |
+| balls | luft | 1080 | 1.65–5.24 | 6.08–10.36 | 5.65–11.69 | 9.53–12.30 | 62.17–123.76 |
+| balls | old | 1080 | 1.12–1.45 | 2.65–3.10 | 2.58–2.75 | 2.92–5.25 | 208.34–248.65 |
+| turtle | luft | 720 | 1.22–2.35 | 3.52–4.54 | 3.49–3.51 | 3.85–9.03 | 138.76–199.49 |
+| turtle | old | 720 | 1.00–1.02 | 2.21–2.63 | 2.20–2.67 | 2.50–2.90 | 257.58–290.15 |
+| turtle | luft | 1080 | 2.45–5.60 | 8.44–12.41 | 7.64–13.00 | 14.11–15.77 | 53.92–88.82 |
+| turtle | old | 1080 | 1.13–2.14 | 3.31–4.27 | 3.27–3.31 | 3.58–7.70 | 148.88–211.90 |
+| terminal | luft | 720 | 0.95–1.10 | 3.19–3.32 | 3.09–3.09 | 3.50–4.42 | 213.21–226.90 |
+| terminal | old | 720 | 0.92–1.42 | 2.59–3.48 | 2.73–3.72 | 2.95–4.43 | 193.56–267.01 |
+| terminal | luft | 1080 | 2.60–3.61 | 8.32–10.66 | 6.72–11.80 | 13.05–14.14 | 67.78–88.30 |
+| terminal | old | 1080 | 0.92–1.20 | 3.16–3.72 | 3.14–3.20 | 3.17–7.68 | 192.25–230.50 |
+| companion | luft | 720 | 1.38–1.58 | 3.08–3.30 | 2.87–2.89 | 3.68–7.52 | 193.72–211.03 |
+| companion | old | 720 | 1.00–1.52 | 1.94–2.71 | 1.94–2.69 | 2.18–3.74 | 222.56–316.67 |
+| companion | luft | 1080 | 4.59–4.74 | 9.84–9.97 | 11.76–11.77 | 12.82–12.82 | 65.88–67.19 |
+| companion | old | 1080 | 1.01–1.02 | 2.62–2.69 | 2.59–2.63 | 2.73–3.00 | 252.26–256.44 |
+| live-alpine | luft | 720 | 5.67–9.60 | 16.00–18.35 | 13.84–20.15 | 20.89–21.08 | 35.13–45.31 |
+| live-alpine | old | 720 | 4.31–5.87 | 15.03–15.06 | 14.93–14.99 | 15.38–15.39 | 46.75–50.65 |
+| live-alpine | luft | 1080 | 7.29–8.85 | 25.44–26.23 | 24.56–27.56 | 29.66–29.70 | 28.10–30.12 |
+| live-alpine | old | 1080 | 6.21–8.31 | 17.51–17.69 | 17.49–17.72 | 18.25–18.31 | 37.67–41.30 |
+| live-meadow | luft | 720 | 7.01–7.37 | 18.32–18.76 | 19.61–20.08 | 21.20–21.24 | 37.43–38.61 |
+| live-meadow | old | 720 | 4.43–7.71 | 10.88–11.07 | 10.77–11.08 | 11.33–11.41 | 51.82–63.70 |
+| live-meadow | luft | 1080 | 3.68–7.28 | 21.97–26.00 | 20.12–27.54 | 28.13–28.72 | 29.54–38.39 |
+| live-meadow | old | 1080 | 2.86–7.90 | 12.66–13.43 | 12.72–13.68 | 13.85–14.00 | 45.79–63.06 |
+| atelier | atelier | 720 | 2.95–3.30 | 11.24–11.75 | 9.91–10.34 | 15.98–17.87 | 64.71–68.74 |
+| atelier | atelier | 1080 | 3.41–3.49 | 18.35–18.51 | 17.17–17.33 | 21.53–21.90 | 44.79–44.90 |
+
+Some percentiles are repeatable (e.g. cave GPU p95 and old live-world GPU
+tails); others are not. In particular Luft alpine 1080 GPU p95 changed from
+10.94 to 5.61 ms, and live-alpine 720 GPU p50 from 20.15 to 13.84 ms. It would
+be misleading to call all tails stable. The parent explicitly declined
+changing shared power settings without the user's authorization. The
+underlying cause of the ordinary-session two-mode timing is not established.
+
+Full CPU, GPU and completion mean/p50/p95/p99, pass timings and startup phase
+records are preserved in
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/chapel-gpu-2026-10-23.sexp][the raw baseline S-expressions]]. Read them in package =GPU-FPS= after loading
+the benchmark with =BENCH_LIBRARY=1=, since phase names use local package
+nicknames. Live-world cases hold the camera/residency fixed: they measure
+rendering of actual settled gameplay populations, not streaming churn,
+walking input, networking, or a complete interactive simulation loop.
+
+** Frame-pass attribution
+
+The first repetition's Luft alpine 720 GPU budget is 2.76 ms, including
+2.55 ms in =luft site streams= and 0.134 ms in HDR presentation. At 1080 the
+corresponding means are 5.92, 5.51 and 0.274 ms. Cave's site pass is 10.29 of
+10.67 ms at 720 and 15.87 of 16.43 ms at 1080. This pass combines the
+procedural sky, indexed/instanced bevelled terrain, fixtures, world text and
+figures. Pass timers alone do not distinguish vertex, fragment, raster or
+bandwidth limits; the draw ablations below isolate groups, not shader ISA.
+
+For actual live-alpine, Luft's scene/shadow means are 17.52/0.48 ms at 720
+and 24.31/0.47 ms at 1080. Old's unlabeled =pass-0= is the shadow pass and
+=pass-1= is the scene, as confirmed in =luvcraft/render.lisp=: their means
+are 7.11/7.69 ms at 720 and 7.30/9.47 ms at 1080. Old shadows therefore
+consume a large part of that renderer's actual-world budget, unlike Luft's
+simplified star-shadow patches. Bloom, shafts, panels and final presentation
+are small GPU costs in these scenes, not the primary steady-state target.
+
+** CPU preparation is not a steady-state frame cost
+
+Settled live scenes do not remesh/repack every timed frame. Startup wrappers
+measure inclusive wall times, including worker calls; parallel/nested totals
+must not be added as exclusive CPU time. In the first live-alpine 720 setup,
+16 chunk mesh calls total 22.40 ms, light-word packing 36.26 ms, population
+preparation 52.89 ms (including packing), and upload/publication 313.75 ms.
+The full setup is 19.82 seconds, so these wrappers do not explain the
+majority of startup generation, capture, initialization and pipeline work.
+For the default atelier, the same measured totals vary across the two
+resolutions: meshing 14.25–23.42 ms, light packing 41.39–54.13 ms, population
+preparation 56.75–73.47 ms, uploads 19.52–309.36 ms, total setup 9.45–10.97 s.
+Do not turn those startup costs into per-frame claims or attribute their
+variation to a particular subsystem without another controlled profile.
+
+The later old live-alpine 720 setup records 169 halo gathers totaling
+99.96 ms and 169 mesh calls totaling 305.96 ms. These are CPU preparation
+records in the single-sample cohort, not extra GPU milliseconds.
+
+A separate 1200-frame live-alpine 720 CPU sampling run at
+[[https://github.com/mbrock/luv/commit/812b3fd][812b3fd]] collected 4325 samples at 1 ms. =encode-terrain= accounts for 48.3%
+of cumulative CPU samples; the Vulkan indexed-draw encoder, nested within it,
+accounts for 36.7%. CLOS dispatch/accessor/type checks are prominent, and
+=arch_set_fp_modes= alone is 9.1% self samples (=arch_get_fp_modes= 1.1%).
+The Vulkan driver environment masks/restores FP traps around individual
+operations. Those percentages overlap and cannot be added into a speedup
+claim. This profile wraps the measurement function, including warmup,
+instrumentation, query collection and cleanup, not just production encoding.
+Its timings are excluded from the baseline FPS table. The
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/chapel-cpu-profile-2026-10-23.txt][flat sampling report]] retains the full attribution, including unknown/native frames.
+
+In the first baseline repetition, 100 awake balls take 0.226/0.246 ms mean
+simulation time on Luft/old at 720, versus 1.165/0.950 ms encoding. At 1080
+the simulation means rise to 1.020/0.300 ms in that ordinary-session sample.
+Turtle advancement is only 0.012–0.062 ms in those runs. The high total frame
+tails should therefore not all be blamed on physics or lighting preparation.
+
+** Draw omissions and matched-revision AA controls
+
+These separate cohorts all loaded [[https://github.com/mbrock/luv/commit/812b3fd][812b3fd]], with 120 warmup + 600 measured
+frames per case. This avoids attributing the intervening figure-lighting
+change to an AA setting. GPU means in milliseconds, Luft only:
+
+| Scene | Height | Full 4x | Full 1x | 4x sky omitted | 4x terrain omitted |
+|-------+--------+---------+---------+----------------+--------------------|
+| alpine | 720 | 2.75 | 2.04 | 2.21 | 1.95 |
+| alpine | 1080 | 7.57 | 4.67 | 4.46 | 2.65 |
+| cave | 720 | 11.81 | 9.71 | 8.36 | 2.23 |
+| cave | 1080 | 16.36 | 14.02 | 14.63 | 2.98 |
+| live-alpine | 720 | 19.02 | 12.71 | 14.16 | 1.88 |
+| live-alpine | 1080 | 26.14 | 19.78 | 25.30 | 1.94 |
+
+Terrain omission removes its scene and shadow draws, retaining the rest of
+the frame. Sky omission suppresses only the sky pipeline's draws. These are
+sequential ordinary-session cohorts, not interleaved clock-locked samples.
+Their differences are not additive and are not guaranteed production FPS
+gains. Low-load cases can change clock/occupancy behavior; small differences
+can reverse sign (old alpine 720 sky omission is an example). The large
+live-world terrain delta is robust enough to prioritize investigation, not
+to distinguish vertex/fragment/memory causes. Single-sample rendering also
+changes image quality; it is not a free optimization or a TAA-on result.
+
+All CPU/GPU/completion quantiles, old controls and phases are retained in
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/chapel-controls-2026-10-23.sexp][full 4x controls]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/chapel-msaa1-2026-10-23.sexp][single-sample controls]],
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/chapel-nosky-2026-10-23.sexp][sky omission]] and
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/chapel-noterrain-2026-10-23.sexp][terrain omission]]. These add 28,800 unprofiled measured frames to the baseline.
+
+** A discrete-GPU memory placement witness, not a proven bandwidth bottleneck
+
+The Vulkan buffer allocator requests the first compatible host-visible,
+host-coherent memory type for /every/ buffer. A real-device probe created
+64 KiB vertex, index, storage and uniform buffers. All four have compatible
+memory bits =0x7AD= and select memory type 2, flags
+=(:host-visible :host-coherent)=, heap 1. This is /not/ device-local memory.
+=vulkaninfo= confirms heap 1 lacks DEVICE_LOCAL; type 3 is a later
+device-local/host-visible/coherent type in a 256 MiB heap, and the large
+device-local heap is separate. Textures already prefer device-local memory.
+
+Thus discrete-GPU mesh/star/index data currently use the upload-memory policy.
+This is a strong reason to test device-local immutable buffers with staged
+uploads before rewriting material shaders. It does /not/ prove how many
+milliseconds are PCIe traffic: no bandwidth/occupancy counters or relocation
+A/B were collected. Choosing the small mapped VRAM heap globally is not a
+safe one-line fix; capacity, updates and lifetime still matter. The
+[[https://github.com/mbrock/luv/blob/main/wiki/measurements/chapel-memory-2026-10-23.txt][memory probe and physical memory properties]] preserve the witness.
+
+** NEXT Ranked experiments, not optimizations made here
+
+1. Test device-local static vertex/index/star/material buffers and staged
+   uploads on discrete Vulkan, retaining mapped buffers for suitable dynamic
+   data. Measure the scene and old shadow passes again; verify capacity,
+   lifetime and update correctness. Memory placement is established, its
+   contribution to frame time is still a hypothesis.
+2. Isolate the terrain vertex/material/fragment workload and visibility.
+   Live-alpine 1080 falls from 26.14 to 1.94 ms GPU with terrain omitted;
+   rich bevel/material/atmosphere shaders and repeated star draws deserve
+   counters/disassembly before choosing ALU, geometry, culling or bandwidth
+   work. Do not start with bloom/shafts.
+3. Batch/specialize terrain indexed-draw encoding and investigate amortizing
+   per-operation Vulkan FP-environment guards at a safe ownership boundary.
+   Preserve validation and trap restoration; CPU sampling identifies this
+   family, not a proven safe shortcut.
+4. For old Luvcraft, simplify/cull shadow geometry or reuse suitable depth
+   work: its live alpine shadow pass alone is about 7.1–7.3 ms, versus
+   roughly 0.48 ms for Luft's simplified star casters.
+5. Evaluate an explicitly quality-matched AA configuration and the native
+   TAA-on path. The one-sample control saves GPU work, but changes quality
+   and does not by itself explain the whole terrain cost. Investigate sky
+   coverage/caching separately; the covered-cave result is architecture-
+   dependent (temple's tile GPU showed no benefit from omitting covered sky).
+6. Treat light packing/upload publication as edit/streaming latency work,
+   not this settled-frame bottleneck. Profile the unaccounted startup work
+   separately before claiming meshing dominates startup.
+
+No production allocator, shader or render-pass optimization was made by
+this experiment. The independently landed Metal creature pipeline-order fix
+is included in the measured source and was required for correct rendering.
+
+** Verification and remaining limits
+
+=make= and =make test= pass after rebasing the benchmark capture change over
+the other agents' focus/UI changes: 35 suites, 42 tasks. Strict Parinfer and
+=git diff --check= pass. A separate check compares all 38 baseline wiki rows
+against the 76 raw records and checks sample counts, extents and AA flags.
+The live/atelier capture smoke passes with GPU samples and inspected images.
+=scripts/wiki dangling= runs successfully but lists two pre-existing code
+references, =TR4VLR= and =H1GHLD= in =captures/luft-portraits.lisp=; neither
+was added here. The registered wiki page builds and its rendered ID, table
+values and temple cross-reference are checked. The site build also warns
+about pre-existing prose mentions =W9GQ3D=, =LSVW2S=, =UABDNH= and =CPIOH5=
+in =mathematical-shaders.org=. There are no new unresolved IDs from this figure.
+
+No connected-monitor run, frame-overlapped presentation throughput,
+clock-locked tails, hardware shader counters, or default-TAA performance
+claim is supplied. Cave lighting parity is explicitly unresolved. The
+source cohorts are recorded rather than silently mixing later changes into
+an already-running image.

@@ -1,0 +1,891 @@
+Number of samples:   4325
+Sample interval:     0.001 seconds
+Total sampling time: 4.3250003 seconds
+Graph cycles:        0
+Sampled threads:
+   #<THREAD tid=317991 "main thread" RUNNING {12003D8003}> (336/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=318734 "luv SDL canvas event loop" RUNNING {120F524EF3}> (633344/1048576 bytes, 2837 hash buckets)
+   #<THREAD tid=318018 "finalizer" RUNNING {12003D9203}> (136/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=320225 "luft lobby radio" RUNNING {120CD8CC23}> (1856/1048576 bytes, 12 hash buckets)
+   #<THREAD tid=320154 "luvcraft checkpoint writer" RUNNING {120E479223}> (184/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=318743 "luv canvas watchdog" RUNNING {120F5C1D93}> (288/1048576 bytes, 2 hash buckets)
+   #<THREAD tid=329846 "luv GPU retirement service" FINISHED values: NIL {1224463823}> (128/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=329950 "luv GPU retirement service" FINISHED values: NIL {1225444AF3}> (224/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=329994 "luv GPU retirement service" FINISHED values: NIL {1225DAD4F3}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=330129 "luv GPU retirement service" FINISHED values: NIL {122652FCF3}> (168/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=331301 "luv GPU retirement service" FINISHED values: NIL {1203643C03}> (200/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=332812 "luv GPU retirement service" FINISHED values: NIL {12027DAD33}> (160/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=332946 "luv GPU retirement service" FINISHED values: NIL {120356C123}> (104/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=333763 "luv GPU retirement service" FINISHED values: NIL {120AE1E753}> (208/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=333969 "luv GPU retirement service" FINISHED values: NIL {120C142993}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=334243 "luv GPU retirement service" FINISHED values: NIL {120D508BA3}> (48/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=334749 "luv GPU retirement service" FINISHED values: NIL {120F61DA43}> (208/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=335091 "luv GPU retirement service" FINISHED values: NIL {1211684253}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=335608 "luv GPU retirement service" FINISHED values: NIL {12146C1A03}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=336076 "luv GPU retirement service" FINISHED values: NIL {12181CC9C3}> (208/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=336202 "luv GPU retirement service" FINISHED values: NIL {121905DD43}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=336595 "luv GPU retirement service" FINISHED values: NIL {121BC057F3}> (160/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=336626 "luv GPU retirement service" FINISHED values: NIL {121BD52393}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=337674 "luv GPU retirement service" FINISHED values: NIL {12145C7DF3}> (208/1048576 bytes, 2 hash buckets)
+   #<THREAD tid=338059 "luv GPU retirement service" FINISHED values: NIL {1216C04F33}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=339169 "luv GPU retirement service" FINISHED values: NIL {1209EE0543}> (216/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=339446 "luv GPU retirement service" FINISHED values: NIL {120C72BE83}> (136/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=340170 "luv GPU retirement service" FINISHED values: NIL {1211C05DF3}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=340465 "luv GPU retirement service" FINISHED values: NIL {121744C4E3}> (144/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=340552 "luv GPU retirement service" FINISHED values: NIL {12190ABD73}> (216/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=341621 "luv GPU retirement service" FINISHED values: NIL {1214A9A363}> (136/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=341637 "luv GPU retirement service" FINISHED values: NIL {1214E85393}> (48/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=342742 "luv GPU retirement service" FINISHED values: NIL {120A94B523}> (216/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=342919 "luv GPU retirement service" FINISHED values: NIL {120DA9E813}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=343365 "luv GPU retirement service" FINISHED values: NIL {12125CA393}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=343580 "luv GPU retirement service" FINISHED values: NIL {1218BBACF3}> (136/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=343827 "luv GPU retirement service" FINISHED values: NIL {120B6439E3}> (224/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=343981 "luv GPU retirement service" FINISHED values: NIL {1214D6A983}> (216/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344057 "luv GPU retirement service" FINISHED values: NIL {1216972533}> (104/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344113 "luv GPU retirement service" FINISHED values: NIL {1217E496E3}> (88/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344183 "luv GPU retirement service" FINISHED values: NIL {1219CAA0E3}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344235 "luv GPU retirement service" FINISHED values: NIL {1220C7A933}> (160/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344310 "luv GPU retirement service" FINISHED values: NIL {120340DF73}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344495 "luv GPU retirement service" FINISHED values: NIL {12112E0BC3}> (232/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344684 "luv GPU retirement service" FINISHED values: NIL {1214B305A3}> (168/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344772 "luv GPU retirement service" FINISHED values: NIL {121731A7B3}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344827 "luv GPU retirement service" FINISHED values: NIL {1218C0D373}> (232/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=344965 "luv GPU retirement service" FINISHED values: NIL {121C908803}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=345066 "luv GPU retirement service" FINISHED values: NIL {120B053583}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=345676 "luv GPU retirement service" FINISHED values: NIL {120C4B8993}> (200/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=345685 "luv GPU retirement service" FINISHED values: NIL {120C8CD8B3}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=345741 "luv GPU retirement service" FINISHED values: NIL {12115148F3}> (168/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=346159 "luv GPU retirement service" FINISHED values: NIL {1208B80C83}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=346161 "luv GPU retirement service" FINISHED values: NIL {1208EC8643}> (200/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=346572 "luv GPU retirement service" FINISHED values: NIL {120CC70563}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=346726 "luv GPU retirement service" FINISHED values: NIL {120E10B873}> (232/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=346982 "luv GPU retirement service" FINISHED values: NIL {120F3B6983}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=347215 "luv GPU retirement service" FINISHED values: NIL {1210792653}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=347428 "luv GPU retirement service" FINISHED values: NIL {1211A1E7E3}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=347488 "luv GPU retirement service" FINISHED values: NIL {1212357333}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=347700 "luv GPU retirement service" FINISHED values: NIL {1214352B03}> (104/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=347959 "luv GPU retirement service" FINISHED values: NIL {12197EC0B3}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=347969 "luv GPU retirement service" FINISHED values: NIL {1219DA4713}> (104/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=348017 "luv GPU retirement service" FINISHED values: NIL {121BC89623}> (232/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=348022 "luv GPU retirement service" FINISHED values: NIL {121D47EC23}> (168/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=348143 "luv GPU retirement service" FINISHED values: NIL {1209B9E973}> (160/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=348394 "luv GPU retirement service" FINISHED values: NIL {121298BCA3}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=348559 "luv GPU retirement service" FINISHED values: NIL {1208F0C403}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=348917 "luv GPU retirement service" FINISHED values: NIL {120E29DA83}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=348998 "luv GPU retirement service" FINISHED values: NIL {120F606BD3}> (208/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=349004 "luv GPU retirement service" FINISHED values: NIL {120FB5FE63}> (152/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=349184 "luv GPU retirement service" FINISHED values: NIL {12176FD253}> (112/1048576 bytes, 1 hash buckets)
+   #<THREAD tid=349384 "luv GPU retirement service" FINISHED values: NIL {1226D3B8F3}> (112/1048576 bytes, 1 hash buckets)
+
+           Self        Total        Cumul
+  Nr  Count     %  Count     %  Count     %    Calls  Function
+------------------------------------------------------------------------
+   1    394   9.1    394   9.1    394   9.1        -  foreign function arch_set_fp_modes
+   2    281   6.5    281   6.5    675  15.6        -  (LAMBDA (SB-PCL::.ARG0.) :IN "SYS:SRC;PCL;BRAID.LISP")
+   3    256   5.9    256   5.9    931  21.5        -  foreign function ioctl
+   4    133   3.1    133   3.1   1064  24.6        -  (LAMBDA (SB-PCL::.ARG0.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+   5    119   2.8   2090  48.3   1183  27.4        -  (SB-PCL::FAST-METHOD LUFT.RENDER:ENCODE-TERRAIN (LUFT.RENDER:TERRAIN-DRAWING T T T))
+   6    105   2.4   1589  36.7   1288  29.8        -  (SB-PCL::FAST-METHOD LUV:ENCODE (LUV::VULKAN-GPU-RENDER-PASS-ENCODER LUV:GPU-DRAW-INDEXED-COMMAND))
+   7     96   2.2    142   3.3   1384  32.0        -  SB-SPROF::UNAVAILABLE-FRAMES
+   8     90   2.1     90   2.1   1474  34.1        -  SB-KERNEL:CLASSOID-TYPEP
+   9     88   2.0    138   3.2   1562  36.1        -  LUV:MAKE-GPU-DRAW-INDEXED-COMMAND
+  10     86   2.0     86   2.0   1648  38.1        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+  11     80   1.8     80   1.8   1728  40.0        -  (LAMBDA (SB-PCL::.ARG0.) :IN "SYS:SRC;PCL;BRAID.LISP")
+  12     60   1.4     60   1.4   1788  41.3        -  (LAMBDA (SB-PCL::.ARG0.) :IN "SYS:SRC;PCL;BRAID.LISP")
+  13     59   1.4     59   1.4   1847  42.7        -  foreign function pthread_sigmask
+  14     55   1.3    141   3.3   1902  44.0        -  SB-KERNEL:CLASSOID-CELL-TYPEP
+  15     54   1.2     54   1.2   1956  45.2        -  SB-KERNEL:VECTOR-HAIRY-DATA-VECTOR-REF/CHECK-BOUNDS
+  16     49   1.1     49   1.1   2005  46.4        -  foreign function arch_get_fp_modes
+  17     47   1.1     47   1.1   2052  47.4        -  SB-KERNEL:STRING=*
+  18     45   1.0     45   1.0   2097  48.5        -  SB-IMPL::GETHASH/EQL-HASH
+  19     42   1.0    116   2.7   2139  49.5        -  FIND
+  20     41   0.9    311   7.2   2180  50.4        -  Unknown fn 45805
+  21     38   0.9     64   1.5   2218  51.3        -  CFFI::%FOREIGN-ENUM-VALUE
+  22     35   0.8     61   1.4   2253  52.1        -  LUV.VK:CMD-DRAW-INDEXED
+  23     28   0.6     46   1.1   2281  52.7        -  LUV.VK:CMD-BIND-INDEX-BUFFER
+  24     26   0.6    134   3.1   2307  53.3        -  (SB-PCL::FAST-METHOD LUV:ENCODE (LUV::VULKAN-GPU-RENDER-PASS-ENCODER LUV:GPU-SET-BIND-GROUP-COMMAND))
+  25     24   0.6     46   1.1   2331  53.9        -  CFFI::FIND-DEFAULT-TYPE-PARSER
+  26     23   0.5     90   2.1   2354  54.4        -  LUV.VULKAN::%CMD-BIND-INDEX-BUFFER
+  27     23   0.5     28   0.6   2377  55.0        -  SB-IMPL::PUTHASH/EQ-HASH/FLAT
+  28     23   0.5     23   0.5   2400  55.5        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. SB-PCL::.ARG2.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+  29     22   0.5     81   1.9   2422  56.0        -  LUV::RETAIN-VULKAN-RESOURCE
+  30     21   0.5    124   2.9   2443  56.5        -  LUV::ENSURE-VULKAN-OBJECT-DEVICE
+  31     21   0.5     63   1.5   2464  57.0        -  LUV::ENSURE-VULKAN-RENDER-PASS-STATE
+  32     20   0.5     33   0.8   2484  57.4        -  SB-IMPL::PUTHASH/EQ-HASH/COMMON
+  33     20   0.5     20   0.5   2504  57.9        -  FPR-SAVE
+  34     20   0.5     20   0.5   2524  58.4        -  (LABELS SB-IMPL::EQUAL-NOT-INLINE :IN EQUAL)
+  35     20   0.5     20   0.5   2544  58.8        -  foreign function __munmap
+  36     19   0.4    232   5.4   2563  59.3        -  (FLET "CLEANUP-FUN-10" :IN LUV:ENCODE)
+  37     19   0.4     19   0.4   2582  59.7        -  SB-IMPL::GETHASH/EQL-HASH/FLAT
+  38     19   0.4     19   0.4   2601  60.1        -  SB-IMPL::GETHASH/EQ-HASH/FLAT
+  39     18   0.4    199   4.6   2619  60.6        -  CFFI::PARSE-TYPE
+  40     18   0.4    166   3.8   2637  61.0        -  LUV.VULKAN:CMD-BIND-INDEX-BUFFER
+  41     18   0.4     18   0.4   2655  61.4        -  foreign function syscall
+  42     16   0.4     16   0.4   2671  61.8        -  (LAMBDA NIL :IN CFFI::NOTICE-FOREIGN-TYPE)
+  43     16   0.4     16   0.4   2687  62.1        -  foreign function try_allocate_small
+  44     16   0.4     16   0.4   2703  62.5        -  FPR-RESTORE
+  45     15   0.3     57   1.3   2718  62.8        -  SB-VM:FLOATING-POINT-MODES
+  46     15   0.3     15   0.3   2733  63.2        -  GETF
+  47     14   0.3    403   9.3   2747  63.5        -  SB-VM::%FLOATING-POINT-MODES-SETTER
+  48     14   0.3    109   2.5   2761  63.8        -  LUV::ENSURE-LIVE-VULKAN-OBJECT
+  49     14   0.3     95   2.2   2775  64.2        -  LUV.VULKAN::CLEAR-FOREIGN-OBJECT
+  50     14   0.3     14   0.3   2789  64.5        -  (SB-VM::OPTIMIZED-DATA-VECTOR-REF T)
+  51     13   0.3     13   0.3   2802  64.8        -  SB-KERNEL:TWO-ARG->=
+  52     12   0.3     18   0.4   2814  65.1        -  SB-KERNEL:%MAP-FOR-EFFECT-ARITY-1
+  53     11   0.3    618  14.3   2825  65.3        -  (SB-PCL::FAST-METHOD LUV:BEGIN-RENDER-PASS (LUV::VULKAN-GPU-COMMAND-ENCODER LUV::RENDER-PASS-DESCRIPTOR))
+  54     11   0.3    593  13.7   2836  65.6        -  LUV.VULKAN::FILL-VK
+  55     11   0.3    181   4.2   2847  65.8        -  CFFI::MEM-SET
+  56     11   0.3     11   0.3   2858  66.1        -  SYMBOL-NAME
+  57     11   0.3     11   0.3   2869  66.3        -  GENERIC-*
+  58     11   0.3     11   0.3   2880  66.6        -  SB-KERNEL:%MEMBER-EQ
+  59     10   0.2     66   1.5   2890  66.8        -  LUFT.RENDER::BOX-OUTSIDE-CLIP-P
+  60      9   0.2     30   0.7   2899  67.0        -  SB-IMPL::GETHASH/EQUAL
+  61      9   0.2      9   0.2   2908  67.2        -  SB-KERNEL:TWO-ARG-<
+  62      9   0.2      9   0.2   2917  67.4        -  SB-KERNEL:TWO-ARG-*
+  63      9   0.2      9   0.2   2926  67.7        -  SB-KERNEL:TWO-ARG->
+  64      9   0.2      9   0.2   2935  67.9        -  foreign function __mmap
+  65      9   0.2      9   0.2   2944  68.1        -  foreign function vkCmdBindIndexBuffer
+  66      8   0.2    146   3.4   2952  68.3        -  LUV:DRAW-INDEXED
+  67      8   0.2    115   2.7   2960  68.4        -  CFFI::GET-SLOT-INFO
+  68      8   0.2     21   0.5   2968  68.6        -  LUV.VULKAN:CMD-BIND-GRAPHICS-DESCRIPTOR-SET
+  69      8   0.2      8   0.2   2976  68.8        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1.) :IN "SYS:SRC;PCL;BRAID.LISP")
+  70      8   0.2      8   0.2   2984  69.0        -  foreign function pthread_mutex_lock
+  71      8   0.2      8   0.2   2992  69.2        -  LUV::VULKAN-INDEX-FORMAT-SIZE
+  72      7   0.2    386   8.9   2999  69.3        -  LUV.VULKAN:CMD-DRAW-INDEXED
+  73      7   0.2      8   0.2   3006  69.5        -  SB-KERNEL:TWO-ARG-STRING=
+  74      7   0.2      7   0.2   3013  69.7        -  SB-KERNEL:%COERCE-CALLABLE-TO-FUN
+  75      7   0.2      7   0.2   3020  69.8        -  SB-KERNEL:TWO-ARG-<=
+  76      7   0.2      7   0.2   3027  70.0        -  (LAMBDA (SB-PCL::.ARG0.) :IN "SYS:SRC;PCL;BRAID.LISP")
+  77      7   0.2      7   0.2   3034  70.2        -  foreign function vkCmdDrawIndexed
+  78      7   0.2      7   0.2   3041  70.3        -  (SB-VM::OPTIMIZED-DATA-VECTOR-REF SINGLE-FLOAT)
+  79      7   0.2      7   0.2   3048  70.5        -  foreign function __vdso_gettimeofday
+  80      6   0.1     13   0.3   3054  70.6        -  (FLET SB-IMPL::INSERT-AT :IN "SYS:SRC;CODE;TARGET-HASH-TABLE.LISP")
+  81      6   0.1      6   0.1   3060  70.8        -  (SETF SB-VM:FLOATING-POINT-MODES)
+  82      6   0.1      6   0.1   3066  70.9        -  CFFI-SYS:%MEM-SET
+  83      6   0.1      6   0.1   3072  71.0        -  foreign function malloc
+  84      6   0.1      6   0.1   3078  71.2        -  SB-KERNEL:%MEMBER
+  85      6   0.1      6   0.1   3084  71.3        -  foreign function pre_search_for_small_space
+  86      6   0.1      6   0.1   3090  71.4        -  CFFI::NAMESPACE-TABLE
+  87      6   0.1      6   0.1   3096  71.6        -  LUV:MAKE-RENDER-PASS-DESCRIPTOR
+  88      5   0.1    582  13.5   3101  71.7        -  (LAMBDA NIL :IN LUV:BEGIN-RENDER-PASS)
+  89      5   0.1    207   4.8   3106  71.8        -  (SB-PCL::FAST-METHOD (SETF CFFI::FOREIGN-STRUCT-SLOT-VALUE) (T T CFFI::SIMPLE-STRUCT-SLOT))
+  90      5   0.1     98   2.3   3111  71.9        -  (SB-PCL::EMF LUV:ENCODE)
+  91      5   0.1     95   2.2   3116  72.0        -  (SB-PCL::FAST-METHOD LUV:ENCODE (LUV::VULKAN-GPU-RENDER-PASS-ENCODER LUV:GPU-SET-PIPELINE-COMMAND))
+  92      5   0.1     48   1.1   3121  72.2        -  foreign function lisp_alloc
+  93      5   0.1      6   0.1   3126  72.3        -  SB-KERNEL:TWO-ARG--
+  94      5   0.1      6   0.1   3131  72.4        -  (LABELS CFFI::PROCESS-ONE :IN CFFI::%FOREIGN-BITFIELD-VALUE)
+  95      5   0.1      5   0.1   3136  72.5        -  (SB-PCL::FAST-METHOD LUV::VULKAN-ADMISSION-CLOSED-P (T))
+  96      5   0.1      5   0.1   3141  72.6        -  SB-THREAD:GRAB-MUTEX
+  97      5   0.1      5   0.1   3146  72.7        -  SB-KERNEL:TWO-ARG-+
+  98      5   0.1      5   0.1   3151  72.9        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+  99      5   0.1      5   0.1   3156  73.0        -  LUV:MAKE-GPU-DRAW-COMMAND
+ 100      5   0.1      5   0.1   3161  73.1        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. SB-PCL::.ARG2. SB-PCL::.ARG3. &REST SB-PCL::.REST.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+ 101      4   0.1   1472  34.0   3165  73.2        -  Unknown fn 94092
+ 102      4   0.1    279   6.5   3169  73.3        -  LUV.VULKAN:CMD-TRANSITION-IMAGE
+ 103      4   0.1    156   3.6   3173  73.4        -  (SB-PCL::FAST-METHOD LUV:ENCODE (LUV::VULKAN-GPU-COMMAND-ENCODER LUV:GPU-PREPARE-TEXTURE-COMMAND))
+ 104      4   0.1    101   2.3   3177  73.5        -  LUV.VULKAN:CREATE-FRAMEBUFFER
+ 105      4   0.1     83   1.9   3181  73.5        -  Unknown fn 45789
+ 106      4   0.1     50   1.2   3185  73.6        -  (SB-PCL::FAST-METHOD LUV:END-PASS :AROUND (LUV::VULKAN-GPU-RENDER-PASS-ENCODER))
+ 107      4   0.1     23   0.5   3189  73.7        -  CFFI::FIND-TYPE-PARSER
+ 108      4   0.1     11   0.3   3193  73.8        -  LUV.VULKAN:CMD-BIND-VERTEX-BUFFER
+ 109      4   0.1      9   0.2   3197  73.9        -  (FLET "CLEANUP-FUN-12" :IN LUV:ENCODE)
+ 110      4   0.1      6   0.1   3201  74.0        -  (SB-PCL::FAST-METHOD CFFI::AGGREGATEP (CFFI::FOREIGN-TYPE-ALIAS))
+ 111      4   0.1      4   0.1   3205  74.1        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. SB-PCL::.ARG2. SB-PCL::.ARG3.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+ 112      4   0.1      4   0.1   3209  74.2        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1.) :IN "SYS:SRC;PCL;BRAID.LISP")
+ 113      4   0.1      4   0.1   3213  74.3        -  SB-KERNEL::INTEGER-/-INTEGER
+ 114      4   0.1      4   0.1   3217  74.4        -  MCLUV::DIRECT-MIRROR-PIPELINE-FAMILY-CURRENT-P
+ 115      3   0.1   1152  26.6   3220  74.5        -  SB-THREAD::CALL-WITH-RECURSIVE-LOCK
+ 116      3   0.1    146   3.4   3223  74.5        -  LUV::MAINTAIN-GPU-RETIREMENT-LEDGER
+ 117      3   0.1     68   1.6   3226  74.6        -  CFFI::ENSURE-PARSED-BASE-TYPE
+ 118      3   0.1     59   1.4   3229  74.7        -  (SB-PCL::FAST-METHOD LUV:ENCODE (LUV::VULKAN-GPU-RENDER-PASS-ENCODER LUV:GPU-DRAW-COMMAND))
+ 119      3   0.1     55   1.3   3232  74.7        -  (SB-PCL::FAST-METHOD CFFI:FOREIGN-TYPE-SIZE (T))
+ 120      3   0.1     40   0.9   3235  74.8        -  LUV.VULKAN::%CMD-DRAW
+ 121      3   0.1     15   0.3   3238  74.9        -  LUV::VULKAN-RENDER-PASS-FOR-FORMAT
+ 122      3   0.1     14   0.3   3241  74.9        -  REDUCE
+ 123      3   0.1     12   0.3   3244  75.0        -  SB-IMPL::GROW-HASH-TABLE
+ 124      3   0.1     11   0.3   3247  75.1        -  LUV::VULKAN-ENCODER-TEXTURE-LAYOUT
+ 125      3   0.1     11   0.3   3250  75.1        -  LUV.VULKAN::CREATE-FRAMEBUFFER-HANDLE
+ 126      3   0.1      9   0.2   3253  75.2        -  SB-IMPL::VECTOR-MAP-INTO/SIMPLE-VECTOR
+ 127      3   0.1      7   0.2   3256  75.3        -  foreign function try_allocate_small_from_pages
+ 128      3   0.1      6   0.1   3259  75.4        -  (LABELS SB-IMPL::SXHASH-RECURSE :IN SB-IMPL::PERHAPS-TRUNCATED-EQUAL-HASH)
+ 129      3   0.1      5   0.1   3262  75.4        -  LUV::HASH-TABLE-KEYS
+ 130      3   0.1      4   0.1   3265  75.5        -  GENERIC-=
+ 131      3   0.1      4   0.1   3268  75.6        -  Unknown fn 62347
+ 132      3   0.1      4   0.1   3271  75.6        -  LUV.VK:CMD-BIND-VERTEX-BUFFERS
+ 133      3   0.1      4   0.1   3274  75.7        -  foreign function realloc
+ 134      3   0.1      3   0.1   3277  75.8        -  (FLET LUV.VULKAN::CALL :IN LUV.VK:CMD-BIND-INDEX-BUFFER)
+ 135      3   0.1      3   0.1   3280  75.8        -  LUV.VK:CMD-BIND-PIPELINE
+ 136      3   0.1      3   0.1   3283  75.9        -  foreign function clock_gettime
+ 137      3   0.1      3   0.1   3286  76.0        -  foreign function __libc_free
+ 138      3   0.1      3   0.1   3289  76.0        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. SB-PCL::.ARG2.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+ 139      3   0.1      3   0.1   3292  76.1        -  (LAMBDA (SB-PCL::.PV. SB-PCL::.NEXT-METHOD-CALL. SB-KERNEL:INSTANCE) :IN SB-PCL::MAKE-STD-READER-METHOD-FUNCTION)
+ 140      3   0.1      3   0.1   3295  76.2        -  foreign function findhash
+ 141      2   0.0   1151  26.6   3297  76.2        -  (FLET "WITHOUT-INTERRUPTS-BODY-" :IN SB-THREAD::CALL-WITH-RECURSIVE-LOCK)
+ 142      2   0.0    725  16.8   3299  76.3        -  LUV::CALL-WITH-LIVE-VULKAN-DEVICE-QUEUE
+ 143      2   0.0    624  14.4   3301  76.3        -  Unknown fn 96161
+ 144      2   0.0    145   3.4   3303  76.4        -  Unknown fn 44080
+ 145      2   0.0    117   2.7   3305  76.4        -  CFFI::FOREIGN-SLOT-SET
+ 146      2   0.0     45   1.0   3307  76.5        -  SB-THREAD::CALL-WITH-SYSTEM-MUTEX
+ 147      2   0.0     39   0.9   3309  76.5        -  foreign function amdgpu_bo_alloc
+ 148      2   0.0     35   0.8   3311  76.6        -  Unknown fn 78581
+ 149      2   0.0     34   0.8   3313  76.6        -  LUV.VULKAN::%CMD-BIND-PIPELINE
+ 150      2   0.0     18   0.4   3315  76.6        -  (FLET LUFT.RENDER::ROW :IN LUFT.RENDER::LIGHT-CLIP-FUNCTION)
+ 151      2   0.0     15   0.3   3317  76.7        -  (LAMBDA (LUFT.RENDER::X LUFT.RENDER::Y LUFT.RENDER::Z) :IN LUFT.RENDER::CAMERA-CLIP-FUNCTION)
+ 152      2   0.0     15   0.3   3319  76.7        -  CFFI::FOLLOW-TYPEDEFS
+ 153      2   0.0     11   0.3   3321  76.8        -  (MAKE-INSTANCE LUV::VULKAN-GPU-COMMAND-BUFFER)
+ 154      2   0.0      9   0.2   3323  76.8        -  LUFT.RENDER::CAPTURE-FRAME-VIEW
+ 155      2   0.0      8   0.2   3325  76.9        -  (MAKE-INSTANCE LUV::VULKAN-GPU-RENDER-PASS-ENCODER)
+ 156      2   0.0      7   0.2   3327  76.9        -  (SB-PCL::FAST-METHOD LUV:WRITE-BUFFER (LUV::VULKAN-GPU-BUFFER T))
+ 157      2   0.0      7   0.2   3329  77.0        -  GENERIC-<
+ 158      2   0.0      7   0.2   3331  77.0        -  SB-THREAD::%MUTEX-TIMEDLOCK
+ 159      2   0.0      7   0.2   3333  77.1        -  SB-IMPL::%MAKE-HASH-TABLE
+ 160      2   0.0      5   0.1   3335  77.1        -  LUFT.RENDER:CAMERA-BASIS
+ 161      2   0.0      4   0.1   3337  77.2        -  SB-IMPL::MERGE-LISTS*
+ 162      2   0.0      3   0.1   3339  77.2        -  LUFT:FIBER-STORE-CELL-BIT
+ 163      2   0.0      3   0.1   3341  77.2        -  REMHASH
+ 164      2   0.0      3   0.1   3343  77.3        -  COPY-LIST
+ 165      2   0.0      3   0.1   3345  77.3        -  (LAMBDA (CFFI::NAME) :IN "/nix/store/2sjzvq2jpbwg6rn0fzbjkma3aq7hgmqg-source/src/types.lisp")
+ 166      2   0.0      3   0.1   3347  77.4        -  SB-IMPL::RECOMPUTE-HT-VECTOR-SIZES
+ 167      2   0.0      3   0.1   3349  77.4        -  (FLET SB-IMPL::MAYBE-UPDATE-TIMEOUT :IN SB-SYS:WAIT-UNTIL-FD-USABLE)
+ 168      2   0.0      2   0.0   3351  77.5        -  SB-KERNEL:SYSTEM-AREA-UB8-COPY
+ 169      2   0.0      2   0.0   3353  77.5        -  (FLET "WRAPPER17" :IN LUV:ENCODE)
+ 170      2   0.0      2   0.0   3355  77.6        -  foreign function vkCmdSetScissor
+ 171      2   0.0      2   0.0   3357  77.6        -  (SB-PCL::FAST-METHOD CFFI:TRANSLATE-TO-FOREIGN (T CFFI::FOREIGN-ENUM))
+ 172      2   0.0      2   0.0   3359  77.7        -  (SB-PCL::FAST-METHOD LUV:ENCODE :AROUND (LUV:GPU-RENDER-PASS-ENCODER LUV:GPU-DRAW-COMMAND))
+ 173      2   0.0      2   0.0   3361  77.7        -  GENERIC--
+ 174      2   0.0      2   0.0   3363  77.8        -  (LAMBDA (&OPTIONAL TYPE) :IN "/nix/store/2sjzvq2jpbwg6rn0fzbjkma3aq7hgmqg-source/src/early-types.lisp")
+ 175      2   0.0      2   0.0   3365  77.8        -  foreign function __pthread_rwlock_rdlock
+ 176      2   0.0      2   0.0   3367  77.8        -  REMOVE
+ 177      2   0.0      2   0.0   3369  77.9        -  SB-IMPL::CASE-FROB-DOWNCASE-SOUT
+ 178      2   0.0      2   0.0   3371  77.9        -  SB-IMPL::%ALLOC-HASH-TABLE
+ 179      2   0.0      2   0.0   3373  78.0        -  LUVCRAFT::%MAKE-SKY-FRAME-PARAMETERS
+ 180      2   0.0      2   0.0   3375  78.0        -  LUV:MAKE-GPU-SET-VERTEX-BUFFER-COMMAND
+ 181      2   0.0      2   0.0   3377  78.1        -  GENERIC-+
+ 182      2   0.0      2   0.0   3379  78.1        -  (LABELS SB-KERNEL::RECURSE :IN SB-KERNEL:%%TYPEP)
+ 183      2   0.0      2   0.0   3381  78.2        -  Unknown fn 44473
+ 184      2   0.0      2   0.0   3383  78.2        -  Unknown fn 33856
+ 185      2   0.0      2   0.0   3385  78.3        -  SB-KERNEL:LIST-SUBSEQ
+ 186      2   0.0      2   0.0   3387  78.3        -  SB-LOCKLESS:SO-FIND
+ 187      2   0.0      2   0.0   3389  78.4        -  (SB-PCL::EMF LUV:WRITE-BUFFER)
+ 188      2   0.0      2   0.0   3391  78.4        -  SB-THREAD::%MAKE-SEMAPHORE
+ 189      2   0.0      2   0.0   3393  78.5        -  COS
+ 190      2   0.0      2   0.0   3395  78.5        -  SB-IMPL::PICK-TABLE-METHODS
+ 191      2   0.0      2   0.0   3397  78.5        -  LUVCRAFT::SKY-LERP
+ 192      2   0.0      2   0.0   3399  78.6        -  SB-IMPL::STRING-SOUT
+ 193      2   0.0      2   0.0   3401  78.6        -  SB-KERNEL:TWO-ARG-/
+ 194      2   0.0      2   0.0   3403  78.7        -  (SB-PCL::FAST-METHOD CFFI::AGGREGATEP (CFFI::FOREIGN-BUILT-IN-TYPE))
+ 195      2   0.0      2   0.0   3405  78.7        -  LUFT.RENDER::PROJECTION-LANE
+ 196      2   0.0      2   0.0   3407  78.8        -  EQ
+ 197      2   0.0      2   0.0   3409  78.8        -  (LAMBDA (SB-PCL::.ARG0.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+ 198      2   0.0      2   0.0   3411  78.9        -  GPU-FPS::CLOCK-GETTIME
+ 199      2   0.0      2   0.0   3413  78.9        -  (LAMBDA (SB-THREAD::NODE) :IN SB-THREAD:%THREAD-FROM-TID)
+ 200      2   0.0      2   0.0   3415  79.0        -  SB-SYS:DECODE-TIMEOUT
+ 201      1   0.0   4308  99.6   3416  79.0        -  (FLET "WITHOUT-INTERRUPTS-BODY-" :IN SB-THREAD::RUN)
+ 202      1   0.0   4147  95.9   3417  79.0        -  (LABELS GPU-FPS::FRAME :IN GPU-FPS::MEASURE)
+ 203      1   0.0   3580  82.8   3418  79.0        -  (SB-PCL::FAST-METHOD LUFT.RENDER::ENCODE-VIEWER-FRAME (T T T T))
+ 204      1   0.0   3515  81.3   3419  79.1        -  LUFT.RENDER:ENCODE-RENDERER-VIEW
+ 205      1   0.0   3141  72.6   3420  79.1        -  LUFT.RENDER::ENCODE-RENDERER-PASSES
+ 206      1   0.0    718  16.6   3421  79.1        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV::CALL-WITH-LIVE-VULKAN-DEVICE-QUEUE)
+ 207      1   0.0    309   7.1   3422  79.1        -  LUFT.RENDER::ENCODE-RENDERER-PRESENTATION
+ 208      1   0.0    307   7.1   3423  79.1        -  (FLET LUFT.RENDER::STAGE :IN LUFT.RENDER::ENCODE-RENDERER-LENS)
+ 209      1   0.0    299   6.9   3424  79.2        -  LUV::TRANSITION-VULKAN-TEXTURE
+ 210      1   0.0    226   5.2   3425  79.2        -  LUFT.RENDER::ENCODE-VIEWER-OVERLAYS
+ 211      1   0.0    215   5.0   3426  79.2        -  (SB-PCL::EMF LUVCRAFT:ENCODE-LUVCRAFT-OVERLAY)
+ 212      1   0.0    190   4.4   3427  79.2        -  LUV::MAINTAIN-VULKAN-QUEUE
+ 213      1   0.0    182   4.2   3428  79.3        -  Unknown fn 78735
+ 214      1   0.0    175   4.0   3429  79.3        -  LUV::SUBMIT-VULKAN-COMMAND-BUFFERS
+ 215      1   0.0    172   4.0   3430  79.3        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV::SUBMIT-VULKAN-COMMAND-BUFFERS)
+ 216      1   0.0    140   3.2   3431  79.3        -  (FLET "RUN1" :IN LUV::MAKE-VULKAN-DEVICE-RETIREMENT-STEP)
+ 217      1   0.0    136   3.1   3432  79.4        -  LUV.VULKAN:DESTROY-COMMAND-POOL
+ 218      1   0.0    114   2.6   3433  79.4        -  LUV.VULKAN:SUBMIT-COMMAND-BUFFERS
+ 219      1   0.0    100   2.3   3434  79.4        -  foreign function drmIoctl
+ 220      1   0.0     85   2.0   3435  79.4        -  ALLOC-TRAMP
+ 221      1   0.0     72   1.7   3436  79.4        -  LUFT.RENDER::RESIDENT-DRAWN-P
+ 222      1   0.0     64   1.5   3437  79.5        -  (FLET "WITHOUT-INTERRUPTS-BODY-" :IN SB-THREAD::CALL-WITH-MUTEX)
+ 223      1   0.0     64   1.5   3438  79.5        -  SB-THREAD::CALL-WITH-MUTEX
+ 224      1   0.0     56   1.3   3439  79.5        -  SB-SYS:WAIT-UNTIL-FD-USABLE
+ 225      1   0.0     52   1.2   3440  79.5        -  SB-UNIX:UNIX-SIMPLE-POLL
+ 226      1   0.0     47   1.1   3441  79.6        -  Unknown fn 44067
+ 227      1   0.0     46   1.1   3442  79.6        -  LUV::TRY-START-GPU-RETIREMENT-CUSTODIAN-SERVICE-LOCKED
+ 228      1   0.0     45   1.0   3443  79.6        -  LUV::START-GPU-RETIREMENT-CUSTODIAN-SERVICE-LOCKED
+ 229      1   0.0     43   1.0   3444  79.6        -  (FLET "WITHOUT-INTERRUPTS-BODY-" :IN SB-THREAD::CALL-WITH-SYSTEM-MUTEX)
+ 230      1   0.0     41   0.9   3445  79.7        -  foreign function drmCloseBufferHandle
+ 231      1   0.0     41   0.9   3446  79.7        -  foreign function amdgpu_bo_free
+ 232      1   0.0     40   0.9   3447  79.7        -  LUV::SERVICE-GPU-RETIREMENT-CUSTODIANS-ONCE
+ 233      1   0.0     37   0.9   3448  79.7        -  LUFT.RENDER::RENDERER-FRAME-COMPONENT-BINDING
+ 234      1   0.0     32   0.7   3449  79.7        -  LUV.VULKAN:CMD-BEGIN-DEPTH-RENDER-PASS
+ 235      1   0.0     29   0.7   3450  79.8        -  (SB-PCL::FAST-METHOD LUV:FINISH (LUV::VULKAN-GPU-COMMAND-ENCODER))
+ 236      1   0.0     24   0.6   3451  79.8        -  (SB-PCL::FAST-METHOD LUV:ENCODE (LUV::VULKAN-GPU-RENDER-PASS-ENCODER LUV:GPU-SET-VERTEX-BUFFER-COMMAND))
+ 237      1   0.0     23   0.5   3452  79.8        -  (LAMBDA (CFFI::NAME) :IN "/nix/store/2sjzvq2jpbwg6rn0fzbjkma3aq7hgmqg-source/src/types.lisp")
+ 238      1   0.0     21   0.5   3453  79.8        -  LUV.VULKAN:CMD-SET-SCISSOR
+ 239      1   0.0     20   0.5   3454  79.9        -  (LAMBDA (LUFT.RENDER::X LUFT.RENDER::Y LUFT.RENDER::Z) :IN LUFT.RENDER::LIGHT-CLIP-FUNCTION)
+ 240      1   0.0     20   0.5   3455  79.9        -  CFFI::CHECK-FOR-TYPEDEF-CYCLES
+ 241      1   0.0     18   0.4   3456  79.9        -  LUV.VULKAN::%CMD-PIPELINE-BARRIER
+ 242      1   0.0     17   0.4   3457  79.9        -  LUV.VULKAN::%GET-SEMAPHORE-COUNTER-VALUE
+ 243      1   0.0     17   0.4   3458  80.0        -  (SB-PCL::FAST-METHOD CFFI:TRANSLATE-FROM-FOREIGN (T LUV.VULKAN::CHECKED-RESULT-TYPE))
+ 244      1   0.0     16   0.4   3459  80.0        -  MCLUV:PREPARE-GPU-MIRROR-COMPOSITOR
+ 245      1   0.0     12   0.3   3460  80.0        -  CFFI:FOREIGN-ENUM-KEYWORD
+ 246      1   0.0     12   0.3   3461  80.0        -  LUFT.RENDER::VIEWER-POINTER-RAY
+ 247      1   0.0     12   0.3   3462  80.0        -  LUV.VULKAN::%CMD-BIND-DESCRIPTOR-SETS
+ 248      1   0.0     11   0.3   3463  80.1        -  LUFT.RENDER:CAMERA-POINTER-RAY
+ 249      1   0.0     11   0.3   3464  80.1        -  SB-THREAD::DEADLOCK-AWARE-MUTEX-WAIT
+ 250      1   0.0     11   0.3   3465  80.1        -  MCLUV::PREPARE-DIRECT-GPU-MIRROR
+ 251      1   0.0     11   0.3   3466  80.1        -  LUV.VULKAN::%WAIT-SEMAPHORES
+ 252      1   0.0     10   0.2   3467  80.2        -  LUV::CHECK-VULKAN-COMMAND-BUFFER-FOR-SUBMIT
+ 253      1   0.0     10   0.2   3468  80.2        -  LUFT.RENDER::UPLOAD-RENDERER-FRAME
+ 254      1   0.0      9   0.2   3469  80.2        -  foreign function listify_rest_arg
+ 255      1   0.0      8   0.2   3470  80.2        -  GPU-FPS::STAMP
+ 256      1   0.0      8   0.2   3471  80.3        -  GET-UNIVERSAL-TIME
+ 257      1   0.0      7   0.2   3472  80.3        -  LUV.VULKAN:END-COMMAND-BUFFER
+ 258      1   0.0      7   0.2   3473  80.3        -  SB-KERNEL:%MAP
+ 259      1   0.0      7   0.2   3474  80.3        -  REMOVE-IF
+ 260      1   0.0      7   0.2   3475  80.3        -  MCLUV::PREPARE-DIRECT-GPU-MIRROR-PIPELINES
+ 261      1   0.0      6   0.1   3476  80.4        -  LUV::NORMALIZE-RENDER-PASS-COLOR
+ 262      1   0.0      6   0.1   3477  80.4        -  LUFT.RENDER:RAYCAST-SITE
+ 263      1   0.0      6   0.1   3478  80.4        -  LUV.VULKAN::%END-COMMAND-BUFFER
+ 264      1   0.0      6   0.1   3479  80.4        -  SB-THREAD:RELEASE-MUTEX
+ 265      1   0.0      6   0.1   3480  80.5        -  SB-C::IR1-CONVERT
+ 266      1   0.0      6   0.1   3481  80.5        -  SB-C::IR1-CONVERT-LAMBDA-BODY
+ 267      1   0.0      6   0.1   3482  80.5        -  MCLUV::HOTBAR-VISIBLE-STATE-FOR
+ 268      1   0.0      5   0.1   3483  80.5        -  GPU-FPS::NOW
+ 269      1   0.0      5   0.1   3484  80.6        -  LUFT.RENDER::DRAW-RESIDENT-FIXTURE-BODIES
+ 270      1   0.0      4   0.1   3485  80.6        -  (SB-PCL::FAST-METHOD MCLUV::ENCODE-GPU-COMMAND (MCLUV::GPU-PREPARED-TEXT-COMMAND T MCLUV::DIRECT-WIDGET-COMMAND-ENCODE-CONTEXT))
+ 271      1   0.0      4   0.1   3486  80.6        -  (FLET "WITH-PINNED-OBJECTS-THUNK31" :IN LUV:WRITE-BUFFER)
+ 272      1   0.0      4   0.1   3487  80.6        -  LUV::VULKAN-TEXTURE-ASPECT
+ 273      1   0.0      4   0.1   3488  80.6        -  PRINC
+ 274      1   0.0      4   0.1   3489  80.7        -  SB-IMPL::PERHAPS-TRUNCATED-EQUAL-HASH
+ 275      1   0.0      4   0.1   3490  80.7        -  REMOVE-IF-NOT
+ 276      1   0.0      4   0.1   3491  80.7        -  (SB-PCL::FAST-METHOD CLIM:BOUNDING-RECTANGLE* (CLIM:SHEET))
+ 277      1   0.0      4   0.1   3492  80.7        -  (LABELS SB-THREAD::RECURSE :IN SB-THREAD::AVLTREE-FILTER)
+ 278      1   0.0      3   0.1   3493  80.8        -  SB-THREAD:CONDITION-NOTIFY
+ 279      1   0.0      3   0.1   3494  80.8        -  (SB-PCL::FAST-METHOD CFFI::CANONICALIZE (CFFI::FOREIGN-TYPE-ALIAS))
+ 280      1   0.0      3   0.1   3495  80.8        -  (SB-PCL::FAST-METHOD LUV:DESTROY (LUV::VULKAN-GPU-COMMAND-ENCODER))
+ 281      1   0.0      3   0.1   3496  80.8        -  LUV:SET-VERTEX-BUFFER
+ 282      1   0.0      3   0.1   3497  80.9        -  CFFI::%FOREIGN-ENUM-KEYWORD
+ 283      1   0.0      3   0.1   3498  80.9        -  LUV.VK:CMD-DRAW
+ 284      1   0.0      2   0.0   3499  80.9        -  LUFT.RENDER::RENDERER-SHADER-TEMPORAL-P
+ 285      1   0.0      2   0.0   3500  80.9        -  LUV.VULKAN:DESTROY-FRAMEBUFFER
+ 286      1   0.0      2   0.0   3501  80.9        -  (LAMBDA (LUV::NATIVE-DEVICE) :IN LUV::VULKAN-COMMAND-NATIVE-RESOURCE-RETIREMENT-STEPS)
+ 287      1   0.0      2   0.0   3502  81.0        -  (LABELS LUV::CURRENT-LAYOUT :IN LUV::VULKAN-SUBMITTED-TEXTURE-LAYOUTS)
+ 288      1   0.0      2   0.0   3503  81.0        -  (SB-PCL::FAST-METHOD LUFT.RENDER:ENCODE-COMPOSITE (LUFT.RENDER:IMAGE-FINISHING T T))
+ 289      1   0.0      2   0.0   3504  81.0        -  LUFT.RENDER::VIEWER-PROJECTION
+ 290      1   0.0      2   0.0   3505  81.0        -  (SB-PCL::FAST-METHOD MCLUV::ENCODE-GPU-COMMAND (MCLUV::GPU-ANALYTIC-COMMAND T MCLUV::DIRECT-WIDGET-COMMAND-ENCODE-CONTEXT))
+ 291      1   0.0      2   0.0   3506  81.1        -  SB-LOCKLESS:SO-DELETE
+ 292      1   0.0      2   0.0   3507  81.1        -  LUV:MAKE-GPU-SET-PIPELINE-COMMAND
+ 293      1   0.0      2   0.0   3508  81.1        -  (SB-PCL::FAST-METHOD MCLUV::ENCODE-GPU-COMMAND (MCLUV::GPU-PREPARED-IMAGE-COMMAND T MCLUV::DIRECT-WIDGET-COMMAND-ENCODE-CONTEXT))
+ 294      1   0.0      2   0.0   3509  81.1        -  (SB-PCL::FAST-METHOD LUFT.RENDER:VIEWER-FIGURES :AROUND (LUVCRAFT.LUFT.GAME::FEEDBACK-GAME-STATE))
+ 295      1   0.0      2   0.0   3510  81.2        -  LUV.VK:CMD-PIPELINE-BARRIER
+ 296      1   0.0      2   0.0   3511  81.2        -  SB-KERNEL:%MAKE-ARRAY
+ 297      1   0.0      2   0.0   3512  81.2        -  LUFT.RENDER::LIGHT-SHADOW-ROWS
+ 298      1   0.0      2   0.0   3513  81.2        -  SB-INT:HASHSET-FIND
+ 299      1   0.0      2   0.0   3514  81.2        -  LUV::MAKE-VULKAN-POST-SUBMIT-PUBLICATION
+ 300      1   0.0      1   0.0   3515  81.3        -  COPY-SEQ
+ 301      1   0.0      1   0.0   3516  81.3        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. SB-PCL::.ARG2. SB-PCL::.ARG3.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+ 302      1   0.0      1   0.0   3517  81.3        -  PPRINT-DISPATCH
+ 303      1   0.0      1   0.0   3518  81.3        -  APPEND
+ 304      1   0.0      1   0.0   3519  81.4        -  LUFT.RENDER::%MAKE-FRAME-VIEW
+ 305      1   0.0      1   0.0   3520  81.4        -  foreign function alloc
+ 306      1   0.0      1   0.0   3521  81.4        -  TYPEXPAND-1
+ 307      1   0.0      1   0.0   3522  81.4        -  (LAMBDA (SB-PCL::METHOD-ARGS SB-PCL::NEXT-METHODS) :IN SB-PCL::METHOD-FUNCTION-FROM-FAST-FUNCTION)
+ 308      1   0.0      1   0.0   3523  81.5        -  (SETF LUV::VULKAN-COMMAND-ENCODER-NATIVE-RESOURCES)
+ 309      1   0.0      1   0.0   3524  81.5        -  HASH-TABLE-REHASH-THRESHOLD
+ 310      1   0.0      1   0.0   3525  81.5        -  foreign function alloc_list
+ 311      1   0.0      1   0.0   3526  81.5        -  SB-KERNEL:%SINGLE-FLOAT
+ 312      1   0.0      1   0.0   3527  81.5        -  Unknown fn 97066
+ 313      1   0.0      1   0.0   3528  81.6        -  foreign function floorf
+ 314      1   0.0      1   0.0   3529  81.6        -  LUFT:CHUNK-KEY-AT
+ 315      1   0.0      1   0.0   3530  81.6        -  SB-C::CHECK-DS-LIST/&REST
+ 316      1   0.0      1   0.0   3531  81.6        -  LUV:MAKE-COMMAND-ENCODER-DESCRIPTOR
+ 317      1   0.0      1   0.0   3532  81.7        -  SB-IMPL::REMHASH/EQ-HASH/FLAT
+ 318      1   0.0      1   0.0   3533  81.7        -  (FLET LUV.VULKAN::CALL :IN LUV.VK:CMD-DRAW-INDEXED)
+ 319      1   0.0      1   0.0   3534  81.7        -  Unknown fn 96193
+ 320      1   0.0      1   0.0   3535  81.7        -  foreign function vkCmdBeginRenderPass
+ 321      1   0.0      1   0.0   3536  81.8        -  (LAMBDA (SB-LOCKLESS::X) :IN SB-LOCKLESS::MAKE)
+ 322      1   0.0      1   0.0   3537  81.8        -  SB-LOCKLESS::%SO-DELETE/ADDR
+ 323      1   0.0      1   0.0   3538  81.8        -  MCLUV::ENSURE-DIRECT-WIDGET-IMAGE-BIND-GROUP
+ 324      1   0.0      1   0.0   3539  81.8        -  (SB-PCL::FAST-METHOD CLIM:BOUNDING-RECTANGLE* (CLIM:STANDARD-RECTANGLE))
+ 325      1   0.0      1   0.0   3540  81.9        -  SB-KERNEL::BASIC-PARSE-TYPESPEC
+ 326      1   0.0      1   0.0   3541  81.9        -  LUV.VK:CMD-SET-SCISSOR
+ 327      1   0.0      1   0.0   3542  81.9        -  GENERIC-NEGATE
+ 328      1   0.0      1   0.0   3543  81.9        -  LUV.VK:CREATE-FRAMEBUFFER
+ 329      1   0.0      1   0.0   3544  81.9        -  foreign function futex_wake
+ 330      1   0.0      1   0.0   3545  82.0        -  (FLET "CLEANUP-FUN-7" :IN LUV.VULKAN:CREATE-FRAMEBUFFER)
+ 331      1   0.0      1   0.0   3546  82.0        -  foreign function vkDestroyFramebuffer
+ 332      1   0.0      1   0.0   3547  82.0        -  SB-IMPL::COMPUTE-FLAT-HASH-ADDRESS-HASHING-P
+ 333      1   0.0      1   0.0   3548  82.0        -  SB-LOCKLESS::%SO-PUT/ADDR
+ 334      1   0.0      1   0.0   3549  82.1        -  (SB-PCL::FAST-METHOD LUFT.RENDER::ENCODE-SCENE-DRAWING-SHADOW (LUVCRAFT.LUFT.GAME::BALL-FIGURE-DRAWING T LUVCRAFT.LUFT.GAME::BALL-FIGURE-BINDING))
+ 335      1   0.0      1   0.0   3550  82.1        -  LUFT.RENDER::ENCODE-RENDERER-WORLD-TEXT
+ 336      1   0.0      1   0.0   3551  82.1        -  (SB-PCL::FAST-METHOD CFFI::CANONICALIZE (CFFI::FOREIGN-BUILT-IN-TYPE))
+ 337      1   0.0      1   0.0   3552  82.1        -  SB-UNIX::WITH-DEFERRABLE-SIGNALS-UNBLOCKED
+ 338      1   0.0      1   0.0   3553  82.2        -  foreign function vkCmdWriteTimestamp
+ 339      1   0.0      1   0.0   3554  82.2        -  GET-OUTPUT-STREAM-STRING
+ 340      1   0.0      1   0.0   3555  82.2        -  SB-KERNEL::FLOOR1
+ 341      1   0.0      1   0.0   3556  82.2        -  SB-BIGNUM:BIGNUM-ASHIFT-LEFT-FIXNUM
+ 342      1   0.0      1   0.0   3557  82.2        -  SB-KERNEL:RANGE<=
+ 343      1   0.0      1   0.0   3558  82.3        -  (SB-PCL::FAST-METHOD LUFT.RENDER:ENCODE-PROGRAM :BEFORE (LUFT.RENDER::VERTEX-DRAWING-PROGRAM T T T))
+ 344      1   0.0      1   0.0   3559  82.3        -  (SB-PCL::FAST-METHOD MCLUV::LUVCRAFT-WIDGET-TARGET-FORMAT (MCLUV:LUVCRAFT-HUD-WIDGET-OVERLAY LUVCRAFT.LUFT.GAME:LUVCRAFT-VIEWER T))
+ 345      1   0.0      1   0.0   3560  82.3        -  (LAMBDA (MCLUV::FAMILY) :IN MCLUV::DIRECT-GPU-MIRROR-MISSING-PIPELINE-FAMILIES)
+ 346      1   0.0      1   0.0   3561  82.3        -  (SB-PCL::FAST-METHOD MCLUV::GPU-COMMAND-CLIP (MCLUV::GPU-SOLID-COMMAND))
+ 347      1   0.0      1   0.0   3562  82.4        -  (LAMBDA (SB-PCL::.ARG0.) :IN "/home/mbrock/.cache/common-lisp/luv/izn0rp7iydkvwl8xfqr8m9sg23v3472r-luv-development-closure/home/mbrock/luv-gpu-fps-chapel/hal/shader/slug-shader.fasl")
+ 348      1   0.0      1   0.0   3563  82.4        -  FLOOR
+ 349      1   0.0      1   0.0   3564  82.4        -  foreign function SDL_GetWindowSize
+ 350      1   0.0      1   0.0   3565  82.4        -  HASH-TABLE-REHASH-SIZE
+ 351      1   0.0      1   0.0   3566  82.5        -  foreign function getpagesize
+ 352      1   0.0      1   0.0   3567  82.5        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. SB-PCL::.ARG2. &REST SB-PCL::.REST.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+ 353      1   0.0      1   0.0   3568  82.5        -  SB-THREAD:MAKE-MUTEX
+ 354      1   0.0      1   0.0   3569  82.5        -  SB-KERNEL::NAMED-UNPARSE-TYPE-METHOD
+ 355      1   0.0      1   0.0   3570  82.5        -  SB-INT:MAKE-CASE-FROB-STREAM
+ 356      1   0.0      1   0.0   3571  82.6        -  SB-KERNEL:TYPE-SPECIFIER
+ 357      1   0.0      1   0.0   3572  82.6        -  (SB-PCL::EMF LUFT.RENDER:ENCODE-TERRAIN)
+ 358      1   0.0      1   0.0   3573  82.6        -  REPLACE
+ 359      1   0.0      1   0.0   3574  82.6        -  Unknown fn 78957
+ 360      1   0.0      1   0.0   3575  82.7        -  (SB-PCL::FAST-METHOD LUFT.RENDER:VIEWER-OVERLAY-STAGE (T))
+ 361      1   0.0      1   0.0   3576  82.7        -  CLASS-OF
+ 362      1   0.0      1   0.0   3577  82.7        -  (LAMBDA NIL :IN "/home/mbrock/luv-gpu-fps-chapel/hal/vulkan/gpu.lisp")
+ 363      1   0.0      1   0.0   3578  82.7        -  foreign function amdgpu_va_range_alloc
+ 364      1   0.0      1   0.0   3579  82.8        -  LUV:MAKE-GPU-PREPARE-TEXTURE-COMMAND
+ 365      1   0.0      1   0.0   3580  82.8        -  (SB-PCL::FAST-METHOD MCLUV::GPU-COMMAND-CLIP (MCLUV::GPU-PREPARED-TEXT-COMMAND))
+ 366      1   0.0      1   0.0   3581  82.8        -  LOGIOR
+ 367      1   0.0      1   0.0   3582  82.8        -  LUV::SPAWN-GPU-RETIREMENT-CUSTODIAN-SERVICE-THREAD
+ 368      1   0.0      1   0.0   3583  82.8        -  LUVCRAFT.LUFT:BLOCK-PLACEMENT
+ 369      1   0.0      1   0.0   3584  82.9        -  foreign function vkCmdEndRenderPass
+ 370      1   0.0      1   0.0   3585  82.9        -  LENGTH
+ 371      1   0.0      1   0.0   3586  82.9        -  SB-IMPL::GETHASH/EQ-HASH/COMMON
+ 372      1   0.0      1   0.0   3587  82.9        -  Unknown fn 92742
+ 373      1   0.0      1   0.0   3588  83.0        -  SB-KERNEL:VECTOR-TO-LIST
+ 374      1   0.0      1   0.0   3589  83.0        -  ALEXANDRIA:ENSURE-LIST
+ 375      1   0.0      1   0.0   3590  83.0        -  RETURN-MULTIPLE
+ 376      1   0.0      1   0.0   3591  83.0        -  (FLET "THUNK" :IN LUV::HASH-TABLE-ALIST)
+ 377      1   0.0      1   0.0   3592  83.1        -  foreign function vkGetSemaphoreCounterValue
+ 378      1   0.0      1   0.0   3593  83.1        -  (LAMBDA (MCLUV::FAMILY) :IN MCLUV::PREPARE-DIRECT-GPU-MIRROR-PIPELINES)
+ 379      1   0.0      1   0.0   3594  83.1        -  (SB-PCL::EMF MCLUV::PREPARE-MIRROR-COMPOSITOR-TARGET-REVISION)
+ 380      1   0.0      1   0.0   3595  83.1        -  (SB-PCL::FAST-METHOD LUV::VULKAN-ADMISSION-CLOSED-P (LUV::VULKAN-GPU-DEVICE))
+ 381      1   0.0      1   0.0   3596  83.1        -  (FLET "THUNK" :IN LUV::HASH-TABLE-KEYS)
+ 382      1   0.0      1   0.0   3597  83.2        -  LUFT.RENDER::RENDERER-SCENE-MSAA-VIEW
+ 383      1   0.0      1   0.0   3598  83.2        -  SB-IMPL::REHASH
+ 384      1   0.0      1   0.0   3599  83.2        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. &REST SB-PCL::.REST.) :IN "SYS:SRC;PCL;DLISP3.LISP")
+ 385      1   0.0      1   0.0   3600  83.2        -  MIN
+ 386      1   0.0      1   0.0   3601  83.3        -  LUFT.RENDER:TORCH-FLAME-EFFECT-UNIFORM-DATA
+ 387      1   0.0      1   0.0   3602  83.3        -  LUFT.RENDER::SKY-CELESTIAL-POLE
+ 388      1   0.0      1   0.0   3603  83.3        -  LUFT.RENDER::ENCODE-RENDERER-RECONSTRUCTION
+ 389      1   0.0      1   0.0   3604  83.3        -  SB-KERNEL:TWO-ARG-=
+ 390      1   0.0      1   0.0   3605  83.4        -  SB-REGALLOC::ASSIGN-TN-COSTS
+ 391      1   0.0      1   0.0   3606  83.4        -  SB-IMPL::%LOOKUP-SYMBOL
+ 392      1   0.0      1   0.0   3607  83.4        -  SB-C::MAKE-LAMBDA-VAR
+ 393      1   0.0      1   0.0   3608  83.4        -  SB-C::CONSTRAINT-PROPAGATE-IN-BLOCK
+ 394      1   0.0      1   0.0   3609  83.4        -  SB-C:LOCATION=
+ 395      1   0.0      1   0.0   3610  83.5        -  SB-IMPL::ARRAY-EQUALP
+ 396      1   0.0      1   0.0   3611  83.5        -  SB-C::%COERCE-TO-POLICY
+ 397      1   0.0      1   0.0   3612  83.5        -  SB-KERNEL:%ADJOIN-EQ
+ 398      1   0.0      1   0.0   3613  83.5        -  SB-C::MAKE-XEP
+ 399      1   0.0      1   0.0   3614  83.6        -  SB-WALKER::%VAR-DECLARATION
+ 400      1   0.0      1   0.0   3615  83.6        -  SB-C::PRESERVE-SINGLE-USE-DEBUG-VAR-P
+ 401      1   0.0      1   0.0   3616  83.6        -  SB-KERNEL::CTYPE-OF-NUMBER
+ 402      1   0.0      1   0.0   3617  83.6        -  SB-C::NODE-HOME-LAMBDA
+ 403      1   0.0      1   0.0   3618  83.7        -  SB-C::MAKE-BIND
+ 404      1   0.0      1   0.0   3619  83.7        -  SB-C::TN-IS-COPY-OF
+ 405      1   0.0      1   0.0   3620  83.7        -  GET-INTERNAL-REAL-TIME
+ 406      1   0.0      1   0.0   3621  83.7        -  LUV::VULKAN-DEVICE-NATIVE-RETIRED-P
+ 407      1   0.0      1   0.0   3622  83.7        -  foreign function try_allocate_small_after_region
+ 408      0   0.0   4310  99.7   3622  83.7        -  foreign function call_into_lisp_
+ 409      0   0.0   4307  99.6   3622  83.7        -  (FLET SB-UNIX::BODY :IN SB-THREAD::RUN)
+ 410      0   0.0   4307  99.6   3622  83.7        -  SB-THREAD::RUN
+ 411      0   0.0   4307  99.6   3622  83.7        -  foreign function funcall1
+ 412      0   0.0   4307  99.6   3622  83.7        -  foreign function new_thread_trampoline
+ 413      0   0.0   4154  96.0   3622  83.7        -  (LAMBDA NIL :IN GPU-FPS::MEASURE)
+ 414      0   0.0   4154  96.0   3622  83.7        -  LUV::PROCESS-SDL-CANVAS-REQUESTS
+ 415      0   0.0   4154  96.0   3622  83.7        -  LUV::SDL-CANVAS-EVENT-LOOP
+ 416      0   0.0   4154  96.0   3622  83.7        -  LUV::RUN-SDL-CANVAS
+ 417      0   0.0   3582  82.8   3622  83.7        -  Unknown fn 95545
+ 418      0   0.0   3469  80.2   3622  83.7        -  LUFT.RENDER::ENCODE-RENDERER-FRAME
+ 419      0   0.0    868  20.1   3622  83.7        -  LUFT.RENDER::ENCODE-RENDERER-SCENE-DRAWINGS
+ 420      0   0.0    313   7.2   3622  83.7        -  LUFT.RENDER::ENCODE-RENDERER-LENS
+ 421      0   0.0    221   5.1   3622  83.7        -  MCLUV:ENCODE-DIRECT-GPU-MIRROR
+ 422      0   0.0    221   5.1   3622  83.7        -  (LAMBDA (LUFT.RENDER::PASS) :IN LUFT.RENDER::ENCODE-VIEWER-FRAME)
+ 423      0   0.0    185   4.3   3622  83.7        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV::MAINTAIN-VULKAN-QUEUE)
+ 424      0   0.0    176   4.1   3622  83.7        -  (FLET "CLEANUP-FUN-1" :IN GPU-FPS::MEASURE)
+ 425      0   0.0    175   4.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:SUBMIT (LUV::VULKAN-GPU-QUEUE VECTOR))
+ 426      0   0.0    175   4.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:SUBMIT (LUV::VULKAN-GPU-QUEUE LUV::VULKAN-GPU-COMMAND-BUFFER))
+ 427      0   0.0    172   4.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:DESTROY (LUV::VULKAN-GPU-COMMAND-BUFFER))
+ 428      0   0.0    172   4.0   3622  83.7        -  (SB-PCL::EMF LUV:DESTROY)
+ 429      0   0.0    171   4.0   3622  83.7        -  LUV.VULKAN:CMD-BEGIN-COLOR-RENDER-PASS
+ 430      0   0.0    171   4.0   3622  83.7        -  LUV::VULKAN-DESTROY-OR-DEFER
+ 431      0   0.0    170   3.9   3622  83.7        -  LUV::RETIRE-VULKAN-NATIVE-OWNER
+ 432      0   0.0    168   3.9   3622  83.7        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV::RETIRE-VULKAN-NATIVE-OWNER)
+ 433      0   0.0    143   3.3   3622  83.7        -  (FLET "RUN9" :IN LUV::VULKAN-NATIVE-TEARDOWN-CLOSURE)
+ 434      0   0.0    143   3.3   3622  83.7        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV::VULKAN-NATIVE-TEARDOWN-CLOSURE)
+ 435      0   0.0    143   3.3   3622  83.7        -  (LAMBDA NIL :IN LUV::VULKAN-NATIVE-TEARDOWN-CLOSURE)
+ 436      0   0.0    142   3.3   3622  83.7        -  (LAMBDA NIL :IN LUV::MAKE-VULKAN-DEVICE-RETIREMENT-STEP)
+ 437      0   0.0    140   3.2   3622  83.7        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV::MAKE-VULKAN-DEVICE-RETIREMENT-STEP)
+ 438      0   0.0    135   3.1   3622  83.7        -  (LAMBDA (LUV::NATIVE-DEVICE) :IN LUV::MAKE-VULKAN-COMMAND-RETIREMENT-TEARDOWN)
+ 439      0   0.0    134   3.1   3622  83.7        -  LUV.VULKAN::%DESTROY-COMMAND-POOL
+ 440      0   0.0    117   2.7   3622  83.7        -  MCLUV::ENCODE-GPU-DRAW-RANGE
+ 441      0   0.0    111   2.6   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:CREATE (LUV::VULKAN-GPU-DEVICE LUV::COMMAND-ENCODER-DESCRIPTOR))
+ 442      0   0.0    108   2.5   3622  83.7        -  LUFT.RENDER::ENCODE-RENDERER-COMPOSITE
+ 443      0   0.0    105   2.4   3622  83.7        -  (LAMBDA NIL :IN LUV:CREATE)
+ 444      0   0.0     93   2.2   3622  83.7        -  LUFT.RENDER::ENCODE-RENDERER-SCENE
+ 445      0   0.0     88   2.0   3622  83.7        -  LUV.VULKAN::%QUEUE-SUBMIT2
+ 446      0   0.0     84   1.9   3622  83.7        -  LUV.VULKAN:CMD-SET-VIEWPORT-AND-SCISSOR
+ 447      0   0.0     76   1.8   3622  83.7        -  (SB-PCL::EMF LUFT.RENDER:ENCODE-PROGRAM)
+ 448      0   0.0     56   1.3   3622  83.7        -  MQTT.NET:PUMP-CONNECTION
+ 449      0   0.0     56   1.3   3622  83.7        -  MQTT.NET:PUMP-CONNECTION-UNTIL
+ 450      0   0.0     56   1.3   3622  83.7        -  Unknown fn 65988
+ 451      0   0.0     56   1.3   3622  83.7        -  (SB-PCL::FAST-METHOD LUV.LOBBY:NEXT-LOBBY-PUBLICATION (LUV.LOBBY:MQTT-LOBBY-TRANSPORT T LUV.LOBBY:LOBBY-CLIENT))
+ 452      0   0.0     56   1.3   3622  83.7        -  LUV.LOBBY::CALL-WITH-LOBBY-RADIO-CONNECTION
+ 453      0   0.0     56   1.3   3622  83.7        -  LUV.LOBBY::RUN-LOBBY-CLIENT
+ 454      0   0.0     50   1.2   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:SUBMITTED-WORK-DONE (LUV::VULKAN-GPU-QUEUE))
+ 455      0   0.0     48   1.1   3622  83.7        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV:SUBMITTED-WORK-DONE)
+ 456      0   0.0     45   1.0   3622  83.7        -  LUV.VULKAN:ALLOCATE-COMMAND-BUFFER
+ 457      0   0.0     43   1.0   3622  83.7        -  LUV.VULKAN:CMD-DRAW
+ 458      0   0.0     43   1.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUFT.RENDER:ENCODE-PROGRAM (LUFT.RENDER:DRAWING-PROGRAM T T T))
+ 459      0   0.0     43   1.0   3622  83.7        -  foreign function poll
+ 460      0   0.0     42   1.0   3622  83.7        -  Unknown fn 44064
+ 461      0   0.0     41   0.9   3622  83.7        -  LUV.VULKAN:BEGIN-COMMAND-BUFFER
+ 462      0   0.0     41   0.9   3622  83.7        -  LUV.VULKAN::ALLOCATE-COMMAND-BUFFER-HANDLE
+ 463      0   0.0     41   0.9   3622  83.7        -  LUV.WORKBENCH:ENCODE-WORKBENCH
+ 464      0   0.0     40   0.9   3622  83.7        -  foreign function vkAllocateCommandBuffers
+ 465      0   0.0     40   0.9   3622  83.7        -  Unknown fn 45732
+ 466      0   0.0     39   0.9   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:END-PASS (LUV::VULKAN-GPU-RENDER-PASS-ENCODER))
+ 467      0   0.0     39   0.9   3622  83.7        -  LUV.VULKAN:CMD-BIND-GRAPHICS-PIPELINE
+ 468      0   0.0     39   0.9   3622  83.7        -  LUFT.RENDER::PREPARE-VIEWER-FRAME-RENDERER
+ 469      0   0.0     38   0.9   3622  83.7        -  SB-THREAD::START-THREAD
+ 470      0   0.0     37   0.9   3622  83.7        -  LUV.VULKAN:CMD-END-RENDER-PASS
+ 471      0   0.0     37   0.9   3622  83.7        -  LUV.VULKAN::%BEGIN-COMMAND-BUFFER
+ 472      0   0.0     36   0.8   3622  83.7        -  Unknown fn 45793
+ 473      0   0.0     36   0.8   3622  83.7        -  foreign function drmCommandWriteRead
+ 474      0   0.0     35   0.8   3622  83.7        -  LUV::VULKAN-QUEUE-COMPLETED-FRONTIER
+ 475      0   0.0     34   0.8   3622  83.7        -  (SB-PCL::EMF LUVCRAFT:REFRESH-LUVCRAFT-OVERLAY)
+ 476      0   0.0     33   0.8   3622  83.7        -  LUV.VULKAN:SEMAPHORE-COUNTER-VALUE
+ 477      0   0.0     33   0.8   3622  83.7        -  (SB-PCL::FAST-METHOD LUV::SERVICE-GPU-RETIREMENT-CUSTODIAN (LUV::VULKAN-GPU-QUEUE))
+ 478      0   0.0     32   0.7   3622  83.7        -  LUFT.RENDER::CAMERA-UNIFORM-DATA
+ 479      0   0.0     30   0.7   3622  83.7        -  Unknown fn 78859
+ 480      0   0.0     28   0.6   3622  83.7        -  LUV::ENSURE-VULKAN-TEXTURE-FOR-COMMAND
+ 481      0   0.0     28   0.6   3622  83.7        -  (LAMBDA NIL :IN LUV:FINISH)
+ 482      0   0.0     27   0.6   3622  83.7        -  LUV.VULKAN:WAIT-SEMAPHORE-VALUE
+ 483      0   0.0     27   0.6   3622  83.7        -  LUV::WAIT-FOR-VULKAN-SUBMISSION
+ 484      0   0.0     24   0.6   3622  83.7        -  SB-C::%COMPILE-IN-LEXENV
+ 485      0   0.0     24   0.6   3622  83.7        -  Unknown fn 78856
+ 486      0   0.0     23   0.5   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:ENCODE (LUV::VULKAN-GPU-RENDER-PASS-ENCODER LUV::GPU-SET-SCISSOR-COMMAND))
+ 487      0   0.0     21   0.5   3622  83.7        -  SB-C:COMPILE-IN-LEXENV
+ 488      0   0.0     21   0.5   3622  83.7        -  SB-PCL::PCL-COMPILE
+ 489      0   0.0     21   0.5   3622  83.7        -  (FLET "G" :IN SB-C::%COMPILE-IN-LEXENV)
+ 490      0   0.0     21   0.5   3622  83.7        -  LUVCRAFT.LUFT.GAME::UPDATE-LUVCRAFT-LIGHT
+ 491      0   0.0     21   0.5   3622  83.7        -  SB-PCL::GET-FUN
+ 492      0   0.0     21   0.5   3622  83.7        -  SB-PCL::MAKE-EFFECTIVE-METHOD-FUNCTION-INTERNAL
+ 493      0   0.0     21   0.5   3622  83.7        -  SB-PCL::GET-SECONDARY-DISPATCH-FUNCTION1
+ 494      0   0.0     21   0.5   3622  83.7        -  SB-PCL::CACHE-MISS-VALUES-INTERNAL
+ 495      0   0.0     21   0.5   3622  83.7        -  SB-PCL::CACHE-MISS-VALUES
+ 496      0   0.0     20   0.5   3622  83.7        -  foreign function amdgpu_va_range_free
+ 497      0   0.0     20   0.5   3622  83.7        -  SB-UNIX::NANOSLEEP-FLOAT
+ 498      0   0.0     20   0.5   3622  83.7        -  SLEEP
+ 499      0   0.0     20   0.5   3622  83.7        -  LUV::WATCH-SDL-CANVAS
+ 500      0   0.0     20   0.5   3622  83.7        -  (LAMBDA NIL :IN LUV::START-SDL-CANVAS-WATCHDOG)
+ 501      0   0.0     20   0.5   3622  83.7        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN LUV::SERVICE-GPU-RETIREMENT-CUSTODIAN)
+ 502      0   0.0     19   0.4   3622  83.7        -  LUFT.RENDER::UPDATE-VIEWER-INSPECTION
+ 503      0   0.0     19   0.4   3622  83.7        -  SB-PCL::GET-NEW-FUN-GENERATOR
+ 504      0   0.0     19   0.4   3622  83.7        -  foreign function clock_nanosleep
+ 505      0   0.0     19   0.4   3622  83.7        -  foreign function nanosleep
+ 506      0   0.0     19   0.4   3622  83.7        -  foreign function sb_nanosleep
+ 507      0   0.0     19   0.4   3622  83.7        -  foreign function sb_nanosleep_double
+ 508      0   0.0     19   0.4   3622  83.7        -  (FLET SB-THREAD::UNMASK-SIGNALS :IN SB-THREAD::RUN)
+ 509      0   0.0     18   0.4   3622  83.7        -  LUV::MAKE-VULKAN-FINISHED-COMMAND-BUFFER
+ 510      0   0.0     18   0.4   3622  83.7        -  SB-PCL::INITIAL-DFUN
+ 511      0   0.0     17   0.4   3622  83.7        -  Unknown fn 44070
+ 512      0   0.0     17   0.4   3622  83.7        -  (LAMBDA NIL :IN SB-C::%COMPILE-IN-LEXENV)
+ 513      0   0.0     17   0.4   3622  83.7        -  (FLET SB-C::WITH-IT :IN SB-C::%WITH-COMPILATION-UNIT)
+ 514      0   0.0     16   0.4   3622  83.7        -  foreign function drmSyncobjQuery2
+ 515      0   0.0     16   0.4   3622  83.7        -  LIST-ALLOC-TRAMP
+ 516      0   0.0     15   0.3   3622  83.7        -  SB-C::COMPILE-COMPONENT
+ 517      0   0.0     14   0.3   3622  83.7        -  LUV.VULKAN:CREATE-COMMAND-POOL
+ 518      0   0.0     13   0.3   3622  83.7        -  MCLUV::GPU-MIRROR-LOGICAL-SIZE
+ 519      0   0.0     12   0.3   3622  83.7        -  LUVCRAFT:SKY-FRAME-PARAMETERS
+ 520      0   0.0     11   0.3   3622  83.7        -  (LAMBDA NIL :IN LUV::VULKAN-RENDER-PASS-FOR-FORMAT)
+ 521      0   0.0     11   0.3   3622  83.7        -  (SB-PCL::FAST-METHOD CLIM:BOUNDING-RECTANGLE-WIDTH (T))
+ 522      0   0.0     10   0.2   3622  83.7        -  foreign function amdgpu_va_range_alloc2
+ 523      0   0.0     10   0.2   3622  83.7        -  CFFI::%FOREIGN-BITFIELD-VALUE
+ 524      0   0.0      9   0.2   3622  83.7        -  LISTIFY-&REST
+ 525      0   0.0      9   0.2   3622  83.7        -  MCLUV:WIDGET-OVERLAY-LOGICAL-SIZE
+ 526      0   0.0      9   0.2   3622  83.7        -  foreign function drmSyncobjTimelineWait
+ 527      0   0.0      9   0.2   3622  83.7        -  SB-C::IR1-OPTIMIZE-PHASE-1
+ 528      0   0.0      9   0.2   3622  83.7        -  SB-C::IR1-PHASES
+ 529      0   0.0      8   0.2   3622  83.7        -  (SB-PCL::FAST-METHOD INITIALIZE-INSTANCE :AFTER (LUV::VULKAN-GPU-OBJECT))
+ 530      0   0.0      8   0.2   3622  83.7        -  foreign function pthread_cond_wait
+ 531      0   0.0      8   0.2   3622  83.7        -  foreign function finalizer_thread_wait
+ 532      0   0.0      8   0.2   3622  83.7        -  (LAMBDA NIL :IN SB-IMPL::FINALIZER-THREAD-START)
+ 533      0   0.0      7   0.2   3622  83.7        -  GPU-FPS::SUMMARY
+ 534      0   0.0      7   0.2   3622  83.7        -  GENERIC->
+ 535      0   0.0      7   0.2   3622  83.7        -  LUVCRAFT::SKY-LERP-COLOR
+ 536      0   0.0      7   0.2   3622  83.7        -  SDL3:GET-WINDOW-SIZE
+ 537      0   0.0      7   0.2   3622  83.7        -  (LAMBDA NIL :IN LUV:CANVAS-LOGICAL-SIZE)
+ 538      0   0.0      7   0.2   3622  83.7        -  SB-C::IR1-OPTIMIZE
+ 539      0   0.0      7   0.2   3622  83.7        -  SB-C::IR1-OPTIMIZE-UNTIL-DONE
+ 540      0   0.0      7   0.2   3622  83.7        -  Unknown fn 78862
+ 541      0   0.0      6   0.1   3622  83.7        -  (FLET SB-UNIX::BODY :IN SB-THREAD::FUTEX-WAIT)
+ 542      0   0.0      6   0.1   3622  83.7        -  (FLET "WITHOUT-INTERRUPTS-BODY-" :IN SB-THREAD::%CONDITION-WAIT)
+ 543      0   0.0      6   0.1   3622  83.7        -  SB-THREAD::%CONDITION-WAIT
+ 544      0   0.0      6   0.1   3622  83.7        -  (FLET SB-THREAD::WITH-SYSTEM-MUTEX-THUNK :IN SB-THREAD::%DECREMENT-SEMAPHORE)
+ 545      0   0.0      6   0.1   3622  83.7        -  (FLET "WITHOUT-INTERRUPTS-BODY-" :IN SB-THREAD::CALL-WITH-SYSTEM-MUTEX/ALLOW-WITH-INTERRUPTS)
+ 546      0   0.0      6   0.1   3622  83.7        -  SB-THREAD::%DECREMENT-SEMAPHORE
+ 547      0   0.0      6   0.1   3622  83.7        -  SB-THREAD:WAIT-ON-SEMAPHORE
+ 548      0   0.0      6   0.1   3622  83.7        -  (LABELS SB-IMPL::RECUR :IN SB-IMPL::STABLE-SORT-LIST)
+ 549      0   0.0      6   0.1   3622  83.7        -  SB-IMPL::STABLE-SORT-LIST
+ 550      0   0.0      6   0.1   3622  83.7        -  SDL3::%GET-WINDOW-SIZE
+ 551      0   0.0      6   0.1   3622  83.7        -  (LAMBDA NIL :IN "/home/mbrock/luv-gpu-fps-chapel/hal/vulkan/gpu.lisp")
+ 552      0   0.0      6   0.1   3622  83.7        -  MCLUV:PREPARE-DIRECT-WIDGET-OVERLAY
+ 553      0   0.0      6   0.1   3622  83.7        -  MCLUV::REMEMBER-INVENTORY-PROFILE
+ 554      0   0.0      6   0.1   3622  83.7        -  SB-C::%COMPILE-COMPONENT
+ 555      0   0.0      6   0.1   3622  83.7        -  SB-C::IR1-OPTIMIZE-COMBINATION
+ 556      0   0.0      5   0.1   3622  83.7        -  (FLET "CLEANUP-FUN-23" :IN LUV:ENCODE)
+ 557      0   0.0      5   0.1   3622  83.7        -  (FLET SB-UNIX::BODY :IN SB-THREAD::FUTEX-WAIT)
+ 558      0   0.0      5   0.1   3622  83.7        -  LUV::VULKAN-SUBMITTED-TEXTURE-LAYOUTS
+ 559      0   0.0      5   0.1   3622  83.7        -  Unknown fn 65240
+ 560      0   0.0      5   0.1   3622  83.7        -  LUFT.RENDER::LIGHT-UNIFORM-DATA
+ 561      0   0.0      5   0.1   3622  83.7        -  (SB-PCL::FAST-METHOD LUFT.RENDER:UPLOAD-TORCH-FRAME (LUFT.RENDER::FRAMED-TORCH-DRAWING T T))
+ 562      0   0.0      5   0.1   3622  83.7        -  (FLET "CLEANUP-FUN-" :IN SB-THREAD::CALL-WITH-RECURSIVE-LOCK)
+ 563      0   0.0      5   0.1   3622  83.7        -  MCLUV::INVENTORY-PROFILE-DESCRIPTION
+ 564      0   0.0      5   0.1   3622  83.7        -  LUV:DRAW
+ 565      0   0.0      5   0.1   3622  83.7        -  (FLET SB-THREAD::WITH-MUTEX-THUNK :IN LUV::GPU-RETIREMENT-CUSTODIAN-SNAPSHOT)
+ 566      0   0.0      5   0.1   3622  83.7        -  SB-C::IR1-CONVERT-PROGN-BODY
+ 567      0   0.0      5   0.1   3622  83.7        -  SB-C::IR1-CONVERT-AUX-BINDINGS
+ 568      0   0.0      5   0.1   3622  83.7        -  SB-C::IR1-CONVERT-SPECIAL-BINDINGS
+ 569      0   0.0      5   0.1   3622  83.7        -  SB-C::IR1-CONVERT-LAMBDA
+ 570      0   0.0      4   0.1   3622  83.7        -  SB-C::OR-EQ-TO-JUMP-TABLE
+ 571      0   0.0      4   0.1   3622  83.7        -  SB-C::OR-EQ-TRANSFORM
+ 572      0   0.0      4   0.1   3622  83.7        -  SB-C::IR1-CONVERT-COMMON-FUNCTOID
+ 573      0   0.0      4   0.1   3622  83.7        -  LUV::CALL-ON-SDL-CANVAS-THREAD
+ 574      0   0.0      4   0.1   3622  83.7        -  MAKE-SEQUENCE
+ 575      0   0.0      4   0.1   3622  83.7        -  FINALIZE
+ 576      0   0.0      4   0.1   3622  83.7        -  Unknown fn 44068
+ 577      0   0.0      4   0.1   3622  83.7        -  LUV::MAYBE-RELEASE-VULKAN-RETIREMENT-CUSTODIAN
+ 578      0   0.0      4   0.1   3622  83.7        -  LUV:CANVAS-FRAME-RESOURCE
+ 579      0   0.0      4   0.1   3622  83.7        -  Unknown fn 93531
+ 580      0   0.0      4   0.1   3622  83.7        -  LUFT.RENDER::RENDERER-FRAME-FIXTURE-BIND-GROUP
+ 581      0   0.0      4   0.1   3622  83.7        -  LUV.VULKAN::FILL-SEMAPHORE-SUBMIT-INFOS
+ 582      0   0.0      3   0.1   3622  83.7        -  SB-THREAD::CALL-WITH-SYSTEM-MUTEX/ALLOW-WITH-INTERRUPTS
+ 583      0   0.0      3   0.1   3622  83.7        -  (FLET SB-IMPL::F :IN SB-IMPL::VECTOR-MAP-INTO/SIMPLE-VECTOR)
+ 584      0   0.0      3   0.1   3622  83.7        -  SB-THREAD::MAKE-SYSTEM-THREAD
+ 585      0   0.0      3   0.1   3622  83.7        -  GPU-FPS::MEASURE
+ 586      0   0.0      3   0.1   3622  83.7        -  (LAMBDA (&REST ARGUMENTS) :IN "/home/mbrock/luv-gpu-fps-chapel/.amp/in/profile-cpu.lisp")
+ 587      0   0.0      3   0.1   3622  83.7        -  GPU-FPS::RUN-LIVE-CASE
+ 588      0   0.0      3   0.1   3622  83.7        -  (LAMBDA NIL :IN GPU-FPS::RUN)
+ 589      0   0.0      3   0.1   3622  83.7        -  GPU-FPS::RUN
+ 590      0   0.0      3   0.1   3622  83.7        -  GPU-FPS::CALL-WITH-PHASE-PROFILING
+ 591      0   0.0      3   0.1   3622  83.7        -  SB-C:EVAL-WITH-COMPILE-IN-LEXENV
+ 592      0   0.0      3   0.1   3622  83.7        -  SB-IMPL::%SIMPLE-EVAL
+ 593      0   0.0      3   0.1   3622  83.7        -  SB-INT:SIMPLE-EVAL-IN-LEXENV
+ 594      0   0.0      3   0.1   3622  83.7        -  EVAL-TLF
+ 595      0   0.0      3   0.1   3622  83.7        -  (LABELS SB-FASL::EVAL-FORM :IN SB-INT:LOAD-AS-SOURCE)
+ 596      0   0.0      3   0.1   3622  83.7        -  (LAMBDA (SB-KERNEL:FORM &KEY :CURRENT-INDEX &ALLOW-OTHER-KEYS) :IN SB-INT:LOAD-AS-SOURCE)
+ 597      0   0.0      3   0.1   3622  83.7        -  SB-C::%DO-FORMS-FROM-INFO
+ 598      0   0.0      3   0.1   3622  83.7        -  SB-INT:LOAD-AS-SOURCE
+ 599      0   0.0      3   0.1   3622  83.7        -  (LABELS SB-FASL::LOAD-STREAM-1 :IN LOAD)
+ 600      0   0.0      3   0.1   3622  83.7        -  SB-FASL::CALL-WITH-LOAD-BINDINGS
+ 601      0   0.0      3   0.1   3622  83.7        -  LOAD
+ 602      0   0.0      3   0.1   3622  83.7        -  (FLET SB-IMPL::LOAD-SCRIPT :IN SB-IMPL::PROCESS-SCRIPT)
+ 603      0   0.0      3   0.1   3622  83.7        -  (FLET SB-UNIX::BODY :IN SB-IMPL::PROCESS-SCRIPT)
+ 604      0   0.0      3   0.1   3622  83.7        -  (FLET "WITHOUT-INTERRUPTS-BODY-" :IN SB-IMPL::PROCESS-SCRIPT)
+ 605      0   0.0      3   0.1   3622  83.7        -  SB-IMPL::PROCESS-SCRIPT
+ 606      0   0.0      3   0.1   3622  83.7        -  SB-IMPL::TOPLEVEL-INIT
+ 607      0   0.0      3   0.1   3622  83.7        -  (FLET SB-UNIX::BODY :IN SB-IMPL::START-LISP)
+ 608      0   0.0      3   0.1   3622  83.7        -  (FLET "WITHOUT-INTERRUPTS-BODY-3" :IN SB-IMPL::START-LISP)
+ 609      0   0.0      3   0.1   3622  83.7        -  SB-IMPL::%START-LISP
+ 610      0   0.0      3   0.1   3622  83.7        -  Unknown fn 78580
+ 611      0   0.0      3   0.1   3622  83.7        -  (LABELS SB-IMPL::HANDLE-IT :IN SB-KERNEL:OUTPUT-OBJECT)
+ 612      0   0.0      3   0.1   3622  83.7        -  LUV.VULKAN::CREATE-COMMAND-POOL-HANDLE
+ 613      0   0.0      3   0.1   3622  83.7        -  LUFT.TERRAIN:INSPECTION-CELL-BIT
+ 614      0   0.0      3   0.1   3622  83.7        -  MCLUV::DIRECT-GPU-MIRROR-MISSING-PIPELINE-FAMILIES
+ 615      0   0.0      3   0.1   3622  83.7        -  MCLUV::REQUIRE-DIRECT-GPU-MIRROR-PIPELINES
+ 616      0   0.0      3   0.1   3622  83.7        -  GPU-FPS::WRITE-TIMESTAMP
+ 617      0   0.0      3   0.1   3622  83.7        -  (FLET "CLEANUP-FUN-31" :IN LUV:BEGIN-RENDER-PASS)
+ 618      0   0.0      3   0.1   3622  83.7        -  (FLET "CLEANUP-FUN-11" :IN LUV:ENCODE)
+ 619      0   0.0      3   0.1   3622  83.7        -  LUFT.RENDER::LIGHT-KEY-COLOR
+ 620      0   0.0      3   0.1   3622  83.7        -  MCLUV::ENSURE-DIRECT-GPU-MIRROR-PIPELINES
+ 621      0   0.0      3   0.1   3622  83.7        -  (LAMBDA (LUFT.RENDER::OVERLAY) :IN LUFT.RENDER::ENCODE-VIEWER-OVERLAYS)
+ 622      0   0.0      3   0.1   3622  83.7        -  MCLUV::GPU-MIRROR-PREPARED-REVISION
+ 623      0   0.0      3   0.1   3622  83.7        -  SB-WALKER::WITH-AUGMENTED-ENVIRONMENT-INTERNAL
+ 624      0   0.0      3   0.1   3622  83.7        -  foreign function lisp_perfhash_with_options
+ 625      0   0.0      3   0.1   3622  83.7        -  (FLET SB-C::GENERATE-PH :IN SB-C:MAKE-PERFECT-HASH-LAMBDA)
+ 626      0   0.0      3   0.1   3622  83.7        -  SB-C:MAKE-PERFECT-HASH-LAMBDA
+ 627      0   0.0      3   0.1   3622  83.7        -  SB-C::EXPAND-HASH-CASE-FOR-JUMP-TABLE
+ 628      0   0.0      3   0.1   3622  83.7        -  (FLET SB-THREAD::WITH-RECURSIVE-LOCK-THUNK :IN SB-PCL::INSTALL-OPTIMIZED-CONSTRUCTOR)
+ 629      0   0.0      3   0.1   3622  83.7        -  SB-C::IR1-CONVERT-COMBINATION
+ 630      0   0.0      3   0.1   3622  83.7        -  SB-C::IR1-CONVERT-COMBINATION-CHECKING-TYPE
+ 631      0   0.0      3   0.1   3622  83.7        -  SB-C::IR1-CONVERT-IF
+ 632      0   0.0      3   0.1   3622  83.7        -  SB-C::IR1-CONVERT-LET
+ 633      0   0.0      3   0.1   3622  83.7        -  SB-WALKER::WALK-IF
+ 634      0   0.0      3   0.1   3622  83.7        -  SB-WALKER::WALK-LET
+ 635      0   0.0      3   0.1   3622  83.7        -  SB-WALKER::WALK-TEMPLATE-HANDLE-REPEAT
+ 636      0   0.0      3   0.1   3622  83.7        -  (LAMBDA NIL :IN SB-WALKER::WALK-FORM-INTERNAL)
+ 637      0   0.0      3   0.1   3622  83.7        -  SB-C::CALL-WITH-CURRENT-SOURCE-FORM
+ 638      0   0.0      3   0.1   3622  83.7        -  SB-WALKER::WALK-FORM-INTERNAL
+ 639      0   0.0      3   0.1   3622  83.7        -  SB-PCL::CACHING-MISS
+ 640      0   0.0      3   0.1   3622  83.7        -  SB-PCL::INSTALL-OPTIMIZED-CONSTRUCTOR
+ 641      0   0.0      3   0.1   3622  83.7        -  (LAMBDA (&REST SB-PCL::ARGS) :IN SB-PCL::INSTALL-INITIAL-CONSTRUCTOR)
+ 642      0   0.0      3   0.1   3622  83.7        -  (FLET "WITHOUT-INTERRUPTS-BODY-1" :IN SB-CONCURRENCY:RECEIVE-MESSAGE)
+ 643      0   0.0      3   0.1   3622  83.7        -  SB-CONCURRENCY:RECEIVE-MESSAGE
+ 644      0   0.0      3   0.1   3622  83.7        -  LUVCRAFT::RUN-WORLD-CHECKPOINT-WRITER
+ 645      0   0.0      3   0.1   3622  83.7        -  SB-THREAD::AVLTREE-FILTER
+ 646      0   0.0      3   0.1   3622  83.7        -  SB-THREAD:%THREAD-FROM-TID
+ 647      0   0.0      3   0.1   3622  83.7        -  SB-THREAD::MUTEX-OWNER-LOOKUP
+ 648      0   0.0      3   0.1   3622  83.7        -  (LABELS SB-THREAD::DETECT-DEADLOCK :IN SB-THREAD::CHECK-DEADLOCK)
+ 649      0   0.0      3   0.1   3622  83.7        -  SB-THREAD::CHECK-DEADLOCK
+ 650      0   0.0      3   0.1   3622  83.7        -  (FLET "CLEANUP-FUN-" :IN SB-THREAD::RUN)
+ 651      0   0.0      2   0.0   3622  83.7        -  LUV::ENSURE-VULKAN-COMMAND-ENCODER-STATE
+ 652      0   0.0      2   0.0   3622  83.7        -  Unknown fn 44821
+ 653      0   0.0      2   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:REFRESH-LIVE-ARTIFACT (LUV:LIVE-SHADER-PIPELINE))
+ 654      0   0.0      2   0.0   3622  83.7        -  LUV.VULKAN::%CREATE-FRAMEBUFFER
+ 655      0   0.0      2   0.0   3622  83.7        -  (FLET "CLEANUP-FUN-1" :IN LUV::MAINTAIN-VULKAN-QUEUE)
+ 656      0   0.0      2   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUFT.RENDER:ENCODE-VIEWER-OVERLAY (LUVCRAFT.LUFT.GAME::TARGET-MARKER T T T))
+ 657      0   0.0      2   0.0   3622  83.7        -  LUV.VULKAN::%CMD-BIND-VERTEX-BUFFERS
+ 658      0   0.0      2   0.0   3622  83.7        -  SB-LOCKLESS:SO-INSERT
+ 659      0   0.0      2   0.0   3622  83.7        -  CANCEL-FINALIZATION
+ 660      0   0.0      2   0.0   3622  83.7        -  LUV:SET-PIPELINE
+ 661      0   0.0      2   0.0   3622  83.7        -  LUV::INSTALL-VULKAN-ENCODER-LEAK-FINALIZER
+ 662      0   0.0      2   0.0   3622  83.7        -  SYS-ALLOC-TRAMP
+ 663      0   0.0      2   0.0   3622  83.7        -  (FLET GPU-FPS::DURATION :IN GPU-FPS::MEASURE)
+ 664      0   0.0      2   0.0   3622  83.7        -  LUFT.RENDER::RENDERER-FRAME-PRESENT-BIND-GROUP
+ 665      0   0.0      2   0.0   3622  83.7        -  (FLET "CLEANUP-FUN-10" :IN LUV:ENCODE)
+ 666      0   0.0      2   0.0   3622  83.7        -  Unknown fn 96571
+ 667      0   0.0      2   0.0   3622  83.7        -  SB-IMPL::%MAP-FOR-EFFECT
+ 668      0   0.0      2   0.0   3622  83.7        -  LUFT.RENDER::RENDERER-FRAME-DRAWING-BINDING
+ 669      0   0.0      2   0.0   3622  83.7        -  SB-C::FIND-AND-PROPAGATE-CONSTRAINTS
+ 670      0   0.0      2   0.0   3622  83.7        -  SB-C::CONSTRAINT-PROPAGATE
+ 671      0   0.0      2   0.0   3622  83.7        -  SB-C::MAP-COMBINATION-ARG-VAR
+ 672      0   0.0      2   0.0   3622  83.7        -  SB-C::PROPAGATE-LET-ARGS
+ 673      0   0.0      2   0.0   3622  83.7        -  SB-C::DEBUG-INFO-FOR-COMPONENT
+ 674      0   0.0      2   0.0   3622  83.7        -  SB-C::MAKE-CORE-COMPONENT
+ 675      0   0.0      2   0.0   3622  83.7        -  SB-KERNEL::CTYPE-HASHSET-INSERT-IF-ABSENT
+ 676      0   0.0      2   0.0   3622  83.7        -  SB-C::FIND-OR-CONVERT-FUN-LEAF
+ 677      0   0.0      2   0.0   3622  83.7        -  SB-C::IR1-CONVERT-LET*
+ 678      0   0.0      2   0.0   3622  83.7        -  SB-C::IR1-CONVERT-COMBINATION-ARGS
+ 679      0   0.0      2   0.0   3622  83.7        -  SB-C::THE-IN-POLICY
+ 680      0   0.0      2   0.0   3622  83.7        -  SB-C::IR1-CONVERT-THE
+ 681      0   0.0      2   0.0   3622  83.7        -  SB-C::IR1-CONVERT-%FUNCALL
+ 682      0   0.0      2   0.0   3622  83.7        -  SB-C::IR1-CONVERT-SRCTRAN
+ 683      0   0.0      2   0.0   3622  83.7        -  SB-WALKER::WALK-TEMPLATE
+ 684      0   0.0      2   0.0   3622  83.7        -  SB-C::IR1-CONVERT-INLINE-LAMBDA
+ 685      0   0.0      2   0.0   3622  83.7        -  SB-C::TRANSFORM-CALL
+ 686      0   0.0      2   0.0   3622  83.7        -  LUV.VULKAN:CREATE-BUFFER
+ 687      0   0.0      2   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:CREATE (LUV::VULKAN-GPU-DEVICE LUV::BUFFER-DESCRIPTOR))
+ 688      0   0.0      2   0.0   3622  83.7        -  MCLUV::MATERIALIZE-DIRECT-WIDGET-FRAME-REVISION
+ 689      0   0.0      2   0.0   3622  83.7        -  SB-PCL::COMPUTE-CONSTANTS
+ 690      0   0.0      1   0.0   3622  83.7        -  (LABELS SB-IMPL::PRINT-IT :IN SB-KERNEL:OUTPUT-OBJECT)
+ 691      0   0.0      1   0.0   3622  83.7        -  LUV.VULKAN::%CREATE-COMMAND-POOL
+ 692      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::RENDERER-TEMPORAL-RESOLVE-KIND
+ 693      0   0.0      1   0.0   3622  83.7        -  LUV.VULKAN::FILL-IMAGE-SUBRESOURCE-RANGE
+ 694      0   0.0      1   0.0   3622  83.7        -  (LAMBDA (LUV::VALUE) :IN LUV::NORMALIZE-RENDER-PASS-COLOR)
+ 695      0   0.0      1   0.0   3622  83.7        -  LUV.SHADER:SHADER-DEFINITION-CHANGE-PENDING-P
+ 696      0   0.0      1   0.0   3622  83.7        -  Unknown fn 44818
+ 697      0   0.0      1   0.0   3622  83.7        -  MAX
+ 698      0   0.0      1   0.0   3622  83.7        -  LUFT:FIBER-STORE-RESOLVE
+ 699      0   0.0      1   0.0   3622  83.7        -  LUV.VULKAN::%CMD-SET-VIEWPORT
+ 700      0   0.0      1   0.0   3622  83.7        -  SB-THREAD::%MAKE-THREAD
+ 701      0   0.0      1   0.0   3622  83.7        -  LUV.WORKBENCH:APPLICATION-WORKBENCH
+ 702      0   0.0      1   0.0   3622  83.7        -  LUV::VULKAN-COMMAND-NATIVE-RESOURCE-RETIREMENT-STEPS
+ 703      0   0.0      1   0.0   3622  83.7        -  LUV::MAKE-VULKAN-COMMAND-RETIREMENT-TEARDOWN
+ 704      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUV::VULKAN-NATIVE-TEARDOWN-CLOSURE (LUV::VULKAN-GPU-COMMAND-BUFFER))
+ 705      0   0.0      1   0.0   3622  83.7        -  LUV.SHADER:SHADER-DEFINITION-CHANGE-SNAPSHOT
+ 706      0   0.0      1   0.0   3622  83.7        -  Unknown fn 78583
+ 707      0   0.0      1   0.0   3622  83.7        -  GPU-FPS::QUERY-RESULTS
+ 708      0   0.0      1   0.0   3622  83.7        -  (LAMBDA (SB-PCL::.ARG0. SB-PCL::.ARG1. SB-PCL::.ARG2. SB-PCL::.ARG3. SB-PCL::.ARG4.))
+ 709      0   0.0      1   0.0   3622  83.7        -  LUVCRAFT:BLOCK-INVENTORY-QUICKBAR-ENTRIES
+ 710      0   0.0      1   0.0   3622  83.7        -  SB-IMPL::%WRITE-STRING
+ 711      0   0.0      1   0.0   3622  83.7        -  Unknown fn 78619
+ 712      0   0.0      1   0.0   3622  83.7        -  (LAMBDA NIL :IN LUV:DESTROY)
+ 713      0   0.0      1   0.0   3622  83.7        -  SB-KERNEL:%LDB
+ 714      0   0.0      1   0.0   3622  83.7        -  LUV::NORMALIZE-RENDER-PASS-DEPTH
+ 715      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::ENSURE-RENDERER-EXTENT
+ 716      0   0.0      1   0.0   3622  83.7        -  LUV:SET-SCISSOR-RECT
+ 717      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUVCRAFT:REFRESH-LUVCRAFT-OVERLAY :AFTER (MCLUV:LUVCRAFT-DIRECT-WIDGET-OVERLAY T))
+ 718      0   0.0      1   0.0   3622  83.7        -  (FLET "CLEANUP-FUN-10" :IN LUV:CREATE)
+ 719      0   0.0      1   0.0   3622  83.7        -  LUVCRAFT::SKY-SMOOTHSTEP
+ 720      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUFT.RENDER::UPLOAD-FIGURE-INSTANCES (LUFT.RENDER::FIGURE-DRAWING LUFT.RENDER::FIGURE-BINDING T))
+ 721      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::EMF LUFT.RENDER::UPLOAD-FIGURE-INSTANCES)
+ 722      0   0.0      1   0.0   3622  83.7        -  SB-KERNEL::CEILING1
+ 723      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::RENDERER-COMPOSITE-VIEW
+ 724      0   0.0      1   0.0   3622  83.7        -  LUVCRAFT::SKY-CLOCK-CURRENT-DAY-FRACTION
+ 725      0   0.0      1   0.0   3622  83.7        -  LUV:PREPARE-TEXTURE
+ 726      0   0.0      1   0.0   3622  83.7        -  (LAMBDA NIL :IN "/home/mbrock/luv-gpu-fps-chapel/hal/vulkan/gpu.lisp")
+ 727      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::RENDERER-FRAME-LENS-BIND-GROUP
+ 728      0   0.0      1   0.0   3622  83.7        -  LUVCRAFT.LUFT.GAME::SELECTED-BLOCK
+ 729      0   0.0      1   0.0   3622  83.7        -  SB-KERNEL:%CONCATENATE-TO-SIMPLE-VECTOR
+ 730      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD CFFI:TRANSLATE-TO-FOREIGN (T CFFI::FOREIGN-BITFIELD))
+ 731      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUFT.RENDER:VIEWER-FIGURES :AROUND (LUVCRAFT.LUFT.GAME::BALL-GAME-STATE))
+ 732      0   0.0      1   0.0   3622  83.7        -  LUV::HASH-TABLE-ALIST
+ 733      0   0.0      1   0.0   3622  83.7        -  LUV::MAKE-GPU-RETIREMENT-ENTRY
+ 734      0   0.0      1   0.0   3622  83.7        -  Unknown fn 44069
+ 735      0   0.0      1   0.0   3622  83.7        -  SB-REGALLOC:PACK
+ 736      0   0.0      1   0.0   3622  83.7        -  SB-C::FIND-BLOCK-TYPE-CONSTRAINTS
+ 737      0   0.0      1   0.0   3622  83.7        -  (LAMBDA (SB-X86-64-ASM::STMT SB-X86-64-ASM::NEXT) :IN "SYS:SRC;COMPILER;X86-64;INSTS.LISP")
+ 738      0   0.0      1   0.0   3622  83.7        -  SB-ASSEM::COMBINE-INSTRUCTIONS
+ 739      0   0.0      1   0.0   3622  83.7        -  SB-C::GENERATE-CODE
+ 740      0   0.0      1   0.0   3622  83.7        -  SB-INT:HASHSET-INSERT-IF-ABSENT
+ 741      0   0.0      1   0.0   3622  83.7        -  SB-KERNEL::WEAKEN-NUMERIC-UNION
+ 742      0   0.0      1   0.0   3622  83.7        -  SB-C::WEAKEN-NUMERIC-UNION-TYPE
+ 743      0   0.0      1   0.0   3622  83.7        -  SB-C::PROPAGATE-FROM-SETS
+ 744      0   0.0      1   0.0   3622  83.7        -  SB-C::COMPUTE-1-DEBUG-FUN
+ 745      0   0.0      1   0.0   3622  83.7        -  SB-C::FIND-FREE-VAR
+ 746      0   0.0      1   0.0   3622  83.7        -  SB-C::COMPUTE-BLOCK-IN
+ 747      0   0.0      1   0.0   3622  83.7        -  SB-C::REFERENCE-ENTRY-POINT
+ 748      0   0.0      1   0.0   3622  83.7        -  SB-C::LOCALL-ANALYZE-FUN-1
+ 749      0   0.0      1   0.0   3622  83.7        -  SB-C::LOCALL-ANALYZE-COMPONENT
+ 750      0   0.0      1   0.0   3622  83.7        -  SB-C::LOCALL-ANALYZE-CLAMBDAS-UNTIL-DONE
+ 751      0   0.0      1   0.0   3622  83.7        -  SB-WALKER:VAR-SPECIAL-P
+ 752      0   0.0      1   0.0   3622  83.7        -  SB-C::MAKE-IR2-BLOCK
+ 753      0   0.0      1   0.0   3622  83.7        -  SB-C::LTN-ANALYZE
+ 754      0   0.0      1   0.0   3622  83.7        -  SB-KERNEL:MAKE-SINGLE-VALUE-TYPE
+ 755      0   0.0      1   0.0   3622  83.7        -  SB-C::MAKE-REF
+ 756      0   0.0      1   0.0   3622  83.7        -  SB-C::REFERENCE-LEAF
+ 757      0   0.0      1   0.0   3622  83.7        -  (LAMBDA (SB-C::ARG SB-C::VAR TYPE) :IN SB-C::PROPAGATE-LET-ARGS)
+ 758      0   0.0      1   0.0   3622  83.7        -  SB-C::MAKE-CONSTANT
+ 759      0   0.0      1   0.0   3622  83.7        -  SB-C::FIND-CONSTANT
+ 760      0   0.0      1   0.0   3622  83.7        -  SB-C::REFERENCE-CONSTANT
+ 761      0   0.0      1   0.0   3622  83.7        -  foreign function ZSTD_compressEnd_public
+ 762      0   0.0      1   0.0   3622  83.7        -  foreign function ZSTD_compressCCtx
+ 763      0   0.0      1   0.0   3622  83.7        -  foreign function ZSTD_compress
+ 764      0   0.0      1   0.0   3622  83.7        -  foreign function compress_vector
+ 765      0   0.0      1   0.0   3622  83.7        -  SB-C::COMPRESS
+ 766      0   0.0      1   0.0   3622  83.7        -  SB-C::COMPUTE-PACKED-DEBUG-FUNS
+ 767      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-HAIRY-ARGS
+ 768      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-FUNCTION
+ 769      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-PROGN
+ 770      0   0.0      1   0.0   3622  83.7        -  SB-WALKER::WALK-BINDINGS-1
+ 771      0   0.0      1   0.0   3622  83.7        -  (LAMBDA (SB-WALKER::REAL-BODY SB-WALKER::REAL-ENV) :IN SB-WALKER::WALK-LET)
+ 772      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-IF-TO-BLOCKS
+ 773      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-JUMP-TABLE
+ 774      0   0.0      1   0.0   3622  83.7        -  SB-C::REPLACE-CHAIN
+ 775      0   0.0      1   0.0   3622  83.7        -  SB-WALKER::WALK-TAGBODY-1
+ 776      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-THE*
+ 777      0   0.0      1   0.0   3622  83.7        -  SB-WALKER::WALK-NAMED-LAMBDA
+ 778      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD CLIM:BOUNDING-RECTANGLE-HEIGHT (T))
+ 779      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::ATMOSPHERE-UNIFORM-DATA
+ 780      0   0.0      1   0.0   3622  83.7        -  LUV.VK:CMD-SET-VIEWPORT
+ 781      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::EMF LUFT.RENDER::ENCODE-SCENE-DRAWING-SHADOW)
+ 782      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::RENDERER-FRAME-RESIDENT-BIND-GROUP
+ 783      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::RENDERER-METALFX-TEMPORAL-P
+ 784      0   0.0      1   0.0   3622  83.7        -  LUV.VULKAN::CREATE-BUFFER-HANDLE
+ 785      0   0.0      1   0.0   3622  83.7        -  MCLUV::ENSURE-GPU-FRAME-GRADIENT-BUFFER
+ 786      0   0.0      1   0.0   3622  83.7        -  (FLET MCLUV::UPLOAD :IN MCLUV::UPLOAD-GPU-PREPARED-FRAME-REVISION)
+ 787      0   0.0      1   0.0   3622  83.7        -  MCLUV::UPLOAD-GPU-PREPARED-FRAME-REVISION
+ 788      0   0.0      1   0.0   3622  83.7        -  SB-IMPL::%FIND-SYMBOL
+ 789      0   0.0      1   0.0   3622  83.7        -  SB-INT:%INTERN
+ 790      0   0.0      1   0.0   3622  83.7        -  LUV.SHADER:BIND-SHADER-RESOURCES
+ 791      0   0.0      1   0.0   3622  83.7        -  Unknown fn 93201
+ 792      0   0.0      1   0.0   3622  83.7        -  LUV.VULKAN:UPDATE-TEXTURE-SAMPLER-UNIFORM-DESCRIPTORS
+ 793      0   0.0      1   0.0   3622  83.7        -  (SB-PCL::FAST-METHOD LUV:CREATE (LUV::VULKAN-GPU-DEVICE LUV::BIND-GROUP-DESCRIPTOR))
+ 794      0   0.0      1   0.0   3622  83.7        -  SB-PCL::COMPUTE-CODE
+ 795      0   0.0      1   0.0   3622  83.7        -  foreign function ZSTD_compressBlock_btultra2
+ 796      0   0.0      1   0.0   3622  83.7        -  SB-C::DELETE-REF
+ 797      0   0.0      1   0.0   3622  83.7        -  SB-C::FLUSH-DEAD-CODE
+ 798      0   0.0      1   0.0   3622  83.7        -  SB-C::PROPAGATE-COPIES
+ 799      0   0.0      1   0.0   3622  83.7        -  SB-C::COPY-PROPAGATE
+ 800      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-WITH-SOURCE-FORM
+ 801      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-BLOCK
+ 802      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-CONVERT-FLET
+ 803      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-TRANSLATE-LOCALLY
+ 804      0   0.0      1   0.0   3622  83.7        -  SB-C::IR1-TOPLEVEL
+ 805      0   0.0      1   0.0   3622  83.7        -  Unknown fn 93192
+ 806      0   0.0      1   0.0   3622  83.7        -  LUFT.RENDER::MAKE-RENDERER-FRAME-STATE
+------------------------------------------------------------------------
+        703  16.3                                     elsewhere
+luv 14:57:36.205 watchdog canvas "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release" is answering again

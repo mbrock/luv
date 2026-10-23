@@ -1,0 +1,91 @@
+MEMORY (:VERTEX) type=2 flags=(:HOST-VISIBLE :HOST-COHERENT) heap=1 compatible=7AD
+MEMORY (:INDEX) type=2 flags=(:HOST-VISIBLE :HOST-COHERENT) heap=1 compatible=7AD
+MEMORY (:STORAGE) type=2 flags=(:HOST-VISIBLE :HOST-COHERENT) heap=1 compatible=7AD
+MEMORY (:UNIFORM) type=2 flags=(:HOST-VISIBLE :HOST-COHERENT) heap=1 compatible=7AD
+VkPhysicalDeviceMemoryProperties:
+=================================
+memoryHeaps: count = 3
+	memoryHeaps[0]:
+		size   = 8321499136 (0x1f0000000) (7.75 GiB)
+		budget = 8304975872 (0x1ef03e000) (7.73 GiB)
+		usage  = 0 (0x00000000) (0.00 B)
+		flags: count = 1
+			MEMORY_HEAP_DEVICE_LOCAL_BIT
+	memoryHeaps[1]:
+		size   = 16755576832 (0x3e6b5d000) (15.60 GiB)
+		budget = 16013099008 (0x3ba748000) (14.91 GiB)
+		usage  = 0 (0x00000000) (0.00 B)
+		flags:
+			None
+	memoryHeaps[2]:
+		size   = 268435456 (0x10000000) (256.00 MiB)
+		budget = 265572352 (0x0fd45000) (253.27 MiB)
+		usage  = 0 (0x00000000) (0.00 B)
+		flags: count = 1
+			MEMORY_HEAP_DEVICE_LOCAL_BIT
+memoryTypes: count = 11
+	memoryTypes[0]:
+		heapIndex     = 0
+		propertyFlags = 0x0001: count = 1
+			MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				color images
+				FORMAT_D16_UNORM
+				FORMAT_D32_SFLOAT
+				FORMAT_S8_UINT
+				FORMAT_D16_UNORM_S8_UINT
+				FORMAT_D32_SFLOAT_S8_UINT
+			IMAGE_TILING_LINEAR:
+				color images
+	memoryTypes[1]:
+		heapIndex     = 0
+		propertyFlags = 0x0001: count = 1
+			MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				None
+			IMAGE_TILING_LINEAR:
+				None
+	memoryTypes[2]:
+		heapIndex     = 1
+		propertyFlags = 0x0006: count = 2
+			MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			MEMORY_PROPERTY_HOST_COHERENT_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				color images
+				FORMAT_D16_UNORM
+				FORMAT_D32_SFLOAT
+				FORMAT_S8_UINT
+				FORMAT_D16_UNORM_S8_UINT
+				FORMAT_D32_SFLOAT_S8_UINT
+			IMAGE_TILING_LINEAR:
+				color images
+	memoryTypes[3]:
+		heapIndex     = 2
+		propertyFlags = 0x0007: count = 3
+			MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			MEMORY_PROPERTY_HOST_COHERENT_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				color images
+				FORMAT_D16_UNORM
+				FORMAT_D32_SFLOAT
+				FORMAT_S8_UINT
+				FORMAT_D16_UNORM_S8_UINT
+				FORMAT_D32_SFLOAT_S8_UINT
+			IMAGE_TILING_LINEAR:
+				color images
+	memoryTypes[4]:
+		heapIndex     = 2
+		propertyFlags = 0x0007: count = 3
+			MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			MEMORY_PROPERTY_HOST_VISIBLE_BIT
+			MEMORY_PROPERTY_HOST_COHERENT_BIT
+		usable for:
+			IMAGE_TILING_OPTIMAL:
+				None
+			IMAGE_TILING_LINEAR:
+				None

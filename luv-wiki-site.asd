@@ -28,6 +28,7 @@
                  (:file "field-notes-mp-units")
                  (:file "gpu-architecture")
                  (:file "frame-performance")
+                 (:file "gpu-frame-benchmarks")
                  (:file "mathematical-shaders")
                  (:file "slug-bezier")
                  (:file "metal-backend")
