@@ -43,7 +43,7 @@
   "Multiplier of wall glyph size; resizing also changes the shell grid.")
 
 (defclass terminal-emission-knob (knobs:scalar-knob) ())
-(defclass terminal-layout-knob (terminal-emission-knob) ())
+(defclass terminal-layout-knob (terminal-emission-knob knobs:rebuild-knob) ())
 
 (knobs:define-knob terminal-ink-emission
     (:group :terminal :class 'terminal-emission-knob

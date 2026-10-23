@@ -84,3 +84,104 @@
       (luv.knobs:set-knob-value ink saved-ink viewer)
       (luv.knobs:set-knob-value scale saved-scale viewer)
       (remhash viewer render::*viewer-terminals*))))
+
+(define-test picture-knobs-change-the-frame-inputs
+  (let ((viewer (make-knob-test-viewer (ball-test-scene))))
+    (dolist (name '(render::time-of-day render::star-brightness render::moon-radiance
+                    render::galaxy-strength render::bloom-gain render::bloom-threshold
+                    render::shaft-gain render::shaft-decay render::vignette
+                    render::paper-grain render::haze-density render::haze-height
+                    render::shadow-base-bias render::shadow-filter-radius))
+      (let* ((knob (luv.knobs:find-knob name))
+             (saved (luv.knobs:knob-value knob viewer)))
+        (flet ((inputs ()
+                 (append (render::atmosphere-uniform-data render::*light*)
+                         (render::light-uniform-data
+                          render::*light* (luv.arithmetic.lisp.vec3:make-vec3 0 0 0)))))
+          (let ((before (inputs)))
+            (unwind-protect
+                 (progn
+                   (luv.knobs:step-knob knob viewer 1)
+                   (true (not (equalp before (inputs)))))
+              (luv.knobs:set-knob-value knob saved viewer))))))))
+
+(define-test physics-knobs-reach-the-shared-solver
+  (let* ((scene (ball-test-scene))
+         (viewer (make-knob-test-viewer scene))
+         (gravity (luv.knobs:find-knob 'luvcraft::physics-gravity))
+         (substeps (luv.knobs:find-knob 'luvcraft::physics-substeps))
+         (bounce (luv.knobs:find-knob 'luvcraft::ball-bounce))
+         (saved-gravity (luv.knobs:knob-value gravity viewer))
+         (saved-substeps (luv.knobs:knob-value substeps viewer))
+         (saved-bounce (luv.knobs:knob-value bounce viewer)))
+    (labels ((fall ()
+               (let* ((physics (ball-test-physics scene))
+                      (ball (luvcraft::spawn-body-of-kind physics :ball 8.5 10.0 8.5)))
+                 (luvcraft::step-physics-world physics)
+                 (nth-value 1 (luvcraft::physics-body-position physics ball))))
+             (peak ()
+               (let* ((physics (ball-test-physics scene))
+                      (ball (luvcraft::spawn-body-of-kind physics :ball 8.5 5.0 8.5))
+                      (landed nil) (peak 0.0))
+                 (dotimes (i 100)
+                   (luvcraft::step-physics-world physics)
+                   (let ((height (nth-value 1 (luvcraft::physics-body-position physics ball)))
+                         (speed (nth-value 1 (luvcraft::physics-body-velocity physics ball))))
+                     (when (< height 2.3) (setf landed t))
+                     (when (and landed (plusp speed)) (setf peak (max peak height)))))
+                 peak)))
+      (unwind-protect
+           (progn
+             (luv.knobs:set-knob-value gravity 0.0 viewer)
+             (let ((hover (fall)))
+               (luv.knobs:set-knob-value gravity 24.0 viewer)
+               (true (< (fall) hover)))
+             (luv.knobs:set-knob-value substeps 1 viewer)
+             (let ((coarse (fall)))
+               (luv.knobs:set-knob-value substeps 8 viewer)
+               (true (/= coarse (fall))))
+             (luv.knobs:set-knob-value bounce 0.0 viewer)
+             (let ((dead (peak)))
+               (luv.knobs:set-knob-value bounce 0.8 viewer)
+               (true (> (peak) (+ dead 0.2)))))
+        (luv.knobs:set-knob-value gravity saved-gravity viewer)
+        (luv.knobs:set-knob-value substeps saved-substeps viewer)
+        (luv.knobs:set-knob-value bounce saved-bounce viewer)))))
+
+(define-test turtle-count-reseeds-the-running-population
+  (let* ((grass (game:block-placement luvcraft::*grass-block*))
+         (builder (luft.terrain:make-scene-builder
+                   :horizontal-bits 11
+                   :material-vocabulary (game:luvcraft-palette-vocabulary game:*luvcraft-palette*)
+                   :ground-material grass :architecture-material grass)))
+    (loop for x from 1024 below 1088 do
+      (loop for y from 1024 below 1088 do
+        (luft.terrain:scene-builder-cell builder x y 1)))
+    (let* ((scene (luft.terrain:make-streaming-scene
+                   (luft.terrain:finish-scene-builder builder)))
+           (player (luft.terrain:make-walking-character
+                    :position (luv.arithmetic.lisp.vec3:make-vec3 1050.5 1050.5 2.0)))
+           (viewer (make-knob-test-viewer scene player))
+           (knob (luv.knobs:find-knob 'host::turtle-count)))
+      (luv.knobs:set-knob-value knob 3 viewer)
+      (is = 3 (length (host::viewer-animals viewer)))
+      (luv.knobs:set-knob-value knob 1 viewer)
+      (is = 1 (length (host::viewer-animals viewer)))
+      (luv.knobs:set-knob-value knob 0 viewer)
+      (is = 0 (length (host::viewer-animals viewer)))
+      (true (host::viewer-animals-initialized-p viewer)))))
+
+(define-test residency-knob-retargets-without-player-motion
+  (let* ((scene (luft.world:make-authored-world-streaming-scene
+                 :horizontal-bits 10 :residency-radius 0))
+         (viewer (make-knob-test-viewer scene))
+         (knob (luv.knobs:find-knob 'render::residency-radius))
+         (producer (luv.production:make-single-worker-production-system)))
+    (unwind-protect
+         (progn
+           (render::retarget-authored-world scene producer 1 512 512)
+           (let ((small (hash-table-count (render::streaming-scene-desired scene))))
+             (luv.knobs:set-knob-value knob 2 viewer)
+             (render::retarget-authored-world scene producer 1 512 512)
+             (true (> (hash-table-count (render::streaming-scene-desired scene)) small))))
+      (luv.production:stop-production-system producer))))

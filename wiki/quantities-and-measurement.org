@@ -2125,3 +2125,33 @@ does a redefined specification invalidate compiled kernels and resident
 bundles?  Can ordinary scalar reference code and a SIMD specialization share
 one semantic operation definition?  A small real physics or lighting kernel
 will answer these better than a freestanding units framework.
+
+* DONE A knob carries the quantity of the place it changes
+:PROPERTIES:
+:ID: 5LO690
+:END:
+
+=luv/knobs= owns the live-value protocol, independently of either game's
+session. =define-knob= lives beside the tuned value and declares its
+representation, quantity, unit, bounds, step, group, and realization class.
+=knobs-for-host= chooses the vocabulary; =knob-session= reaches the value
+owner from a UI host. The shared McCLIM adapter knows knob objects, not games
+or individual setting names. Old Luvcraft imports the same symbols rather
+than retaining a second implementation. See #2CNSXF for the Luft consumers.
+
+Units describe the stored value, not just a decorative suffix: Luft's
+atlas tick is 1/8 cell, a resident chunk is 64 cells, a sky hour is 3,600
+seconds, mouse sensitivity is radians per pointer pixel, and haze extinction
+and height falloff are inverse cells. Walking and acceleration retain cells
+per second and cells per second squared. HDR brightness is relative scene
+radiance, not an unsupported claim of SI luminance. Dimensionless gains,
+sample counts, and boolean switches remain distinct represented values.
+
+=set-knob-value= fits the value, writes the owner's place, and dispatches
+=realize-knob=. Ordinary uniforms are read at the next frame; terminal
+emission invalidates even an idle shell's glyph batch; font scale resizes
+the live grid; geometry crosses the renderer replacement boundary. A folded
+voxel-light gain is tracked by the shader parser, so changing it rebuilds
+the renderer cohort. Expensive controls preview during a drag and commit
+on release. These declarations do not add dispatch to dense GPU or physics
+loops: the hot paths still receive raw lanes and literals.

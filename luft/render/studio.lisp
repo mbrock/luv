@@ -2707,6 +2707,11 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
 (defclass construction-knob (knobs:switch-knob) ())
 (defclass walking-speed-knob (knobs:scalar-knob) ())
 (defclass walking-gravity-knob (knobs:scalar-knob) ())
+(defclass residency-knob (knobs:scalar-knob) ())
+
+(defmethod knobs:realize-knob progn ((knob residency-knob) (session game-host))
+  ;; Retarget even while the player stays in the same chunk.
+  (setf (luft.terrain::streaming-scene-focus (viewer-source session)) nil))
 
 (defmethod knobs:coerce-knob-value ((knob bevel-knob) value session)
   (declare (ignore knob session))
@@ -2741,6 +2746,14 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
   (when (viewer-player session)
     (setf (character-speed (viewer-player session)) (viewer-speed session))))
 
+(defun viewer-walk-speed (viewer)
+  (if (viewer-player viewer)
+      (character-speed (viewer-player viewer))
+      (viewer-speed viewer)))
+
+(defun (setf viewer-walk-speed) (value viewer)
+  (setf (viewer-speed viewer) value))
+
 (defun walking-gravity-magnitude () (- luft.terrain::*walking-gravity*))
 (defun (setf walking-gravity-magnitude) (value)
   (setf luft.terrain::*walking-gravity* (- value))
@@ -2759,14 +2772,15 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
      :minimum 1 :maximum 4 :step 1)
   (viewer-bevel-width session))
 (knobs:define-knob construction-lines
-    (:group :geometry :class 'construction-knob)
+    (:group :geometry :class 'construction-knob :type boolean
+     :quantity (:quantity :dimensionless :unit :one))
   (construction-lines-p))
 (knobs:define-knob movement-speed
     (:group :player :class 'walking-speed-knob :label "walk speed"
      :quantity (:quantity quantities:world-velocity
                 :unit ((quantities:cell 1) (:second -1)))
      :minimum 1.0 :maximum 12.0 :step 0.5)
-  (viewer-speed session))
+  (viewer-walk-speed session))
 (knobs:define-knob jump-speed
     (:group :player
      :quantity (:quantity quantities:world-velocity
@@ -2794,7 +2808,7 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
      :minimum 0.45 :maximum 1.75 :step 0.05)
   (camera-field-of-view (viewer-camera session)))
 (knobs:define-knob residency-radius
-    (:group :streaming :type integer
+    (:group :streaming :type integer :class 'residency-knob
      :quantity (:quantity quantities:world-distance :unit resident-chunk)
      :minimum 0 :maximum 4 :step 1)
   (streaming-scene-residency-radius (viewer-source session)))

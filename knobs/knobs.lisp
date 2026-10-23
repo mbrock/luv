@@ -93,7 +93,7 @@ what SESSION must do after a change for the change to show."))
   (find name *knobs* :key #'knob-name))
 
 (defparameter *knob-group-order*
-  '(:grading :sun :sky :shadows :camera :player :streaming :critters
+  '(:grading :sun :sky :shadows :camera :player :streaming :physics :critters
     :gnome :cat :fantus :riding :terminal :text)
   "The order the metabar shows groups in; a group not named here follows.")
 

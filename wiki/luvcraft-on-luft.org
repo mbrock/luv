@@ -911,10 +911,10 @@ metabar even after releasing the pointer; inventory and creative controls
 are window commands too. Parameterized M-x remains open in both games
 (#OL2JZ1); this port does not disguise that limitation as completed work.
 
-The metabar widget and interaction are shared, not the renderer-specific
-catalogue: old Luvcraft has grading, streaming, entities, and other knobs
-whose old session fields do not drive Luft. The game exposes Luft's geometry,
-navigation, sky, lens, and atmosphere settings rather than fake old knobs.
+The metabar widget and interaction are shared. Initially the game exposed
+Luft's hand-written geometry, navigation, sky, lens, and atmosphere settings
+rather than fake controls over unused old session fields. #2CNSXF replaces
+that catalogue with the engine knob protocol and actual Luft consumers.
 Contextual game hints now occupy an early field in the shared top HUD, so
 removing the generic palette does not lose =B= ball, =G= summon, stock errors,
 or the ball's throw/marbles/put-away hint. Modal focus suppresses that field
@@ -1082,3 +1082,45 @@ agents' tool vocabulary over the same queries.
 
 /Done when./ One behaviour block works in Luvcraft on Luft without the
 engine knowing its kind.
+
+** DONE Turn the engine's real values with the old knob protocol
+:PROPERTIES:
+:ID: 2CNSXF
+:END:
+
+The protocol is now =luv/knobs= (#5LO690). Luft's original seventeen settings
+are ordinary knob objects defined in the files owning their values, not
+seventeen families of metabar methods. The game inherits those objects and
+adds the original solver's gravity, bounce, and substep knobs without
+copying their places. Its groups are grading, sky, shadows, camera, player,
+streaming, physics, critters, terminal, and the atelier's extra geometry.
+
+Player walk/jump speed and gravity reach the walking character and body;
+eye height reaches the eye camera. Exposure multiplies the measured or
+fixed exposure. Shadow bias and filter radius reach the frame's shadow
+lanes. Streaming radius changes the demanded residency window. Voxel-light
+gain is a tracked folded literal in terrain, torch, and fixture shaders,
+not a read-time constant. Terminal emission invalidates quiet screen batches;
+font scale changes rows/columns and requests a live PTY resize. Turtle count
+re-seeds a bounded population on suitable resident ground. Ball bounce tunes
+newly spawned balls, as in the original game; it does not rewrite the
+material properties of balls already in flight.
+
+The shared adapter gives rebuild controls commit-on-release behavior. Unit
+and value round trips and realization dispatch are exercised through the
+metabar protocol, with locomotion/camera and idle-terminal effects checked
+separately. =scripts/capture-knob-metabars.lisp= drives Return, arrows, and
+pointer press/motion/release events against both games' real McCLIM/Vulkan
+metabars, asserts the value changes and drained operations, and captures
+grading/camera/player/physics/terminal states. A native Luft run additionally
+changed voxel-light gain and observed renderer cohort revision 0 → 1 with
+the new literal installed and no retained canvas failures.
+
+Consumer checks caught two otherwise believable but inert controls: walk
+speed initially read the free camera's 4 instead of the walking character's
+7 cells/second, and streaming radius left the cached focus unchanged until
+the player crossed a chunk boundary. The knob now reads the actual walking
+speed and invalidates residency focus. A stationary-player test observes
+the demanded window grow. Native checks also observed exposure 0.7 × 2 = 1.4
+in the uploaded frame, changed projection and construction lanes, a replaced
+bevel renderer, and the movement/jump/pointer consumers using their new values.

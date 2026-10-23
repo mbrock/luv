@@ -343,6 +343,12 @@ The sun lanes carry the key light: the sun by day and the moon by night."
 ;;; Knobs belong to the values packed below, not to a UI vocabulary.
 (math:define-unit 'sky-hour :reference :second :magnitude 3600
                           :quantity-kind :duration)
+(math:define-quantity-kind 'inverse-spatial-coordinate
+  :dimension nil :parent :dimensionless)
+(math:define-quantity 'haze-extinction :kind 'inverse-spatial-coordinate
+  :non-negative-p t)
+(math:define-quantity 'haze-height-falloff :kind 'inverse-spatial-coordinate
+  :non-negative-p t)
 (defmethod knobs:unit-abbreviation ((unit (eql 'sky-hour))) "h")
 (defmethod knobs:unit-abbreviation ((unit (eql quantities:cell))) "cell")
 
@@ -389,12 +395,12 @@ The sun lanes carry the key light: the sun by day and the moon by night."
      :minimum 0.0 :maximum 0.15 :step 0.005)
   *paper-grain*)
 (knobs:define-knob haze-density
-    (:group :sky :quantity (:quantity :dimensionless :unit ((quantities:cell -1)))
+    (:group :sky :quantity (:quantity haze-extinction :unit ((quantities:cell -1)))
      :minimum 0.0 :maximum 0.03 :step 0.001)
   *haze-density*)
 (knobs:define-knob haze-height
     (:group :sky :label "haze falloff"
-     :quantity (:quantity :dimensionless :unit ((quantities:cell -1)))
+     :quantity (:quantity haze-height-falloff :unit ((quantities:cell -1)))
      :minimum 0.0 :maximum 0.08 :step 0.002)
   *haze-height*)
 (knobs:define-knob shadow-base-bias

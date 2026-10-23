@@ -1,12 +1,15 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  ;; The lobby vocabulary moved to LUV.LOBBY.  Remove stale home symbols from
+  ;; Lobby and knob vocabularies moved into the engine. Remove stale symbols from
   ;; durable images so package qualification continues to name ownership.
   (let ((package (find-package '#:luvcraft)))
     (when package
-      (dolist (name '("LOBBY-CLIENT" "LOBBY-CLIENT-ID" "LOBBY-CLIENT-NAME"
+      (dolist (name (append
+                    '("LOBBY-CLIENT" "LOBBY-CLIENT-ID" "LOBBY-CLIENT-NAME"
                       "LOBBY-CLIENT-SNAPSHOT" "LOBBY-CLIENT-VALUE"
                       "LOBBY-PEER" "LOBBY-PEER-ID" "LOBBY-PEER-NAME"
-                      "RECEIVE-LOBBY-PUBLICATION"))
+                      "RECEIVE-LOBBY-PUBLICATION")
+                    (loop for symbol being the external-symbols of '#:luv.knobs
+                          collect (symbol-name symbol))))
         (multiple-value-bind (symbol status) (find-symbol name package)
           (when (and symbol (eq package (symbol-package symbol)))
             (when (eq status :external) (unexport symbol package))

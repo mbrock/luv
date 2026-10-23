@@ -2878,7 +2878,8 @@ solid ink."
                 (return-from render-gpu-mirror-frame mirror))
               (call-with-gpu-mirror-target
                mirror context
-               (lambda (surface encoder)
+               (lambda (surface encoder presentation-time)
+                 (declare (ignore presentation-time))
                  (let* ((state
                           (ensure-gpu-mirror-frame-state
                            mirror context surface))

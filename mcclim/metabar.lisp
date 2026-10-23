@@ -54,10 +54,6 @@
    "Return OWNER's ordered group identities.  Group identities remain owned
 by the application; symbols are sufficient when they are the vocabulary."))
 
-(defmethod metabar-groups-for (owner)
-  (declare (ignore owner))
-  nil)
-
 (defgeneric metabar-group-label (owner group)
   (:documentation "Return GROUP's short label in OWNER's metabar."))
 
@@ -72,16 +68,8 @@ by the application; symbols are sufficient when they are the vocabulary."))
 (defgeneric metabar-controls-for (owner group)
   (:documentation "Return OWNER's ordered controls in GROUP."))
 
-(defmethod metabar-controls-for (owner group)
-  (declare (ignore owner group))
-  nil)
-
 (defgeneric metabar-actions-for (owner)
   (:documentation "Return OWNER's ordered metabar actions."))
-
-(defmethod metabar-actions-for (owner)
-  (declare (ignore owner))
-  nil)
 
 (defgeneric metabar-control-kind (control owner)
   (:documentation "Return :SCALAR or :SWITCH for CONTROL in OWNER."))
