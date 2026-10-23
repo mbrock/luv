@@ -605,6 +605,7 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
   (assert (null (uiop:getenv "BENCH_MSAA")) () "Use BENCH_MODE=native-1x or native-4x instead of BENCH_MSAA")
   (setf luv::*canvas-watchdog-fatal-seconds* nil
         luv::*canvas-dispatch-timeout* 600.0
+        luv::*offscreen-render-scale* nil
         luv::*fixed-render-scale* (unless (eq *benchmark-mode* :default) 1.0)
         old::*luvcraft-temporal-p* (and (eq *benchmark-mode* :default) *default-old-temporal-p*)
         old::*luvcraft-benchmark-terrain-p* (null (uiop:getenv "BENCH_TERRAIN_OFF"))
