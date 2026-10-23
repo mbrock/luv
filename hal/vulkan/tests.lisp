@@ -26,7 +26,8 @@
            (setf (symbol-function create-symbol)
                  (lambda (native-device formats &key depth-format
                                                    depth-store-op samples
-                                                   resolve-p)
+                                                   resolve-p
+                                              &allow-other-keys)
                    (declare (ignore native-device depth-format depth-store-op
                                     resolve-p))
                    (push (coerce formats 'list) native-formats)

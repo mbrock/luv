@@ -986,11 +986,15 @@ advertised is never placed in the query chain and is returned as NIL."
 
 (defun create-color-render-pass
     (device formats &key depth-format (depth-store-op :discard)
-                         (samples :1) resolve-p)
+                         (samples :1) resolve-p
+                         (load-op :clear) (depth-load-op :clear))
   "Create a pass whose color attachments have FORMATS in location order.
 
 When RESOLVE-P is true, multisampled attachments are followed by single-sample
-resolves.  A depth resolve selects sample zero through the RenderPass2 path."
+resolves.  A depth resolve selects sample zero through the RenderPass2 path.
+LOAD-OP and DEPTH-LOAD-OP are :CLEAR or :LOAD; the attachments enter the pass
+already in their attachment layouts, so loading keeps what an earlier pass
+drew."
   (when (and resolve-p depth-format)
     (return-from create-color-render-pass
       (create-resolving-render-pass-2
@@ -1012,7 +1016,7 @@ resolves.  A depth resolve selects sample zero through the RenderPass2 path."
                 attachments '(:struct attachment-description) index)
                 'attachment-description
                 :flags 0 :format format :samples samples
-                :load-op :clear :store-op (if resolve-p :dont-care :store)
+                :load-op load-op :store-op (if resolve-p :dont-care :store)
                 :stencil-load-op :dont-care :stencil-store-op :dont-care
                 :initial-layout :color-attachment-optimal
                 :final-layout :color-attachment-optimal))
@@ -1033,7 +1037,7 @@ resolves.  A depth resolve selects sample zero through the RenderPass2 path."
          (cffi:mem-aptr
           attachments '(:struct attachment-description) depth-index)
          'attachment-description :flags 0 :format depth-format :samples samples
-         :load-op :clear
+         :load-op depth-load-op
          :store-op (vulkan-attachment-store-op depth-store-op)
          :stencil-load-op :dont-care :stencil-store-op :dont-care
          :initial-layout :depth-stencil-attachment-optimal
@@ -1089,7 +1093,8 @@ resolves.  A depth resolve selects sample zero through the RenderPass2 path."
                 (with-depth (cffi:null-pointer)))))))))
 
 (defun create-depth-render-pass
-    (device depth-format &key (depth-store-op :store) (samples :1) resolve-p)
+    (device depth-format &key (depth-store-op :store) (samples :1) resolve-p
+                              (depth-load-op :clear))
   (when resolve-p
     (return-from create-depth-render-pass
       (create-resolving-render-pass-2
@@ -1099,7 +1104,7 @@ resolves.  A depth resolve selects sample zero through the RenderPass2 path."
     (fill-vk
      attachments 'attachment-description
      :flags 0 :format depth-format :samples samples
-     :load-op :clear
+     :load-op depth-load-op
      :store-op (vulkan-attachment-store-op depth-store-op)
      :stencil-load-op :dont-care :stencil-store-op :dont-care
      :initial-layout :depth-stencil-attachment-optimal

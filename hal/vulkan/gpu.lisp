@@ -1452,8 +1452,12 @@ VK_EXT_mesh_shader is enabled, so ask the device first."
 
 (defun vulkan-render-pass-for-format
     (device gpu-formats descriptor &optional depth-format
-            (depth-store-op :discard) (sample-count 1) resolve-p)
+            (depth-store-op :discard) (sample-count 1) resolve-p
+            (load-op :clear) (depth-load-op :clear))
   "Return the cached render pass for GPU-FORMATS and optional DEPTH-FORMAT.
+
+LOAD-OP and DEPTH-LOAD-OP do not change render-pass compatibility, so
+pipelines may keep using the default clearing pass.
 
 GPU-FORMATS is a list in fragment-output location order.  A single keyword
 is accepted for callers predating multiple render targets."
@@ -1463,7 +1467,7 @@ is accepted for callers predating multiple render targets."
                             (and gpu-formats (list gpu-formats))))
            (samples (ecase sample-count (1 :1) (2 :2) (4 :4) (8 :8)))
            (key (list gpu-formats depth-format depth-store-op
-                      sample-count resolve-p)))
+                      sample-count resolve-p load-op depth-load-op)))
       (or (gethash key (vulkan-device-render-passes device))
           (setf (gethash key (vulkan-device-render-passes device))
                 (if gpu-formats
@@ -1477,12 +1481,14 @@ is accepted for callers predating multiple render targets."
                      (and depth-format
                           (vulkan-gpu-format depth-format descriptor))
                      :depth-store-op depth-store-op
-                     :samples samples :resolve-p resolve-p)
+                     :samples samples :resolve-p resolve-p
+                     :load-op load-op :depth-load-op depth-load-op)
                     (lvk:create-depth-render-pass
                      (vulkan-handle device)
                      (vulkan-gpu-format depth-format descriptor)
                      :depth-store-op depth-store-op
-                     :samples samples :resolve-p resolve-p)))))))
+                     :samples samples :resolve-p resolve-p
+                     :depth-load-op depth-load-op)))))))
 
 (defun normalize-vulkan-vertex-buffers (descriptor buffers)
   (unless (listp buffers)
@@ -1727,7 +1733,8 @@ render-pass compatibility need no separate vocabulary."
                    (vulkan-render-pass-for-format
                     device formats descriptor depth-format
                     (or depth-store-op :discard) sample-count
-                    (> sample-count 1))))
+                    (> sample-count 1) color-load-op
+                    (if (eq depth-load-op :load) :load :clear))))
                (pipeline-layout
                  (with-cpu-trace-zone (:vulkan/pipeline/create-layout)
                    (lvk:create-pipeline-layout
@@ -2590,13 +2597,26 @@ lowering later without changing this queue-level operation."
                    (or (getf depth-attachment :depth-clear-value) 1.0))))
            (depth-store-op
              (and depth-attachment
-                  (getf depth-attachment :depth-store-op))))
+                  (getf depth-attachment :depth-store-op)))
+           ;; Every color attachment shares one load op; :LOAD keeps what an
+           ;; earlier pass drew, as Metal's MTLLoadActionLoad does.
+           (color-load-op
+             (let ((op (getf (first attachments) :load-op :clear)))
+               (if (member op '(:clear :load)) op :clear)))
+           (depth-load-op
+             (if depth-attachment
+                 (getf depth-attachment :depth-load-op :clear)
+                 :clear)))
       (unless (and (listp attachments)
                    (every (lambda (attachment target)
                             (and target
-                                 (eq :clear (getf attachment :load-op))
+                                 (eq color-load-op (getf attachment :load-op))
                                  (eq :store (getf attachment :store-op))))
                           attachments targets)
+                   ;; A resolving pass is created only with clearing loads.
+                   (or (= sample-count 1)
+                       (and (eq :clear color-load-op)
+                            (eq :clear depth-load-op)))
                    (every (lambda (target)
                             (= sample-count
                                (gpu-texture-sample-count target)))
@@ -2623,8 +2643,7 @@ lowering later without changing this queue-level operation."
                        (and depth-target
                             (eq :depth32-float
                                 (gpu-texture-format depth-target))
-                            (eq :clear
-                                (getf depth-attachment :depth-load-op))
+                            (member depth-load-op '(:clear :load))
                             (member depth-store-op '(:discard :store))))
                    (or (null depth-resolve-target)
                        (and depth-target
@@ -2644,7 +2663,8 @@ lowering later without changing this queue-level operation."
                     device (mapcar #'gpu-texture-format targets) descriptor
                     (and depth-target (gpu-texture-format depth-target))
                     (or depth-store-op :discard) sample-count
-                    (> sample-count 1)))
+                    (> sample-count 1) color-load-op
+                    (if (eq depth-load-op :load) :load :clear)))
                  (framebuffer nil)
                  (completed-p nil))
             (loop for view in views
