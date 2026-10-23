@@ -90,36 +90,43 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
                   zmax (max zmax (aref sites (+ offset 2))))))
         (let* ((width (+ 2 (- xmax xmin)))
                (height (+ 2 (- ymax ymin)))
-               (volume (* width height (+ 2 (- zmax zmin))))
+               (depth (+ 2 (- zmax zmin)))
+               (volume (* width height depth))
                ;; Regional meshes have compact bounds. Avoid allocating the
                ;; entire enclosing world for a sparse, non-regional mesh.
                (dense (when (<= volume 1048576)
                         (make-array volume :element-type '(unsigned-byte 32)
                                            :initial-element #x10000)))
+               (reader (when dense
+                         (%star-light-lattice-reader field sky xmin ymin zmin
+                                                     width height depth dense)))
                (points (unless dense (make-hash-table :test #'eql))))
-          (declare (type fixnum width height volume)
+          (declare (type fixnum width height depth volume)
                    (type (or null (simple-array (unsigned-byte 32) (*))) dense))
           (flet ((point-light (x y z)
                    (declare (type fixnum x y z))
                    (let* ((key (if dense
-                                   (+ (- x xmin) (* width (+ (- y ymin) (* height (- z zmin)))))
+                                   (%star-light-cache-index x y z xmin ymin zmin height depth)
                                    (logior z (ash y 9) (ash x 27))))
                           (cached (if dense (aref dense key) (gethash key points #x10000))))
                      (declare (type fixnum key cached))
                      (if (< cached #x10000)
                          cached
-                         (let ((light (logior
-                                       (luft:voxel-light-at-lattice-point field x y z)
-                                       (ash (if sky
-                                                (luft:voxel-sky-at-lattice-point sky x y z)
-                                                15) 12))))
+                         (let ((light
+                                 (if reader
+                                     (funcall reader x y z)
+                                     (logior
+                                      (luft:voxel-light-at-lattice-point field x y z)
+                                      (ash (if sky
+                                               (luft:voxel-sky-at-lattice-point sky x y z)
+                                               15) 12)))))
                            (if dense (setf (aref dense key) light)
                                (setf (gethash key points) light))
                            light)))))
-            (loop for offset from 0 below (length sites) by 4
-                  for x = (aref sites offset)
-                  for y = (aref sites (+ offset 1))
-                  for z = (aref sites (+ offset 2))
+            (loop for offset fixnum from 0 below (length sites) by 4
+                  for x fixnum = (aref sites offset)
+                  for y fixnum = (aref sites (+ offset 1))
+                  for z fixnum = (aref sites (+ offset 2))
                   when (or sky (%light-page-near-p field domain x y z))
                     do (setf (aref words offset) 0
                              (aref words (+ offset 1)) 0
@@ -129,6 +136,7 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
                          (let ((light (point-light (+ x (ldb (byte 1 0) point))
                                                    (+ y (ldb (byte 1 1) point))
                                                    (+ z (ldb (byte 1 2) point)))))
+                           (declare (type (unsigned-byte 16) light))
                            (setf (aref words (+ offset (floor point 2)))
                                  (logior (aref words (+ offset (floor point 2)))
                                          (ash light (* 16 (mod point 2))))))))))))
@@ -203,18 +211,62 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
 (defvar +render-population-preparer+ (make-instance 'render-population-preparer)
   "Pass as a streaming scene's :MESH-PREPARER to build populations on the worker.")
 
+(defun %mesh-light-unchanged-p (mesh previous)
+  "Prove equality over the complete sampling envelope, including the cell halo.
+Page identity is sufficient, page equality is exact, and sky columns witness
+the implicit baseline. Unknown baseline functions never justify reuse."
+  (let ((new (luft:surface-mesh-voxel-light mesh))
+        (old (luft:surface-mesh-voxel-light previous))
+        (sites (luft:surface-mesh-star-site-words mesh)))
+    (when (eq old new) (return-from %mesh-light-unchanged-p t))
+    (unless (and old new (equalp (luft:voxel-light-field-domain old)
+                                (luft:voxel-light-field-domain new)))
+      (return-from %mesh-light-unchanged-p nil))
+    (when (zerop (length sites)) (return-from %mesh-light-unchanged-p t))
+    (let* ((domain (luft:voxel-light-field-domain new))
+           (x0 (aref sites 0)) (y0 (aref sites 1)) (z0 (aref sites 2))
+           (x1 x0) (y1 y0) (z1 z0))
+      (loop for i from 0 below (length sites) by 4 do
+        (setf x0 (min x0 (aref sites i)) x1 (max x1 (aref sites i))
+              y0 (min y0 (aref sites (+ i 1))) y1 (max y1 (aref sites (+ i 1)))
+              z0 (min z0 (aref sites (+ i 2))) z1 (max z1 (aref sites (+ i 2)))))
+      (setf x0 (max 0 (1- x0)) x1 (min (1- (luft:world-domain-x-limit domain)) (1+ x1))
+            y0 (max 0 (1- y0)) y1 (min (1- (luft:world-domain-y-limit domain)) (1+ y1))
+            z0 (max 0 (1- z0)) z1 (min (1- luft:+top-z+) (1+ z1)))
+      (labels ((same-field (a b)
+                 (when (eq a b) (return-from same-field t))
+                 (unless (and a b) (return-from same-field nil))
+                 (unless (eq (luft::voxel-light-field-baseline a) (luft::voxel-light-field-baseline b))
+                   (let ((ac (luft::voxel-light-field-baseline-column a))
+                         (bc (luft::voxel-light-field-baseline-column b)))
+                     (unless (and ac bc) (return-from same-field nil))
+                     (loop for y from y0 to y1 do
+                       (loop for x from x0 to x1 do
+                         (unless (equalp (funcall ac x y) (funcall bc x y))
+                           (return-from same-field nil))))))
+                 (loop for x from (* 8 (ash x0 -3)) to x1 by 8 do
+                   (loop for y from (* 8 (ash y0 -3)) to y1 by 8 do
+                     (loop for z from (* 8 (ash z0 -3)) to z1 by 8 do
+                       (flet ((page (f)
+                                (luft::%voxel-light-page-at
+                                 (luft::voxel-light-field-pages f) (luft::voxel-light-field-direct-p f)
+                                 (luft::voxel-light-field-x-pages f) (luft::voxel-light-field-y-pages f) x y z)))
+                         (unless (equalp (page a) (page b)) (return-from same-field nil))))))
+                 t))
+        (and (same-field old new)
+             (same-field (luft:voxel-light-field-skylight old)
+                         (luft:voxel-light-field-skylight new)))))))
+
 (defmethod prepare-streamed-mesh
     ((preparer render-population-preparer) mesh previous)
   "Reuse PREVIOUS's sites and appearance, and its light when MESH's is the same.
 
-Each cohort joins a fresh regional field, so the light is compared by value:
-an owner far from any changed tile keeps its whole population."
+Each cohort joins a fresh regional field. Prove its pages and direct columns
+unchanged over this mesh before sampling; otherwise repack and compare words."
   (if previous
       (let* ((population (prepared-render-mesh-population previous))
              (lights
-               (if (eq (luft:surface-mesh-voxel-light mesh)
-                       (luft:surface-mesh-voxel-light
-                        (prepared-render-mesh-mesh previous)))
+               (if (%mesh-light-unchanged-p mesh (prepared-render-mesh-mesh previous))
                    (render-population-light-words population)
                    (star-lattice-light-words mesh)))
              (bodies (luft:surface-mesh-bodies mesh)))

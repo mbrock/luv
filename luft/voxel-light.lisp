@@ -77,6 +77,9 @@
   (revision 0 :type (integer 0 *) :read-only t)
   ;; Implicit direct-column light avoids materializing the open atmosphere.
   (baseline nil :type (or null function))
+  ;; Optional exact sky witness: (X,Y) -> immutable u8 column, NIL (open),
+  ;; or :UNKNOWN (closed). Equal witnesses imply equal baseline at every Z.
+  (baseline-column nil :type (or null function))
   (skylight nil :type (or null voxel-light-field))
   (visits 0 :type (integer 0 *) :read-only t)
   (pushes 0 :type (integer 0 *) :read-only t)
@@ -656,5 +659,7 @@ REPLACEMENT's implicit baseline must describe the whole retained tile."
                       (if replacement (voxel-light-field-stale-pops replacement) 0))))
           (when replacement
             (setf (voxel-light-field-baseline field)
-                  (voxel-light-field-baseline replacement)))
+                  (voxel-light-field-baseline replacement)
+                  (voxel-light-field-baseline-column field)
+                  (voxel-light-field-baseline-column replacement)))
           field)))))

@@ -719,6 +719,21 @@ under #LX8GZ2; #C5HWIZ records the shared language and bounded edit repair.
 with exact incremental frontier programs. Retiring old Luvcraft's solver is
 a separate adapter decision, not permission to change its boundary laws.
 
+/Packing is a batch transform./ The 2026-10-23 profile under #WLLATM replaces
+independent sparse corner queries on the streaming path with the mesher's
+preparation/kernel separation. One demanded lattice tile gathers eight RGB
+and eight sky page pointers, resolves sky columns, and prepares a dense
+9-cubed cell halo. A typed SSE2 byte-max kernel joins four corners at a time;
+the output gather retains exactly seven RGB4/sky samples in four words per
+star. No AVX-512 requirement, no change to sparse u16 storage or shader ABI.
+Unchanged mesh owners retain their words only after exact page and implicit
+sky-column comparison. This is not yet changed-page-only repacking within
+an owner. Seed 7 packing fell from 110.8 ms to 49--57 ms for 246,975 stars;
+warm cohort preparation fell from 93.6 ms to 5.6--7.2 ms. Differential tests
+and the real cached cohort/edit products remain bit-identical to scalar
+sampling. Next: measure demand-limited tile fills and a real publication
+budget; full tiles still calculate 3.76 times the uniquely requested corners.
+
 /Evidence./ The first implementation streamed Luft's handwritten solver. A
 light value loses at least one level per step and starts at fifteen, while
 a chunk column is sixty-four cells wide, so the exact light over one column

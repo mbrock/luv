@@ -132,6 +132,7 @@
                              (:file "image-finishing")
                              (:file "reconstruction")
                              (:file "render")
+                             (:file "light-packing")
                              (:file "render-population")
                              (:file "renderer-residency")
                              (:file "renderer-targets")

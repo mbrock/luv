@@ -15,6 +15,112 @@
 
 (in-package #:luft.render.tests)
 
+(defun scalar-star-light-words (mesh)
+  "Uncached specification of the seven-corner sidecar, including its spare lane."
+  (let* ((sites (luft:surface-mesh-star-site-words mesh))
+         (field (luft:surface-mesh-voxel-light mesh))
+         (sky (and field (luft:voxel-light-field-skylight field)))
+         (words (make-array (length sites) :element-type '(unsigned-byte 32)
+                                           :initial-element #xf000f000)))
+    (when field
+      (loop for i from 0 below (length sites) by 4
+            for x = (aref sites i) for y = (aref sites (+ i 1)) for z = (aref sites (+ i 2))
+            when (or sky (render::%light-page-near-p field (luft:surface-mesh-domain mesh) x y z)) do
+              (dotimes (word 4) (setf (aref words (+ i word)) 0))
+              (dotimes (point 7)
+                (let* ((px (+ x (logand point 1)))
+                       (py (+ y (ldb (byte 1 1) point)))
+                       (pz (+ z (ldb (byte 1 2) point)))
+                       (light (logior (luft:voxel-light-at-lattice-point field px py pz)
+                                      (ash (if sky (luft:voxel-sky-at-lattice-point sky px py pz) 15) 12))))
+                  (setf (aref words (+ i (floor point 2)))
+                        (logior (aref words (+ i (floor point 2)))
+                                (ash light (* 16 (mod point 2)))))))))
+    words))
+
+(define-test star-light-packing-is-bit-identical-to-scalar-sampling
+  ;; Cross all three page seams, domain edges, and the open top, with both
+  ;; page directories. The large fixture also exercises sparse point caching.
+  (dolist (spec '((nil nil) (nil t) (t t)))
+    (let* ((sparse-p (first spec))
+           (hashed-p (second spec))
+           (domain (luft:make-world-domain :horizontal-bits (if sparse-p 8 4)))
+           (coordinates (if sparse-p '(0 255) (loop for i from 0 to 16 collect i)))
+           (sites (make-array 0 :element-type '(unsigned-byte 32) :adjustable t :fill-pointer 0))
+           (cells (make-hash-table :test #'eql))
+           (opacity (make-array 1 :element-type '(unsigned-byte 8) :initial-element 15))
+           (source (vector (luft:make-voxel-light-source
+                            (luft:make-site domain 7 8 8 luft:+cell-extent+ 1) #xf73)))
+           (field (luft:solve-voxel-light domain cells opacity source :hashed-p hashed-p))
+           (sky (luft:solve-voxel-light domain cells opacity #() :hashed-p hashed-p)))
+      (dolist (x coordinates)
+        (dolist (y coordinates)
+          (dolist (z '(0 1 7 8 9 15 16 17 254 255))
+            (dolist (word (list x y z 1)) (vector-push-extend word sites)))))
+      (let ((mesh (luft:make-surface-mesh domain
+                    (coerce sites '(simple-array (unsigned-byte 32) (*))))))
+        (dolist (state '(:absent :rgb :sky :sky-witness))
+          (setf (luft:surface-mesh-voxel-light mesh) (unless (eq state :absent) field)
+                (luft:voxel-light-field-skylight field) (when (member state '(:sky :sky-witness)) sky)
+                (luft::voxel-light-field-baseline sky)
+                (lambda (x y z) (if (and (oddp x) (evenp y) (> z 7)) 15 3))
+                (luft::voxel-light-field-baseline-column sky)
+                (when (eq state :sky-witness)
+                  (let ((short (make-array 8 :element-type '(unsigned-byte 8) :initial-element 3))
+                        (full (make-array luft:+top-z+ :element-type '(unsigned-byte 8) :initial-element 3)))
+                    (lambda (x y) (if (and (oddp x) (evenp y)) short full)))))
+          (true (equalp (scalar-star-light-words mesh) (render::star-lattice-light-words mesh))))))))
+
+(define-test light-corner-kernel-matches-scalar-byte-maxima
+  (let ((cells (make-array 729 :element-type '(unsigned-byte 32)))
+        (expected (make-array 4 :element-type '(unsigned-byte 32)))
+        (actual (make-array 4 :element-type '(unsigned-byte 32))))
+    (dotimes (i 729)
+      (setf (aref cells i) (logand #xffffffff (* (+ i 17) 2654435761))))
+    (dotimes (x 8)
+      (dotimes (y 8)
+        (loop for z from 0 below 8 by 4
+              for index = (+ (* 81 x) (* 9 y) z) do
+                (render::%join-four-light-corners-scalar cells index expected 0)
+                (#+x86-64 render::%join-four-light-corners
+                 #-x86-64 render::%join-four-light-corners-scalar cells index actual 0)
+                (true (equalp expected actual)))))))
+
+(define-test prepared-light-reuse-observes-implicit-sky-without-page-changes
+  (let* ((domain (luft:make-world-domain :horizontal-bits 6))
+         (sites (make-array 4 :element-type '(unsigned-byte 32) :initial-contents '(8 8 8 1)))
+         (cells (make-hash-table :test #'eql))
+         (opacity (make-array 1 :element-type '(unsigned-byte 8) :initial-element 15)))
+    (labels ((mesh (level witnessed-p)
+               (let* ((mesh (luft:make-surface-mesh domain sites))
+                      (field (luft:solve-voxel-light domain cells opacity #() :hashed-p t))
+                      (sky (luft:solve-voxel-light domain cells opacity #() :hashed-p t))
+                      (column (make-array luft:+top-z+ :element-type '(unsigned-byte 8)
+                                                      :initial-element level)))
+                 (setf (luft:surface-mesh-appearance-codes mesh)
+                       (make-array 8 :element-type '(unsigned-byte 8) :initial-element 1)
+                       (luft:surface-mesh-voxel-light mesh) field
+                       (luft:voxel-light-field-skylight field) sky
+                       (luft::voxel-light-field-baseline sky) (lambda (x y z) (declare (ignore x y z)) level)
+                       (luft::voxel-light-field-baseline-column sky)
+                       (when witnessed-p (lambda (x y) (declare (ignore x y)) column)))
+                 mesh)))
+      (let* ((old (mesh 5 t))
+             (previous (render::prepare-render-mesh old)))
+        (dolist (spec '((5 t) (3 t) (2 nil)))
+          (let* ((new (mesh (first spec) (second spec)))
+                 (prepared (terrain:prepare-streamed-mesh
+                            render::+render-population-preparer+ new previous))
+                 (words (render::render-population-light-words
+                         (render::prepared-render-mesh-population prepared))))
+            (true (equalp (scalar-star-light-words new) words))
+            (true (eq (= (first spec) 5)
+                      (eq words (render::render-population-light-words
+                                 (render::prepared-render-mesh-population previous))))))
+            (true (equalp (scalar-star-light-words old)
+                          (render::render-population-light-words
+                           (render::prepared-render-mesh-population previous)))))))))
+
 (define-test player-shaders-compile-for-both-backends
   (dolist (specification (list (shaders:player-sdf-vertex-specification)
                                (shaders:player-sdf-fragment-specification)
@@ -1096,6 +1202,8 @@
                                                   (render::render-population-instance-words bp)))
                                      (true (equalp (render::render-population-appearance-words ap)
                                                   (render::render-population-appearance-words bp)))
+                                     (true (equalp (scalar-star-light-words am)
+                                                  (render::render-population-light-words ap)))
                                      (true (equalp (render::render-population-light-words ap)
                                                   (render::render-population-light-words bp))))))
                      (setf (render::streaming-scene-mesh-cache scene) saved)))))

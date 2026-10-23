@@ -948,13 +948,101 @@ Evidence:
 Done when: a pinned-night capture shows the crystal face glowing and warming
 nearby surfaces, while tests cover placement/removal and cross-chunk falloff.
 
-** NEXT Measure light-to-mesh latency
+** NEXT Budget batched light packing and publication
 :PROPERTIES:
 :ID: WLLATM
 :END:
 
 Intent: find out whether owner-thread relighting plus one mesh capture per
 frame feels immediate enough during edit bursts and residency churn.
+
+Measured CPU evidence (2026-10-23, #BQMYNU):
+=scripts/profile-light.lisp= runs seed 7, 64 captured chunks, 16 owners,
+36 light tiles and a supported cave lantern at (1002,1086,8). The edited
+cell is (1002,1084,8). Materialization, GPU upload and scheduling are excluded.
+The cohort has 246,975 stars and 1,728,825 corner requests. Each unprofiled
+measurement averages ten runs; separate sb-sprof CPU and allocation runs
+retain flat and cumulative reports, followed by hot-loop disassembly.
+
+| CPU phase          | Original ms | Batched ms | Original bytes | Batched bytes |
+|--------------------+-------------+------------+----------------+---------------|
+| Packing alone      |       110.8 |       56.8 |       12489872 |      12998237 |
+| Warm cohort        |        93.6 |        7.2 |       13541802 |        601434 |
+| Cold cohort        |       343.6 |      262.4 |       58447970 |      58733040 |
+| Cold tiles         |       156.0 |      132.8 |       16973376 |      16917210 |
+| Lantern-side edit  |       140.8 |       37.6 |       19803202 |       8134299 |
+| Edit repair alone  |        16.4 |       22.8 |        4836989 |       4815882 |
+
+A separate post-rebase run gave 49.2 / 5.6 / 315.6 / 162.0 / 37.2 / 16.0 ms
+in that order. Cold times vary substantially on the shared Xeon orb; do not
+attribute the cold-tile difference to packing or claim a propagation speedup.
+Packing costs 449 ns/star originally versus 199--230 ns/star now, or
+64.1 versus 28.5--32.9 ns per requested corner. These are worker CPU costs,
+not a promise of frame latency. Packing still needs a budget and remains
+roughly 50 ms for this entire cohort.
+
+The baseline point cache has 489,782 misses and 1,239,043 hits (71.7%). The
+new demanded-page transform fills 3,595 lattice tiles: 2,620,755 cell records,
+1,840,640 computed corners, 57,520 RGB/sky page-directory slots and 291,195
+sky-column requests. Directory slots include absent/out-of-domain pages;
+they are not a count of distinct allocated pages. The point cache becomes
+page-filled: only 3,595 of 1,728,825 requests trigger a fill (99.792% fill-hit
+rate, a different metric from the old unique-point hit rate). Full tiles
+overcompute 3.76 times the requested unique corners. Warm preparation fills
+zero tiles; the edit fills 388 (198,656 corners, 6,208 page slots).
+
+Baseline packing's flat CPU profile puts 18.1% in integer-key hash lookup,
+15.0% in RGB corner sampling, 14.9% in direct sky, 8.0% in the sky generation
+closure, and 4.6% in generic LENGTH. RGB sampling is 24.0% cumulative; the
+sky reader's unnamed frame is 47.5% cumulative. After batching, tile fill is
+49.8% self / 60.8% cumulative, output gathering is 22.2% self, and hash
+lookup is 1.0% self. Sky-column closures together are 6.1% self. The new
+kernel disassembles to MOVDQU/PMAXUB loads and byte maxima, with no calls or
+boxed arithmetic inside the corner join. General numeric calls remain in
+outer setup/page addressing and equality checks; this is not a claim that
+the complete preparation path is free of them. Allocation profiles mostly
+land in array allocation trampolines; bytes above come from get-bytes-consed,
+not sample percentages. Packing and warm preparation recorded zero GC time;
+cold cohort GC was 4.7 ms before and 4.1 ms after.
+
+Propagation is separately measured, not inferred from the packing result.
+Cold tiles perform 72 solves: 264,814 visits, 265,365 pushes, 551 stale pops,
+1,588,884 opacity reads, and 5,483 page allocations across the solver results.
+The joined cohort retains 2,159 RGB and 1,168 sky pages. Repair performs four
+solves: 5,794 visits, 6,331 pushes, 537 stale pops, 34,764 opacity reads and
+123 allocated pages. The cold profile is 94% cumulative in solve-voxel-light:
+neighbor draining 62%, admits 19%, and hash lookup 40% self. Material opacity
+reads account for roughly 40% cumulative in earlier runs. Joining and tile
+identity checks are not the dominant cold cost. Sky interfaces are already
+cached after materialization in this fixture; their first construction is
+not isolated by the cold-tile number. Edit repair also scans column opacity
+interfaces; FIND-POSITION-IF is 31% cumulative in its short CPU profile.
+
+Implemented: mesher-style dense scratch with a one-cell halo, SSE2 four-corner
+byte maxima on x86-64 (portable scalar elsewhere), Z-contiguous point cache,
+and exact whole-owner sidecar reuse when all sampled pages and implicit sky
+columns are unchanged. Scratch is reused per mesh, not allocated per tile.
+Sparse 8-cubed u16 pages, RGB4/sky values and four output words/star remain
+unchanged. General unwitnessed baseline functions still use the scalar
+sampler rather than silently changing their semantics. Differential packing
+tests include seams, boundaries, sparse meshes and sky witnesses; the whole
+cohort and cached edit products also match the original words exactly.
+
+Ranked next experiments (estimates, not measured promises):
+1. Demand masks/row ranges within each tile: target the 3.76x overcomputation;
+   plausibly save 10--25 ms of packing, bounded by the ~60% tile-fill share.
+2. Repack only stars depending on changed cell pages, including their halo:
+   the current edit still computes 198,656 corners. Potentially several ms
+   per edit, little benefit to cold packing. Preserve exact sky-column
+   invalidation, not just explicit page identity.
+3. Give propagation a bounded local opacity view rather than hashed material
+   reads: its ~40% cumulative share suggests a 20--40 ms cold-tile target;
+   preparation overhead must be measured and repair kept exact.
+4. Narrow remaining setup/index arithmetic and consolidate witness traversal:
+   low-single-digit ms potential; wider SIMD alone is unlikely to dominate.
+
+The next latency experiment remains a renderer-publication/burst measurement,
+not another unmeasured propagation rewrite.
 
 Evidence to gather:
 
