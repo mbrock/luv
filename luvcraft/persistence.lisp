@@ -381,7 +381,9 @@ inhabitant descriptions."
 
 (defun write-luvcraft-save-description (description pathname)
   "Atomically replace PATHNAME with the printable save DESCRIPTION."
-  (let* ((target (pathname pathname))
+  ;; Absolute first: RENAME-FILE merges a relative target against the
+  ;; temporary's own directory, so build/save would become build/build/save.
+  (let* ((target (merge-pathnames pathname))
          (temporary (checkpoint-temporary-pathname target)))
     (ensure-directories-exist target)
     (unwind-protect

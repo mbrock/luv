@@ -184,6 +184,21 @@
       (luvcraft::write-luvcraft-save-description description pathname)))
   pathname)
 
+(define-test a-relative-save-pathname-lands-where-it-names
+  (let* ((directory (uiop:ensure-directory-pathname
+                     (uiop:merge-pathnames*
+                      (format nil "luvcraft-relative-save-~36R" (random (expt 36 8)
+                                                                        (make-random-state t)))
+                      (uiop:temporary-directory))))
+         (*default-pathname-defaults* directory))
+    (unwind-protect
+         (progn
+           (luvcraft::write-luvcraft-save-description '(:save) #p"nested/world.sexp")
+           (true (probe-file (merge-pathnames "nested/world.sexp" directory)))
+           (true (not (probe-file (merge-pathnames "nested/nested/world.sexp"
+                                                     directory)))))
+      (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore))))
+
 (define-test luft-edits-save-back-into-a-luvcraft-save
   (uiop:with-temporary-file (:pathname pathname :type "sexp")
     (let ((world (luvcraft.birthday:make-birthday-world :seed 7 :chunk-radius nil)))

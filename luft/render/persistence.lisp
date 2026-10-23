@@ -87,6 +87,9 @@ A game hosted in a viewer answers with its own save format.")
 
 (defun write-luft-world-description (description pathname)
   "Replace PATHNAME with DESCRIPTION, never leaving a partial file."
+  ;; Absolute first: RENAME-FILE merges a relative target against the
+  ;; temporary's own directory.
+  (setf pathname (merge-pathnames pathname))
   (ensure-directories-exist pathname)
   (let ((temporary (make-pathname :type "tmp" :defaults pathname)))
     (with-open-file (stream temporary :direction :output :if-exists :supersede)
