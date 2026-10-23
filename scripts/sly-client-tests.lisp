@@ -129,7 +129,8 @@
 test \"$#\" -eq 0 || exit 2
 printf 'ID       STATUS\\nLIVE123  running\\n'
 " stream)
-    (finish-output stream)
+    ;; Linux refuses to execute a file still open for writing (ETXTBSY).
+    :close-stream
     (sb-posix:chmod script #o700)
     (let ((sly-client::*swash* (namestring script)))
       (true (sly-client::swash-session-running-p

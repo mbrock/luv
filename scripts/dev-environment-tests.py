@@ -2,6 +2,7 @@
 
 """Exercise launcher handoff when a login shell changes the inherited PATH."""
 
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -37,8 +38,11 @@ class DevEnvironmentTests(unittest.TestCase):
             if repository_launcher:
                 root = HELPER.parent.parent
                 launcher = root / "sly"
+            # The fake tools shadow sbcl and nix; a real PATH still has the
+            # host's POSIX utilities, which launchers use before entering Nix.
             env = {
-                "PATH": str(tools),
+                "PATH": os.pathsep.join(
+                    [str(tools), os.environ.get("PATH", os.defpath)]),
                 "LUV_DEV_ENVIRONMENT_MODE": mode,
                 "LUV_NATIVE_LIBRARY_PATH": "/test/libraries",
                 "LUV_NATIVE_ENVIRONMENT_ACTIVE": "1",
