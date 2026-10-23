@@ -1,0 +1,126 @@
+#+title: Visible terrain compression on yawl, 2026-10-23
+
+This is the experiment behind #7B19HJ, not a production rendering path.
+Source revision =876e5d35154f351c137bbcac76649dc1102f7974=; benchmark blob
+=e7a4c9b783f3efe601566e922efe0a942f577704=. Apple M5, native Metal.
+Thread: https://ampcode.com/threads/T-01a16974-f1f6-7698-9082-658f7825c505
+
+* Result: fewer triangles, not a demonstrated GPU gain
+
+At native 1920x1080, live alpine's nine scene-visible residents contain:
+
+| Product                   | Original | Compressed |
+|---------------------------+----------+------------|
+| Scene triangles           |  1925590 |    1123274 |
+| Scene draws               |     1163 |          9 |
+| Referenced vertex records |  2849173 |    2127698 |
+
+The final row counts CPU vertex-reference records, not GPU invocations.
+The compressed reference/index buffers add 30,500,872 bytes (29.09 MiB);
+the original resident and atlas buffers remain allocated. Straight-line
+boundary simplification removes 41.7% of scene triangles. An earlier probe
+that retained every boundary vertex removed only 8.4%.
+
+All means below are milliseconds. Each cell lists independent runs, not
+percentiles. Three-scene runs use alpine, cave, then live alpine; the other
+runs measure only live alpine.
+
+| Live alpine                 | CPU encode            | GPU execution         | Serialized completion |
+|-----------------------------+-----------------------+-----------------------+-----------------------|
+| Original (control-1/2)      | 2.280 / 2.097 / 2.201 | 13.762/13.044/14.234  | 16.692/15.792/17.098  |
+| Batch only (batch-1)        | 1.747 / 1.571         | 13.709/13.619         | 16.139/15.850         |
+| Compressed (coordinated-1/2)| 1.650 / 1.487 / 1.613 | 13.755/13.526/13.763  | 16.092/15.706/16.064  |
+| Flat + compressed (flat-1)  | 3.274 / 3.045         | 11.811/11.430         | 15.882/15.209         |
+
+Compression does not establish a GPU win over batching. The final code's
+separate preparation census takes 0.80--0.99 seconds per visible live-alpine
+resident, on the render owner in this probe. This intentionally simple
+list/hash/ear-clipping implementation is unsuitable for live streaming.
+
+The flat experiment removes *all* bevels, including those near the camera;
+it is not distance LoD or a transition implementation. It reduces the nine
+residents to 157,694 triangles and lowers GPU cost, but also selects the
+existing unmerged flat-shadow path. Its increased CPU cost includes that
+shadow-path change. Do not attribute the entire difference to scene LoD.
+
+Alpine's triangles fall 63,754 -> 34,868; cave's 101,820 -> 51,012.
+Their single control/treatment runs are insufficient for a timing claim.
+
+* What the prototype preserves
+
+=batch.lisp= adapts the earlier exact scene-batching probe. Each vertex
+references its original site and atlas vertex. The original material,
+light, motion, and fragment computations remain in use. Shadows delegate
+to the existing renderer. Only visible residents receive probe buffers;
+buffers survive capture and host teardown before release.
+
+=compress.lisp= groups by oriented integer plane, selected material-code
+lanes, occupied/empty mask counts, and constant packed voxel light. One
+nonzero material contribution may move between otherwise zero lanes;
+multiple contributions keep their lane order. Nonconstant-light triangles
+stay intact. This is stricter than equality of final material outputs.
+
+Groups with holes or ambiguous boundaries fall back to original triangles.
+Candidate groups remove interior vertices. A boundary vertex may disappear
+only when it is collinear on all candidate boundaries meeting there and is
+not used by a retained triangle. Unpaired edges retain both endpoints:
+residents never independently simplify shared chunk seams. The simple
+polygon boundaries are then ear-clipped. The output compacts unused vertex
+references. No semantic mesh, appearance sidecar, or light field is changed.
+
+The final incidence guard and added count logging postdate the timed runs.
+The final preparation run produced identical triangle counts for all eleven
+measured scene residents. The guard rejects edges incident to more than two
+triangles rather than allowing opposite directed edges to mask them.
+
+* Validation and limits
+
+=check.lisp= performs 98 CPU differential comparisons: all 256 stars, an
+asymmetric cuboid, tunnel, hollow shell, and seeded random occupancy, with
+uniform/mixed materials, constant/varying light, and bevelled/flat geometry.
+The oracle compares oriented unit-tick boundary segments per material,
+plane and constant light; nonconstant-light triangles must remain intact.
+It separately compares unsplit mesh boundary edges, detecting new
+T-junctions or changed resident-edge segmentation. Counts never increase.
+
+Metal compiled and rendered alpine, cave and live alpine. The three final
+captures were inspected: no obvious new holes or cracks. The alpine recess
+and foreground green/gray cliff stripes also occur in the control.
+Captures are 3840x2160 even though timed targets are 1920x1080. They are
+*not pixel-identical*: =image-diff.json= excludes the changing HUD at y<64.
+Live alpine has a mean absolute channel difference of 0.432/255, maximum
+55/255; 83 pixels differ by more than 8/255. Do not call this a proven
+bit-exact image replacement. No Vulkan runtime or moving-camera LoD test
+was performed; this prototype introduces no LoD selection.
+
+Original captures, review thumbnails, logs, and the earlier all-boundary
+probe remain in the thread's =.amp/in/artifacts/scene-merge/= directory.
+The files here retain the final runnable experiment and raw timing data.
+
+* Reproduce in a disposable process
+
+From the checkout root, after =make=:
+
+#+begin_src sh
+BENCH_LIBRARY=1 BENCH_MODE=native-1x BENCH_SIZES=1920x1080 \
+BENCH_SCENES=live-alpine BENCH_REPEATS=2 BENCH_WARMUP=120 BENCH_FRAMES=600 \
+SCENE_MERGE=1 BENCH_OUTPUT=build/scene-compression.sexp \
+./env sbcl --script wiki/measurements/yawl-scene-compression-876e5d3/benchmark.lisp
+
+BENCH_LIBRARY=1 ./env sbcl --script \
+  wiki/measurements/yawl-scene-compression-876e5d3/check.lisp
+#+end_src
+
+=SCENE_MERGE=0= selects the original renderer; =batch= selects only batching.
+=SCENE_FLAT=1= additionally removes all bevels. Unset it for exact-surface
+comparisons. =BENCH_CAPTURE_DIR= optionally saves images after timing.
+Never load these method/function replacements into a user's live Sly image.
+
+Runs use 120 warmup / 600 timed frames, no profiler, no concurrent builds.
+Measurements are serialized offscreen completion, not display FPS.
+Clock frequencies and thermal state are not locked. Runs are sequential,
+not randomized: control-1, coordinated-1, control-2, flat-1, coordinated-2,
+batch-1, with other exploratory runs between some cohorts. Small differences
+are inconclusive. =preparation.txt= is a separate one-frame census, not a
+frame-timing sample. Retained output may contain skipped-old metadata forms;
+only forms with =:BACKEND :LUFT= are measurements.

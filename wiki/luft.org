@@ -1481,19 +1481,51 @@ not evidence for a large whole-frame GPU gain. A separate preparation run
 spent 1.89--2.72 ms compressing each of the sixteen live alpine residents;
 this work is outside the frame loop and reused across relighting.
 
-******* NEXT Compress the visible surface without changing its light
+******* DONE Measure visible-surface compression without changing its light
 :PROPERTIES:
 :ID: 7B19HJ
 :END:
 
-#5UH08L establishes resident-owned compressed geometry, but does not reduce
-scene triangles or implement distance LoD. Recover #YGP21F's coplanar
-compression as a renderer product, admitting merges only when flat material
-outputs and the interpolated voxel-light field are preserved. Its historical
-71.8% reduction came from a width-four medial surface, not today's
-width-one bevels. A farther simplified surface needs explicit shared-boundary
-transitions before distance policy can select it; independent chunk bevel
-widths previously opened seams.
+#5UH08L establishes resident-owned compressed shadows. A disposable scene
+prototype now recovers #YGP21F's coplanar compression on today's width-one
+surface, admitting only equal material inputs and constant voxel light.
+It coordinates straight-boundary removal between adjoining groups while
+retaining every unmatched resident-edge endpoint. Keeping every boundary
+vertex removed only 8.4% of live-alpine triangles; coordinating boundaries
+removed 41.7%, from 1,925,590 to 1,123,274 across nine visible residents.
+
+This is not enabled in the renderer. Native-1080 M5 GPU means remain about
+13.6 ms, indistinguishable from batching alone. Batching reduces scene draws
+from 1,163 to nine and CPU encode from roughly 2.1--2.3 to 1.5--1.7 ms;
+compression adds 29.09 MiB of GPU buffers and the inspectable prototype
+spends 0.80--0.99 seconds preparing each visible resident. That is a poor
+default streaming trade even before improving its allocations.
+
+All 98 CPU geometry/material/light comparisons pass, including unsplit
+boundary-edge checks for T-junctions. The Metal captures have no obvious
+new holes but are not pixel-identical. The exact method, limitations,
+controls and runnable probes live in
+[[file:measurements/yawl-scene-compression-876e5d3/README.org][the scene-compression measurement bundle]].
+
+******* NEXT Make distant detail retire its shading work too
+:PROPERTIES:
+:ID: IE3WMY
+:END:
+
+#7B19HJ rules out treating triangle count alone as a frame-time proxy.
+Flattening and compressing the entire live-alpine scene reached 157,694
+triangles and 11.43--11.81 ms GPU, but changed near geometry and the shadow
+path: it is an approximate control, not a shipped distance policy.
+
+The next experiment should combine a small spatial selection unit with
+feature-sized geometry and shading tiers. Moppe's useful precedent is
+retiring subpixel detail before executing it, preserving coarse appearance
+and shared-boundary correspondence. Luft's ordinary grass/stone/grain
+relief still evaluates its procedural fields at distance; fading a result
+is not removing that work. Keep near relief and silhouette detail, measure
+the distant tier separately, and retain a camera-motion and seam oracle.
+Do not restore independent chunk bevel widths: those previously opened
+seams. Neither this policy nor a topology-safe transition is implemented.
 
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:

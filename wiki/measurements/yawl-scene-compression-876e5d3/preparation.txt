@@ -1,0 +1,11 @@
+MERGE sites=4030 triangles=63754->34868 eligible=59285 groups=1851 merged=932 refs=93781->67594 bytes=959168 ms=231.30
+MERGE sites=5852 triangles=101820->51012 eligible=96368 groups=230 merged=142 refs=143308->97792 bytes=1394480 ms=413.48
+MERGE sites=17125 triangles=258060->168624 eligible=202285 groups=12660 merged=6792 refs=389301->309640 bytes=4500608 ms=925.28
+MERGE sites=12211 triangles=197444->107688 eligible=181649 groups=4778 merged=2247 refs=287942->207040 bytes=2948576 ms=822.62
+MERGE sites=12531 triangles=201048->112018 eligible=180588 groups=5523 merged=2991 refs=293924->213698 bytes=3053800 ms=827.87
+MERGE sites=12467 triangles=192678->108534 eligible=178266 groups=7911 merged=3784 refs=287103->211036 bytes=2990696 ms=876.60
+MERGE sites=14787 triangles=227194->137360 eligible=194531 groups=10370 merged=5438 refs=339898->258970 bytes=3720080 ms=891.53
+MERGE sites=13567 triangles=216604->123216 eligible=191536 groups=6701 merged=3344 refs=317812->233862 bytes=3349488 ms=898.52
+MERGE sites=11754 triangles=188494->103666 eligible=170705 groups=5779 merged=2812 refs=276237->199710 bytes=2841672 ms=802.78
+MERGE sites=14436 triangles=225718->131742 eligible=195407 groups=8467 merged=4374 refs=334252->249672 bytes=3578280 ms=989.80
+MERGE sites=13894 triangles=218350->130426 eligible=185779 groups=8140 merged=4164 refs=322704->244070 bytes=3517672 ms=884.26

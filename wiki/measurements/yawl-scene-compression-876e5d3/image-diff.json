@@ -1,0 +1,20 @@
+{
+  "alpine": {
+    "changed_pixels": 763055,
+    "max_channel_delta": 50,
+    "mean_channel_delta": 0.07596985329198473,
+    "pixels_above_8": 13
+  },
+  "cave": {
+    "changed_pixels": 653069,
+    "max_channel_delta": 4,
+    "mean_channel_delta": 0.04887192121898855,
+    "pixels_above_8": 0
+  },
+  "live-alpine": {
+    "changed_pixels": 4327251,
+    "max_channel_delta": 55,
+    "mean_channel_delta": 0.43226032596811387,
+    "pixels_above_8": 83
+  }
+}
