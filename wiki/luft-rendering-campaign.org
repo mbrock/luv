@@ -226,7 +226,38 @@ chunk-boundary, cave, and shadow checks preserve the intended appearance.
 Record a failed result here too. No approximate shading tier or new scene
 compression path is approved for the default renderer by this page alone.
 
-* NEXT Validate shared relief before enabling it
+* DONE Try a bounded grass/stone material cache
+:PROPERTIES:
+:ID: FSOEGQ
+:END:
+
+The [[file:measurements/yawl-material-cache-5ee6831/README.org][material-cache experiment]] bakes Lisp-authored grass/stone relief into
+filtered normal+height tiles. At the same hilltop camera, nine residents,
+geometry, shadows and native 1920×1080 extent, adjacent ABBA and reversed
+BAAB runs save 3.55–3.64% whole-frame GPU time (about 0.53 ms), and
+2.82–2.92% serialized completion time. Both improve in every balanced
+120-frame window, without a concurrent profiler or clock-policy change.
+
+That is real but smaller than #ZRQM38, not the profound budget reduction we
+want. Near stone and grazing grass become visibly smoother. Short native
+and temporal moving views show no obvious hard seams or persistent trails,
+but do not accept disocclusions, fast turns, long repetition or all boundaries.
+Independent GPU readback checks validated every wrapped border and 2×2 mip
+average to 8-bit readback precision. The retained atlas is 8.18 MiB; bake and
+compilation are outside timing. Keep this as an experiment, not the default.
+
+Only two relief codes changed, not the full material response or palette.
+This is not evidence against baking surface response more generally. Packed
+manual mips were expedient for a bounded probe; native mip chains and proper
+filtering belong in our HAL when they make the implementation better. The
+HAL is ours to improve, not a fixed limitation to work around indefinitely.
+
+Thin projected bevel triangles, especially distant or grazing faces, remain
+a plausible source of helper-fragment waste (#EFKH0C). Isolate scene bevels
+without changing shadow geometry or material shaders before attributing the
+helper count to them. Use actual profiling alongside runtime comparisons.
+
+* TODO Validate shared relief before enabling it
 :PROPERTIES:
 :ID: XDZ78R
 :END:

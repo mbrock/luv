@@ -10,6 +10,7 @@
 (defvar *interleaved-index* 0)
 (defvar *interleaved-mode* nil)
 (defvar *interleaved-labels* nil)
+(defvar *interleaved-inspection* nil)
 
 (let ((original (symbol-function 'advance-fixture)))
   (setf (symbol-function 'advance-fixture)
@@ -88,7 +89,9 @@
                (r:capture-viewer-frame
                 (merge-pathnames (format nil "~A.png" mode)
                                  (uiop:ensure-directory-pathname (uiop:getenv "PROBE_CAPTURE_DIR")))
-                host))))
+                host)))
+           (when *interleaved-inspection*
+             (funcall *interleaved-inspection* host programs)))
       (setf *interleaved-programs* nil *interleaved-drawing* nil)
       (luv::call-on-sdl-canvas-thread
        (r:viewer-canvas host)
@@ -99,5 +102,6 @@
     result))
 
 (setf (symbol-function 'measure) #'measure-interleaved)
-(main)
-(sb-ext:exit :code 0 :abort t)
+(unless (uiop:getenv "INTERLEAVED_LIBRARY")
+  (main)
+  (sb-ext:exit :code 0 :abort t))

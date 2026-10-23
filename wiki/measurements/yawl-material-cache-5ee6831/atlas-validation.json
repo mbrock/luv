@@ -1,0 +1,205 @@
+{
+  "method": "Actual GPU atlas converted to RGBA8; independent wrap and 2x2 mip checks",
+  "levels": [
+    {
+      "level": 0,
+      "size": 512,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0,
+          "rms_normal_length": 1.0001139992412853,
+          "mean_height": 0.5080002279842474
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0,
+          "rms_normal_length": 1.000734749635168,
+          "mean_height": 0.5838053834204855
+        }
+      ]
+    },
+    {
+      "level": 1,
+      "size": 256,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.9995446937592712,
+          "mean_height": 0.5078568402458542
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 1.0,
+          "rms_normal_length": 1.0006424100760802,
+          "mean_height": 0.58365669998462
+        }
+      ]
+    },
+    {
+      "level": 2,
+      "size": 128,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.997793741360383,
+          "mean_height": 0.5077301623774791
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 1.0005196207701215,
+          "mean_height": 0.5834910673254528
+        }
+      ]
+    },
+    {
+      "level": 3,
+      "size": 64,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.993320940468273,
+          "mean_height": 0.5075779335171567
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 1.0003010558216803,
+          "mean_height": 0.5833151424632218
+        }
+      ]
+    },
+    {
+      "level": 4,
+      "size": 32,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.9869893839457083,
+          "mean_height": 0.5074142156862746
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.9999064618882874,
+          "mean_height": 0.5831571691176476
+        }
+      ]
+    },
+    {
+      "level": 5,
+      "size": 16,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.983361679258327,
+          "mean_height": 0.5073223039215684
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.9992653972305189,
+          "mean_height": 0.583088235294118
+        }
+      ]
+    },
+    {
+      "level": 6,
+      "size": 8,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.9823774017540937,
+          "mean_height": 0.5068627450980393
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.5,
+          "rms_normal_length": 0.9986419074732363,
+          "mean_height": 0.5828431372549023
+        }
+      ]
+    },
+    {
+      "level": 7,
+      "size": 4,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.982421429259071,
+          "mean_height": 0.5068627450980392
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.75,
+          "rms_normal_length": 0.9986342076362517,
+          "mean_height": 0.5823529411764704
+        }
+      ]
+    },
+    {
+      "level": 8,
+      "size": 2,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.5,
+          "rms_normal_length": 0.9843293491455941,
+          "mean_height": 0.5068627450980392
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.5,
+          "rms_normal_length": 0.9980912194163656,
+          "mean_height": 0.5823529411764706
+        }
+      ]
+    },
+    {
+      "level": 9,
+      "size": 1,
+      "materials": [
+        {
+          "material": "grass",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.5,
+          "rms_normal_length": 0.9843293491455941,
+          "mean_height": 0.5058823529411764
+        },
+        {
+          "material": "stone",
+          "max_border_error_8bit": 0,
+          "max_mip_error_8bit": 0.5,
+          "rms_normal_length": 1.0000153785822494,
+          "mean_height": 0.5843137254901961
+        }
+      ]
+    }
+  ]
+}
