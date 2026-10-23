@@ -300,9 +300,9 @@ the layer of #W9QMPT that owns the feature afterwards.
 | First-person hands, held items | 1k | none | game, on a renderer stage | animation neutral |
 | Sky, clock, night | 0.4k | done, and further | renderer | delete |
 | World text | 0.4k | done | renderer | delete |
-| Terminal walls, phone, agent wall | 2.8k | terminal walls done | game, on renderer stages | phone and wall need stages |
+| Terminal walls, phone | 2.8k | terminal walls done | game, on renderer stages | phone needs stages; agent wall removed |
 | Portals, mirror, video, tape, film | 2.6k | none | game, on renderer stages | Darwin and libav hosting; tape and film are behaviours |
-| Agents: gnome, cat, Fantus | 5.8k | embodied companions (#LEQ5SP) | game | shared harness; Luft tools, simple figure bodies; old SDFs and wall remain |
+| Agents: gnome, cat, Fantus | 5.8k | original SDFs, dialogue and cloud (#JZWPAI) | game | shared presentation adapter; Luft tools and physical bodies |
 | Birthday content | 3.2k | none | game | follows stages and agents |
 | Knobs, intent, camera, sound, lobby | 1k | knobs via metabar, lobby | game, luv | mostly neutral |
 | CLIM menus, legend, metabar | 1.4k + 4.8k | workbench | luv | Luft already owns these on the workbench |
@@ -647,11 +647,11 @@ decision count, resting spell, and gait, while other inhabitants pass
 through. Animals in nonresident chunks freeze and remain in the save,
 rather than falling through missing cells or despawning (#L4OMIZ).
 
-G now summons a gnome onto clear resident ground, T opens the shared
-workbench's conversation prompt, and F7 chooses a companion. The same
+G now summons a gnome onto clear resident ground, T focuses its original
+inline conversation, and F7 chooses a companion. The same
 tools and saves serve the cat and Fantus through their named summon
-commands (#LEQ5SP). These bodies use the figure stage, not the old game's
-SDF overlay or the atelier's bodiless agent.
+commands (#LEQ5SP). The first box figures have been replaced by the old
+game's original SDF overlays and conversation surfaces (#JZWPAI).
 
 To host the game the studio gave up three atelier assumptions, now protocol
 in =luft.render=: the playing commands -- walk, jump, fly, M-x, metabar,
@@ -963,7 +963,7 @@ on seed 7's meadow and the original wizard on his isle. The live turtles
 walk and rest, and their descriptions round-trip through Luvcraft's own save
 reader. Still open: turtle atlas relief rather than flat tones, shadows
 cast by animal boxes, riding, and held-device stages. Agent bodies now use
-the same box stage (#LEQ5SP). The old critter renderer remains because old
+their original SDF stage (#JZWPAI). The old critter renderer remains because old
 Luvcraft still plays through it.
 
 *** DONE Give Luvcraft companions bodies and tools on Luft
@@ -972,11 +972,13 @@ Luvcraft still plays through it.
 :END:
 
 =luvcraft/luft/game= now owns gnome, cat, and Fantus inhabitants. G summons
-a gnome; T talks to the selected companion through the workbench's typed
-prompt and message HUD; F7 selects another. M-x offers Summon Cat and
+a gnome; Tab focuses a nearby looked-at companion, T talks to the selected
+companion through the original inline dialogue, and F7 selects another.
+M-x offers Summon Cat and
 Summon Fantus. Y approves a proposed edit, N declines, and T returns
 revision guidance. Conversation and approval keys work with the pointer
-released as well as captured; prompt typing is still owned by the shell.
+released as well as captured. Y/N/T approval stays simple; T's revision
+prompt still belongs to the shell.
 
 The application-agent frame boundary now specializes the generic game
 host rather than the atelier. Each companion uses that shared harness,
@@ -996,10 +998,13 @@ is bounded and ray-checked, failed or occupied edits spend nothing, and
 companions freeze outside resident terrain. A walk times out rather than
 parking a provider forever behind an edit or a departed chunk.
 
-The figure stage draws simple box models: red hat and beard, a small
-eared cat, and purple Fantus. The gnome's feet animate from actual travel;
-present and previous poses go to the instanced stage. This is not a port
-of their detailed SDF appearances. Their saved =:gnome=, =:cat= and
+The first cut used simple box models. The current presentation reuses the
+original SDF gnome, cat and Fantus bodies, the original focused dialogue and
+the unchanged McCLIM thought cloud (#JZWPAI). A neutral host protocol owns
+overlays, focus, input and eased camera poses; the game adapter translates
+coordinates and delegates to existing painters instead of duplicating them.
+World panels draw at native density into separate color/depth attachments,
+outside temporal reconstruction, tilt shift and bloom. Their saved =:gnome=, =:cat= and
 =:fantus= entries use the existing inhabitant format, with a coordinate
 map at the boundary: cell, heading, last question and answer, and provider
 response ID. Old Luvcraft reads them too. Unhostable agents and unrelated

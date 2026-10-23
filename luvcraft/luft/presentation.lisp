@@ -276,5 +276,6 @@
         (case (luv:canvas-key-event-key-name event)
           (:y (luvcraft.agent:approve-tool-approval approval))
           (:n (luvcraft.agent:deny-tool-approval approval "Player declined."))
-          (:t (clim:execute-frame-command viewer '(com-talk-to-companion))))
+          (:t (render:unfocus-viewer viewer)
+              (clim:execute-frame-command viewer '(com-talk-to-companion))))
         (luvcraft:handle-luvcraft-focus-event agent viewer canvas event))))

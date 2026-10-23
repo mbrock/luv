@@ -180,11 +180,11 @@ show a memory chip (#KZ019W).
 In luv the scope is a CLOS object rather than a coroutine zone: a
 =shell-session= owning a PTY (the world terminal already has one serialized
 PTY owner, #NMAD2U), a sampler thread, and its observation, all presentable.
-A shell a tool starts should /become/ a terminal-material wall the agent
-stands beside and the player can walk up to.  The concurrency story is the
-one [[file:../luvcraft/agent/wall.lisp][the agent's wall]] already states: a
-mailbox one way, a published immutable snapshot the other, and no lock
-anywhere.  Swash's default applies too (#I0U0LI): a
+A shell a tool starts can /become/ a terminal-material wall the agent
+stands beside and the player can walk up to. This is a world terminal,
+not a separate agent-wall UI: the latter has been removed. The agent's
+presentation crosses the frame boundary as mailbox notes and retained
+snapshots. Swash's default applies too (#I0U0LI): a
 shell tool returns within a few seconds with either the exit and a
 screenful, or a handle to the still-running session and the command to
 follow it.
@@ -524,13 +524,50 @@ different reader:
   =say= reaches its gnome through =*current-agent*=, bound around the command
   by =call-tool=.
 - /The record./ The same turn is on =transcript-lines= for a windowless
-  session, and on an agent terminal wall if one is open.
+  session. The dedicated agent wall is gone; the conversation and cloud
+  remain the in-world surfaces.
 
 The threads meet the same way as everywhere else on this page: the turn's
 observer posts notes to the gnome's mailbox; the gnome's own
 =refresh-luvcraft-overlay=, on the canvas thread, turns them into bubbles
 and lines.  Repainting a mirror from any other thread races the frame and
 faults; every repaint here happens at the frame boundary.
+
+** DONE Share the companion's presentation with the Luft host
+:PROPERTIES:
+:ID: JZWPAI
+:END:
+
+The gnome, cat and Fantus in =luvcraft/luft/game= now instantiate the same
+embodied classes and original SDF pipelines as the old game. The adapter in
+=luvcraft/luft/presentation.lisp= maps Luft's Z-up physical poses into the
+old painters' Y-up coordinates and forwards their overlay, focus and camera
+protocols. It does not redraw the dialogue or thought cloud. The cloud's
+scallops, trail, inks, text styles and retained McCLIM commands are unchanged.
+Provider observers post to the same original mailbox; inline Return reaches
+the Luft inhabitant's real provider rather than opening a second agent.
+
+The neutral host owns attach/refresh/encode/input/release and modal focus.
+Focused instruments can own Tab and Escape through
+=viewer-focus-dismiss-key-p=; ordinary companions keep the host's dismissal
+keys. Native world panels have their own color/depth layer, sorted far to
+near, and are depth-composited over terrain after temporal reconstruction.
+They do not enter AO, tilt shift, or the lens chain (#HN9MI5). Putting the
+unchanged cloud into the terrain pass had washed out its small text; moving
+the stage, rather than changing the cloud, restored the original sharpness.
+The matching capture also exposed a shared Slug ABI bug: interpolating
+integer atlas addresses as floats could round an address down before its
+integer conversion, dropping strokes in perspective text. Atlas addresses
+and band counts now use flat interpolation in all three vertex producers
+and the shared fragment shader. The cloud painter itself is unchanged.
+
+Linux Vulkan captures compare old and Luft focused, thinking, answering,
+cat and Fantus states at 1200 by 900 with dynamic resolution and TAA off.
+An actual OpenAI turn was submitted through the focused input's Return
+handler and returned a garden sentence. The thinking comparison stages one
+identical retained turn in both hosts; it is a visual comparison, not a
+claim to capture private model reasoning. The cassette HUD was not ported;
+Luft keeps its simple Y/N/T approval controls.
 
 * Fantus is a third body, sewn from felt
 :PROPERTIES:

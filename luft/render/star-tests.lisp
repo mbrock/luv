@@ -121,6 +121,31 @@
                           (render::render-population-light-words
                            (render::prepared-render-mesh-population previous)))))))))
 
+(defclass key-owning-focus ()
+  ((keys :initform nil :accessor focus-test-keys)))
+
+(defmethod render:viewer-focus-dismiss-key-p ((focus key-owning-focus) viewer event)
+  (declare (ignore viewer event)) nil)
+
+(defmethod render:handle-viewer-focus-event ((focus key-owning-focus) viewer canvas event)
+  (declare (ignore viewer canvas))
+  (push (luv:canvas-key-event-key-name event) (focus-test-keys focus)))
+
+(define-test focused-instruments-can-own-tab-and-escape
+  (let ((viewer (allocate-instance (find-class 'render:game-host)))
+        (focus (make-instance 'key-owning-focus)))
+    (setf (slot-value viewer 'render::modal-focus) focus
+          (slot-value viewer 'render::controls) (make-hash-table)
+          (slot-value viewer 'render::player) nil)
+    (dolist (key '(:tab :escape))
+      (luv:handle-canvas-event viewer nil (make-instance 'luv:canvas-key-press-event :key-name key))
+      (true (eq focus (render:viewer-modal-focus viewer))))
+    (true (equal '(:escape :tab) (focus-test-keys focus)))
+    ;; Other focused objects retain the ordinary host dismissal shortcut.
+    (setf (render:viewer-modal-focus viewer) :ordinary-focus)
+    (luv:handle-canvas-event viewer nil (make-instance 'luv:canvas-key-press-event :key-name :escape))
+    (true (null (render:viewer-modal-focus viewer)))))
+
 (define-test player-shaders-compile-for-both-backends
   (dolist (specification (list (shaders:player-sdf-vertex-specification)
                                (shaders:player-sdf-fragment-specification)

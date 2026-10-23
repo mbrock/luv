@@ -33,7 +33,7 @@ projection to judge a shape rule in.")
 
 (defun advance-camera-focus (camera pose seconds)
   "Ease CAMERA toward POSE using an exact exponential response."
-  (let ((blend (- 1.0 (exp (* -8.0 seconds))))
+  (let ((blend (- 1.0 (exp (* -12.0 seconds))))
         (position (camera-position camera))
         (target (camera-pose-position pose)))
     (setf (camera-position camera)
