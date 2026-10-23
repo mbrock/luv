@@ -200,7 +200,11 @@ SHARE is the part of *RENDER-SCALE* dynamic resolution currently draws."
 
 Both temporal implementations reconstruct the output from the scene;
 without one, presentation enlarges it directly."
-  (render-scale-extent extent (renderer-scene-share renderer)))
+  (if *fixed-render-scale*
+      (mapcar (lambda (dimension)
+                (max 1 (round (* dimension *fixed-render-scale*))))
+              extent)
+      (render-scale-extent extent (renderer-scene-share renderer))))
 
 (defparameter *renderer-output-images*
   '(:resolved :history :composite :bloom-primary :bloom-secondary)

@@ -283,6 +283,25 @@ GPU's clock -- so measurements taken then say nothing about the frame rate.")
     (declare (ignore canvas))
     t))
 
+(defgeneric canvas-offscreen-p (canvas)
+  (:documentation "Whether CANVAS has no real display to pace rendering against.")
+  (:method (canvas)
+    (declare (ignore canvas))
+    nil))
+
+(defparameter *offscreen-render-scale* 1.0
+  "Fixed scene pixels per output pixel on offscreen canvases, never paced.")
+
+(defvar *fixed-render-scale* nil
+  "The capture transaction's fixed linear scene scale, or NIL outside capture.")
+
+(defun canvas-fixed-render-scale (canvas)
+  "Return a fixed native-pixel scale for captures or offscreen canvases.
+
+NIL leaves interactive display rendering's resolution policy unchanged."
+  (or *fixed-render-scale*
+      (when (canvas-offscreen-p canvas) *offscreen-render-scale*)))
+
 (defmethod (setf canvas-clock) :before (clock (canvas canvas))
   (declare (ignore canvas))
   (unless (typep clock 'canvas-clock)

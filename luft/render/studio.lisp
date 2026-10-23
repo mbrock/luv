@@ -540,7 +540,9 @@ before the operation boundary, or it would encode through resources which the
 (defun encode-viewer-frame
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
-  (let* ((renderer (prepare-viewer-frame-renderer viewer))
+  (let* ((*fixed-render-scale*
+           (canvas-fixed-render-scale (viewer-canvas viewer)))
+         (renderer (prepare-viewer-frame-renderer viewer))
          (*renderer-scene-overlay-encoder*
            (lambda (pass)
              (encode-viewer-overlays viewer :scene pass surface-texture)
@@ -1932,24 +1934,26 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
 
 (defun capture-viewer-frame
     (pathname &optional (viewer *viewer*)
-     &key (inspector-p (viewer-inspector-p viewer)))
+     &key (inspector-p (viewer-inspector-p viewer)) (render-scale 1.0))
   "Render one native-resolution VIEWER frame offscreen into PATHNAME.
 
 INSPECTOR-P defaults to VIEWER's inspector setting.  A source-defined
 evidence capture may override it when the subject is the geometry rather than
-the atelier UI."
+the atelier UI. RENDER-SCALE fixes the scene's linear native-pixel scale,
+independently of interactive resolution and pacing."
   (luv:capture-application-screenshot
    viewer (merge-pathnames pathname)
    :label "LUFT screenshot"
-   :options (list :inspector-p inspector-p)))
+   :options (list :inspector-p inspector-p :render-scale render-scale)))
 
 (defun film-viewer (viewer pathname
-                    &key (seconds 8) (frame-rate 30) before-frame)
+                    &key (seconds 8) (frame-rate 30) before-frame (render-scale 1.0))
   "Film VIEWER offscreen into an MP4 at PATHNAME.
 
 BEFORE-FRAME, when supplied, receives the frame index before streaming and
 rendering that frame.  Recording is paced in real time so asynchronous chunk
-production gets the same opportunity to publish as it does in the window."
+production gets the same opportunity to publish as it does in the window.
+RENDER-SCALE fixes the scene's linear native-pixel scale (default 1.0)."
   (luv:capture-application-film
    viewer pathname
    :seconds seconds
@@ -1961,7 +1965,7 @@ production gets the same opportunity to publish as it does in the window."
        (format t "LUFT film: frame ~D / ~D~%" frame frame-count)
        (force-output)))
    :label "LUFT film"
-   :options '(:inspector-p nil)))
+   :options (list :inspector-p nil :render-scale render-scale)))
 
 (defstruct viewer-frame-recorder-state
   "A timestamped CPU ring fed by a small asynchronous GPU staging ring."

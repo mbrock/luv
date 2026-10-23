@@ -812,6 +812,10 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:canvas-time-unadjusted
            #:canvas-refresh-rate
            #:canvas-watched-p
+           #:canvas-offscreen-p
+           #:canvas-fixed-render-scale
+           #:*offscreen-render-scale*
+           #:*fixed-render-scale*
            #:canvas-presentation-time
            #:make-presentation-clock
            #:make-canvas-context

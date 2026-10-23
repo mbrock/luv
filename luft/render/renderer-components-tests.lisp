@@ -335,6 +335,41 @@
              (true (eq (first outputs) (second histories))))
         (render:destroy-renderer renderer)))))
 
+(defclass resolution-test-canvas (luv:canvas)
+  ((offscreen-p :initarg :offscreen-p :reader luv:canvas-offscreen-p)))
+
+(define-test fixed-resolution-ignores-slow-frames-without-changing-play
+  (let* ((renderer (make-instance 'render::renderer :device nil))
+         (display (make-instance 'resolution-test-canvas :offscreen-p nil))
+         (offscreen (make-instance 'resolution-test-canvas :offscreen-p t)))
+    (flet ((slow-frames (canvas)
+             (setf (render::renderer-gpu-times renderer)
+                   (make-list 120 :initial-element 0.2d0))
+             (render::pace-renderer-resolution renderer canvas)))
+      ;; Offscreen frames neither sample nor consume slow work as feedback.
+      (slow-frames offscreen)
+      (true (= 1.0 (luv:dynamic-resolution-share
+                    (render::renderer-dynamic-resolution renderer))))
+      (true (null (render::start-renderer-gpu-timing renderer offscreen 1d0)))
+      ;; Real-display play still sheds resolution under the same load.
+      (slow-frames display)
+      (true (= 0.5 (luv:dynamic-resolution-share
+                    (render::renderer-dynamic-resolution renderer))))
+      (true (equal '(240 180)
+                   (render::renderer-render-scale-extent renderer '(640 480))))
+      ;; A capture ignores that pre-existing controller state. It also keeps
+      ;; odd native extents rather than rounding them to an even scene size.
+      (dolist (canvas (list display offscreen))
+        (let ((luv:*fixed-render-scale* 1.0))
+          (slow-frames canvas)
+          (true (equal '(641 481)
+                       (render::renderer-render-scale-extent renderer '(641 481)))))
+        (let ((luv:*fixed-render-scale* 0.5))
+          (true (equal '(320 240)
+                       (render::renderer-render-scale-extent renderer '(640 480))))))
+      (true (= 0.5 (luv:dynamic-resolution-share
+                    (render::renderer-dynamic-resolution renderer)))))))
+
 (define-test scene-only-resize-keeps-the-output-images-and-their-history
   (let* ((render::*temporal-reconstruction* :shader)
          (device (make-instance 'gpu-test-device))

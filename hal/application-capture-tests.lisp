@@ -228,6 +228,10 @@
      (capture luv:application-capture) encoder target extent)
   (declare (ignore encoder extent))
   (let ((frame (luv:capture-frame-index capture)))
+    ;; Both stills and films enter the canvas callback with a fixed scale,
+    ;; including when the canvas itself belongs to interactive display play.
+    (true (= (luv:capture-option capture :render-scale 1.0)
+             (luv:canvas-fixed-render-scale (luv:capture-canvas application))))
     (note-capture-probe-event application (list :encode frame))
     (note-capture-probe-frame-phase application :encode frame)
     (when (capture-probe-fail-encode-p application)
@@ -514,7 +518,7 @@
                  (written pixels width height format metadata)
                (luv:capture-application-screenshot
                 application pathname
-                :options '(:pixel-value 37 :metadata :frame-metadata)
+                :options '(:pixel-value 37 :metadata :frame-metadata :render-scale 0.5)
                 :label "capture probe screenshot")
              (true (equal pathname written))
              (true (probe-file pathname))
@@ -522,6 +526,7 @@
              (true (= 1 height))
              (true (eq :rgba8-unorm format))
              (true (eq :frame-metadata metadata))
+             (true (null luv:*fixed-render-scale*))
              (true (equalp #(37 37 37 255 37 37 37 255) pixels))
              (true (equal '(:prepare (:encode 0) :cleanup)
                           (capture-probe-application-events application)))

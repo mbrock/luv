@@ -15,15 +15,17 @@
 (defun film-luvcraft-session (session pathname
                               &key (seconds 8) (frame-rate 30) before-frame
                                    (include-hud-p t)
-                                   (include-viewmodel-p t))
+                                   (include-viewmodel-p t)
+                                   (render-scale 1.0))
   "Film SESSION for SECONDS of real time into an MP4 at PATHNAME.
 
 Frames are captured at FRAME-RATE, paced against the wall clock so that
 overlay animation driven by real time plays at its true speed.  BEFORE-FRAME,
 when given, is called with the frame index before each capture, and is the
 place to move the camera.  INCLUDE-HUD-P and INCLUDE-VIEWMODEL-P choose the
-same compositing layers as a still capture.  Returns PATHNAME and the frame
-count."
+same compositing layers as a still capture. RENDER-SCALE fixes the scene's
+linear native-pixel scale (default 1.0), independently of live pacing.
+Returns PATHNAME and the frame count."
   (luv:capture-application-film
    session pathname
    :seconds seconds
@@ -32,4 +34,5 @@ count."
    :label "luvcraft film"
    :options
    (list :include-hud-p include-hud-p
-         :include-viewmodel-p include-viewmodel-p)))
+         :include-viewmodel-p include-viewmodel-p
+         :render-scale render-scale)))

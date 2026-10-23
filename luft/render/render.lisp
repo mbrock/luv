@@ -178,13 +178,14 @@ choices. Resident geometry and resized targets are published independently."
 
 (defun renderer-scene-share (renderer)
   "The share of *RENDER-SCALE* dynamic resolution currently draws."
-  (if *dynamic-resolution-frame-rate*
+  (if (and *dynamic-resolution-frame-rate* (null *fixed-render-scale*))
       (dynamic-resolution-share (renderer-dynamic-resolution renderer))
       1.0))
 
 (defun start-renderer-gpu-timing (renderer canvas now)
   "Start timing the coming frame when a sample is due; return its finisher."
   (when (and *dynamic-resolution-frame-rate*
+             (null (canvas-fixed-render-scale canvas))
              (>= now (renderer-next-gpu-sample-time renderer))
              (canvas-watched-p canvas))
     (setf (renderer-next-gpu-sample-time renderer)
@@ -199,7 +200,8 @@ choices. Resident geometry and resized targets are published independently."
   "Give the GPU times delivered since the last frame to dynamic resolution."
   (let ((times (sb-thread:with-mutex ((renderer-gpu-times-lock renderer))
                  (shiftf (renderer-gpu-times renderer) nil))))
-    (when (and times *dynamic-resolution-frame-rate*)
+    (when (and times *dynamic-resolution-frame-rate*
+               (null (canvas-fixed-render-scale canvas)))
       (let ((period (max (/ 1d0 *dynamic-resolution-frame-rate*)
                          (/ 1d0 (or (canvas-refresh-rate canvas) 60d0)))))
         (dolist (seconds (reverse times))

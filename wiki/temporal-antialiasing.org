@@ -462,6 +462,9 @@ under a quiet band, and not at all inside it, so a steady view settles on a
 step instead of hunting.  The samples taken while a new size reaches the GPU
 are passed over.
 
+This is a policy for interactive display play, not for rendering evidence;
+offscreen canvases and authored captures choose a fixed scale (#WQNVFQ).
+
 A scene-only resize keeps the output-sized images.  The new target generation
 borrows the resolved, history, composite, and lens images from the one it
 replaces and takes custody of them at publication, so the shader resolve's
@@ -480,6 +483,35 @@ correctly holds the whole scene there; it sheds only when the clock is
 exhausted.  Live on an M-series Mac, a 2.4× scene measured 26.7 ms, stepped
 down to a half, held history throughout, and grew back step by step to the
 whole when the load was removed.
+
+** DONE Keep offscreen rendering and captures at their chosen resolution
+:PROPERTIES:
+:ID: WQNVFQ
+:END:
+
+SDL's active =offscreen= driver has no display deadline; Luft and old
+Luvcraft draw a fixed native-pixel scene there, at
+=luv:*offscreen-render-scale*= (1.0 by default), without GPU-time feedback.
+The active driver is queried rather than its environment variable, so SDL's
+fallback after a disconnected compositor makes the same choice.
+
+Screenshots and authored films also fix their scene scale, even when taken
+from a paced live window whose controller has already shrunk the scene.
+Their =:render-scale= argument defaults to 1.0 and is bound on the canvas
+thread only while encoding the capture. It bypasses Luft's ordinary 0.75
+scale and Luvcraft's logical-point pixel budget; the next display frame
+returns to its previous interactive policy. Neither a slow software Vulkan
+frame nor a film's requested cadence is a reason to discard scene pixels.
+The diagnostic live frame ring still copies exactly what play presented.
+
+/Evidence./ Matched 640 by 480 software Vulkan captures, after 120 slow
+200 ms samples, drew Luft's shrine at 240 by 180 before and 640 by 480 after;
+old Luvcraft drew 320 by 240 before and 640 by 480 after. Luft had already
+fallen to 330 by 248 before injected samples. Regression tests keep slow
+offscreen/capture work fixed while real-display policy still shrinks.
+
+/Done when./ Headless scenes and captures keep the requested pixel scale
+regardless of slow frames, while interactive display pacing remains enabled.
 
 ** DONE Move Luvcraft's scene pacing onto the shared controller
 :PROPERTIES:

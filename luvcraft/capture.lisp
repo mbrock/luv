@@ -80,7 +80,8 @@
 
 (defun capture-luvcraft-screenshot
     (session pathname &key camera-pose metadata-function
-                           (include-hud-p t) (include-viewmodel-p t))
+                           (include-hud-p t) (include-viewmodel-p t)
+                           (render-scale 1.0))
   "Render SESSION once offscreen and write its native GPU frame to PNG.
 
 This works for both live and hidden sessions.  The call returns only after GPU
@@ -88,7 +89,9 @@ readback and compressed PNG writing have completed; it does not inspect the
 host window or depend on the window being visible.  CAMERA-POSE may be a pose
 or a function of SESSION evaluated on the canvas thread; the session camera is
 restored before the call returns.  METADATA-FUNCTION, when supplied, is called
-there under the capture pose and its value is returned last."
+there under the capture pose and its value is returned last. RENDER-SCALE
+fixes the scene's linear native-pixel scale (default 1.0), ignoring the live
+frame pacer's share and the logical-point pixel budget."
   (luv:capture-application-screenshot
    session pathname
    :label "luvcraft screenshot"
@@ -96,7 +99,8 @@ there under the capture pose and its value is returned last."
    (list :camera-pose camera-pose
          :metadata-function metadata-function
          :include-hud-p include-hud-p
-         :include-viewmodel-p include-viewmodel-p)))
+         :include-viewmodel-p include-viewmodel-p
+         :render-scale render-scale)))
 
 (defun temporal-derivative-rgba
     (current previous scale &optional previous-previous)

@@ -236,6 +236,8 @@ reenter the capture gate.  Return true when it ran, NIL after shutdown began."
   (unless (proper-capture-options-p (capture-options capture))
     (error "Application capture options must be a proper property list: ~S."
            (capture-options capture)))
+  (let ((scale (getf (capture-options capture) :render-scale 1.0)))
+    (check-type scale (real (0))))
   (unless (stringp (capture-label capture))
     (error 'type-error :datum (capture-label capture)
                        :expected-type 'string)))
@@ -444,9 +446,13 @@ request which encodes and submits the frame."
                         :label
                         (capture-resource-label capture "frame encoder"))))
                 (setf metadata
-                      (encode-capture-frame
-                       application capture encoder
-                       (capture-target capture) (capture-extent capture)))
+                      ;; Bind on the canvas thread: bindings on the caller
+                      ;; do not cross REQUEST-CANVAS-FRAME's dispatch boundary.
+                      (let ((*fixed-render-scale*
+                              (capture-option capture :render-scale 1.0)))
+                        (encode-capture-frame
+                         application capture encoder
+                         (capture-target capture) (capture-extent capture))))
                 (encode
                  encoder
                  (make-gpu-copy-texture-to-buffer-command
@@ -498,8 +504,10 @@ request which encodes and submits the frame."
   "Render APPLICATION offscreen and write its native-resolution PNG.
 
 OPTIONS is an application-owned property list interpreted by the capture
-protocol methods.  Return PATHNAME, packed pixels, width, height, color format,
-and the optional metadata value from ENCODE-CAPTURE-FRAME."
+protocol methods, except :RENDER-SCALE (default 1.0), which fixes the scene's
+linear scale independently of interactive pacing. Return PATHNAME, packed
+pixels, width, height, color format, and the optional metadata value from
+ENCODE-CAPTURE-FRAME."
   (let ((capture
           (make-instance 'application-capture
                          :application application
@@ -573,7 +581,8 @@ and the optional metadata value from ENCODE-CAPTURE-FRAME."
 
 The application chooses readiness, advancement, frame meaning, and cleanup;
 the shared implementation owns the fixed-size target, readback, ffmpeg writer,
-and absolute wall-clock pacing.  Return PATHNAME and the encoded frame count."
+and absolute wall-clock pacing. OPTIONS may select :RENDER-SCALE (default 1.0),
+independently of interactive pacing. Return PATHNAME and the encoded frame count."
   (check-type seconds (real 0))
   (check-type frame-rate (integer 1))
   (let* ((frame-count (max 1 (round (* seconds frame-rate))))

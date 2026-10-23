@@ -448,6 +448,15 @@ arbitrary window dimensions commonly fail in SDL_Vulkan_CreateSurface."
 (defmethod canvas-refresh-rate ((canvas sdl-canvas))
   (ignore-errors (sdl-canvas-refresh-rate canvas)))
 
+(defmethod canvas-offscreen-p ((canvas sdl-canvas))
+  ;; Ask the active driver, not SDL_VIDEODRIVER: initialization can fall back
+  ;; through a temporary hint when a compositor has no connected displays.
+  (flet ((offscreen-p ()
+           (string-equal "offscreen" (sdl3:get-current-video-driver))))
+    (if (sdl-canvas-native-thread-p canvas)
+        (offscreen-p)
+        (call-on-sdl-canvas-thread canvas #'offscreen-p))))
+
 (defmethod canvas-watched-p ((canvas sdl-canvas))
   (let ((flags (ignore-errors
                 (sdl3:get-window-flags (sdl-canvas-window canvas)))))

@@ -2637,6 +2637,42 @@
 (defmethod canvas-logical-size ((canvas sized-test-canvas))
   (values (slot-value canvas 'width) (slot-value canvas 'height)))
 
+(defclass resolution-test-canvas (sized-test-canvas canvas)
+  ((offscreen-p :initarg :offscreen-p :reader canvas-offscreen-p)))
+
+(defmethod canvas-size ((canvas resolution-test-canvas))
+  ;; A native-density capture must not inherit the logical-point budget.
+  (values (* 2 (slot-value canvas 'width)) (* 2 (slot-value canvas 'height))))
+
+(define-test fixed-scenes-ignore-a-slow-frame-pacer-and-the-pixel-budget
+  (let* ((pacer (luvcraft::make-luvcraft-frame-pacer))
+         (luvcraft::*luvcraft-scene-pixel-budget* 100000))
+    (dotimes (i 120)
+      (observe-dynamic-resolution (luvcraft::frame-pacer-resolution pacer)
+                                  0.2d0 (/ 1d0 60)))
+    (dolist (offscreen-p '(nil t))
+      (let* ((canvas (make-instance 'resolution-test-canvas
+                                    :width 640 :height 480 :offscreen-p offscreen-p
+                                    :clock (make-cadence-clock (lambda (&rest args)
+                                                                (declare (ignore args))))))
+             (session (make-instance 'luvcraft-session :canvas canvas)))
+        (setf (luvcraft::luvcraft-session-frame-pacer session) pacer)
+        (flet ((extent ()
+                 (luvcraft::luvcraft-scene-extent
+                  canvas (luvcraft::luvcraft-scene-scale session))))
+          (if offscreen-p
+              (progn
+                (true (equal '(1280 960) (extent)))
+                (true (null (luvcraft::luvcraft-frame-pacer-for session))))
+              (progn
+                (true (< (first (extent)) 640))
+                (true (eq pacer (luvcraft::luvcraft-frame-pacer-for session)))))
+          (let ((*fixed-render-scale* 1.0))
+            (true (equal '(1280 960) (extent)))
+            (true (null (luvcraft::luvcraft-frame-pacer-for session))))
+          (let ((*fixed-render-scale* 0.5))
+            (true (equal '(640 480) (extent)))))))))
+
 (define-test the-scene-keeps-to-its-pixel-budget
   (let ((luvcraft::*luvcraft-scene-pixel-budget* 2000000))
     ;; An ordinary window renders one scene pixel per logical point.

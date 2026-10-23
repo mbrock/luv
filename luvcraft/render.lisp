@@ -1351,7 +1351,13 @@ fixed *RENDER-SCALE* and MetalFX temporal reconstruction.")
 (defun luvcraft-scene-extent (canvas &optional (fraction 1.0))
   "Return the scene's render extent for CANVAS, within the pixel budget.
 
-FRACTION is the part of that budget the frame pacer currently allows."
+FRACTION is the part of that budget the frame pacer currently allows.
+Captures and offscreen canvases instead choose a fixed native-pixel scale."
+  (alexandria:when-let ((scale (canvas-fixed-render-scale canvas)))
+    (return-from luvcraft-scene-extent
+      (multiple-value-bind (width height) (canvas-size canvas)
+        (list (max 1 (round (* width scale)))
+              (max 1 (round (* height scale)))))))
   (multiple-value-bind (width height) (canvas-logical-size canvas)
     (let* ((pixels (* width height))
            (budget (* fraction (min pixels (or *luvcraft-scene-pixel-budget*
@@ -2163,7 +2169,8 @@ gives way only once the scene is as small as it is drawn and still overruns."
   "SESSION's frame pacer, when its clock is one the pacer may retune."
   (let* ((canvas (luvcraft-session-canvas session))
          (clock (canvas-clock canvas)))
-    (when (and *luvcraft-frame-pacing-p* (typep clock 'cadence-clock))
+    (when (and *luvcraft-frame-pacing-p* (typep clock 'cadence-clock)
+               (null (canvas-fixed-render-scale canvas)))
       (or (luvcraft-session-frame-pacer session)
           ;; The first frames compile pipelines and fill the world; they are
           ;; no evidence about play.
