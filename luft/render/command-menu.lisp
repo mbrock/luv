@@ -6,7 +6,11 @@
 
 (defmethod mcluv:command-menu-tables-for ((viewer viewer))
   (declare (ignore viewer))
-  '(luft-window luft-atelier))
+  '(luft-atelier-window luft-atelier))
+
+(defmethod mcluv:command-menu-tables-for ((viewer game-host))
+  (declare (ignore viewer))
+  '(luft-window luft-play))
 
 (defun open-viewer-command-menu (viewer &key title)
   (declare (ignore title))

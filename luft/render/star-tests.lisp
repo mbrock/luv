@@ -66,7 +66,7 @@
   (true (find-method #'mcluv:status-bar-application-name
                      nil (list (find-class 'render:viewer)) nil))
   (true (find-method #'mcluv:status-bar-channels-for
-                     nil (list (find-class 'render:viewer)) nil))
+                     nil (list (find-class 'render:game-host)) nil))
   (let ((viewer (allocate-instance (find-class 'render:viewer))))
     (true (= 12 (length (mcluv:status-bar-channels-for viewer))))
     (true (eq :mode (second (mcluv:status-bar-channels-for viewer))))

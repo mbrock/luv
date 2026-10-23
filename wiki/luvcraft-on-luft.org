@@ -524,7 +524,7 @@ lawn, flowers, trees, and a placed plank match Luvcraft cell for cell.
 
 Luvcraft on Luft is a game of its own, =luvcraft/luft/game= in the
 =luvcraft.luft.game= package, played by =./sly play luvcraft-on-luft=.  Its
-frame is a subclass of the viewer, so it has the renderer, streaming,
+frame is a subclass of [[lisp:luft.render:game-host]], so it has the renderer, streaming,
 walking, flight, first person, and the workbench, and it brings Luvcraft's
 title, its status line and workbench name, a ten-slot hotbar of Luvcraft's
 blocks (picking a block puts it in the selected slot), and its own keys --
@@ -546,21 +546,40 @@ To host the game the studio gave up three atelier assumptions, now protocol
 in =luft.render=: the playing commands -- walk, jump, fly, M-x, metabar,
 lobby -- moved into =luft-play=, which the atelier's table inherits; key
 tables, the hotbar, picking, editing at the crosshair, and the save format
-are generic functions on the viewer
+are generic functions on the host
 ([[lisp:luft.render:viewer-key-event-tables]],
 [[lisp:luft.render:viewer-hotbar]], [[lisp:luft.render:viewer-pick-material]],
 [[lisp:luft.render:viewer-edit-at-crosshair]],
-[[lisp:luft.render:viewer-world-description]]); and =start-viewer= takes a
+[[lisp:luft.render:viewer-world-description]]); and =start-game-host= takes a
 frame class, its initargs, and a saved pose.
+
+The host and atelier are now separate McCLIM frame classes.  The host has
+no instrument panes or metabar vocabulary; it starts from the game's scene,
+palette, pose, and save pathname, never the atelier's world or save by
+default.  The atelier's =viewer= subclasses it and supplies the inspector,
+metabar instruments, diagnostic ink, and its camera commands.  M and F5
+belong to =luft-atelier-window=, which inherits the ordinary window controls,
+so they remain available in the atelier even with the pointer released but
+are absent from Luvcraft's keys, legend, and command menu.  A host's
+[[lisp:luft.render:viewer-allows-mode-p]] also rejects atelier modes before a
+transition changes controls, camera, or pointer ownership.  Luvcraft no
+longer declares an inspector pane or names its display function.
+
+The wizard keeps its small canvas host: sharing this McCLIM/workbench host
+would add those dependencies to a game deliberately built without them,
+and replace its per-game isometric camera, zoom, clock, and click handling
+with overrides of first-person play.  It still shares terrain, simulation,
+renderer, and luv's capture/lifetime protocols (#CERUZY), not atelier modes.
+Headless software-Vulkan captures show the Luvcraft terrain and ten-slot
+hotbar without inspector, the atelier with inspector in first person and
+after M switches to isometric, and the wizard's isle and walker.  The host
+regression dispatches M/F5 with captured and released input and checks that
+only the atelier offers its camera cycle.  This is an inheritance and startup
+boundary: the host and atelier still load together in =luft/render= and
+share its package and source file, not separate ASDF systems.
 
 What still reaches past the line, which is where the next cut goes:
 
-- The viewer is one McCLIM frame that is both the host and the atelier, so a
-  game's frame restates the atelier's inspector pane and layout and names its
-  display function, =luft.render::display-site-inspector=.  The host wants
-  to be a frame of its own with the inspector as one game's instrument.
-- The playing tables still carry the atelier's notions of mode: M and F5
-  switch a Luvcraft player into the isometric walk and orbit cameras.
 - Saving reaches into Luvcraft's unexported save writer, world description,
   and edit overlay; those are a protocol the old program never needed to
   publish.

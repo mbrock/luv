@@ -13,17 +13,17 @@ world.  The workbench's surface already encodes its linear inks to sRGB, so
 the tone stays linear; a small gain stands in for the sun and exposure."
   (mapcar (lambda (value) (max 0.0 (min 1.0 (* 1.25 value)))) tone))
 
-(defmethod mcluv:palette-items-for ((viewer viewer))
+(defmethod mcluv:palette-items-for ((viewer game-host))
   (viewer-hotbar viewer))
 
-(defmethod mcluv:palette-visible-p ((viewer viewer))
+(defmethod mcluv:palette-visible-p ((viewer game-host))
   (and (typep (viewer-mode viewer) '(or world-edit-mode first-person-mode))
        (not (null (viewer-hotbar viewer)))))
 
-(defmethod mcluv:palette-selected-item ((viewer viewer))
+(defmethod mcluv:palette-selected-item ((viewer game-host))
   (viewer-edit-material viewer))
 
-(defmethod mcluv:palette-item-label ((viewer viewer) (item material-placement))
+(defmethod mcluv:palette-item-label ((viewer game-host) (item material-placement))
   (declare (ignore viewer))
   (case (material-placement-name item)
     (:terrain "Earth")
@@ -32,14 +32,14 @@ the tone stays linear; a small gain stands in for the sun and exposure."
         (substitute #\Space #\-
                     (symbol-name (material-placement-name item)))))))
 
-(defmethod mcluv:palette-item-tones ((viewer viewer) (item material-placement))
+(defmethod mcluv:palette-item-tones ((viewer game-host) (item material-placement))
   (declare (ignore viewer))
   (multiple-value-bind (top side bottom)
       (material-kind-oriented-tones (material-placement-kind item))
     (values (display-tone top) (display-tone side) (display-tone bottom))))
 
 (defmethod mcluv:palette-item-luminous-p
-    ((viewer viewer) (item material-placement))
+    ((viewer game-host) (item material-placement))
   (declare (ignore viewer))
   (plusp (material-kind-surface-emission (material-placement-kind item))))
 
@@ -63,7 +63,7 @@ the tone stays linear; a small gain stands in for the sun and exposure."
                 internal-time-units-per-second))
       status)))
 
-(defmethod mcluv:palette-hint ((viewer viewer))
+(defmethod mcluv:palette-hint ((viewer game-host))
   (let ((mode (viewer-mode viewer)))
     (or (case (viewer-recent-edit-status viewer)
           (:outside-domain "Out of reach")
@@ -93,10 +93,10 @@ the pointer on the first click; every later click edits.")
   `(("In the world" . luft-atelier)
     ("Moving" . luft-play)
     ("Pointer" . ,*viewer-pointer-legend-rows*)
-    ("Any time" . luft-window)))
+    ("Any time" . luft-atelier-window)))
 
 (defmethod mcluv:keymap-legend-command-label
-    ((viewer viewer) (name (eql 'com-start-moving)) arguments table)
+    ((viewer game-host) (name (eql 'com-start-moving)) arguments table)
   (declare (ignore viewer arguments table))
   "walk")
 

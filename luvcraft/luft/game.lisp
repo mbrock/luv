@@ -1,7 +1,7 @@
-;;;; Luvcraft on Luft as a game of its own: a viewer frame with Luvcraft's
-;;;; title, keys, hotbar, and save, over the Luft renderer and studio.
+;;;; Luvcraft on Luft as a game of its own: a host frame with Luvcraft's
+;;;; title, keys, hotbar, and save, over the Luft renderer and shared play.
 ;;;;
-;;;; The viewer brings walking, flight, first person, the workbench, and
+;;;; The host brings walking, flight, first person, the workbench, and
 ;;;; streaming; this file brings only what is Luvcraft's (#J3WZZS).
 
 (defpackage #:luvcraft.luft.game
@@ -35,7 +35,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 (clim:define-command-table luvcraft-world-release
   :inherit-from (render:luft-play-release))
 
-(clim:define-application-frame luvcraft-viewer (render:viewer)
+(clim:define-application-frame luvcraft-viewer (render:game-host)
   ((luvcraft-world :initarg :luvcraft-world :reader luvcraft-viewer-world
                    :documentation "Luvcraft's own world: its source and edits as read.")
    (resume :initarg :resume :initform nil :reader luvcraft-viewer-resume)
@@ -46,11 +46,6 @@ quickbar begins: things to build a house with, colours, and a lamp.")
                    :inherit-from (render:luft-window render:luft-window-release
                                   luvcraft-world luvcraft-world-release)
                    :inherit-menu t))
-  (:panes
-   (inspector :application
-              :display-function 'luft.render::display-site-inspector
-              :scroll-bars nil))
-  (:layouts (default (clim:horizontally (:width 372 :height 306) inspector)))
   (:menu-bar nil))
 
 (defmethod initialize-instance :after ((viewer luvcraft-viewer) &key)
@@ -186,7 +181,7 @@ given, else a fresh little world of SEED, RELIEF, and WORLD-HEIGHT.  Edits
 and the player's pose are written back to PATHNAME in Luvcraft's own save
 format as the game plays and when it stops; a fresh SEED writes only to a
 PATHNAME given explicitly, never over the player's save.  Other keys go to
-LUFT.RENDER:START-VIEWER."
+LUFT.RENDER:START-GAME-HOST."
   (let ((loaded-p (and pathname (null seed) (probe-file pathname))))
     (multiple-value-bind (world resume inhabitants)
         (if loaded-p
@@ -196,7 +191,7 @@ LUFT.RENDER:START-VIEWER."
       (let ((source (game:luvcraft-world-luft-source world)))
         (multiple-value-bind (position yaw pitch)
             (and resume (game:luvcraft-resume-luft-pose source resume))
-          (apply #'render:start-viewer
+          (apply #'render:start-game-host
                  :solid (game:make-luvcraft-streaming-scene
                          source :mesh-preparer render:+render-population-preparer+)
                  :title *title*

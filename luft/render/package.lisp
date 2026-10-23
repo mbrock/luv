@@ -227,6 +227,9 @@
            #:luft-play-release
            #:+render-population-preparer+
            #:start-viewer
+           #:start-game-host
+           #:game-host
+           #:viewer-allows-mode-p
            #:stop-viewer
            #:refresh-viewer-renderer
            #:refresh-viewer-shaders

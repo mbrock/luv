@@ -72,7 +72,7 @@
   (declare (ignore viewer diagnostic))
   nil)
 
-(defmethod note-renderer-live-diagnostic ((viewer viewer) diagnostic)
+(defmethod note-renderer-live-diagnostic ((viewer game-host) diagnostic)
   (setf (viewer-shader-diagnostic viewer) diagnostic))
 
 (defun report-renderer-live-diagnostic (artifact diagnostic)
@@ -88,7 +88,7 @@
   (sb-thread:with-mutex (*viewer-live-artifacts-lock*)
     (gethash viewer *viewer-live-artifacts*)))
 
-(defmethod application-live-artifacts ((viewer viewer))
+(defmethod application-live-artifacts ((viewer game-host))
   (when-let ((artifact (viewer-live-artifact viewer)))
     (list artifact)))
 

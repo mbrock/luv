@@ -7,19 +7,19 @@
   (declare (ignore viewer))
   "Luft")
 
-(defmethod luv.workbench:workbench-application-command-frame ((viewer viewer))
+(defmethod luv.workbench:workbench-application-command-frame ((viewer game-host))
   viewer)
 
-(defmethod luv.workbench:workbench-application-canvas ((viewer viewer))
+(defmethod luv.workbench:workbench-application-canvas ((viewer game-host))
   (viewer-canvas viewer))
 
-(defmethod luv.workbench:workbench-application-context ((viewer viewer))
+(defmethod luv.workbench:workbench-application-context ((viewer game-host))
   (viewer-context viewer))
 
-(defmethod luv.workbench:workbench-application-stop-controller ((viewer viewer))
+(defmethod luv.workbench:workbench-application-stop-controller ((viewer game-host))
   (viewer-stop-controller viewer))
 
-(defmethod luv.workbench:suspend-workbench-application-input ((viewer viewer))
+(defmethod luv.workbench:suspend-workbench-application-input ((viewer game-host))
   (clear-viewer-controls viewer)
   (when (viewer-pointer-captured-p viewer)
     (set-canvas-relative-pointer-mode (viewer-canvas viewer) nil)
@@ -29,7 +29,7 @@
   (list :luft-input-suspension viewer))
 
 (defmethod luv.workbench:resume-workbench-application-input
-    ((viewer viewer) token)
+    ((viewer game-host) token)
   (unless (and (consp token)
                (eq :luft-input-suspension (first token))
                (eq viewer (second token)))

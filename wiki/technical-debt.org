@@ -141,7 +141,12 @@ The remaining work below concerns the wider Luft system.
   before preserving or generalizing their vocabulary. The static join now
   preserves the metadata required by publication (#5WML7P).
 - Separate scene authoring from mesh-publication evidence, and studio controls
-  from recording and frame analysis.
+  from recording and frame analysis. The host/atelier inheritance cut is in
+  place (#J3WZZS): =game-host= owns shared play and lifetime, while =viewer=
+  adds the atelier's panes, instruments, and camera commands. Luvcraft no
+  longer subclasses the atelier. The host and atelier still share one ASDF
+  system and studio source file; the wizard keeps its non-McCLIM host rather
+  than acquire the workbench just to share lifetime code.
 - Use the shader language's existing source abstractions for repeated sampling
   patterns and material lanes. The procedural player now has its own source
   home (#9J3QI1), but its internal explanation still needs work.

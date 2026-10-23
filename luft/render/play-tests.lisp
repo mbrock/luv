@@ -1,5 +1,33 @@
 (in-package #:luft.render.tests)
 
+(define-test game-host-does-not-inherit-the-ateliers-camera-commands-or-instruments
+  (let* ((scene (world:make-mountain-sanctuary-scene))
+         (host (make-instance 'render:game-host :source scene))
+         (atelier (make-instance 'render:viewer :source scene)))
+    (true (null (mcluv:metabar-groups-for host)))
+    (true (mcluv:metabar-groups-for atelier))
+    (dolist (mode '(render:isometric-walk-mode render:orbit-mode
+                    render:free-camera-mode render:world-edit-mode))
+      (true (not (render:viewer-allows-mode-p host (make-instance mode))))
+      (true (render:viewer-allows-mode-p atelier (make-instance mode))))
+    (dolist (captured-p '(nil t))
+      (setf (render:viewer-pointer-captured-p host) captured-p)
+      (dolist (key '(:m :f5))
+        (let ((event (make-instance 'luv:canvas-key-press-event
+                                    :timestamp 0 :key-name key :modifiers nil)))
+          (true (null (render::viewer-key-command host event)))
+          (true (render::viewer-key-command atelier event))
+          (luv:handle-canvas-event host nil event)
+          (true (typep (render:viewer-mode host) 'render:first-person-mode)))))
+    ;; Without a captured pointer, the atelier still offers both global keys.
+    (loop for key in '(:m :f5 :f5 :f5)
+          for mode in '(render:isometric-walk-mode render:first-person-mode
+                        render:orbit-mode render:free-camera-mode)
+          do (luv:handle-canvas-event
+              atelier nil (make-instance 'luv:canvas-key-press-event
+                                         :timestamp 0 :key-name key :modifiers nil))
+             (true (typep (render:viewer-mode atelier) mode)))))
+
 (define-test authored-world-spawns-in-view-of-a-summit-away-from-the-corner
   (let* ((scene (world:make-authored-world-streaming-scene))
          (source (render::streaming-scene-source scene)))

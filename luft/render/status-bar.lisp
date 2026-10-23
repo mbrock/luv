@@ -6,10 +6,10 @@
   (declare (ignore viewer))
   "LUFT")
 
-(defmethod mcluv:status-bar-lobby-client ((viewer viewer))
+(defmethod mcluv:status-bar-lobby-client ((viewer game-host))
   (viewer-lobby-client viewer))
 
-(defmethod mcluv:status-bar-channels-for ((viewer viewer))
+(defmethod mcluv:status-bar-channels-for ((viewer game-host))
   (declare (ignore viewer))
   (let ((base (call-next-method)))
     (append (list (first base) :mode) (rest base)
@@ -27,12 +27,12 @@
           (floor (vec3-y position) luft:+chunk-size+)))
 
 (defmethod mcluv:status-bar-channel-label
-    ((channel (eql :coordinates)) (viewer viewer))
+    ((channel (eql :coordinates)) (viewer game-host))
   (declare (ignore channel viewer))
   "xyz")
 
 (defmethod mcluv:status-bar-channel-value
-    ((channel (eql :coordinates)) (viewer viewer) bar)
+    ((channel (eql :coordinates)) (viewer game-host) bar)
   (declare (ignore channel bar))
   (let ((camera (camera-position (viewer-camera viewer))))
     (if (viewer-player viewer)
@@ -43,7 +43,7 @@
         (format nil "c~A" (status-bar-position camera)))))
 
 (defmethod mcluv:status-bar-channel-value
-    ((channel (eql :chunks)) (viewer viewer) bar)
+    ((channel (eql :chunks)) (viewer game-host) bar)
   (declare (ignore channel bar))
   (let ((scene (viewer-source viewer)))
     (when (typep scene 'streaming-scene)
@@ -60,7 +60,7 @@
                     "--"))))))
 
 (defmethod mcluv:status-bar-channel-value
-    ((channel (eql :stream)) (viewer viewer) bar)
+    ((channel (eql :stream)) (viewer game-host) bar)
   (declare (ignore channel bar))
   (let ((scene (viewer-source viewer)))
     (when (typep scene 'streaming-scene)
@@ -75,17 +75,17 @@
               (streaming-scene-pending-mesh-count scene)))))
 
 (defmethod mcluv:status-bar-channel-value
-    ((channel (eql :bevel)) (viewer viewer) bar)
+    ((channel (eql :bevel)) (viewer game-host) bar)
   (declare (ignore channel bar))
   (viewer-bevel-label viewer))
 
 (defmethod mcluv:status-bar-channel-value
-    ((channel (eql :view)) (viewer viewer) bar)
+    ((channel (eql :view)) (viewer game-host) bar)
   (declare (ignore channel viewer bar))
   (string-downcase (symbol-name (viewer-projection viewer))))
 
 (defmethod mcluv:status-bar-channel-value
-    ((channel (eql :mode)) (viewer viewer) bar)
+    ((channel (eql :mode)) (viewer game-host) bar)
   (declare (ignore channel bar))
   (if (typep (viewer-mode viewer) '(or world-edit-mode first-person-mode))
       (format nil "~A · ~A · ~A"

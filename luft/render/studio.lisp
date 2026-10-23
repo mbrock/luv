@@ -454,7 +454,7 @@ before the operation boundary, or it would encode through resources which the
      :projection (viewer-projection viewer)
      :figure (and player (character-render-lanes player))
      :pointer (viewer-pointer-fraction viewer)
-     :ink-strength (if (and inspection *inspection-ink-p*) 1.0 0.0)
+     :ink-strength (if (and inspection (viewer-inspection-ink-p viewer)) 1.0 0.0)
      :bevel-width (viewer-bevel-width viewer)
      :fixed-exposure (viewer-fixed-exposure viewer)
      :first-person-p (typep (viewer-mode viewer) 'first-person-mode)
@@ -481,6 +481,7 @@ before the operation boundary, or it would encode through resources which the
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
+(clim:define-command-table luft-atelier-window :inherit-from (luft-window))
 ;;; Walking, jumping, flight, and the workbench's tools belong to any game
 ;;; played in a viewer; the atelier's own instruments inherit them.
 (clim:define-command-table luft-play)
@@ -631,7 +632,7 @@ before the operation boundary, or it would encode through resources which the
     :initform nil :accessor viewer-tracy-canvas-thread-named-p)
    (agent :initform nil :accessor viewer-agent-service)))
 
-(clim:define-application-frame viewer
+(clim:define-application-frame game-host
     (clim:standard-application-frame canvas-event-handler
      viewer-service-state)
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
@@ -658,16 +659,11 @@ before the operation boundary, or it would encode through resources which the
    (pointer-x :initform nil :accessor viewer-pointer-x)
    (pointer-y :initform nil :accessor viewer-pointer-y)
    (inspection :initform nil :accessor viewer-inspection)
-   (edit-material :initform *terrain-material-placement*
+   (edit-material :initform nil
                   :accessor viewer-edit-material)
    (edit-undo-history :initform nil :accessor viewer-edit-undo-history)
    (edit-redo-history :initform nil :accessor viewer-edit-redo-history)
    (last-edit-status :initform nil :accessor viewer-last-edit-status)
-   (inspector-p :initarg :inspector-p :initform nil
-                :accessor viewer-inspector-p)
-   (inspector-mirror :initform nil :accessor viewer-inspector-mirror)
-   (inspector-compositor :initform nil
-                         :accessor viewer-inspector-compositor)
    (last-timestamp :initform nil :accessor viewer-last-timestamp)
    (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
    (sensitivity :initarg :sensitivity :initform 0.0032
@@ -679,11 +675,25 @@ before the operation boundary, or it would encode through resources which the
     :initarg :stop-controller
     :initform (make-stop-controller :name "LUFT viewer")
     :reader viewer-stop-controller))
-  ;; The frame is the application and the inspector is its first pane.  Its
-  ;; command table inherits every input phase so McCLIM considers each command
-  ;; executable; event dispatch still chooses one phase explicitly.
-  (:command-table (luft-viewer
+  (:command-table (game-host
                    :inherit-from (luft-window luft-window-release
+                                  luft-play luft-play-release)
+                   :inherit-menu t))
+  (:panes)
+  (:layouts (default nil))
+  (:menu-bar nil))
+
+;;; The atelier is a game, not the superclass of other games. In particular,
+;;; its inspector pane and its camera commands do not belong to GAME-HOST.
+(clim:define-application-frame viewer (game-host)
+  ((edit-material :initform *terrain-material-placement*)
+   (inspector-p :initarg :inspector-p :initform nil
+                :accessor viewer-inspector-p)
+   (inspector-mirror :initform nil :accessor viewer-inspector-mirror)
+   (inspector-compositor :initform nil
+                         :accessor viewer-inspector-compositor))
+  (:command-table (luft-viewer
+                   :inherit-from (luft-atelier-window luft-window-release
                                   luft-atelier luft-atelier-release)
                    :inherit-menu t))
   (:panes
@@ -697,12 +707,27 @@ before the operation boundary, or it would encode through resources which the
     (clim:horizontally (:width +site-inspector-width+
                         :height +site-inspector-height+)
       inspector)))
+  (:default-initargs :source (make-mountain-sanctuary-scene))
   (:menu-bar nil))
 
-(defmethod initialize-instance :after ((viewer viewer) &key source)
+(defmethod viewer-inspector-p ((viewer game-host)) nil)
+(defmethod viewer-inspector-mirror ((viewer game-host)) nil)
+
+(defgeneric viewer-allows-mode-p (viewer mode)
+  (:documentation "Whether this game's host offers MODE; checked before any transition.")
+  (:method ((viewer game-host) mode) (typep mode 'first-person-mode))
+  (:method ((viewer viewer) mode) (typep mode 'viewer-mode)))
+
+(defgeneric viewer-inspection-ink-p (viewer)
+  (:method ((viewer game-host)) nil)
+  (:method ((viewer viewer)) *inspection-ink-p*))
+
+(defmethod initialize-instance :after ((viewer game-host) &key source)
+  (unless (viewer-allows-mode-p viewer (viewer-mode viewer))
+    (error "~S does not offer mode ~S." viewer (viewer-mode viewer)))
   (unless (slot-boundp viewer 'simulation)
     (setf (viewer-simulation viewer)
-          (make-world-simulation (or source (make-mountain-sanctuary-scene)))))
+          (make-world-simulation (or source (error "A game host needs a scene.")))))
   ;; Another game's scene has its own palette; edit with one of its members
   ;; rather than interning the atelier's stone into it.
   (let* ((source (viewer-source viewer))
@@ -719,11 +744,11 @@ before the operation boundary, or it would encode through resources which the
 (defun viewer-source (viewer)
   (simulation-source (viewer-simulation viewer)))
 
-(defmethod (setf viewer-player) :before (player (viewer viewer))
+(defmethod (setf viewer-player) :before (player (viewer game-host))
   (declare (ignore player))
   (clear-viewer-controls viewer))
 
-(defmethod (setf viewer-player) :after (player (viewer viewer))
+(defmethod (setf viewer-player) :after (player (viewer game-host))
   ;; Selecting another character does not remove the old one from the world.
   (when player (add-simulation-character (viewer-simulation viewer) player)))
 
@@ -1111,6 +1136,8 @@ A completed pair is spent, so a third quick press starts a new one."
 (defun set-viewer-mode (viewer mode)
   "Install MODE, its projection, and its pointer ownership together."
   (check-type mode viewer-mode)
+  (unless (viewer-allows-mode-p viewer mode)
+    (error "~S does not offer mode ~S." viewer mode))
   (clear-viewer-controls viewer)
   (when (viewer-player viewer)
     (cancel-character-route (viewer-player viewer)))
@@ -1133,7 +1160,7 @@ A completed pair is spent, so a third quick press starts a new one."
     (setf (renderer-history-valid-p (viewer-renderer viewer)) nil))
   viewer)
 
-(clim:define-command (com-cycle-camera :command-table luft-window
+(clim:define-command (com-cycle-camera :command-table luft-atelier-window
                                       :name "Cycle Camera" :keystroke (:f5))
     ()
   (let ((viewer (viewer-command-viewer)))
@@ -1152,7 +1179,7 @@ A completed pair is spent, so a third quick press starts a new one."
 The number keys, the wheel, and the workbench palette all read this row.  The
 atelier offers its scene's whole small palette; a game with a larger one
 offers the few its player carries.")
-  (:method ((viewer viewer))
+  (:method ((viewer game-host))
     (let ((source (viewer-source viewer)))
       (when (typep source 'scene)
         (coerce (domains:identity-vocabulary-members
@@ -1162,7 +1189,7 @@ offers the few its player carries.")
 (defgeneric viewer-pick-material (viewer placement)
   (:documentation
    "Take up PLACEMENT, the material of a cell VIEWER's player picked.")
-  (:method ((viewer viewer) placement)
+  (:method ((viewer game-host) placement)
     (setf (viewer-edit-material viewer) placement
           (viewer-last-edit-status viewer) :selected)))
 
@@ -1185,7 +1212,7 @@ offers the few its player carries.")
               (declare (ignore gesture numeric-argument))
               (list 'com-select-material index)) :errorp nil)))
 
-(clim:define-command (com-toggle-viewer-mode :command-table luft-window
+(clim:define-command (com-toggle-viewer-mode :command-table luft-atelier-window
                                              :name "Toggle Interaction Mode"
                                              :keystroke (:m))
     ()
@@ -1253,10 +1280,16 @@ A game played in a viewer names its own in-world tables, which usually
 inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
 
 (defmethod viewer-key-event-tables ((viewer viewer) (event canvas-key-press-event))
-  (values 'luft-window 'luft-atelier))
+  (values 'luft-atelier-window 'luft-atelier))
 
 (defmethod viewer-key-event-tables ((viewer viewer) (event canvas-key-release-event))
   (values 'luft-window-release 'luft-atelier-release))
+
+(defmethod viewer-key-event-tables ((viewer game-host) (event canvas-key-press-event))
+  (values 'luft-window 'luft-play))
+
+(defmethod viewer-key-event-tables ((viewer game-host) (event canvas-key-release-event))
+  (values 'luft-window-release 'luft-play-release))
 
 (defun viewer-key-command (viewer event)
   "Return the named McCLIM command VIEWER binds to key EVENT, or NIL."
@@ -1275,13 +1308,13 @@ inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
            viewer event :command-table atelier)))))
 
 (defmethod handle-canvas-event
-    ((viewer viewer) canvas (event canvas-window-close-request-event))
+    ((viewer game-host) canvas (event canvas-window-close-request-event))
   (declare (ignore canvas event))
   (request-viewer-quit viewer)
   :defer-canvas-close)
 
 (defmethod handle-canvas-event
-    ((viewer viewer) canvas (event canvas-key-press-event))
+    ((viewer game-host) canvas (event canvas-key-press-event))
   (declare (ignore canvas))
   (unless (canvas-key-event-repeat-p event)
     (let ((command (viewer-key-command viewer event)))
@@ -1290,7 +1323,7 @@ inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
   nil)
 
 (defmethod handle-canvas-event
-    ((viewer viewer) canvas (event canvas-key-release-event))
+    ((viewer game-host) canvas (event canvas-key-release-event))
   (declare (ignore canvas))
   (let ((command (viewer-key-command viewer event)))
     (when command
@@ -1300,7 +1333,7 @@ inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
 (defgeneric handle-viewer-mode-pointer-press (mode viewer canvas event))
 
 (defmethod handle-canvas-event
-    ((viewer viewer) canvas (event canvas-pointer-button-press-event))
+    ((viewer game-host) canvas (event canvas-pointer-button-press-event))
   (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
         (viewer-pointer-y viewer) (canvas-pointer-event-y event))
   (if (and (viewer-frame-recorder viewer)
@@ -1383,7 +1416,7 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
     (setf (viewer-pointer-captured-p viewer) t)))
 
 (defmethod handle-canvas-event
-    ((viewer viewer) canvas (event canvas-pointer-wheel-event))
+    ((viewer game-host) canvas (event canvas-pointer-wheel-event))
   (declare (ignore canvas))
   (when (typep (viewer-mode viewer) 'first-person-mode)
     (when (viewer-pointer-captured-p viewer)
@@ -1405,7 +1438,7 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
   nil)
 
 (defmethod handle-canvas-event
-    ((viewer viewer) canvas (event canvas-pointer-motion-event))
+    ((viewer game-host) canvas (event canvas-pointer-motion-event))
   (declare (ignore canvas))
   (setf (viewer-pointer-x viewer) (canvas-pointer-event-x event)
         (viewer-pointer-y viewer) (canvas-pointer-event-y event))
@@ -1426,7 +1459,7 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
   nil)
 
 (defmethod handle-canvas-event
-    ((viewer viewer) canvas (event canvas-window-focus-lost-event))
+    ((viewer game-host) canvas (event canvas-window-focus-lost-event))
   (declare (ignore event))
   (clear-viewer-controls viewer)
   (when (viewer-pointer-captured-p viewer)
@@ -1434,13 +1467,27 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
     (setf (viewer-pointer-captured-p viewer) nil))
   nil)
 
-(defmethod handle-canvas-event ((viewer viewer) canvas event)
+(defmethod handle-canvas-event ((viewer game-host) canvas event)
   (declare (ignore viewer canvas event))
   nil)
 
-(defun start-viewer (&key
+(defun start-viewer (&rest arguments
+                     &key
                        (solid (make-authored-world-streaming-scene
                                :mesh-preparer +render-population-preparer+))
+                       (world-pathname (default-luft-world-pathname))
+                       (saved-world (load-luft-world-description solid world-pathname))
+                     &allow-other-keys)
+  "Play the atelier on the shared game host, with its world and instruments."
+  (apply #'start-game-host
+         :solid solid :world-pathname world-pathname :saved-world saved-world
+         (append
+          (alexandria:remove-from-plist arguments :solid :world-pathname :saved-world)
+          (list :frame-class 'viewer :lattice-factory 'make-lattice-drawing
+                :title "LUFT — click to play · WASD move · Space jump, twice to fly · L/R edit · 1–8 material · Tab terminal · F5 camera · Esc release"))))
+
+(defun start-game-host (&key
+                       solid
                        (bevel-width 1)
                        surface-mesh
                        surface-generation
@@ -1451,24 +1498,22 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
                        (torch-factory 'make-framed-torch-drawing)
                        (terrain-factory 'make-terrain-drawing)
                        (shadow-factory 'make-sun-shadow)
-                       (lattice-factory 'make-lattice-drawing)
+                       lattice-factory
                        (reconstruction-factory 'make-reconstruction)
                        (finishing-factory 'make-image-finishing)
                        (camera (make-fly-camera :yaw 0.35))
                        (player-p t)
-                       (title
-                         "LUFT — click to play · WASD move · Space jump, twice to fly · L/R edit · 1–8 material · Tab terminal · F5 camera · Esc release")
+                       (title "Luft game")
                        (width 1100) (height 800)
                        fullscreen-p
                        (inspector-p nil)
                        (frames-per-second 60)
                        (provider *gpu-provider*)
-                       (world-pathname (default-luft-world-pathname))
-                       (saved-world
-                        (load-luft-world-description solid world-pathname))
-                       (frame-class 'viewer)
+                       world-pathname
+                       saved-world
+                       (frame-class 'game-host)
                        frame-initargs)
-  "Open the fixed-star LUFT renderer as a McCLIM atelier.
+  "Open SOLID in a game's McCLIM host, without atelier panes or commands.
 
 SKY-FACTORY and PLAYER-FACTORY select independently owned scene drawings;
 NIL omits either program. TORCH-FACTORY similarly selects or omits torch
@@ -1483,17 +1528,21 @@ while retaining SOLID as the semantic inspection source. SURFACE-GENERATION,
 when supplied with that mesh, preserves its exact immutable realized-light
 cohort. EXPOSURE-FACTORY receives the device and constructs a fresh exposure
 control. FIXED-EXPOSURE selects a constant control instead, omitting GPU
-measurement entirely for reproducible evidence.  When SOLID is the authored
-large world, WORLD-PATHNAME (NIL for none) is where its edits and player are
-loaded from and saved to; see persistence.lisp.  PLAYER-P is the
-atelier's own choice of whether a traveler walks SOLID: the terrain does not
-say, and a study scene may want the frame to itself.
+measurement entirely for reproducible evidence. WORLD-PATHNAME (NIL for
+none) is where the game's save protocol writes its edits and player; the
+caller loads its save and supplies SAVED-WORLD. PLAYER-P is the game's
+choice of whether a traveler walks SOLID: the terrain does not say, and a
+study scene may want the frame to itself.
 
-A game hosts itself in a viewer by naming its FRAME-CLASS, a subclass of
-VIEWER, with FRAME-INITARGS for its own slots; its SAVED-WORLD is a Luft save
+A game hosts itself by naming its FRAME-CLASS, a subclass of
+GAME-HOST, with FRAME-INITARGS for its own slots; its SAVED-WORLD is a pose
 description whose player, flight, and look the viewer starts from, and its
 WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
   (check-type solid scene)
+  (unless (subtypep frame-class 'game-host)
+    (error "~S is not a GAME-HOST subclass." frame-class))
+  (when (and inspector-p (not (subtypep frame-class 'viewer)))
+    (error "The site inspector belongs to the atelier, not ~S." frame-class))
   (when fixed-exposure
     (setf fixed-exposure (checked-exposure-value fixed-exposure)))
   (when (and surface-generation (null surface-mesh))
@@ -1587,8 +1636,10 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
                                                  solid))
                                    :bevel-width bevel-width
                                    :fixed-exposure fixed-exposure
-                                   :inspector-p inspector-p
-                                   frame-initargs)))))
+                                   (append
+                                    (when (subtypep frame-class 'viewer)
+                                      (list :inspector-p inspector-p))
+                                    frame-initargs))))))
            ;; Establish the following pose before the first streaming tick;
            ;; otherwise the legacy sanctuary camera demands the wrong chunks.
            (when (viewer-player viewer)
@@ -1672,11 +1723,11 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
           (releasing :canvas (close-canvas canvas)))
         (when device (releasing :device (destroy device)))))))
 
-(defmethod luv:capture-canvas ((viewer viewer))
+(defmethod luv:capture-canvas ((viewer game-host))
   (viewer-canvas viewer))
 
 (defmethod luv:prepare-capture
-    ((viewer viewer) (capture luv:application-capture))
+    ((viewer game-host) (capture luv:application-capture))
   (when (eq :film (luv:capture-kind capture))
     (setf (luv:capture-client-state capture)
           (list :running-p (viewer-running-p viewer))
@@ -1684,12 +1735,12 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
   viewer)
 
 (defmethod luv:advance-capture-frame
-    ((viewer viewer) (capture luv:application-capture) frame-index)
+    ((viewer game-host) (capture luv:application-capture) frame-index)
   (declare (ignore capture frame-index))
   (advance-viewer-streaming viewer))
 
 (defmethod luv:encode-capture-frame
-    ((viewer viewer) (capture luv:application-capture)
+    ((viewer game-host) (capture luv:application-capture)
      encoder target extent)
   (encode-viewer-frame
    viewer encoder target extent
@@ -1700,7 +1751,7 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
          (viewer-inspector-p viewer)))))
 
 (defmethod luv:cleanup-capture
-    ((viewer viewer) (capture luv:application-capture))
+    ((viewer game-host) (capture luv:application-capture))
   (let ((target (luv:capture-target capture))
         (canvas (viewer-canvas viewer))
         (saved-state (luv:capture-client-state capture)))

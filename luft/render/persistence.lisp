@@ -45,6 +45,7 @@
   (:documentation
    "Return VIEWER's world as a save description, or NIL when it has none.
 A game hosted in a viewer answers with its own save format.")
+  (:method ((viewer game-host)) nil)
   (:method ((viewer viewer)) (luft-world-description viewer)))
 
 (defgeneric write-viewer-world-description (viewer description pathname)
