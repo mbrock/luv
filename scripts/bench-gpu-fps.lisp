@@ -8,8 +8,10 @@
 ;;;; live-alpine,live-meadow,atelier). BENCH_CAPTURE_DIR optionally saves PNGs.
 ;;;; BENCH_REPEATS (1) repeats the matrix; BENCH_SKY_OFF / BENCH_TERRAIN_OFF
 ;;;; opt into controlled ablations (do not compare them to full-frame FPS).
-;;;; BENCH_MSAA (4) controls Luft's non-temporal samples; old Luvcraft uses 1.
-;;;; Native 720p and 1080p, TAA and dynamic resolution OFF on both renderers.
+;;;; BENCH_MODE defaults to default: shipped temporal settings and scene scale.
+;;;; native-1x disables temporal rendering and renders both games at native 1x;
+;;;; native-4x is the previous Luft 4x MSAA / old 1x control, not shipped play.
+;;;; Dynamic resolution is always OFF; output size and internal size are recorded.
 ;;;; No swapchain/readback in the timed loop: serialized completion throughput,
 ;;;; NOT monitor presentation FPS. CPU encode and GPU execution are separate.
 ;;;; Methodology, machine results and limitations: #4C7L3C.
@@ -27,6 +29,14 @@
 (defparameter *source-revision*
   (string-trim '(#\Newline #\Return)
                (uiop:run-program '("git" "rev-parse" "HEAD") :output :string)))
+(defparameter *benchmark-blob*
+  (string-trim '(#\Newline #\Return)
+               (uiop:run-program '("git" "hash-object" "scripts/bench-gpu-fps.lisp") :output :string)))
+(defvar *benchmark-mode* :default)
+(defparameter *default-luft-temporal-p* r::*temporal-upscaling-p*)
+(defparameter *default-old-temporal-p* old::*luvcraft-temporal-p*)
+(defparameter *default-render-scale* r::*render-scale*)
+(defparameter *default-reconstruction* r::*temporal-reconstruction*)
 
 (cffi:defcstruct timespec (seconds :long) (nanoseconds :long))
 (cffi:defcfun ("clock_gettime" clock-gettime) :int (clock :int) (time :pointer))
@@ -356,7 +366,7 @@ The old renderer relights the same occupied cells with its own light solver."
     (format t "~&DEVICE ~S SDL=~A ~Dx~D~%" description (sdl3:get-current-video-driver) width height)
     (when (getf description :device-type)
       (assert (/= 4 (getf description :device-type)) () "Software Vulkan device rejected"))
-    (labels ((frame (record-p)
+    (labels ((frame-body (record-p)
                (let* ((*query-pool* timer) (*query-index* 0) (*pass-records* nil)
                       (start (now))
                       (encoder (luv:create device (luv::make-command-encoder-descriptor)))
@@ -406,7 +416,14 @@ The old renderer relights the same occupied cells with its own light solver."
                             (dolist (pass *pass-records*)
                               (push (fourth pass) (gethash (first pass) cpu-passes))))))
                    (when commands (luv:destroy commands))
-                   (luv:destroy encoder)))))
+                   (luv:destroy encoder))))
+             (frame (record-p)
+               ;; Match the production Metal canvas lifetime boundary. Borrowed
+               ;; native encoders must not retain command backing for a batch.
+               #+darwin
+               (luv.objective-c:with-autorelease-pool () (frame-body record-p))
+               #-darwin
+               (frame-body record-p)))
       (unwind-protect
            (luv::call-on-sdl-canvas-thread
             canvas
@@ -418,22 +435,41 @@ The old renderer relights the same occupied cells with its own light solver."
                 (dotimes (i (env-integer "BENCH_WARMUP" 60)) (frame nil))
                 (dotimes (i (env-integer "BENCH_FRAMES" 300)) (frame t))
                 (assert (= (length gpu) (env-integer "BENCH_FRAMES" 300)))
-                (let ((actual (if old-p (old::luvcraft-session-render-extent host)
-                                  (r::renderer-render-extent (r:viewer-renderer host)))))
-                  (assert (equalp actual (list width height)) () "Render extent ~S != requested ~S" actual (list width height)))
-                (list :device description :extent (list width height) :taa nil :dynamic-resolution nil
-                      :scene-samples (if old-p 1 (r::renderer-scene-sample-count (r:viewer-renderer host)))
-                      :exposure (cond (old-p :host-default) ((eq kind :atelier) :automatic) (t 0.45))
-                      :sky (null (uiop:getenv "BENCH_SKY_OFF")) :terrain (null (uiop:getenv "BENCH_TERRAIN_OFF"))
-                      :cpu-encode-ms (summary cpu) :completion-ms (summary wall)
-                      :cpu-frame-ms (summary cpu-frame)
-                      :simulation-ms (summary simulation)
-                      :completion-fps (/ 1000 (getf (summary wall) :mean))
-                      :gpu-ms (summary gpu)
-                      :cpu-passes (loop for label being the hash-keys of cpu-passes using (hash-value values)
-                                        collect (list label (summary values)))
-                      :gpu-passes (loop for label being the hash-keys of passes using (hash-value values)
-                                        collect (list label (summary values)))))))
+                (let* ((renderer (unless old-p (r:viewer-renderer host)))
+                       (actual (if old-p (old::luvcraft-session-presentation-extent host)
+                                   (r::renderer-extent renderer)))
+                       (internal (if old-p (old::luvcraft-session-render-extent host)
+                                     (r::renderer-render-extent renderer)))
+                       (temporal (if old-p (not (null (old::luvcraft-temporal-active-p host)))
+                                     (r::renderer-temporal-p renderer)))
+                       (reconstruction (if old-p (and temporal :shader)
+                                           (r::renderer-temporal-resolve-kind renderer))))
+                  (assert (equalp actual (list width height)) () "Output extent ~S != requested ~S" actual (list width height))
+                  (assert (eql temporal (not (null (if old-p old::*luvcraft-temporal-p* r::*temporal-upscaling-p*)))))
+                  #+darwin
+                  (when (and temporal (not old-p))
+                    (assert (eq reconstruction :metalfx) () "Default Metal temporal benchmark requires MetalFX, got ~S" reconstruction))
+                  (unless (eq *benchmark-mode* :default)
+                    (assert (equalp internal (list width height))))
+                  (when (and (eq *benchmark-mode* :default) (not old-p))
+                    (assert (equalp internal (r::render-scale-extent (list width height)))))
+                  (list :device description :mode *benchmark-mode* :extent (list width height)
+                        :internal-extent internal :taa temporal :reconstruction reconstruction
+                        :autorelease-policy #+darwin :per-frame #-darwin :not-applicable
+                        :fixed-render-scale (luv::canvas-fixed-render-scale canvas)
+                        :render-scale (if old-p :host-budget r::*render-scale*) :dynamic-resolution nil
+                        :scene-samples (if old-p 1 (r::renderer-scene-sample-count (r:viewer-renderer host)))
+                        :exposure (cond (old-p :host-default) ((eq kind :atelier) :automatic) (t 0.45))
+                        :sky (null (uiop:getenv "BENCH_SKY_OFF")) :terrain (null (uiop:getenv "BENCH_TERRAIN_OFF"))
+                        :cpu-encode-ms (summary cpu) :completion-ms (summary wall)
+                        :cpu-frame-ms (summary cpu-frame)
+                        :simulation-ms (summary simulation)
+                        :completion-fps (/ 1000 (getf (summary wall) :mean))
+                        :gpu-ms (summary gpu)
+                        :cpu-passes (loop for label being the hash-keys of cpu-passes using (hash-value values)
+                                          collect (list label (summary values)))
+                        :gpu-passes (loop for label being the hash-keys of passes using (hash-value values)
+                                          collect (list label (summary values))))))))
         (luv:submitted-work-done queue)
         (luv:destroy target)
         #+linux (destroy-query-pool (luv::vulkan-handle device) timer (cffi:null-pointer))))))
@@ -563,14 +599,20 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
           (when host (if old-p (old:stop-luvcraft host) (r:stop-viewer host))))))))
 
 (defun run ()
+  (setf *benchmark-mode*
+        (intern (string-upcase (or (uiop:getenv "BENCH_MODE") "default")) :keyword))
+  (assert (member *benchmark-mode* '(:default :native-1x :native-4x)))
+  (assert (null (uiop:getenv "BENCH_MSAA")) () "Use BENCH_MODE=native-1x or native-4x instead of BENCH_MSAA")
   (setf luv::*canvas-watchdog-fatal-seconds* nil
         luv::*canvas-dispatch-timeout* 600.0
-        luv::*fixed-render-scale* 1.0
-        old::*luvcraft-temporal-p* nil
+        luv::*fixed-render-scale* (unless (eq *benchmark-mode* :default) 1.0)
+        old::*luvcraft-temporal-p* (and (eq *benchmark-mode* :default) *default-old-temporal-p*)
         old::*luvcraft-benchmark-terrain-p* (null (uiop:getenv "BENCH_TERRAIN_OFF"))
         r::*benchmark-terrain-p* (null (uiop:getenv "BENCH_TERRAIN_OFF"))
-        r::*scene-sample-count* (env-integer "BENCH_MSAA" 4)
-        r::*temporal-upscaling-p* nil
+        r::*scene-sample-count* (if (eq *benchmark-mode* :native-1x) 1 4)
+        r::*temporal-upscaling-p* (and (eq *benchmark-mode* :default) *default-luft-temporal-p*)
+        r::*render-scale* *default-render-scale*
+        r::*temporal-reconstruction* *default-reconstruction*
         r::*dynamic-resolution-frame-rate* nil)
   (let ((output (or (uiop:getenv "BENCH_OUTPUT") "build/gpu-fps.sexp"))
         (sizes (mapcar (lambda (s)
@@ -595,6 +637,7 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
                (dolist (backend (if (eq scene :atelier) '(:atelier) '(:luft :old)))
                  (let ((result (append (list :repeat (1+ repeat) :host (machine-instance)
                                             :source-revision *source-revision*
+                                            :benchmark-blob *benchmark-blob*
                                             :frames (env-integer "BENCH_FRAMES" 300)
                                             :warmup (env-integer "BENCH_WARMUP" 60))
                                        (run-case scene backend (first size) (second size)))))
