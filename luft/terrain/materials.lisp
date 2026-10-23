@@ -9,7 +9,9 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter +material-reliefs+
     '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss)
-    "The relief fields the star shader knows, in the order of their codes."))
+    "The relief fields the star shader knows, in the order of their codes.")
+  (defparameter +material-patterns+ '(:none :bond :grid :shingle :checker)
+    "The laid patterns the star shader knows, in the order of their codes."))
 
 (defclass material-kind ()
   ((name :initarg :name :reader material-kind-name)
@@ -33,7 +35,15 @@
               :reader material-kind-roughness)
    (edge-wear :initarg :edge-wear :initform 0.5
               :reader material-kind-edge-wear
-              :documentation "How much convex edges lighten and hollows darken."))
+              :documentation "How much convex edges lighten and hollows darken.")
+   (pattern :initarg :pattern :initform nil :reader material-kind-pattern
+            :documentation
+            "NIL, or a laid pattern (SHAPE &key COURSES ASPECT MORTAR-WIDTH
+MORTAR-TONE VARIANCE): bricks, tiles, or shingles cut into the surface in
+world space.  SHAPE is one of +MATERIAL-PATTERNS+ but :NONE.  COURSES rows
+fill a cell; each element is ASPECT rows long; MORTAR-WIDTH is the joint's
+share of a row, MORTAR-TONE its colour, and VARIANCE how far each element's
+tone strays.  The kind's tones are the elements' own, not mortar and all."))
   (:documentation
    "An authored cell substance: its tones, the relief and edge response the
 star shader cuts it with (#HYBFRT), and the facts needed by voxel light."))
@@ -76,13 +86,35 @@ edge wear; the star shader unpacks the same layout."
             (ash (unit (material-kind-roughness kind) 8) 8)
             (ash (unit (material-kind-edge-wear kind) 8) 16))))
 
+(defun pack-terrain-pattern (kind)
+  "Pack KIND's laid pattern into a word, and return its mortar tone word too.
+
+Bits 0-3 are the pattern code, 4-7 the rows per cell, 8-11 the element length
+in half rows, 12-19 the mortar width, and 20-27 the variance."
+  (if (null (material-kind-pattern kind))
+      (values 0 0)
+      (destructuring-bind (shape &key (courses 4) (aspect 2) (mortar-width 0.12)
+                                   (mortar-tone '(0.4 0.4 0.4)) (variance 0.15))
+          (material-kind-pattern kind)
+        (flet ((field (value limit) (max 1 (min limit (round value))))
+               (unit (value) (round (* 255 (max 0.0 (min 1.0 value))))))
+          (values (logior (or (position shape +material-patterns+ :start 1)
+                              (error "~S is not a laid pattern." shape))
+                          (ash (field courses 15) 4)
+                          (ash (field (* 2 aspect) 15) 8)
+                          (ash (unit mortar-width) 12)
+                          (ash (unit variance) 20))
+                  (pack-terrain-tone mortar-tone))))))
+
 (defun compile-terrain-material-descriptors (placement-vocabulary)
-  "Compile AIR plus the scene's u8 placements to descriptor rows: top, side,
-and bottom RGB8 tones, then the packed surface (PACK-TERRAIN-SURFACE)."
+  "Compile AIR plus the scene's u8 placements to two descriptor rows each:
+top, side, and bottom RGB8 tones and the packed surface
+(PACK-TERRAIN-SURFACE), then the packed pattern and its mortar tone
+(PACK-TERRAIN-PATTERN)."
   (let* ((placements
            (domains:identity-vocabulary-members placement-vocabulary))
          (words
-           (make-array (* 4 (1+ (length placements)))
+           (make-array (* 8 (1+ (length placements)))
                        :element-type '(unsigned-byte 32)
                        :initial-element 0)))
     (loop for placement across placements
@@ -90,11 +122,14 @@ and bottom RGB8 tones, then the packed surface (PACK-TERRAIN-SURFACE)."
           for kind = (material-placement-kind placement)
           do (multiple-value-bind (top side bottom)
                  (material-kind-oriented-tones kind)
-               (let ((row (* code 4)))
+               (let ((row (* code 8)))
                  (setf (aref words row) (pack-terrain-tone top)
                        (aref words (+ row 1)) (pack-terrain-tone side)
                        (aref words (+ row 2)) (pack-terrain-tone bottom)
-                       (aref words (+ row 3)) (pack-terrain-surface kind)))))
+                       (aref words (+ row 3)) (pack-terrain-surface kind))
+                 (multiple-value-bind (pattern mortar) (pack-terrain-pattern kind)
+                   (setf (aref words (+ row 4)) pattern
+                         (aref words (+ row 5)) mortar)))))
     words))
 
 ;;; Published material fields share immutable per-chunk tables. Construction

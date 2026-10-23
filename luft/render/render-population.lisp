@@ -52,10 +52,14 @@
 ;;; paints it.  A population whose meshes name no palette draws that code in
 ;;; one neutral clay, so the renderer needs no game's materials.
 (defparameter +unpainted-terrain-descriptors+
-  (let ((words (make-array 8 :element-type '(unsigned-byte 32)
+  (let ((words (make-array 16 :element-type '(unsigned-byte 32)
                              :initial-element 0))
         (clay (pack-terrain-tone '(0.50 0.47 0.42))))
-    (setf (aref words 4) clay (aref words 5) clay (aref words 6) clay)
+    ;; Two rows per code (COMPILE-TERRAIN-MATERIAL-DESCRIPTORS); code 1 is
+    ;; words 8-15, with no relief and no pattern.
+    (setf (aref words 8) clay (aref words 9) clay (aref words 10) clay
+          (aref words 11) (pack-terrain-surface
+                           (make-instance 'material-kind :base-tone nil)))
     words)
   "AIR and the mesher's one unpainted occupied code.")
 

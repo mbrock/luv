@@ -161,6 +161,7 @@ this package draws; the renderer and the ateliers use it.")
            #:material-kind
            #:material-kind-base-tone
            #:material-kind-oriented-tones
+           #:material-kind-pattern
            #:material-kind-surface-emission
            #:material-placement
            #:material-placement-kind
@@ -172,6 +173,8 @@ this package draws; the renderer and the ateliers use it.")
            #:mesh-streaming-chunk
            #:movement-controller
            #:movement-intent
+           #:pack-terrain-pattern
+           #:pack-terrain-surface
            #:pack-terrain-tone
            #:physical-body
            #:prepare-streamed-mesh

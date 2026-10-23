@@ -386,6 +386,20 @@ is recognizably itself, grass hanging over the top of its sides, and
 Luvcraft's stone,
 whose atlas mean is a cold lavender grey beside Luft's warmer rock.
 
+A material may also be laid: [[lisp:luft.terrain:material-kind-pattern]]
+names a bond, grid, shingle, or checker, its rows per cell, element length,
+mortar width and tone, and how far each element's tone strays, packed into a
+second descriptor row by [[lisp:luft.terrain:pack-terrain-pattern]].  The
+fragment stage lays it in the face's own world coordinates, so courses run
+the length of a wall and wrap its corners, every brick or tile has its own
+hashed tone, and joints are grooves in the relief that hold shade.  The
+pattern fades to its mean tone where its joints would be finer than pixels.
+Luvcraft's bricks, stone bricks, roof tiles, slate shingles, marble and blue
+tiles, mosaic, checker floor, boards, and parquet are laid this way.  Objects
+rather than surfaces -- lanterns, barrels, bookshelves, lit windows -- are
+not patterns: lanterns become surface attachments with a drawn body, and
+barrels small drawn fixtures.
+
 ** NEXT Start Luvcraft as a game on the engine
 :PROPERTIES:
 :ID: J3WZZS

@@ -67,6 +67,41 @@
 block kind (#HYBFRT).  The atlas tiles' painted relief is not carried over;
 these choose the closest of the shader's world-space fields.")
 
+(defparameter *block-patterns*
+  ;; (pattern-arguments . names): laid in world space by the star shader.
+  '(((:bond :courses 4 :aspect 2 :mortar-width 0.14
+      :mortar-tone (0.42 0.40 0.36) :variance 0.22)
+     :bricks)
+    ((:bond :courses 2 :aspect 2 :mortar-width 0.10
+      :mortar-tone (0.20 0.20 0.21) :variance 0.12)
+     :stone-bricks :mossy-stone-bricks :cracked-stone-bricks :chiseled-stone)
+    ((:shingle :courses 4 :aspect 1 :mortar-width 0.08
+      :mortar-tone (0.10 0.06 0.05) :variance 0.18)
+     :roof-tiles)
+    ((:shingle :courses 4 :aspect 1.5 :mortar-width 0.08
+      :mortar-tone (0.06 0.07 0.08) :variance 0.15)
+     :slate-shingles)
+    ((:grid :courses 2 :aspect 1 :mortar-width 0.06
+      :mortar-tone (0.55 0.55 0.52) :variance 0.06)
+     :marble-tiles :blue-tiles)
+    ((:grid :courses 6 :aspect 1 :mortar-width 0.10
+      :mortar-tone (0.45 0.43 0.40) :variance 0.30)
+     :mosaic)
+    ((:checker :courses 2 :aspect 1 :mortar-width 0.02
+      :mortar-tone (0.05 0.05 0.05) :variance 0.03)
+     :checker-floor)
+    ((:bond :courses 4 :aspect 4 :mortar-width 0.05
+      :mortar-tone (0.12 0.08 0.05) :variance 0.15)
+     :planks :dark-planks :birch-planks :wainscot)
+    ((:grid :courses 4 :aspect 1 :mortar-width 0.05
+      :mortar-tone (0.10 0.07 0.04) :variance 0.15)
+     :parquet))
+  "Which block kinds are laid in a pattern of bricks, tiles, shingles, or
+boards, and how.  The kind's tone is the elements'; mortar has its own.")
+
+(defun block-pattern (name)
+  (first (find name *block-patterns* :key #'rest :test #'member)))
+
 (defun block-surface (name)
   (or (find name *block-surfaces* :key #'cddddr :test #'member)
       (first (member :stone *block-surfaces* :key #'first))))
@@ -85,7 +120,8 @@ these choose the closest of the shader's world-space fields.")
    :relief (first (block-surface (luvcraft:block-kind-name kind)))
    :relief-strength (second (block-surface (luvcraft:block-kind-name kind)))
    :roughness (third (block-surface (luvcraft:block-kind-name kind)))
-   :edge-wear (fourth (block-surface (luvcraft:block-kind-name kind)))))
+   :edge-wear (fourth (block-surface (luvcraft:block-kind-name kind)))
+   :pattern (block-pattern (luvcraft:block-kind-name kind))))
 
 (defclass luvcraft-palette ()
   ((vocabulary :initarg :vocabulary :reader luvcraft-palette-vocabulary)

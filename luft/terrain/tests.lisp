@@ -62,10 +62,15 @@
                    :limit #xff))
          (words (terrain:compile-terrain-material-descriptors palette)))
     ;; Relief code 2 (stone), strength 15, roughness 0, wear 255.
-    (is = #x00FF00F2 (aref words (+ 3 (* 4 2))))
+    (is = #x00FF00F2 (aref words (+ 3 (* 8 2))))
+    ;; Bond, 4 rows, elements 4 half-rows long, mortar 31/255, variance 38/255.
+    (is = #x0261F441
+        (terrain:pack-terrain-pattern
+         (make-instance 'terrain:material-kind :name :brick :base-tone '(0.5 0.2 0.1)
+                                               :pattern '(:bond))))
     ;; A default kind has no relief, mid strength, and rough, half-worn edges.
     (is = (logior 0 (ash 8 4) (ash 217 8) (ash 128 16))
-        (aref words (+ 3 (* 4 1))))))
+        (aref words (+ 3 (* 8 1))))))
 
 (define-test an-attachment-keeps-its-support-and-clearance
   (let ((builder (make-builder)))

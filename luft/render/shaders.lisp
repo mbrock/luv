@@ -37,13 +37,11 @@
 ;;; empty cell masks; the fragment stage cuts the relief in world space, so it
 ;;; runs across cell boundaries instead of repeating on every face.
 
-(define-shader-function terrain-surface-pick (current code selected descriptor)
-  "Keep CURRENT once chosen, else DESCRIPTOR's surface word when sampled."
+(define-shader-function terrain-code-pick (current code selected)
+  "Keep CURRENT once chosen, else CODE when it is a sampled material."
   (if (> current (uint 0.0))
       current
-      (if (> selected (uint 0.0))
-          (if (> code (uint 0.0)) (swizzle descriptor :w) (uint 0.0))
-          (uint 0.0))))
+      (if (> selected (uint 0.0)) code (uint 0.0))))
 
 (define-shader-function cell-mask-count (mask)
   "The number of cells named by an eight-bit sample MASK."
@@ -91,6 +89,69 @@ convex edge or corner fewer occupied, and a concave one more."
          (far-high (mix (paper-hash (+ lattice (vec3 0.0 1.0 1.0)))
                         (paper-hash (+ lattice (vec3 1.0 1.0 1.0))) u)))
     (mix (mix near-low near-high v) (mix far-low far-high v) w)))
+
+(define-shader-function terrain-pattern-vector (word)
+  "Unpack pattern WORD: shape, rows per cell, element length in rows, mortar."
+  (vec4 (float (ldb (byte 4 0) word))
+        (float (ldb (byte 4 4) word))
+        (* 0.5 (float (ldb (byte 4 8) word)))
+        (/ (float (ldb (byte 8 12) word)) 255.0)))
+
+;;; Laid patterns.  Bricks, tiles, and shingles are laid out in the face's
+;;; own world coordinates: along a wall and up it, or across a floor.  Rows
+;;; therefore run the whole length of a wall and meet at its corners, and
+;;; every element has its own identity to vary its tone by.  The shapes
+;;; follow +MATERIAL-PATTERNS+: none, bond, grid, shingle, checker.
+
+(define-shader-function laid-pattern (pattern normal world)
+  "Return the element mask, the element's hash, its height ramp, and parity."
+  (let* ((shape (swizzle pattern :x))
+         (courses (max 1.0 (swizzle pattern :y)))
+         (aspect (max 0.5 (swizzle pattern :z)))
+         (mortar (* 0.5 (swizzle pattern :w)))
+         (an (abs normal))
+         (top (> (swizzle an :z) 0.7))
+         (x-facing (> (swizzle an :x) (swizzle an :y)))
+         (u (if top (swizzle world :x)
+                (if x-facing (swizzle world :y) (swizzle world :x))))
+         (v (if top (swizzle world :y) (swizzle world :z)))
+         (w (if top (swizzle world :z)
+                (if x-facing (swizzle world :x) (swizzle world :y))))
+         (rowf (* v courses))
+         (row (floor rowf))
+         (fv (fract rowf))
+         (parity (* 2.0 (fract (* row 0.5))))
+         (shift (if (< shape 1.5) (* 0.5 parity)
+                    (if (> shape 2.5) (if (< shape 3.5) (* 0.5 parity) 0.0) 0.0)))
+         (uf (+ (/ (* u courses) aspect) shift))
+         (col (floor uf))
+         (fu (fract uf))
+         (du (* aspect (min fu (- 1.0 fu))))
+         (dv (min fv (- 1.0 fv)))
+         (bevel 0.08)
+         (joint (smoothstep mortar (+ mortar bevel) du))
+         (bed (smoothstep mortar (+ mortar bevel) dv))
+         (shingle (> shape 2.5))
+         (checker (> shape 3.5))
+         (mask (if checker (* joint bed)
+                   (if shingle (* joint (smoothstep 0.0 (+ mortar bevel) fv))
+                       (* joint bed))))
+         (ramp (if checker 1.0 (if shingle (- 1.0 (* 0.5 fv)) 1.0)))
+         (hash (paper-hash (vec3 col row (floor (+ w 0.5)))))
+         (checked (* 2.0 (fract (* (+ row col) 0.5)))))
+    (if (< shape 0.5)
+        (vec4 1.0 0.5 1.0 0.0)
+        (vec4 mask hash ramp checked))))
+
+(define-shader-function surface-height (code pattern normal point fade)
+  "The relief CODE at POINT, cut by PATTERN's elements, faded by FADE."
+  (let* ((relief (material-relief-height code point))
+         (laid (laid-pattern pattern normal point))
+         (cut (* (swizzle laid :x) (swizzle laid :z)
+                 (+ 0.75 (* 0.25 relief)))))
+    (if (< (swizzle pattern :x) 0.5)
+        relief
+        (mix relief cut fade))))
 
 (define-shader-function ridged-noise (point)
   (- 1.0 (abs (- (* (paper-noise point) 2.0) 1.0))))
@@ -142,16 +203,19 @@ leaves, planks, snow, gloss."
   (- (* (swizzle a :yzx) (swizzle b :zxy))
      (* (swizzle a :zxy) (swizzle b :yzx))))
 
-(define-shader-function relief-normal (normal world code strength)
-  "Bend NORMAL by the relief field CODE at WORLD, by STRENGTH."
+(define-shader-function relief-normal (normal world code strength pattern fade)
+  "Bend NORMAL by the relief CODE and laid PATTERN at WORLD, by STRENGTH."
   (let* ((helper (if (< (abs (swizzle normal :z)) 0.9)
                      (vec3 0.0 0.0 1.0) (vec3 1.0 0.0 0.0)))
          (tangent (normalize (cross-product normal helper)))
          (bitangent (cross-product normal tangent))
-         (step 0.04)
-         (here (material-relief-height code world))
-         (along (material-relief-height code (+ world (* tangent step))))
-         (across (material-relief-height code (+ world (* bitangent step))))
+         ;; Fine enough to resolve a mortar joint's bevel.
+         (step 0.015)
+         (here (surface-height code pattern normal world fade))
+         (along (surface-height code pattern normal
+                                (+ world (* tangent step)) fade))
+         (across (surface-height code pattern normal
+                                 (+ world (* bitangent step)) fade))
          (slope (* strength 0.09)))
     (normalize (- normal (* (+ (* tangent (- along here))
                                (* bitangent (- across here)))
@@ -462,7 +526,9 @@ the figure stays clear and only its far reaches recede."
               (shadow-sample :vec3 :location 4
                              :quantity quantities:shadow-coordinate :unit :one)
               (material-tone :vec3 :location 5 :interpolation :flat)
-              (material-surface :vec4 :location 6 :interpolation :flat))
+              (material-surface :vec4 :location 6 :interpolation :flat)
+              (material-pattern :vec4 :location 7 :interpolation :flat)
+              (material-mortar :vec4 :location 8 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -482,15 +548,40 @@ the figure stays clear and only its far reaches recede."
          (strength (swizzle material-surface :y))
          (roughness (swizzle material-surface :z))
          (wear (swizzle material-surface :w))
-         (height (material-relief-height relief world))
-         (bent (relief-normal normal world relief strength))
-         ;; Hollows of the relief hold shade and dirt; convex edges are
-         ;; worn lighter and concave ones gather darker (#HYBFRT).
-         (tone (* material-tone
-                  (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear))))
          (eye (representation camera-position))
          (forward (representation (swizzle camera-forward :xyz)))
          (divisor (swizzle (representation render-parameters) :z))
+         ;; A laid pattern fades out where its joints would be finer than
+         ;; pixels; an orthographic view keeps it.
+         (to-eye (- (swizzle eye :xyz) world))
+         (distance (mix 20.0 (sqrt (dot to-eye to-eye)) divisor))
+         (fade (- 1.0 (smoothstep 40.0 120.0
+                                  (* distance (/ (swizzle material-pattern :y)
+                                                 4.0)))))
+         (laid (laid-pattern material-pattern normal world))
+         (height (surface-height relief material-pattern normal world fade))
+         (bent (relief-normal normal world relief strength
+                              material-pattern fade))
+         (mortar-tone (swizzle material-mortar :xyz))
+         (element-tone
+           (* (if (> (swizzle laid :w) 0.5)
+                  (if (> (swizzle material-pattern :x) 3.5)
+                      mortar-tone material-tone)
+                  material-tone)
+              (+ 1.0 (* 2.0 (swizzle material-mortar :w)
+                        (- (swizzle laid :y) 0.5)))))
+         (joint-tone (if (> (swizzle material-pattern :x) 3.5)
+                         (* mortar-tone 0.6) mortar-tone))
+         (laid-tone (mix joint-tone element-tone (swizzle laid :x)))
+         (base-tone (if (< (swizzle material-pattern :x) 0.5)
+                        material-tone
+                        (mix (mix material-tone mortar-tone
+                                  (swizzle material-pattern :w))
+                             laid-tone fade)))
+         ;; Hollows of the relief hold shade and dirt; convex edges are
+         ;; worn lighter and concave ones gather darker (#HYBFRT).
+         (tone (* base-tone
+                  (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear))))
          (view (normalize (mix (- forward) (- (swizzle eye :xyz) world)
                                divisor)))
          (radiance
@@ -546,7 +637,9 @@ the figure stays clear and only its far reaches recede."
                (shadow-sample-output :vec3 :location 4
                                      :quantity quantities:shadow-coordinate :unit :one)
                (material-tone-output :vec3 :location 5 :interpolation :flat)
-               (material-surface-output :vec4 :location 6 :interpolation :flat))
+               (material-surface-output :vec4 :location 6 :interpolation :flat)
+               (material-pattern-output :vec4 :location 7 :interpolation :flat)
+               (material-mortar-output :vec4 :location 8 :interpolation :flat))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (terrain-appearances :storage-buffer :binding 3 :element :uvec2)
@@ -577,57 +670,58 @@ the figure stays clear and only its far reaches recede."
          (tone-total
            (+ (terrain-material-sample
                code-0 (ldb (byte 1 0) sample-mask)
-               (buffer-element material-descriptors code-0) normal)
+               (buffer-element material-descriptors (+ code-0 code-0)) normal)
               (terrain-material-sample
                code-1 (ldb (byte 1 1) sample-mask)
-               (buffer-element material-descriptors code-1) normal)
+               (buffer-element material-descriptors (+ code-1 code-1)) normal)
               (terrain-material-sample
                code-2 (ldb (byte 1 2) sample-mask)
-               (buffer-element material-descriptors code-2) normal)
+               (buffer-element material-descriptors (+ code-2 code-2)) normal)
               (terrain-material-sample
                code-3 (ldb (byte 1 3) sample-mask)
-               (buffer-element material-descriptors code-3) normal)
+               (buffer-element material-descriptors (+ code-3 code-3)) normal)
               (terrain-material-sample
                code-4 (ldb (byte 1 4) sample-mask)
-               (buffer-element material-descriptors code-4) normal)
+               (buffer-element material-descriptors (+ code-4 code-4)) normal)
               (terrain-material-sample
                code-5 (ldb (byte 1 5) sample-mask)
-               (buffer-element material-descriptors code-5) normal)
+               (buffer-element material-descriptors (+ code-5 code-5)) normal)
               (terrain-material-sample
                code-6 (ldb (byte 1 6) sample-mask)
-               (buffer-element material-descriptors code-6) normal)
+               (buffer-element material-descriptors (+ code-6 code-6)) normal)
               (terrain-material-sample
                code-7 (ldb (byte 1 7) sample-mask)
-               (buffer-element material-descriptors code-7) normal)))
+               (buffer-element material-descriptors (+ code-7 code-7)) normal)))
          (material-tone
            (/ (swizzle tone-total :xyz) (max (swizzle tone-total :w) 1.0)))
-         (surface-0 (terrain-surface-pick
-                      (uint 0.0) code-0 (ldb (byte 1 0) sample-mask)
-                      (buffer-element material-descriptors code-0)))
-         (surface-1 (terrain-surface-pick
-                      surface-0 code-1 (ldb (byte 1 1) sample-mask)
-                      (buffer-element material-descriptors code-1)))
-         (surface-2 (terrain-surface-pick
-                      surface-1 code-2 (ldb (byte 1 2) sample-mask)
-                      (buffer-element material-descriptors code-2)))
-         (surface-3 (terrain-surface-pick
-                      surface-2 code-3 (ldb (byte 1 3) sample-mask)
-                      (buffer-element material-descriptors code-3)))
-         (surface-4 (terrain-surface-pick
-                      surface-3 code-4 (ldb (byte 1 4) sample-mask)
-                      (buffer-element material-descriptors code-4)))
-         (surface-5 (terrain-surface-pick
-                      surface-4 code-5 (ldb (byte 1 5) sample-mask)
-                      (buffer-element material-descriptors code-5)))
-         (surface-6 (terrain-surface-pick
-                      surface-5 code-6 (ldb (byte 1 6) sample-mask)
-                      (buffer-element material-descriptors code-6)))
-         (surface-7 (terrain-surface-pick
-                      surface-6 code-7 (ldb (byte 1 7) sample-mask)
-                      (buffer-element material-descriptors code-7)))
+         (chosen-0 (terrain-code-pick (uint 0.0) code-0
+                                        (ldb (byte 1 0) sample-mask)))
+         (chosen-1 (terrain-code-pick chosen-0 code-1
+                                        (ldb (byte 1 1) sample-mask)))
+         (chosen-2 (terrain-code-pick chosen-1 code-2
+                                        (ldb (byte 1 2) sample-mask)))
+         (chosen-3 (terrain-code-pick chosen-2 code-3
+                                        (ldb (byte 1 3) sample-mask)))
+         (chosen-4 (terrain-code-pick chosen-3 code-4
+                                        (ldb (byte 1 4) sample-mask)))
+         (chosen-5 (terrain-code-pick chosen-4 code-5
+                                        (ldb (byte 1 5) sample-mask)))
+         (chosen-6 (terrain-code-pick chosen-5 code-6
+                                        (ldb (byte 1 6) sample-mask)))
+         (chosen-7 (terrain-code-pick chosen-6 code-7
+                                        (ldb (byte 1 7) sample-mask)))
+         ;; The first sampled material's surface and pattern speak for the
+         ;; whole triangle; a material's two rows sit at twice its code.
+         (surface-row (buffer-element material-descriptors (+ chosen-7 chosen-7)))
+         (pattern-row (buffer-element material-descriptors
+                                      (+ (+ chosen-7 chosen-7) (uint 1.0))))
          (material-surface
-           (terrain-surface-vector surface-7 sample-mask
+           (terrain-surface-vector (swizzle surface-row :w) sample-mask
                                    (ldb (byte 8 8) (swizzle record :w))))
+         (material-pattern (terrain-pattern-vector (swizzle pattern-row :x)))
+         (material-mortar
+           (vec4 (unpack-terrain-tone (swizzle pattern-row :y))
+                 (/ (float (ldb (byte 8 20) (swizzle pattern-row :x))) 255.0)))
          (divisor (swizzle (representation render-parameters) :z))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection divisor))
@@ -653,7 +747,9 @@ the figure stays clear and only its far reaches recede."
                        (swizzle light :z))
                  :quantity quantities:shadow-coordinate :unit :one))
     (set-output material-tone-output material-tone)
-    (set-output material-surface-output material-surface)))
+    (set-output material-surface-output material-surface)
+    (set-output material-pattern-output material-pattern)
+    (set-output material-mortar-output material-mortar)))
 
 (define-live-shader terrain-shadow-vertex-specification
     (:stage :vertex
