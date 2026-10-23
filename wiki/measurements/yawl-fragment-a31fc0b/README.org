@@ -1,0 +1,134 @@
+#+title: Terrain relief: three height evaluations versus one
+
+Evidence for #57KXBH. Yawl, Apple M5, native Metal 4, macOS 27.2.
+Source revision =a31fc0b53d7126f5710f420005e07a5fbfdf6548=; the production
+renderer is unchanged from #FIW26N. Thread:
+https://ampcode.com/threads/T-01a16974-f1f6-7698-9082-658f7825c505
+
+* Experiment
+
+The terrain fragment computes =surface-height= once for tone and twice
+more, at tangent offsets of 0.015 cells, for =relief-normal=. Each sample
+evaluates the material's procedural fields and laid pattern. Merely fading
+the final normal or color would leave these evaluations in the program.
+
+=probe.lisp= changes only bindings in the existing fragment source AST:
+
+- =control=: reparse without changing any bindings.
+- =normal-off=: use the geometric normal; keep the original height/tone.
+- =relief-off=: also replace height with 0.5. This is an ablation, not an
+  acceptable appearance-preserving optimization.
+- =screen-gradient=: keep the original height, derive its surface gradient
+  from screen-space derivatives of height and world position, and apply
+  the original strength. There are no additional procedural height samples.
+
+All other material, shadow, atmosphere, voxel lighting, geometry and
+post-processing paths remain unchanged. The candidate is not enabled in
+the production renderer. Load the probe only in a disposable process.
+
+For a normal N, world derivatives X and Y, and height derivatives hx and
+hy, set R1 = cross(Y,N), R2 = cross(N,X). The tangent gradient is
+=(R1*hx + R2*hy) / dot(X,R1)=. The signed denominator preserves orientation
+under mirrored screen bases. A degenerate projected surface returns N.
+CPU validation recovered an independent linear field's gradient for 1,000
+random skewed, scaled and mirrored tangent bases. This checks the formula,
+not filtering quality on nonlinear procedural fields.
+
+* Replay evidence
+
+Each native-1080 seed-7 live-alpine capture uses the same stationary camera,
+120 warmup frames and one uncaptured measurement frame before capture.
+The official =gpudebug= profiler requests =high= GPU state and overlapping
+execution. The tool reports =max= but =Consistent state: no=, so these are
+not locked-frequency measurements. Stage intervals overlap and must not
+be added as an exclusive frame budget.
+
+The probes measured:
+
+| Variant         | Whole GPU ms | Scene vertex ms | Scene fragment ms |
+|-----------------+--------------+-----------------+-------------------|
+| Fresh control   |         8.58 |            3.20 |              4.38 |
+| Normal off      |         7.29 |            3.27 |              3.14 |
+| Relief off      |         6.75 |            3.20 |              2.63 |
+| Screen gradient | 7.42--7.44   |            3.21 |              3.24 |
+
+The candidate was replay-profiled twice; the other variants once in this
+cohort. A fresh control reproduces the earlier 8.56--8.68 ms measurements.
+All variants have the same primitive and actual vertex invocation counts.
+The candidate reduces the fragment interval by 26% and whole-GPU replay
+by about 13%. This is a shader-cost result, not a live-frame-rate claim.
+
+The screen-gradient fragment compiles to 3,781 instructions and 92 temporary
+registers versus 8,669 instructions and 108 registers in the original.
+Both report zero spilling. Static instructions are not executed instruction
+counts; the timing experiment, not the instruction ratio, measures benefit.
+Source-line cost and occupancy remain unmeasured.
+
+* Ordinary runtime does not yet demonstrate the replay gain
+
+Four independent uninstrumented native-1080 runs, in control/candidate/
+candidate/control order, each used 120 warmup and 300 measured frames.
+No capture or profiling session overlapped these runs. This harness
+serializes each frame through GPU completion; it is not presentation FPS.
+
+| Variant/run       | GPU mean ms | GPU median ms | CPU encode mean ms | Completion mean ms |
+|-------------------+-------------+---------------+--------------------+--------------------|
+| Control 1         |       12.74 |         14.66 |               2.14 |              15.30 |
+| Screen gradient 1 |       13.06 |         14.68 |               2.18 |              15.66 |
+| Screen gradient 2 |       13.26 |         14.79 |               2.16 |              15.84 |
+| Control 2         |       13.59 |         15.06 |               2.58 |              16.61 |
+
+Both variants average about 13.16 ms GPU across their two runs. This
+cohort does not demonstrate a runtime gain. Runtime GPU clocks were not
+measured or pinned; clock policy, scheduling and other differences from
+replay are possible explanations, not established diagnoses. Retain this
+contradictory evidence rather than promoting the 13% replay reduction as
+a measured game speedup. The four original =runtime-*.sexp= files and
+=runtime-summary.json= preserve these results.
+
+* Appearance and limits
+
+The captured alpine view retains its terrain, material regions and fine
+relief. Full images and a 640x360 unscaled crop were inspected. Against the
+earlier control, excluding the top 64 HUD rows, screen-gradient mean RGB
+absolute difference is 1.133/255; maximum channel difference 46; 12,891
+pixels differ by more than 8/255. It is not pixel-equivalent. Disabling
+normal relief gives mean difference 1.197/255 and 20,926 pixels above 8.
+Disabling all height relief gives 1.500/255 and 41,551 pixels above 8.
+The fresh control is pixel-identical to the earlier control below the HUD.
+
+Screen derivatives sample one-pixel separations, not the old fixed world
+offset. Fine detail can soften or alias with distance, grazing angle and
+resolution; this is not a band-limited filter. The single alpine view does
+not establish close-up mortar/cloth quality, camera-motion stability,
+temporal-upscaler behavior or acceptable appearance on every material.
+The candidate must pass those checks before replacing the normal routine.
+An analytic value-and-gradient noise evaluator or a filtered baked field
+is an alternative if screen derivatives fail them.
+
+* Reproduce
+
+Build the capture helper as described in
+[[file:../yawl-gpudebug-7480638/README.org][the headless profiling bundle]], then run from the checkout root:
+
+#+begin_src sh
+MTL_CAPTURE_ENABLED=1 BENCH_LIBRARY=1 BENCH_MODE=native-1x \
+BENCH_SIZES=1920x1080 BENCH_SCENES=live-alpine BENCH_REPEATS=1 \
+BENCH_WARMUP=120 BENCH_FRAMES=1 FRAGMENT_PROBE=screen-gradient \
+TERRAIN_CAPTURE="$PWD/build/fragment.gputrace" \
+BENCH_OUTPUT="$PWD/build/fragment-capture.sexp" \
+./env sbcl --script wiki/measurements/yawl-fragment-a31fc0b/capture.lisp
+#+end_src
+
+Use =gpudebug= and the earlier bundle's =export.py= to replay, profile and
+export counters. For uninstrumented completion throughput, omit
+=MTL_CAPTURE_ENABLED= and =TERRAIN_CAPTURE=, set =BENCH_FRAMES=300=, and run
+=benchmark.lisp= instead. Select a variant with =FRAGMENT_PROBE=.
+
+Full captures, images and logs remain in the source thread's
+=.amp/in/artifacts/fragment-probe/=. Retained JSON consists of actual CLI
+responses, not synthetic timing estimates: =raw.json.gz= holds the final
+response per query, =summary.json= selected metrics for all five profiles,
+and =image-diff.json= the image comparison. All three Lisp scripts pass
+strict Parinfer; the final capture harness produced the fresh control
+successfully. No production shader or mesh representation was changed.

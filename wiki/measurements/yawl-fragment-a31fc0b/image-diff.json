@@ -1,0 +1,23 @@
+[
+  {
+    "variant": "normal-off",
+    "excluded_top_rows": 64,
+    "mean_absolute_channel_difference": 1.1971924896106736,
+    "max_channel_difference": 40,
+    "pixels_over_8": 20926
+  },
+  {
+    "variant": "relief-off",
+    "excluded_top_rows": 64,
+    "mean_absolute_channel_difference": 1.500095178532371,
+    "max_channel_difference": 38,
+    "pixels_over_8": 41551
+  },
+  {
+    "variant": "screen-gradient",
+    "excluded_top_rows": 64,
+    "mean_absolute_channel_difference": 1.1333430733267715,
+    "max_channel_difference": 46,
+    "pixels_over_8": 12891
+  }
+]

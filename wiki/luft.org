@@ -1536,6 +1536,33 @@ counts do not establish which procedural field dominates execution.
 Raw counters, reproducible probes and limitations live in
 [[file:measurements/yawl-gpudebug-7480638/README.org][the headless Metal measurement bundle]].
 
+******* DONE Measure relief's repeated fragment work before removing detail
+:PROPERTIES:
+:ID: 57KXBH
+:END:
+
+#FIW26N's persistent fragment interval has a concrete reducible term:
+surface height is evaluated three times, once for tone and twice more
+for tangent-space finite differences. Removing only normal perturbation
+reduces native-1080 live-alpine fragment replay from 4.38 to 3.14 ms;
+removing height variation as well reaches 2.63 ms. These are ablations,
+not appearance-preserving changes.
+
+A disposable prototype recovers the surface gradient from screen-space
+derivatives of the existing height and world position. It retains relief
+with one height evaluation: 3.24 ms fragment, 7.42--7.44 ms whole-GPU replay
+against a fresh 8.58 ms control. Static fragment instructions fall from
+8,669 to 3,781. The alpine image remains close, not identical; pixel-step
+derivatives still need close-up, grazing, motion and temporal checks.
+
+Four unprofiled 300-frame runs in control/candidate/candidate/control order
+average about 13.16 ms GPU for both variants. Thus the replay improvement
+is not yet a demonstrated game speedup. Runtime clocks and scheduling
+remain unmeasured; do not declare them the cause. The prototype stays out
+of the default renderer. Reproduction, images' error metrics and both
+positive and negative timing evidence live in
+[[file:measurements/yawl-fragment-a31fc0b/README.org][the fragment-relief measurement bundle]].
+
 ******* NEXT Make distant detail retire its shading work too
 :PROPERTIES:
 :ID: IE3WMY
@@ -1546,6 +1573,10 @@ proxy: geometry compression leaves almost all fragment work intact.
 Flattening and compressing the entire live-alpine scene reached 157,694
 triangles and 11.43--11.81 ms GPU, but changed near geometry and the shadow
 path: it is an approximate control, not a shipped distance policy.
+
+First follow #57KXBH: avoid repeated field evaluation without deleting the
+field, and reconcile replay savings with ordinary runtime before claiming
+a frame-rate improvement.
 
 The next experiment should combine a small spatial selection unit with
 feature-sized geometry and shading tiers. Moppe's useful precedent is
