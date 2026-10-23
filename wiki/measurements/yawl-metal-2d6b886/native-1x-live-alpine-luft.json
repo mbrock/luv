@@ -1,0 +1,418 @@
+{
+  "pid": "81178",
+  "frame_numbers": [
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77,
+    78,
+    79,
+    80,
+    81,
+    82,
+    83,
+    84,
+    85,
+    86,
+    87,
+    88,
+    89,
+    90,
+    91,
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    99,
+    100,
+    101,
+    102,
+    103,
+    104,
+    105,
+    106,
+    107,
+    108,
+    109,
+    110
+  ],
+  "passes": [
+    {
+      "pass": "Command Buffer 0:luft HDR presentation",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.78787958,
+      "median_ms": 0.81225
+    },
+    {
+      "pass": "Command Buffer 0:luft HDR presentation",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.01099798,
+      "median_ms": 0.0115625
+    },
+    {
+      "pass": "Command Buffer 0:luft lens bright",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.04278536,
+      "median_ms": 0.0415
+    },
+    {
+      "pass": "Command Buffer 0:luft lens bright",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.00394334,
+      "median_ms": 0.003896
+    },
+    {
+      "pass": "Command Buffer 0:luft lens horizontal",
+      "stage": "Fragment",
+      "n": 200,
+      "segments": 200,
+      "mean_ms": 0.01521713,
+      "median_ms": 0.015625
+    },
+    {
+      "pass": "Command Buffer 0:luft lens horizontal",
+      "stage": "Vertex",
+      "n": 200,
+      "segments": 200,
+      "mean_ms": 0.003762915,
+      "median_ms": 0.003791
+    },
+    {
+      "pass": "Command Buffer 0:luft lens shafts",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.05739325,
+      "median_ms": 0.058625
+    },
+    {
+      "pass": "Command Buffer 0:luft lens shafts",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.00368458,
+      "median_ms": 0.003708
+    },
+    {
+      "pass": "Command Buffer 0:luft lens vertical",
+      "stage": "Fragment",
+      "n": 200,
+      "segments": 200,
+      "mean_ms": 0.01510644,
+      "median_ms": 0.015667
+    },
+    {
+      "pass": "Command Buffer 0:luft lens vertical",
+      "stage": "Vertex",
+      "n": 200,
+      "segments": 200,
+      "mean_ms": 0.003727325,
+      "median_ms": 0.0036875
+    },
+    {
+      "pass": "Command Buffer 0:luft native viewmodel",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.00067291,
+      "median_ms": 0.000708
+    },
+    {
+      "pass": "Command Buffer 0:luft native viewmodel",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.01070132,
+      "median_ms": 0.010957999999999999
+    },
+    {
+      "pass": "Command Buffer 0:luft post-temporal HDR flame composite",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.07659837,
+      "median_ms": 0.072104
+    },
+    {
+      "pass": "Command Buffer 0:luft post-temporal HDR flame composite",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.00536922,
+      "median_ms": 0.0049375
+    },
+    {
+      "pass": "Command Buffer 0:luft site streams",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 6.81690036,
+      "median_ms": 7.301271
+    },
+    {
+      "pass": "Command Buffer 0:luft site streams",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 4.96828333,
+      "median_ms": 5.311166999999999
+    },
+    {
+      "pass": "Command Buffer 0:luft sun shadow",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.13762875,
+      "median_ms": 0.140958
+    },
+    {
+      "pass": "Command Buffer 0:luft sun shadow",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.67567544,
+      "median_ms": 0.7036875
+    },
+    {
+      "pass": "Command Buffer 0:native world panels",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.00091619,
+      "median_ms": 0.000959
+    },
+    {
+      "pass": "Command Buffer 0:native world panels",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.01066626,
+      "median_ms": 0.011063
+    },
+    {
+      "pass": "Command Buffer 0:world instruments",
+      "stage": "Fragment",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.00774667,
+      "median_ms": 0.007833
+    },
+    {
+      "pass": "Command Buffer 0:world instruments",
+      "stage": "Vertex",
+      "n": 100,
+      "segments": 100,
+      "mean_ms": 0.00203548,
+      "median_ms": 0.0020629999999999997
+    }
+  ],
+  "shader_samples": [
+    {
+      "name": "star_fragment_specification (0)",
+      "stage": "Fragment",
+      "n": 101,
+      "duration_ms": 679.468418
+    },
+    {
+      "name": "terrain_vertex_specification (1)",
+      "stage": "Vertex",
+      "n": 103,
+      "duration_ms": 496.2809149999999
+    },
+    {
+      "name": "luvcraft_sky_fragment_specification (4)",
+      "stage": "Fragment",
+      "n": 2288,
+      "duration_ms": 248.9009480000005
+    },
+    {
+      "name": "present_fragment_specification (0)",
+      "stage": "Fragment",
+      "n": 100,
+      "duration_ms": 78.23341200000003
+    },
+    {
+      "name": "terrain_shadow_vertex_specification (9)",
+      "stage": "Vertex",
+      "n": 529,
+      "duration_ms": 66.41190900000001
+    },
+    {
+      "name": "unmapped",
+      "stage": "",
+      "n": 3509,
+      "duration_ms": 42.49136499999985
+    },
+    {
+      "name": "roundrect_fragment_specification (0)",
+      "stage": "Fragment",
+      "n": 1224,
+      "duration_ms": 15.687712000000014
+    },
+    {
+      "name": "slug_atlas_fragment_specification (23)",
+      "stage": "Fragment",
+      "n": 579,
+      "duration_ms": 12.122212999999997
+    },
+    {
+      "name": "hdr_copy_fragment_specification (0)",
+      "stage": "Fragment",
+      "n": 100,
+      "duration_ms": 7.180462000000001
+    },
+    {
+      "name": "sun_shaft_fragment_specification (5)",
+      "stage": "Fragment",
+      "n": 100,
+      "duration_ms": 5.293073999999999
+    },
+    {
+      "name": "bloom_bright_fragment_specification (2)",
+      "stage": "Fragment",
+      "n": 100,
+      "duration_ms": 3.766588
+    },
+    {
+      "name": "gradient_roundrect_fragment_specification (2)",
+      "stage": "Fragment",
+      "n": 998,
+      "duration_ms": 3.300206000000001
+    },
+    {
+      "name": "bloom_vertical_fragment_specification (4)",
+      "stage": "Fragment",
+      "n": 200,
+      "duration_ms": 2.3884060000000003
+    },
+    {
+      "name": "bloom_horizontal_fragment_specification (3)",
+      "stage": "Fragment",
+      "n": 200,
+      "duration_ms": 2.3879219999999988
+    },
+    {
+      "name": "direct_mirror_slug_vertex_specification (24)",
+      "stage": "Vertex",
+      "n": 100,
+      "duration_ms": 0.2724979999999999
+    },
+    {
+      "name": "image_roundrect_fragment_specification (8)",
+      "stage": "Fragment",
+      "n": 94,
+      "duration_ms": 0.185498
+    },
+    {
+      "name": "direct_widget_analytic_vertex_specification (1)",
+      "stage": "Vertex",
+      "n": 74,
+      "duration_ms": 0.15250200000000005
+    },
+    {
+      "name": "direct_widget_solid_vertex_specification (5)",
+      "stage": "Vertex",
+      "n": 37,
+      "duration_ms": 0.06267000000000002
+    },
+    {
+      "name": "direct_widget_gradient_vertex_specification (3)",
+      "stage": "Vertex",
+      "n": 35,
+      "duration_ms": 0.062171000000000025
+    },
+    {
+      "name": "mcluv_solid_fragment_specification (4)",
+      "stage": "Fragment",
+      "n": 29,
+      "duration_ms": 0.05133400000000002
+    },
+    {
+      "name": "present_vertex_specification (1)",
+      "stage": "Vertex",
+      "n": 25,
+      "duration_ms": 0.045750000000000006
+    },
+    {
+      "name": "direct_widget_image_vertex_specification (9)",
+      "stage": "Vertex",
+      "n": 13,
+      "duration_ms": 0.020331000000000002
+    }
+  ],
+  "spill_events_by_bytes": {}
+}

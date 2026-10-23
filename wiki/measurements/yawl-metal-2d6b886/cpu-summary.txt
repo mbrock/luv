@@ -1,0 +1,72 @@
+build/yawl-default.sexp ALPINE r1 CPU 0.952 GPU 8.103 FPS 102.9
+  luft HDR presentation 0.251
+  luft site streams 0.116
+  luft sun shadow 0.161
+build/yawl-default.sexp MEADOW r1 CPU 0.736 GPU 7.521 FPS 113.1
+  luft HDR presentation 0.236
+  luft site streams 0.076
+  luft sun shadow 0.113
+build/yawl-default.sexp CAVE r1 CPU 0.844 GPU 8.964 FPS 95.8
+  luft HDR presentation 0.243
+  luft site streams 0.080
+  luft sun shadow 0.131
+build/yawl-default.sexp BALLS r1 CPU 1.194 GPU 7.764 FPS 99.9
+  luft HDR presentation 0.351
+  luft site streams 0.069
+  luft sun shadow 0.146
+build/yawl-default.sexp TURTLE r1 CPU 5.577 GPU 8.919 FPS 61.0
+  luft HDR presentation 1.205
+  luft site streams 0.389
+  luft sun shadow 0.741
+build/yawl-default.sexp TERMINAL r1 CPU 2.220 GPU 8.222 FPS 86.5
+  luft HDR presentation 0.637
+  luft site streams 0.220
+  luft sun shadow 0.360
+build/yawl-default.sexp COMPANION r1 CPU 3.662 GPU 8.990 FPS 69.3
+  luft HDR presentation 0.770
+  luft site streams 0.205
+  luft sun shadow 0.452
+build/yawl-default.sexp LIVE-ALPINE r1 CPU 5.055 GPU 15.150 FPS 47.0
+  luft HDR presentation 0.468
+  luft site streams 1.588
+  luft sun shadow 2.221
+build/yawl-default.sexp LIVE-MEADOW r1 CPU 4.156 GPU 15.104 FPS 48.0
+  luft HDR presentation 0.585
+  luft site streams 1.123
+  luft sun shadow 1.401
+build/yawl-native-1x.sexp ALPINE r1 CPU 3.596 GPU 7.350 FPS 84.5
+  luft HDR presentation 1.160
+  luft site streams 0.417
+  luft sun shadow 0.674
+build/yawl-native-1x.sexp MEADOW r1 CPU 1.176 GPU 10.138 FPS 84.5
+  luft HDR presentation 0.385
+  luft site streams 0.119
+  luft sun shadow 0.224
+build/yawl-native-1x.sexp CAVE r1 CPU 3.380 GPU 6.888 FPS 89.2
+  luft HDR presentation 1.173
+  luft site streams 0.317
+  luft sun shadow 0.626
+build/yawl-native-1x.sexp BALLS r1 CPU 3.495 GPU 8.056 FPS 78.1
+  luft HDR presentation 1.058
+  luft site streams 0.239
+  luft sun shadow 0.573
+build/yawl-native-1x.sexp TURTLE r1 CPU 4.305 GPU 8.072 FPS 75.1
+  luft HDR presentation 1.081
+  luft site streams 0.292
+  luft sun shadow 0.591
+build/yawl-native-1x.sexp TERMINAL r1 CPU 3.324 GPU 6.654 FPS 91.1
+  luft HDR presentation 1.169
+  luft site streams 0.341
+  luft sun shadow 0.595
+build/yawl-native-1x.sexp COMPANION r1 CPU 4.211 GPU 7.633 FPS 75.4
+  luft HDR presentation 1.049
+  luft site streams 0.212
+  luft sun shadow 0.541
+build/yawl-native-1x.sexp LIVE-ALPINE r1 CPU 3.022 GPU 12.807 FPS 60.9
+  luft HDR presentation 0.268
+  luft site streams 1.163
+  luft sun shadow 1.339
+build/yawl-native-1x.sexp LIVE-MEADOW r1 CPU 2.203 GPU 13.511 FPS 61.0
+  luft HDR presentation 0.314
+  luft site streams 0.629
+  luft sun shadow 0.932

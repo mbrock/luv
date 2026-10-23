@@ -1,0 +1,150 @@
+#+title: Yawl M5 Metal measurements, 2026-10-23
+
+This bundle supports #E6JYVE in =wiki/frame-performance.org=, alongside
+temple's #B4E7Z5 and chapel's #4C7L3C. Measured revision:
+=2d6b886ecb20de463a0931b2876b4eb993edde74=, benchmark blob
+=e7a4c9b783f3efe601566e922efe0a942f577704=.
+
+Hardware: MacBook Air Mac17,3; Apple M5, 10 GPU cores, 16 GB memory;
+macOS 27.2 (26B118); Xcode 27.1 (27A9275); native Metal 4.
+
+* Contents and cohorts
+
+- =default.sexp= and =native-1x.sexp=: the full shipped benchmark matrices,
+  38 cases each, 720p/1080p, 60 warmup / 300 measured. The default matrix
+  overlapped exploratory profiling in places; do not call it clean.
+- =clean-default.sexp= and =clean-native-1x.sexp=: Luft only, alpine/cave/
+  live-alpine at 1080p, two repeats, 60 / 300 frames, no profiler. The
+  included =luft-bench.lisp= skips reference rows, leaving renderer settings
+  unchanged, and exits immediately after results to avoid teardown hangs.
+  Each has six measured cases; metadata-only forms without =:backend= are
+  skipped-old placeholders from the outer benchmark loop, not measurements.
+- =traced-default.sexp= and =traced-native-1x.sexp=: 1080p focused traces,
+  10 / 100 frames. Default contains reference rows from the initial
+  mixed-host trace harness; those are not used for shader diagnosis. Do not compare
+  instrumented throughput directly against clean throughput.
+- =cpu-summary.txt= and =clean-summary.txt=: host pass means from those
+  records. CPU encoding does not include GPU wait; CPU frame also includes
+  simulation. Preserve that distinction.
+- Six =*-luft.json= files: GPU stage-channel summaries and mapped shader
+  sample weights, filtered to the benchmark PID. Vertex/fragment channels
+  can overlap. Shader weights are not exclusive per-shader timings.
+- Matching directories contain compressed original =xctrace export= XML
+  for GPU intervals, shader registration, shader profile and spill events.
+  These are full-system exports; the analyzer's PID filter is essential.
+  They preserve trace evidence without committing the multi-GB packages.
+- =draw-counts.sexp=: command counts across 120 frames (20 warmup + 100
+  measured). Divide each count by 120 for the figure's per-frame counts.
+  The second value for indexed commands is index-count × instance-count,
+  not actual vertex invocations. No trace was running for this cohort.
+- =counter-info.xml=: the sole counter identity exported for the configured
+  profiles, RT Unit Active. The large time series was not retained in Git;
+  it was zero for this raster workload. =device-probe.log= independently
+  records the public API's timestamp-only counter set.
+- =spills.xml=: an example empty spill-event table. Every focused Luft
+  export has an empty table; absence of events does not give register usage.
+- =luft-site-streams.metal.gz=: generated site-stream module from the final
+  native-1x trace run, containing terrain vertex and star fragment programs.
+  This is source, not disassembly or instruction/register statistics.
+- =capture-metadata.plist=: finalized Luft alpine capture metadata,
+  =DYCaptureEngine.captured_frames_count=1=. The actual 66 MB document stays
+  local. Capture success does not establish successful replay or analysis.
+
+Full native and traced-default matrices produced complete records but hung
+on shutdown; the idle supervisors were sampled and terminated afterwards.
+Clean runs and native Luft-only traces exited successfully. No timings
+were manufactured from shutdown or setup. Frequencies were not pinned;
+this fanless machine's low-load CPU/GPU distributions vary substantially.
+Stored S-expressions have printer trailing whitespace removed; their
+measurement values are unchanged.
+
+* Reproduce the clean completion measurements
+
+From the checkout root, after =make=:
+
+#+begin_src sh
+for mode in default native-1x; do
+  BENCH_LIBRARY=1 BENCH_MODE=$mode BENCH_SIZES=1920x1080 \
+  BENCH_SCENES=alpine,cave,live-alpine BENCH_REPEATS=2 \
+  BENCH_WARMUP=60 BENCH_FRAMES=300 \
+  BENCH_OUTPUT=build/yawl-clean-$mode.sexp \
+  ./env sbcl --script wiki/measurements/yawl-metal-2d6b886/luft-bench.lisp
+done
+#+end_src
+
+The full matrices use =scripts/bench-gpu-fps.lisp= directly, with its default
+scene/size lists and =BENCH_MODE=default= or =native-1x=. Do not set Linux SDL
+or Vulkan environment variables on this Mac.
+
+* Trace acquisition and audit
+
+The Apple CLI is
+=/Applications/Xcode.app/Contents/Developer/usr/bin/xctrace=. Use the
+absolute path inside Nix: =xcrun xctrace= there did not locate it. A local
+benchmark hook set the native =MTL4CommandEncoder.label= from each HAL
+render-pass descriptor, via =labelEncoder= in =probe.m=. It also dumped
+generated MSL on shader-module creation. These hooks were measurement-local,
+not changes to the renderer or HAL. The original acquisition harness is
+retained in this thread's ignored =.amp/in/profile.lisp= and
+=.amp/in/luft-only.lisp=; the latter skips old-host cases.
+
+=counter-template.py= records the exploratory transformation of Apple's
+installed Metal System Trace template: shader profiling enabled, counter
+profile 1, device registry ID 4294968364. It writes to
+=.amp/in/counters.tracetemplate= and is machine/Xcode-specific, not a stable
+supported template API. Other tried configurations likewise did not yield
+usable raster hardware counters. Do not infer universal M5 counter support
+or lack of support from that result.
+
+The profiler was launched before each measurement, with a three-second
+lead-in, and awaited after the measurement:
+
+#+begin_src sh
+/Applications/Xcode.app/Contents/Developer/usr/bin/xctrace record \
+  --template .amp/in/counters.tracetemplate --all-processes \
+  --time-limit 12s --no-prompt --output PATH.trace
+sh wiki/measurements/yawl-metal-2d6b886/export-trace.sh PATH.trace
+TRACE_PID=80881 python3 wiki/measurements/yawl-metal-2d6b886/analyze-trace.py PATH
+#+end_src
+
+=export-trace.sh= documents the exact table schemas. The analyzer selects
+the final 100 scene frame numbers for PID 80881 (default) or 81178 (native),
+using those same frames for every pass. It sums fragmented intervals within
+each encoder/stage before averaging, then maps shader PC samples from those
+submissions to that process's shader-address registrations. Repeated passes
+with the same label are separate encoder invocations, not a combined frame
+cost. It does not attribute other desktop apps to Luft or sum overlapped GPU
+stage channels into a frame budget. Missing default shadow vertex events
+remain explicitly fewer than 100 (86 alpine, 84 cave, 93 live alpine); their
+means use observed events, not zeros or substitute warmup frames.
+
+To independently recalculate a retained summary without the original trace,
+expand that directory's four XML files into a scratch directory, then run
+the analyzer there with its recorded PID. Example:
+
+#+begin_src sh
+mkdir -p .amp/in/audit-live
+for table in gpu shader-list shader-profile spills; do
+  gzip -dc wiki/measurements/yawl-metal-2d6b886/default-live-alpine-luft/$table.xml.gz \
+    > .amp/in/audit-live/$table.xml
+done
+TRACE_PID=80881 python3 wiki/measurements/yawl-metal-2d6b886/analyze-trace.py .amp/in/audit-live
+cmp .amp/in/audit-live/summary.json \
+  wiki/measurements/yawl-metal-2d6b886/default-live-alpine-luft.json
+#+end_src
+
+The actual packages are under =.amp/in/artifacts/= in the measurement
+worktree: =default-{alpine,cave,live-alpine}-luft.trace=,
+=native-1x-{alpine,cave,live-alpine}-luft.trace=, and
+=default-alpine-luft.gputrace=. The GPU capture used
+=MTL_CAPTURE_ENABLED=1= and the capture functions in =probe.m=. Device
+support, successful finalization and frame metadata were checked; no
+compiled register counts, occupancy inspection or headless replay result
+is claimed. No system-wide toolchain installation was needed.
+
+* Verification
+
+=make= and =make test= passed before profiling and again after recording the
+results: strict Parinfer and 35 suites, including Metal shader validation.
+The investigation changes documentation/measurement artifacts only. It does
+not optimize the renderer and does not diagnose old Luvcraft's TAA pass.

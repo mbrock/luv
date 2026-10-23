@@ -927,3 +927,232 @@ Ordinary-session CPU/GPU clocks were not pinned, and temple has one
 Low-load tails and small mean differences should not be over-interpreted.
 Cave lantern lighting still is not visually equivalent between the games;
 live residency and default temporal algorithms/internal sizes also differ.
+
+* DONE Yawl M5: terrain stages, shadow submission, and MetalFX
+:PROPERTIES:
+:ID: E6JYVE
+:END:
+
+On 2026-10-23, yawl ran the shipped-temporal benchmark #4C7L3C and its
+=native-1x= control, then focused Apple Metal System Traces. This is a
+MacBook Air (Mac17,3), Apple M5 with 10 GPU cores and 16 GB unified memory,
+macOS 27.2 (26B118), Xcode 27.1 (27A9275), native Metal 4. The measured
+source is [[https://github.com/mbrock/luv/commit/2d6b886ecb20de463a0931b2876b4eb993edde74][2d6b886]], benchmark blob
+=e7a4c9b783f3efe601566e922efe0a942f577704=. It was fetched and checked out
+detached before building; later documentation does not change this cohort.
+Temple's M2 Pro fallback results remain in #B4E7Z5 and its shipped-temporal
+rerun is in #V0MTXB; both retain their original source cohorts and limits.
+
+** Which Apple tools actually worked
+
+| Tool | Observed result on yawl |
+|-
+| Metal System Trace / Instruments CLI | Works on the real Metal 4 workload; GPU vertex, fragment and compute intervals export successfully. No residency-set modeler assertion. |
+| Shader timeline / PC samples | Works; identifies terrain vertex, star fragment, shadow vertex, sky, presentation and MetalFX kernels. |
+| Public device performance counters | Only the =timestamp= set and =GPUTimestamp= are exposed by =MTLDevice.counterSets=. |
+| Instruments hardware counters | The configured profiles exported only =RT Unit Active=, zero for this raster workload. No usable occupancy, bandwidth, overdraw, vertex-invocation or fragment-invocation counters were obtained. |
+| Compiler spill-event trace | Export works; the six Luft traces contain no spill events. This is not a measured register count or proof that every shader is spill-free. |
+| Headless GPU capture | =MTL_CAPTURE_ENABLED=1= plus =MTLCaptureManager= finalized a 66 MB Luft alpine =.gputrace=; metadata records one captured frame. |
+| Headless capture replay / compiled shader statistics | Not obtained. Capturing a document does not establish working replay, register inspection or occupancy analysis. |
+| Offline Metal compiler | Installed and works; =make test= includes passing shader-validation. No system component was installed. |
+
+In particular, this run supplies *trace evidence*, not a hardware-counter
+explanation of bandwidth, occupancy or overdraw. Those questions remain
+open. Stage-channel duration includes scheduling and stalls, not just ALU
+execution. A source-level operation count is not a hardware counter.
+
+** Completion benchmark and controls
+
+The full default and native matrices each contain 38 cases, 60 warmup and
+300 measured frames per case, at 720p and 1080p. Serialized offscreen
+completion FPS is not monitor FPS. GPU time is command-buffer feedback;
+CPU encoding excludes the GPU wait. Default Luft renders 1440×810 for
+1920×1080 output, one sample and MetalFX temporal reconstruction. Native
+uses 1920×1080, one sample, no TAA. Default old Luvcraft uses its own
+1885×1060 temporal setup; old rows are reference only, not AA-quality parity.
+
+Each entry below is GPU mean milliseconds / serialized completion FPS,
+at 1920×1080 output. Full distributions and the other scenes/resolutions
+are in the [[file:measurements/yawl-metal-2d6b886/default.sexp][default]] and
+[[file:measurements/yawl-metal-2d6b886/native-1x.sexp][native-1x]] records.
+
+| Scene | Luft default | Luft native-1x | Old reference default | Old reference native-1x |
+|-
+| Finite alpine | 8.103 / 102.9 | 7.350 / 84.5 | 57.618 / 16.8 | 12.008 / 67.5 |
+| Cave + lantern | 8.964 / 95.8 | 6.888 / 89.2 | 57.889 / 16.8 | 8.053 / 79.6 |
+| Live alpine | 15.150 / 47.0 | 12.807 / 60.9 | 58.730 / 16.4 | 12.848 / 62.2 |
+| Live meadow | 15.104 / 48.0 | 13.511 / 61.0 | 58.312 / 16.4 | 11.272 / 70.1 |
+
+These are sequential, non-clock-locked runs on a fanless laptop. Some early
+exploratory traces overlapped the full default matrix, so it is a baseline
+with instrumentation contamination, not a clean A/B experiment. The native
+matrix completed all records but hung during shutdown and was terminated
+after sampling the idle process. Focused clean Luft-only repetitions below
+avoid both the profiler and old-renderer lifetime. Neither mean GPU time
+nor host time alone predicts completion FPS; distributions, wait/submit
+overhead and clock variation matter.
+
+Two further clean Luft-only repetitions used 60 warmup / 300 measured
+frames at 1080p, no trace, in default then native mode. Each table cell is
+run 1 ; run 2, GPU mean ms / completion FPS. These support the live-world
+direction without relying on the contaminated full default matrix; they
+are still sequential rather than randomized thermal/clock controls.
+
+| Scene | Clean default | Clean native-1x |
+|-
+| Finite alpine | 8.532 / 66.4 ; 9.249 / 64.8 | 7.378 / 85.3 ; 7.327 / 84.3 |
+| Cave + lantern | 8.831 / 66.4 ; 10.068 / 60.8 | 6.770 / 90.3 ; 7.053 / 88.2 |
+| Live alpine | 15.305 / 45.6 ; 15.480 / 43.0 | 13.060 / 60.3 ; 13.356 / 58.7 |
+
+The [[file:measurements/yawl-metal-2d6b886/clean-default.sexp][clean default]] and [[file:measurements/yawl-metal-2d6b886/clean-native-1x.sexp][clean native]] records preserve their distributions. Clean
+live default CPU encode means are 5.376 and 6.441 ms, including 2.173 and
+2.735 ms shadows; native is 2.878 and 3.054 ms, shadows 1.379 and 1.446 ms.
+The substantial host variation is another reason not to subtract GPU
+means and call the remainder CPU work or a specific MetalFX overhead.
+
+** Trace evidence: live terrain is not only a fragment problem
+
+Six focused traces cover finite alpine, cave and live alpine at 1080p in
+default and native-1x. Each used 10 warmup and 100 measured frames, with
+encoder names attached by a benchmark-local hook. Exports are filtered to
+the benchmark process (80881 default, 81178 native); the final 100 scene
+frame numbers select the same measured frames for every pass. Fragmented
+stage intervals are summed within each encoder before averaging. Setup,
+shader compilation and other desktop processes must not enter the table.
+Some default shadow vertex events are absent: 86 alpine, 84 cave and 93
+live-alpine frames have events. Their means are over observed events,
+not fabricated zeros; missing events do not pull warmup frames back in.
+
+| GPU stage-channel mean, ms | Alpine default | Cave default | Live alpine default | Live alpine native |
+|-
+| Site streams vertex | 0.429 | 0.476 | 5.840 | 4.968 |
+| Site streams fragment | 3.621 | 3.755 | 4.923 | 6.817 |
+| Sun shadow vertex | 0.027 | 0.037 | 0.677 | 0.676 |
+| Sun shadow fragment | 0.026 | 0.030 | 0.137 | 0.138 |
+| MetalFX preprocessing compute | 0.725 | 0.869 | 0.453 | absent |
+| MetalFX midprocessing compute | 1.074 | 1.223 | 0.806 | absent |
+| MetalFX postprocessing compute | 0.803 | 0.891 | 0.640 | absent |
+| HDR presentation fragment | 0.938 | 1.163 | 0.781 | 0.788 |
+
+Vertex and fragment intervals can overlap: *do not add these columns into
+an exclusive frame-time decomposition*. Shader timeline samples map the
+large live vertex interval to =terrain_vertex_specification= and the large
+fragment interval to =star_fragment_specification=. The sky shader also
+appears in exposed alpine; it shares the site-stream encoder, so that
+encoder is not a terrain-only fragment measurement. Sample weights are not
+independent additive shader timings.
+
+A separate command-count run (20 warmup + 100 measured, no trace) counts
+indexed commands and submitted index-count × instance-count. Per frame:
+
+| Scene | Scene indexed draws | Scene submitted indices | Shadow indexed draws | Shadow submitted indices |
+|-
+| Finite alpine | 87 | 191262 | 68 | 24204 |
+| Cave + lantern | 46 | 305460 | 32 | 35076 |
+| Live alpine | 1163 | 5776770 | 1679 | 1289328 |
+
+These are submission counts, *not* hardware vertex invocations or surviving
+fragments. Live scene submits about 30× the finite alpine index workload.
+=encode-terrain= iterates resident star runs, with one instanced indexed
+draw per nonempty run. The terrain vertex program decodes site/patch data,
+eight material codes, appearance, light and material descriptors, emitting
+material/light varyings and temporal positions. These are concrete reasons
+to investigate geometry visibility, vertex work and submission granularity,
+not to assume that reducing scene pixels alone solves the live frame.
+The trace does not distinguish vertex ALU cost from memory stalls.
+
+** Cave: expensive visible terrain, not an identified lantern pass
+
+The premise that cave is invariably the slowest fixed scene and old is
+twice as fast is *not reproduced on this machine/revision*. In the full
+1080p matrix cave is 8.964 ms default (companion is 8.990 ms), and 6.888 ms
+native versus the old reference's 8.053 ms. Temple's older cohorts and
+chapel's Vulkan results cannot be treated as this exact Metal cohort.
+The lighting-parity limitation in #B4E7Z5 remains.
+
+The cave trace is fragment-dominated: site vertex 0.476 ms versus fragment
+3.755 ms default; native is 0.380 versus 5.719 ms. Shader samples identify
+the star fragment shader, not an expensive separate lantern-shadow shader.
+The benchmark places a lantern voxel; its propagated light is read by the
+terrain pipeline. The source adds squared interpolated voxel-light RGB to
+the terrain radiance. The shared terrain fragment also contains procedural
+material relief, cloud visibility, specular response, atmosphere and a
+conditional nine-tap sun-shadow function; generated MSL confirms nine
+explicit =sample_compare= calls. These are optimization candidates, not measured
+per-expression costs. No occupancy or cache measurement isolates one.
+Covered-cave sky does not feature among the major mapped shader samples;
+its sun-shadow GPU cost is tiny. MetalFX and native-resolution finishing
+are material parts of this finite fixture's frame, too: default cave's
+three MetalFX intervals total 2.983 ms and presentation is 1.163 ms.
+
+** Shadows: a host submission problem as well as GPU geometry
+
+The full default live-alpine record has 5.055 ms mean CPU encode time:
+2.221 ms sun shadows, 1.588 ms site streams, 0.468 ms presentation.
+This closely reproduces temple's roughly 5.3 / 2.2 ms host observation,
+but is not a GPU shadow time. Native live alpine records 3.022 ms encode,
+1.339 ms shadows and 1.163 ms site streams. The independently counted run
+has 1679 shadow draws per frame, versus 1163 scene draws, despite many
+fewer shadow indices. Its shadow pipeline/bind-group selections number 16
+per frame, scene 10. Observed shadow vertex GPU intervals are about 0.68 ms,
+not the 2.2 ms host duration.
+
+The Metal backend validates and binds the argument table and retains
+resources for every indexed draw. Pipeline changes release/recreate the
+argument table. These code paths plus the command counts support batching
+and state-reuse experiments; they do *not* prove which CPU function owns
+each millisecond. No CPU sampling attribution or allocation ablation is
+claimed here. Do not remove safety checks based on this measurement.
+
+** MetalFX: a real cost, but the remaining work is elsewhere
+
+Temple's 11.9 ms default versus 10.3 ms native live-alpine observation has
+the same direction as yawl's full-matrix 15.150 versus 12.807 ms. The trace
+directly names =MetalFX_Temporal_PreProcessing=, =MidProcessing= and
+=PostProcessing=: 0.453 + 0.806 + 0.640 = 1.899 ms of compute intervals in
+live alpine. This is the observed encoder cost, not a subtraction inferred
+from two frame means. It excludes possible integration/synchronization
+cost outside these intervals. The kernels include history warp,
+low-resolution signal/tensor work and anisotropic Gaussian filtering.
+
+Upscaling cuts the site fragment interval from 6.817 to 4.923 ms in these
+sequential traces, but leaves a large vertex interval (4.968 versus 5.840
+ms) and similar shadows and native-resolution presentation. Pixel reduction
+does not remove the vertex workload or the thousands of host draw calls.
+Therefore a fixed reconstruction cost can consume the pixel savings;
+MetalFX is neither free nor the explanation for all remaining frame time.
+Do not equate the 2.343 ms full-frame difference with the 1.899 ms measured
+compute cost or infer a precise net benefit from unmatched clock states.
+
+** Ranked fixes to try, not optimizations made here
+
+1. Reduce live resident terrain work before expensive vertex processing:
+   test finer visibility/culling and fewer submitted patches, then optimize
+   the vertex material/light decoding only with shader statistics. Evidence:
+   5.8 million scene indices and a 5.840 ms vertex channel versus finite
+   alpine's 191262 and 0.429 ms. This is not evidence of low occupancy.
+2. Batch shadow and scene star-run submission and reuse compatible binding
+   state. Evidence: 1679 + 1163 indexed draws, 2.221 + 1.588 ms host pass
+   encoding, but much smaller shadow GPU intervals. Preserve resource
+   retention, binding validation and shadow coverage in any experiment.
+3. Offer a measured reconstruction/scale policy rather than assuming 0.75
+   MetalFX is faster. Evidence: its own 1.899 ms live compute cost and the
+   default/native full-frame results. Quality, stability and thermal-state
+   controls must accompany any default change.
+4. Specialize/simplify terrain fragment work for covered or unlit material
+   states, with image-parity checks. Evidence: cave's dominant star fragment
+   channel, common material/atmosphere/shadow code and nine comparison taps;
+   no evidence yet that a particular tap, loop, spill or bandwidth limit
+   dominates. This is not a recommendation to delete lantern lighting.
+5. Measure native-resolution finishing after the above: presentation costs
+   0.78 ms live and 1.16 ms cave in default traces; individual bloom/shaft
+   intervals are much smaller. Keep exposed-world sky as a separate target,
+   not a covered-cave explanation.
+
+No production renderer or shader was optimized in this investigation.
+The [[file:measurements/yawl-metal-2d6b886/README.org][measurement bundle]] records tool invocations, process filters,
+trace summaries, command counts, shader source and benchmark cohorts.
+Raw Instruments/capture packages remain local to the measurement thread;
+large binary traces are not part of the source tree. Missing occupancy,
+bandwidth, overdraw and compiled register statistics are explicit limits,
+not silently substituted timing guesses.

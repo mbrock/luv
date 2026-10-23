@@ -1,0 +1,6 @@
+2026-10-23 18:04:35.540 probe[79161:1992245] DEVICE Apple M5 counterSets=(
+    "A counter set containing only a GPU timestamp."
+)
+2026-10-23 18:04:35.540 probe[79161:1992245] COUNTER SET timestamp
+2026-10-23 18:04:35.540 probe[79161:1992245] COUNTER GPUTimestamp
+2026-10-23 18:04:35.540 probe[79161:1992245] CAPTURE supported=1

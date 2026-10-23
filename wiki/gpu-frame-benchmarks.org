@@ -14,6 +14,10 @@ It does not use screenshots as a timing mechanism.
 Temple's independent M2 Pro / Metal 4 three-resolution measurements are
 recorded in #B4E7Z5, including its own source cohorts, AA controls and counter
 limitations. Compare like scene cohorts, not a finite island to a live world.
+Yawl's M5 / Metal 4 shipped-default and native controls, working Metal
+System Trace stage/shader evidence, shadow submission counts and directly
+traced MetalFX phases are recorded in #E6JYVE. Useful occupancy, bandwidth
+and overdraw counters were not obtained there either.
 
 ** Reproduce
 

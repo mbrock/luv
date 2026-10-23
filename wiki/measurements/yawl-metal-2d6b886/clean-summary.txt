@@ -1,0 +1,48 @@
+build/yawl-clean-default.sexp ALPINE r1 CPU 4.692 GPU 8.532 FPS 66.4
+  luft HDR presentation 1.305
+  luft site streams 0.535
+  luft sun shadow 0.781
+build/yawl-clean-default.sexp CAVE r1 CPU 4.423 GPU 8.831 FPS 66.4
+  luft HDR presentation 1.268
+  luft site streams 0.398
+  luft sun shadow 0.728
+build/yawl-clean-default.sexp LIVE-ALPINE r1 CPU 5.376 GPU 15.305 FPS 45.6
+  luft HDR presentation 0.533
+  luft site streams 1.787
+  luft sun shadow 2.173
+build/yawl-clean-default.sexp ALPINE r2 CPU 4.444 GPU 9.249 FPS 64.8
+  luft HDR presentation 1.230
+  luft site streams 0.510
+  luft sun shadow 0.757
+build/yawl-clean-default.sexp CAVE r2 CPU 4.540 GPU 10.068 FPS 60.8
+  luft HDR presentation 1.318
+  luft site streams 0.413
+  luft sun shadow 0.741
+build/yawl-clean-default.sexp LIVE-ALPINE r2 CPU 6.441 GPU 15.480 FPS 43.0
+  luft HDR presentation 0.617
+  luft site streams 2.078
+  luft sun shadow 2.735
+build/yawl-clean-native-1x.sexp ALPINE r1 CPU 3.464 GPU 7.378 FPS 85.3
+  luft HDR presentation 1.123
+  luft site streams 0.407
+  luft sun shadow 0.651
+build/yawl-clean-native-1x.sexp CAVE r1 CPU 3.428 GPU 6.770 FPS 90.3
+  luft HDR presentation 1.209
+  luft site streams 0.319
+  luft sun shadow 0.618
+build/yawl-clean-native-1x.sexp LIVE-ALPINE r1 CPU 2.878 GPU 13.060 FPS 60.3
+  luft HDR presentation 0.266
+  luft site streams 0.970
+  luft sun shadow 1.379
+build/yawl-clean-native-1x.sexp ALPINE r2 CPU 3.667 GPU 7.327 FPS 84.3
+  luft HDR presentation 1.167
+  luft site streams 0.419
+  luft sun shadow 0.768
+build/yawl-clean-native-1x.sexp CAVE r2 CPU 3.421 GPU 7.053 FPS 88.2
+  luft HDR presentation 1.184
+  luft site streams 0.350
+  luft sun shadow 0.618
+build/yawl-clean-native-1x.sexp LIVE-ALPINE r2 CPU 3.054 GPU 13.356 FPS 58.7
+  luft HDR presentation 0.341
+  luft site streams 0.993
+  luft sun shadow 1.446

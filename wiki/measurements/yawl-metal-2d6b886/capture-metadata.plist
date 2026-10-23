@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>(uuid)</key>
+	<string>578AF071-91FE-4DEF-A7A1-0ECC4E2D0050</string>
+	<key>DYCaptureEngine.captured_frames_count</key>
+	<integer>1</integer>
+	<key>DYCaptureEngine.launch_dictionary</key>
+	<dict/>
+	<key>DYCaptureEngine.linked_on_apex_or_later</key>
+	<integer>1</integer>
+	<key>DYCaptureSession.boundaryLess</key>
+	<false/>
+	<key>DYCaptureSession.capture_version</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.deviceId</key>
+	<integer>1</integer>
+	<key>DYCaptureSession.graphics_api</key>
+	<integer>1</integer>
+	<key>DYCaptureSession.interpose_feature_version</key>
+	<integer>65538</integer>
+	<key>DYCaptureSession.interpose_patch_version</key>
+	<string>0</string>
+	<key>DYCaptureSession.library_link_time_versions</key>
+	<dict>
+		<key>AppKit</key>
+		<integer>-1</integer>
+		<key>CoreFoundation</key>
+		<integer>-1</integer>
+		<key>Foundation</key>
+		<integer>-1</integer>
+		<key>Metal</key>
+		<integer>-1</integer>
+		<key>System</key>
+		<integer>88171522</integer>
+		<key>UIKit</key>
+		<integer>-1</integer>
+	</dict>
+	<key>DYCaptureSession.nativePointerSize</key>
+	<integer>8</integer>
+	<key>DYCaptureSession.unusedBufferCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedCommandQueueCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedComputePipelineStateCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedDepthStencilStateCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedFunctionCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedLibraryCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedRenderPipelineStateCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedSamplerStateCount</key>
+	<integer>0</integer>
+	<key>DYCaptureSession.unusedTextureCount</key>
+	<integer>0</integer>
+</dict>
+</plist>
