@@ -479,3 +479,105 @@ Done when: repeated captures summarize drawable-acquisition and encoding
 distributions separately for Metal and Vulkan, the benchmark explains which
 intervals include pacing, and eventual GPU timestamps remain a distinct
 measurement rather than being inferred from host waits.
+
+* DONE Fixed-target Metal throughput on temple
+:PROPERTIES:
+:ID: B4E7Z5
+:END:
+
+On 2026-10-23, temple's Mac mini (Mac14,12, Apple M2 Pro, 16 GPU cores,
+16 GB unified memory, macOS 27.2 / 26B5091g) ran the shared
+[[file:../scripts/bench-gpu-fps.lisp][GPU benchmark]] through the native Metal 4 backend. Each case used
+60 warmup and 300 measured frames. TAA and dynamic resolution were disabled;
+targets were exactly 1280×720, 1920×1080, and the display's physical
+6016×1692 pixels, not its 3008×846 logical points.
+
+These are serialized offscreen submission/completion rates, *not presentation
+FPS*. The timed loop has no drawable acquisition or readback. GPU milliseconds
+come from Metal 4 command-buffer start/end feedback, with all 300 samples
+required; asynchronous feedback retrieval happens outside the completion
+interval. CPU encode time excludes the GPU wait. Main-thread Cocoa/SDL setup
+and hidden-window handling are necessary on this backend.
+
+The main matrix used Luft's default *4× MSAA*, versus old Luvcraft's *1×*.
+It is not an AA-quality-matched comparison. Alpine/meadow use seed 7.
+Finite cases have matched 32×32 cell fixtures. The live cases instead run
+actual streaming: Luft has nine visible 64-cell chunks, old Luvcraft 169
+16-cell chunks; their residency footprints differ. Do not turn the finite
+fixture advantage into a claim about full-world throughput.
+
+Each table entry is mean GPU milliseconds / serialized completion FPS.
+The paired entries are Luft then old Luvcraft; atelier is the actual default
+Luft atelier alone. The finite terrain/balls run used benchmark a5662b2;
+companion used the same fixture script with production d6021c1 (including
+the walking-motor and creature fixes); revised
+turtle, deterministic 24-line terminal, live worlds, and atelier used a596824.
+The b9fd306 figure-lighting change was not loaded in those cohorts; the
+505455f controls and revised visual captures did load it. These cohorts
+must not be described as one exact production revision.
+
+| Scene | 1280×720 Luft ; old | 1920×1080 Luft ; old | 6016×1692 Luft ; old |
+|-
+| Finite alpine | 4.22 / 134.1 ; 3.93 / 133.9 | 6.63 / 92.9 ; 6.33 / 94.0 | 18.12 / 49.1 ; 25.24 / 36.1 |
+| Finite meadow | 4.36 / 126.6 ; 3.99 / 130.2 | 6.60 / 93.9 ; 6.86 / 89.1 | 17.79 / 48.5 ; 25.24 / 36.0 |
+| Cave + lantern | 4.95 / 114.6 ; 3.68 / 133.7 | 6.58 / 94.6 ; 6.60 / 90.0 | 21.35 / 41.2 ; 21.90 / 40.7 |
+| 100 physics balls | 3.94 / 125.3 ; 3.65 / 133.5 | 6.46 / 91.8 ; 6.53 / 90.2 | 17.06 / 50.2 ; 24.20 / 37.3 |
+| Ridden moving turtle | 3.70 / 142.2 ; 3.73 / 134.0 | 6.44 / 93.5 ; 6.50 / 91.0 | 17.49 / 49.6 ; 22.69 / 39.7 |
+| Focused terminal | 3.16 / 156.2 ; 3.86 / 131.2 | 5.52 / 106.2 ; 6.30 / 94.4 | 15.33 / 53.8 ; 22.20 / 39.9 |
+| Companion bubble | 4.10 / 127.3 ; 3.96 / 132.5 | 6.09 / 99.0 ; 6.61 / 88.4 | 18.81 / 47.2 ; 24.25 / 37.6 |
+| Live alpine | 10.10 / 61.6 ; 6.02 / 92.7 | 13.81 / 55.2 ; 6.86 / 84.8 | 36.55 / 24.4 ; 25.05 / 35.6 |
+| Live meadow | 8.91 / 70.7 ; 5.75 / 94.1 | 12.63 / 56.6 ; 6.79 / 85.6 | 34.49 / 26.4 ; 25.01 / 35.3 |
+| Actual atelier | 7.03 / 85.1 | 7.83 / 79.1 | 22.13 / 39.4 |
+
+Fresh 1080p controls on revision 505455f compared explicit 4× and 1× MSAA.
+Luft GPU mean changed from 6.46 to 5.82 ms in finite alpine, 6.74 to 6.78 ms
+in the covered cave (no demonstrated gain), and 13.84 to 10.24 ms in live
+alpine. Live alpine therefore saves 26% GPU time at 1×, but still costs more
+than old Luvcraft's contemporaneous 6.57--6.70 ms. The two default-AA live
+runs agree on GPU time (13.81 and 13.84 ms); CPU and small-fixture results
+vary substantially more. These are separate sequential runs, not clock-locked
+randomized A/B trials.
+
+The new Metal CPU pass instrumentation was validated natively in those
+controls. At 4×, live alpine's 4.14 ms mean CPU encoding includes about
+1.97 ms sun-shadow encoding, 1.10 ms site-stream scene encoding, and 0.50 ms
+HDR presentation encoding. These are host durations, not GPU pass durations.
+
+The linked [[https://ampcode.com/threads/T-01a16873-8ef3-712f-b952-ce32b77d2f2e][measurement thread]] retains per-case CPU/GPU mean, median,
+p95 and p99 distributions and raw artifacts. Low-load 720p/1080p results
+have much wider GPU distributions than sustained native-size work; GPU clock
+states were not pinned. A long matrix also accumulated memory pressure:
+Apple's process sampler reported a 41.6 GB peak physical footprint on this
+16 GB machine. This is a lifetime/measurement-isolation candidate, not proof
+of a particular leaking owner. Do not over-interpret small CPU differences.
+
+The finite cave screenshots are not lighting-parity evidence: Luft's orange
+lamp and old Luvcraft's bright lamp/floor patch remain visibly different.
+Metal System Trace failed inside Apple's residency-set event modeler, so
+there are no usable hardware counters or GPU per-pass timestamps here.
+Submission GPU timestamps are real; pass-local CPU times are not GPU times.
+
+Controlled eight-pass 720p GPU ablations reduce low-load clock noise. Alpine
+full/no-sky/no-terrain/neither measured 15.40/8.44/9.89/2.44 ms; cave measured
+19.15/19.20/9.91/2.44 ms. Marginal sky cost in exposed alpine is about 0.87 ms
+per repetition; the covered cave gets no benefit from removing sky. This is
+consistent with tile hidden-surface elimination, not hardware-counter proof.
+Finite shadow-only versus scene-only suppression made shadows a minor GPU
+cost in those fixtures, which says nothing about live shadow cost.
+
+Ranked next experiments: (1) reduce live scene pixel/shading/MSAA cost with
+quality-matched controls; (2) measure live shadow and native-resolution
+finishing separately; (3) reduce CPU pipeline/argument-table churn and bound
+native resource lifetimes; (4) optimize sky only where it survives occlusion;
+(5) profile startup streaming separately from steady rendering. Live alpine
+setup was about 16 s, but measured mesh/light-pack/upload totals were only
+about 25/59/25 ms (inclusive, partly nested), so those totals do not explain
+startup latency by themselves.
+
+The safe Metal-specific correction selected the creature pipeline before
+binding its vertex buffer. Pipeline selection replaces the Metal argument
+table; the former ordering failed with =UNSUPPORTED-VERTEX-BUFFER-SLOT= on
+the turtle while Vulkan tolerated it. Native rendered turtle frames verified
+the correction. Runtime Metal compilation works. Offline shader-validation
+tests require the missing Xcode MetalToolchain component:
+=xcodebuild -downloadComponent MetalToolchain=.
