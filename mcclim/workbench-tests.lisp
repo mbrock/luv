@@ -155,7 +155,28 @@
     (multiple-value-bind (x y)
         (clim:transform-position
          (clim:sheet-delta-transformation metabar transient) 0 0)
-      (true (equal '(-460 110) (list x y))))))
+      (true (equal '(-460 124) (list x y))))))
+
+(define-test tall-metabar-fits-the-transient-layer-at-native-density
+  (let* ((metabar (make-instance 'mcluv::metabar-pane
+                                :region (clim:make-bounding-rectangle 0 0 460 1152)))
+         (layer (make-instance 'workbench::workbench-layer-pane
+                              :kind :transient :contents (list metabar))))
+    (dolist (height '(600 700 1400))
+      (clim:allocate-space layer 1000 height)
+      (let ((transform (clim:sheet-delta-transformation metabar layer)))
+        (multiple-value-bind (x1 y1 x2 y2)
+            (clim:bounding-rectangle*
+             (clim:transform-region transform (clim:sheet-region metabar)))
+          ;; Even while slid offscreen, every row fits vertically. Scaling
+          ;; is a sheet transform, not a smaller/rasterized logical panel.
+          (true (<= mcluv::+status-bar-height+ y1 y2 height))
+          (true (<= (- x2 x1) 460))
+          (is = 1152 (clim:bounding-rectangle-height (clim:sheet-region metabar))))
+        (multiple-value-bind (x y) (clim:transform-position transform 230 576)
+          (multiple-value-bind (u v) (clim:untransform-position transform x y)
+            (true (< (abs (- u 230)) 1e-3))
+            (true (< (abs (- v 576)) 1e-3))))))))
 
 (define-test layer-state-is-semantic-not-numeric-priority
   (multiple-value-bind (shell application canvas events) (make-test-workbench)

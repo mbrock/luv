@@ -35,6 +35,24 @@
    :width width :height height :min-width 1 :min-height 1
    :max-width clim:+fill+ :max-height clim:+fill+))
 
+(defun place-workbench-metabar (pane width height pane-height slide)
+  "Fit the original drawer in its parent; return whether its placement changed."
+  (let* ((available-height (max 1 (- height mcluv::+status-bar-height+)))
+         (scale (mcluv::metabar-panel-scale
+                 (list mcluv::+metabar-width+ pane-height) (list width available-height)))
+         (eased (- 1d0 (expt (- 1d0 slide) 3)))
+         (transform (clim:make-transformation
+                     scale 0 0 scale
+                     (floor (* scale mcluv::+metabar-width+ (- eased 1d0)))
+                     (+ mcluv::+status-bar-height+
+                        (floor (- available-height (* scale pane-height)) 2))))
+         (changed (not (clim:transformation-equal
+                        transform (clim:sheet-transformation pane)))))
+    (setf (clim:sheet-region pane)
+          (clim:make-bounding-rectangle 0 0 mcluv::+metabar-width+ pane-height)
+          (clim:sheet-transformation pane) transform)
+    changed))
+
 (defmethod clim:allocate-space ((pane workbench-layer-pane) width height)
   ;; Status is fixed shell chrome. Its McCLIM parent, not an application
   ;; placement affine, owns top-edge layout and the child's retained clip.
@@ -75,10 +93,7 @@
       ((typep child 'mcluv::metabar-pane)
        (let ((child-height
                (clim:bounding-rectangle-height (clim:sheet-region child))))
-         (clim:move-and-resize-sheet
-          child (- mcluv::+metabar-width+)
-          (max 0 (floor (- height child-height) 2))
-          mcluv::+metabar-width+ child-height)))
+         (place-workbench-metabar child width height child-height 0d0)))
       ((typep child 'luv.lobby.mcclim::lobby-hud-pane)
        (clim:move-and-resize-sheet
         child luv.lobby.mcclim::+lobby-hud-margin+
@@ -928,7 +943,6 @@ every key and pointer event."
                 0.0 1.0 0.0 0.0)))
 
 (defun refresh-workbench-metabar (workbench width height)
-  (declare (ignore width))
   (let* ((frame (workbench-frame workbench))
          (pane (workbench-tool-pane workbench :metabar))
          (layer (workbench-layer workbench :transient))
@@ -944,15 +958,14 @@ every key and pointer event."
            (cond ((> target slide) (min target (+ slide step)))
                  ((< target slide) (max target (- slide step)))
                  (t slide)))
-         (eased (- 1d0 (expt (- 1d0 next) 3)))
          (pane-height (mcluv:metabar-logical-height frame)))
     (setf (workbench-metabar-last-time workbench) now
           (workbench-metabar-slide workbench) next)
     (when (workbench-layer-visible-p layer)
-      (clim:move-and-resize-sheet
-       pane (floor (* mcluv::+metabar-width+ (- eased 1d0)))
-       (max 0 (floor (- height pane-height) 2))
-       mcluv::+metabar-width+ pane-height)
+      (when (place-workbench-metabar pane width height pane-height next)
+        ;; GPU media retain transformed vertices and clips. Moving the pane
+        ;; without repainting leaves the opening drawer drawn offscreen.
+        (setf (mcluv::metabar-dirty-p frame) t))
       (mcluv:drain-metabar-operations frame)
       (mcluv:prepare-metabar frame)
       (when (and (zerop next) (zerop target))

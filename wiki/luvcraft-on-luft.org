@@ -1418,6 +1418,20 @@ the demanded window grow. Native checks also observed exposure 0.7 × 2 = 1.4
 in the uploaded frame, changed projection and construction lanes, a replaced
 bevel renderer, and the movement/jump/pointer consumers using their new values.
 
+/Player-session follow-up./ The shared workbench now uses the original
+metabar's viewport-fit scaling, reserving the top status strip. Previously
+its 1152-pixel logical drawer clipped the lower groups in a 700-pixel window;
+opening it could also leave the retained GPU stream offscreen until another
+key repainted it. A changed sheet placement now invalidates that stream,
+including every slide step. The logical pane remains full size and McCLIM
+inverts its sheet transform for pointer input, not a rasterized substitute.
+The public layout regression checks repeated 600/700/1400-pixel allocations
+and pointer-coordinate round trips. A native 1000 by 700 game opens the
+drawer with Return alone, changes the clock from 6.50 to 6.75 with arrows,
+then drags its scaled track to 16.75 through portable pointer events. The
+before/after and expanded-sky captures were inspected; all groups and bottom
+actions fit, with no retained canvas failures.
+
 ** DONE The aimed face and the broken block answer back
 :PROPERTIES:
 :ID: 7O90OS
