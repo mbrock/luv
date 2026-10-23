@@ -323,3 +323,42 @@ transition buffers and memory to the candidate. Validate near/far boundaries,
 silhouettes, moving cameras, temporal reconstruction, caves and editing before
 any default change. The all-flat result is a counterfactual, not the target
 appearance and not a promise to recover the full 49.8%.
+
+#YHVCJU now establishes a boundary-consistent shared-corner morph and a
+repeatable native runtime gain. Next remove its measured selection/upload
+overhead with a fence-safe rendering product, and solve previous-frame LOD
+motion, transition normals and singular contacts before considering a default.
+The corner-displacement bound is not yet an orientation-aware strip-width test.
+
+** DONE Measure shared-corner retirement with its selection cost
+:PROPERTIES:
+:ID: YHVCJU
+:END:
+
+The [[file:measurements/yawl-bevel-retirement-2a231b9/README.org][shared-corner experiment]] leaves landscape coverage, material fragment
+shading and the original merged shadow path intact. At native 1080p, a
+2-pixel projected-displacement policy saves 19.77–19.90% GPU time and
+8.34–8.66% serialized completion in reversed adjacent-frame runs. A more
+aggressive 4-pixel policy saves 37.13–37.28% GPU and 22.99–23.52% completion.
+Both improve every balanced window. The 1-pixel policy retires no complete
+patches in this view and worsens completion; not all costly detail is subpixel.
+
+Fresh Metal counters show helpers 1,298,128 → 996,752 → 635,376 and vertex
+invocations 2,890,813 → 2,326,870 → 1,477,559 for control/2px/4px. Valid
+fragments change only about 6.2%; the fragment binary remains identical at
+8,954 instructions and 108 temporaries. These counter profiles are distinct
+from unprofiled runtime and from GUI sampled shader-source attribution.
+
+Each canonical lattice corner chooses one morph weight shared by all owners.
+Original bands taper through the transition; the smaller flat atlas is submitted
+only once all corners of an owned patch have collapsed. Exact rational closure
+checks pass 2,112 mixed-weight cases; the checkerboard zero endpoint explicitly
+demonstrates that closed boundaries are not preservation of manifold sheets.
+Eight sampled native camera poses retain terrain without observed new continuous
+cracks. The 4-pixel view visibly squares edges; neither threshold is accepted
+for production appearance or temporal reconstruction.
+
+The measured candidate pays its 1.96 MB upload and about 1.4–1.5 ms additional
+CPU encoding per frame. Its mutable staging buffer is only safe in the serialized
+harness. Default rendering and semantic topology remain unchanged. This is useful
+headroom evidence and a transition oracle, not a completed production LOD system.

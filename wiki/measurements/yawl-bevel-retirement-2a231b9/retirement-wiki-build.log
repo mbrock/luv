@@ -1,0 +1,12 @@
+WARNING: redefining LUV.SHADER:PARSE-SHADER-OPERATOR-CALL in DEFGENERIC
+WARNING: redefining SDL3-IMAGE::SYSTEM-RELATIVE-NAMESTRING in DEFUN
+WARNING: redefining ZPB-TTF::LOCATION in DEFGENERIC
+WARNING: WHILE is deprecated, use LOOP WHILE instead
+WARNING: WHILE is deprecated, use LOOP WHILE instead
+WARNING: WHILE is deprecated, use LOOP WHILE instead
+WARNING: Dangling figure mentions:
+  mathematical-shaders: W9GQ3D LSVW2S UABDNH CPIOH5
+WARNING: Dangling figure mentions in code:
+  defun capture-luft-traveler (luft-portraits.lisp:674): TR4VLR
+  defun wait-for-luft-landscape-residency (luft-portraits.lisp:824): H1GHLD
+/Users/mbrock/luv/build/wiki/

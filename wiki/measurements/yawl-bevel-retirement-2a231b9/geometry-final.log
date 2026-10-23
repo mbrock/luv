@@ -1,0 +1,71 @@
+
+; file: /Users/mbrock/luv/luft/star-geometry.lisp
+; in: DEFUN STAR-CANONICAL-FORM
+;     (SVREF LUFT::*STAR-CANONICAL-FORMS*
+;            (+
+;             (IF LUFT::REFLECTIONS
+;                 1
+;                 0)
+;             (IF COMPLEMENT
+;                 2
+;                 0)))
+; 
+; caught WARNING:
+;   undefined variable: LUFT::*STAR-CANONICAL-FORMS*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *STAR-CANONICAL-FORMS*
+;   caught 1 WARNING condition
+
+; file: /Users/mbrock/luv/luft/star-table.lisp
+; in: DEFUN %UNFOLD-STAR-PARTS
+;     (GETHASH LUFT::REPRESENTATIVE LUFT::*STAR-ATLAS-FAMILIES*)
+; 
+; caught WARNING:
+;   undefined variable: LUFT::*STAR-ATLAS-FAMILIES*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *STAR-ATLAS-FAMILIES*
+;   caught 1 WARNING condition
+
+; file: /Users/mbrock/luv/luft/star-table.lisp
+; in: DEFUN STAR-ATLAS-PARTS
+;     (SVREF LUFT::*STAR-ATLAS-PARTS* LUFT::STAR)
+; 
+; caught WARNING:
+;   undefined variable: LUFT::*STAR-ATLAS-PARTS*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *STAR-ATLAS-PARTS*
+;   caught 1 WARNING condition
+
+; file: /Users/mbrock/luv/luft/star-table.lisp
+; in: DEFUN STAR-ATLAS-OWNED-TRIANGLES
+;     (SVREF LUFT::*STAR-ATLAS-OWNED-TRIANGLES* LUFT::STAR)
+; 
+; caught WARNING:
+;   undefined variable: LUFT::*STAR-ATLAS-OWNED-TRIANGLES*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *STAR-ATLAS-OWNED-TRIANGLES*
+;   caught 1 WARNING condition
+
+; file: /Users/mbrock/luv/luft/star-table.lisp
+; in: DEFUN STAR-ATLAS-OWNED-APPEARANCE-MASKS
+;     (SVREF LUFT::*STAR-ATLAS-OWNED-APPEARANCE-MASKS* LUFT::STAR)
+; 
+; caught WARNING:
+;   undefined variable: LUFT::*STAR-ATLAS-OWNED-APPEARANCE-MASKS*
+; 
+; compilation unit finished
+;   Undefined variable:
+;     *STAR-ATLAS-OWNED-APPEARANCE-MASKS*
+;   caught 1 WARNING condition
+Zero endpoint: all 256 stars equal flat-owned exact oriented triangles.
+Mixed closure: 2112 cases passed; 8856 nonempty flat-site substitutions (2338 outside all-zero fields).
+Expected nonmanifold endpoint: cells ((0 -1 -1) (-1 0 -1)); edge (0 0 -8) -> (0 0 0) has 4 incident triangles; boundary remains closed.
+Geometry contract oracle: PASS.

@@ -1,0 +1,169 @@
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-aclrepl - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-aclrepl.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-aclrepl/sb-aclrepl.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-bsd-sockets - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-bsd-sockets.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-bsd-sockets/sb-bsd-sockets.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-capstone - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-capstone.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-capstone/sb-capstone.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-cltl2 - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cltl2.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cltl2/sb-cltl2.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-concurrency - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-concurrency.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-concurrency/sb-concurrency.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-cover - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cover.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-cover/sb-cover.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-executable - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-executable.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-executable/sb-executable.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-gmp - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-gmp.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-gmp/sb-gmp.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-grovel - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-grovel.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-grovel/sb-grovel.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-introspect - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-introspect.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-introspect/sb-introspect.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-manual - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-manual.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-manual/sb-manual.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-md5 - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-md5.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-md5/sb-md5.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-mpfr - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-mpfr.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-mpfr/sb-mpfr.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-posix - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-posix.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-posix/sb-posix.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-queue - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-queue.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-queue/sb-queue.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-rotate-byte - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rotate-byte.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rotate-byte/sb-rotate-byte.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-rt - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rt.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-rt/sb-rt.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-simd - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simd.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simd/sb-simd.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-simple-streams - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simple-streams.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-simple-streams/sb-simple-streams.asd"
+WARNING:
+   In source-registry entry /nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl// found several entries for sb-sprof - picking #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-sprof.asd" over #P"/nix/store/fgx5f38a57b6gxx1jrgx223kmqv0dlxf-sbcl-2.6.7/lib/sbcl/contrib/sb-sprof/sb-sprof.asd"
+; in:
+;      LAMBDA (LUV.FRONTIER::WINDOW LUV.FRONTIER::FRONTIER LUV.FRONTIER::EXECUTION
+;          &KEY LUVCRAFT::DIRECT-DIRECTION)
+;     (ERROR "Frontier count disagrees with priority bucket ~D."
+;            LUV.FRONTIER::CURRENT-PRIORITY)
+; 
+; note: deleting unreachable code
+; 
+; compilation unit finished
+;   printed 1 note
+; in:
+;      LAMBDA (LUV.FRONTIER::WINDOW LUV.FRONTIER::FRONTIER LUV.FRONTIER::EXECUTION
+;          &KEY LUVCRAFT::DIRECT-DIRECTION)
+;     (ERROR "Frontier count disagrees with priority bucket ~D."
+;            LUV.FRONTIER::CURRENT-PRIORITY)
+; 
+; note: deleting unreachable code
+; 
+; compilation unit finished
+;   printed 1 note
+luv 02:16:46.490 canvas opened "Luft game", 3840x2160 pixels, metal
+DEVICE (:NAME "Apple M5") SDL=cocoa 1920x1080
+ADJACENT control GPU (:N 4 :MEAN 3.468958333542105d0 :P50 3.468374998192303d0
+                      :P95 3.4746250021271408d0 :P99 3.4746250021271408d0) completion (:N
+                                                                                       4
+                                                                                       :MEAN
+                                                                                       4.578500000206986d0
+                                                                                       :P50
+                                                                                       4.5310000132303685d0
+                                                                                       :P95
+                                                                                       4.697999989730306d0
+                                                                                       :P99
+                                                                                       4.697999989730306d0)
+ADJACENT p2 GPU (:N 4 :MEAN 3.4796250001818407d0 :P50 3.4783750015776604d0 :P95
+                 3.483624997898005d0 :P99 3.483624997898005d0) completion (:N 4
+                                                                           :MEAN
+                                                                           4.621249998308485d0
+                                                                           :P50
+                                                                           4.6110000112093985d0
+                                                                           :P95
+                                                                           4.661999992094934d0
+                                                                           :P99
+                                                                           4.661999992094934d0)
+ADJACENT p4 GPU (:N 4 :MEAN 3.4805104187398683d0 :P50 3.4783750015776604d0 :P95
+                 3.483624997898005d0 :P99 3.483624997898005d0) completion (:N 4
+                                                                           :MEAN
+                                                                           4.629999999451684d0
+                                                                           :P50
+                                                                           4.594999991240911d0
+                                                                           :P95
+                                                                           4.714000009698793d0
+                                                                           :P99
+                                                                           4.714000009698793d0)
+RETIREMENT p4: sites=5852 near=5852 flat=0 triangles=101820/101820 draws=46 upload=93632 bytes/frame
+RETIREMENT p2: sites=5852 near=5852 flat=0 triangles=101820/101820 draws=46 upload=93632 bytes/frame
+luv 02:16:48.012 canvas closing "Luft game" after 21 loop iterations
+luv 02:16:48.053 canvas closed "Luft game"
+RESULT (:REPEAT 1 :HOST "yawl" :SOURCE-REVISION
+        "2a231b97e3061c2c64d051736f1d855437385311" :BENCHMARK-BLOB
+        "aa5c64b20b2b420e817ea8338912672bcc2a912e" :FRAMES 12 :WARMUP 12 :SCENE
+        :CAVE :BACKEND :LUFT :SETUP-SECONDS 0.7153869999892777d0 :SETUP-PROFILE
+        ((LUVCRAFT:RELIGHT-BLOCK-WORLD :CALLS 1 :INCLUSIVE-MS
+                                       58.6769999936223d0)
+         (LUFT.TERRAIN:FINISH-SCENE-BUILDER :CALLS 1 :INCLUSIVE-MS
+                                            2.5310000055469573d0)
+         (LUFT:MESH-STAR-CHUNK :CALLS 4 :INCLUSIVE-MS 0.6889999931445345d0)
+         (LUFT.RENDER::STAR-LATTICE-LIGHT-WORDS :CALLS 1 :INCLUSIVE-MS
+                                                1.10599999607075d0)
+         (LUFT.RENDER::MAKE-RENDER-POPULATION :CALLS 1 :INCLUSIVE-MS
+                                              2.1410000044852495d0)
+         (LUFT.RENDER::%UPLOAD-RENDER-POPULATION :CALLS 1 :INCLUSIVE-MS
+                                                 1.1740000045392662d0))
+        :DEVICE (:NAME "Apple M5") :MODE :NATIVE-1X :EXTENT (1920 1080)
+        :INTERNAL-EXTENT (1920 1080) :TAA NIL :RECONSTRUCTION NIL
+        :AUTORELEASE-POLICY :PER-FRAME :FIXED-RENDER-SCALE 1.0 :RENDER-SCALE
+        0.75 :DYNAMIC-RESOLUTION NIL :SCENE-SAMPLES 1 :EXPOSURE 0.45 :SKY T
+        :TERRAIN T :CPU-ENCODE-MS
+        (:N 12 :MEAN 0.715333331754664d0 :P50 0.7049999840091914d0 :P95
+         0.8159999852068722d0 :P99 0.8159999852068722d0)
+        :COMPLETION-MS
+        (:N 12 :MEAN 4.609916665989052d0 :P50 4.594999991240911d0 :P95
+         4.714000009698793d0 :P99 4.714000009698793d0)
+        :CPU-FRAME-MS
+        (:N 12 :MEAN 0.7164166660610741d0 :P50 0.7059999916236848d0 :P95
+         0.8169999928213656d0 :P99 0.8169999928213656d0)
+        :SIMULATION-MS
+        (:N 12 :MEAN 0.0010833343064102034d0 :P50 0.00100000761449337d0 :P95
+         0.0020000006770715117d0 :P99 0.0020000006770715117d0)
+        :COMPLETION-FPS 216.92366098020372d0 :GPU-MS
+        (:N 12 :MEAN 3.4763645841546045d0 :P50 3.4782916627591476d0 :P95
+         3.483624997898005d0 :P99 3.483624997898005d0)
+        :CPU-PASSES
+        (("luft HDR presentation"
+          (:N 12 :MEAN 0.2512499995646067d0 :P50 0.2410000015515834d0 :P95
+           0.31099999614525586d0 :P99 0.31099999614525586d0))
+         ("native world panels"
+          (:N 12 :MEAN 0.021500000002561137d0 :P50 0.02099999983329326d0 :P95
+           0.025999994250014424d0 :P99 0.025999994250014424d0))
+         ("luft lens shafts"
+          (:N 12 :MEAN 0.018250000721309334d0 :P50 0.016999998479150236d0 :P95
+           0.023999993572942913d0 :P99 0.023999993572942913d0))
+         ("luft lens vertical"
+          (:N 24 :MEAN 0.01737500133458525d0 :P50 0.016999998479150236d0 :P95
+           0.0219999928958714d0 :P99 0.025000001187436283d0))
+         ("luft lens horizontal"
+          (:N 24 :MEAN 0.01874999907158781d0 :P50 0.018999999156221747d0 :P95
+           0.02400000812485814d0 :P99 0.02400000812485814d0))
+         ("luft lens bright"
+          (:N 12 :MEAN 0.030583335804597784d0 :P50 0.030000010156072676d0 :P95
+           0.039000005926936865d0 :P99 0.039000005926936865d0))
+         ("luft native viewmodel"
+          (:N 12 :MEAN 0.009666665088540563d0 :P50 0.008999995770864189d0 :P95
+           0.012999997125007212d0 :P99 0.012999997125007212d0))
+         ("luft post-temporal HDR flame composite"
+          (:N 12 :MEAN 0.019750001229112968d0 :P50 0.01999999221879989d0 :P95
+           0.027000001864507794d0 :P99 0.027000001864507794d0))
+         ("world instruments"
+          (:N 12 :MEAN 0.0111666668090038d0 :P50 0.00999998883344233d0 :P95
+           0.016999998479150236d0 :P99 0.016999998479150236d0))
+         ("luft site streams"
+          (:N 12 :MEAN 0.09999999989910673d0 :P50 0.10999999358318746d0 :P95
+           0.12799999967683107d0 :P99 0.12799999967683107d0))
+         ("luft sun shadow"
+          (:N 12 :MEAN 0.1091666648183794d0 :P50 0.10699999984353781d0 :P95
+           0.1230000052601099d0 :P99 0.1230000052601099d0)))
+        :GPU-PASSES NIL)
+RESULT (:REPEAT 1 :HOST "yawl" :SOURCE-REVISION
+        "2a231b97e3061c2c64d051736f1d855437385311" :BENCHMARK-BLOB
+        "aa5c64b20b2b420e817ea8338912672bcc2a912e" :FRAMES 12 :WARMUP 12)

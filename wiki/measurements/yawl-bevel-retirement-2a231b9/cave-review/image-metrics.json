@@ -1,0 +1,14 @@
+{
+  "control": {
+    "mean_absolute_rgb8": 0.0,
+    "rms_rgb8": 0.0
+  },
+  "p2": {
+    "mean_absolute_rgb8": 0.0,
+    "rms_rgb8": 0.0
+  },
+  "p4": {
+    "mean_absolute_rgb8": 0.0,
+    "rms_rgb8": 0.0
+  }
+}
