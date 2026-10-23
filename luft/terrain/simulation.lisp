@@ -28,15 +28,21 @@
    (controller :initarg :controller :initform (make-instance 'movement-intent)
                :accessor character-controller)
    (heading-x :initarg :heading-x :initform 0.0
+              :quantity (:quantity quantities:horizontal-x-direction :unit :one)
               :accessor character-heading-x)
    (heading-y :initarg :heading-y :initform 1.0
+              :quantity (:quantity quantities:horizontal-y-direction :unit :one)
               :accessor character-heading-y)
    (previous-heading-x :initarg :heading-x :initform 0.0
+                       :quantity (:quantity quantities:horizontal-x-direction :unit :one)
                        :accessor character-previous-heading-x)
    (previous-heading-y :initarg :heading-y :initform 1.0
+                       :quantity (:quantity quantities:horizontal-y-direction :unit :one)
                        :accessor character-previous-heading-y)
-   (gait :initform 0.0 :accessor character-gait)
-   (previous-gait :initform 0.0 :accessor character-previous-gait)
+   (gait :initform 0.0 :accessor character-gait
+         :quantity (:quantity quantities:gait-phase :unit :radian))
+   (previous-gait :initform 0.0 :accessor character-previous-gait
+                  :quantity (:quantity quantities:gait-phase :unit :radian))
    (speed :initarg :speed :initform +walking-speed+
           :type real
           :quantity (:quantity quantities:world-velocity
@@ -393,8 +399,11 @@ Called only on fixed simulation ticks. NIL means no steering, not braking."))
   ((source :initarg :source :accessor simulation-source)
    (bodies :initform nil :reader simulation-bodies)
    (characters :initform nil :reader simulation-characters)
-   (clock :initform 0 :reader simulation-clock)
-   (accumulator :initform 0d0 :reader simulation-accumulator))
+   (clock :initform 0 :reader simulation-clock
+          :quantity (:quantity quantities::simulation-time :unit :second))
+   (accumulator :initform 0d0 :reader simulation-accumulator
+                :quantity (:quantity quantities:elapsed-time :unit :second)))
+  (:metaclass quantity-class)
   (:documentation
    "Owns terrain, physical occupants, and one clock, independently of a viewer.
 Characters supply locomotion; bodies without characters are equally physical."))

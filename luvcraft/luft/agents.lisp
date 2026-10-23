@@ -5,6 +5,8 @@
 ;;; belong to the same application-agent harness used by old Luvcraft.
 
 (defclass inhabitant ()
+  ;; Locomotion quantities belong to CHARACTER's declared terrain body, not
+  ;; duplicate agent slots. These slots are identities, dialogue and handles.
   ((kind :initarg :kind :reader inhabitant-kind)
    (description :initarg :description :initform nil :reader inhabitant-original-description)
    (character :initarg :character :reader inhabitant-character)
@@ -184,10 +186,13 @@ is immediate. Build larger things one cell at a time. Keep replies short.")
 
 (defclass inhabitant-journey ()
   ((route :initarg :route :reader journey-route)
-   (started :initform (get-internal-real-time) :reader journey-started)
+   (started :initform (get-internal-real-time) :reader journey-started
+            :quantity (:quantity luft.quantities::monotonic-time
+                       :unit luft.quantities::internal-time-tick))
    (fetch :initarg :fetch :initform nil :reader journey-fetch)
    (result :initform nil :accessor journey-result)
-   (mailbox :initform (sb-concurrency:make-mailbox) :reader journey-mailbox)))
+   (mailbox :initform (sb-concurrency:make-mailbox) :reader journey-mailbox))
+  (:metaclass luv.arithmetic.records:quantity-class))
 
 (defun finish-inhabitant-journey (inhabitant text)
   (let ((journey (inhabitant-journey inhabitant)))

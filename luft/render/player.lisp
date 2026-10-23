@@ -10,6 +10,20 @@
 
 (defconstant +figure-scalar-count+ 20)
 
+(defmethod math:value-declaration-for ((name (eql 'pack-figure-instances)))
+  (load-time-value
+   (luft.terrain::make-terrain-float-product-declaration
+    'pack-figure-instances 20
+    '(((0 1 2) :quantity quantities:world-position :unit quantities:cell)
+      ((3) :quantity quantities:gait-phase :unit :radian)
+      ((4 5 6) :quantity quantities:world-position :unit quantities:cell)
+      ((7) :quantity quantities:gait-phase :unit :radian)
+      ((8 9) :quantity quantities:horizontal-direction :unit :one)
+      ((10 11) :quantity quantities:horizontal-direction :unit :one)
+      ((12 13 14) :quantity quantities:world-distance :unit quantities:cell)
+      ((16 17 18) :quantity quantities::surface-tone :unit :one)))))
+
+;;; Kind (lane 15) and padding (19) are categorical, not dimensions.
 (defun pack-figure-instances (figures)
   "Pack five vec4 rows per figure: current and previous center/gait,
 headings, half extents/kind (0 wizard, 1 box), and linear albedo.

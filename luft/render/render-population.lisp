@@ -5,6 +5,44 @@
 ;;; builds it on the worker beside each mesh, so the owner thread only stages
 ;;; buffers; GPU residency is renderer-residency.lisp.
 
+(defun ensure-terrain-quantity-contract ()
+  "Check the actual decoded shader products once, outside packing loops."
+  (let* ((vertex (shaders:terrain-vertex-specification))
+         (fragment (shaders:star-fragment-specification))
+         (outputs (luv.shader:shader-specification-outputs vertex))
+         (inputs (luv.shader:shader-specification-inputs fragment)))
+    (dolist (entry '((6 :surface) (7 :pattern) (8 :mortar) (9 :accent) (10 :light)))
+      (destructuring-bind (location product) entry
+        (let* ((output (find location outputs :key #'luv.shader:shader-interface-location))
+               (input (find location inputs :key #'luv.shader:shader-interface-location))
+               (expected
+                 (if (eq product :light)
+                     (luft::light-point-product-layout)
+                     (luv.shader::parse-declaration-quantity-layout
+                      (luft.terrain::terrain-varying-components product)
+                      (luv.shader:find-shader-type :vec4) entry))))
+          (unless (and output input
+                       (math:quantity-layout=
+                        expected (math:declaration-quantity-layout output))
+                       (math:quantity-layout=
+                        expected (math:declaration-quantity-layout input)))
+            (error "Terrain ~S product disagrees with shader location ~D."
+                   product location)))))
+    ;; The descriptor consumes two uvec4 rows; the sidecar one, per site.
+    (dolist (entry '((8 luft::light-sidecar 128)
+                     (6 compile-terrain-material-descriptors 256)))
+      (destructuring-bind (binding name bits) entry
+        (let* ((resource (find binding (luv.shader:shader-specification-resources vertex)
+                               :key #'luv.shader:shader-resource-binding))
+               (layout (math:declaration-quantity-layout (math:value-declaration-for name))))
+          (unless (and resource
+                       (luv.shader:shader-type=
+                        (luv.shader:shader-storage-buffer-element-type resource) :uvec4)
+                       (= bits (math:repeated-quantity-layout-stride layout)))
+            (error "Terrain packed product ~S disagrees with shader binding ~D."
+                   name binding)))))
+    t))
+
 (defun pack-terrain-appearance-codes (codes)
   "Pack eight u8 sample codes per star into the GPU's parallel uvec2 lane."
   (declare (type (simple-array (unsigned-byte 8) (*)) codes)
@@ -35,12 +73,38 @@ and voxel light."
                     :read-only t)
   (descriptor-words #() :type (simple-array (unsigned-byte 32) (*))
                     :read-only t)
+  (descriptor-declaration
+   (math:value-declaration-for 'compile-terrain-material-descriptors)
+   :read-only t)
+  (light-declaration (math:value-declaration-for 'luft::light-sidecar)
+                     :read-only t)
   (site-count 0 :type (integer 0 *) :read-only t)
   ;; Four words per site: STAR-LATTICE-LIGHT-WORDS.
   (light-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
   ;; Fixture bodies (LUFT.TERRAIN::PACK-FIXTURE-BODIES), drawn beside the stars.
   (body-data #.(make-array 0 :element-type 'single-float)
              :type (simple-array single-float (*)) :read-only t))
+
+(defun ensure-population-quantity-declarations (population)
+  "Check retained CPU writer contracts before GPU upload, never per lane."
+  (dolist (entry
+            (list (list (render-population-light-declaration population)
+                        'luft::light-sidecar
+                        (render-population-light-words population)
+                        (* 4 (render-population-site-count population)))
+                  (list (render-population-descriptor-declaration population)
+                        'compile-terrain-material-descriptors
+                        (render-population-descriptor-words population) nil)))
+    (destructuring-bind (retained name words length) entry
+      (let* ((current (math:value-declaration-for name))
+             (stride (math:repeated-quantity-layout-stride
+                      (math:declaration-quantity-layout current))))
+        (math:ensure-declarations-compatible retained current)
+        (unless (and (typep words (math:declaration-representation-type retained))
+                     (zerop (mod (* 32 (length words)) stride))
+                     (or (null length) (= length (length words))))
+          (error "Terrain ~S storage violates its packed product declaration." name)))))
+  population)
 
 ;;; Voxel light reaches the star shader at lattice points (#BQMYNU).  Every
 ;;; star-table vertex lies within a tick of one of the seven lattice points
@@ -171,6 +235,7 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
 
 (defun %make-star-render-population (meshes)
   "Flatten geometry and its parallel active-star appearance independently."
+  (load-time-value (ensure-terrain-quantity-contract))
   (let* ((site-words
            (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
                   (mapcar #'luft:surface-mesh-star-site-words meshes)))
@@ -183,6 +248,8 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
                        (luft:surface-mesh-appearance-descriptor-words mesh)
                      when (plusp (length words)) return words)
                +unpainted-terrain-descriptors+)))
+    (unless (zerop (mod (length descriptor-words) 8))
+      (error "Terrain descriptor product needs eight u32 words per material."))
     (unless (= (* 2 (length site-words)) (length appearance-codes))
       (error "~D site words do not have a one-for-one eight-byte appearance (~D bytes)."
              (length site-words) (length appearance-codes)))

@@ -10,6 +10,61 @@
 
 (in-package #:luft.terrain.tests)
 
+(define-test voxel-light-fields-retain-their-meaning
+  (let* ((domain (luft:make-world-domain :horizontal-bits 4))
+         (cells (make-hash-table :test #'eql))
+         (opacity (make-array 0 :element-type '(unsigned-byte 8)))
+         (rgb (luft:solve-voxel-light domain cells opacity #()))
+         (sky (luft:solve-voxel-light domain cells opacity #() :field-name :luft-sky)))
+    (dolist (entry (list (cons rgb :luft-rgb4) (cons sky :luft-sky)))
+      (true (eq (luv.fields:field-definition-for (cdr entry))
+                (luv.fields:materialized-field-definition (car entry) (cdr entry))))
+      (let ((copy (luft:join-voxel-light-fields domain (list (car entry)))))
+        (true (luv.fields:materialized-field-current-p copy (cdr entry)))))
+    (true (handler-case
+              (progn (luft:join-voxel-light-fields domain (list rgb sky)) nil)
+            (luv.arithmetic:declaration-compatibility-error () t)))
+    (true (handler-case
+              (progn (luft:replace-voxel-light-region domain rgb sky '(0 0 8 8)) nil)
+            (luv.arithmetic:declaration-compatibility-error () t))))
+  ;; The scalar frontier realization is exact for every RGB4 and every loss.
+  (true (loop for light below 4096 always
+          (loop for opacity from 0 to 15 always
+            (= (luft:voxel-light-transfer light opacity)
+               (luft:pack-voxel-light
+                (max 0 (- (logand light 15) (1+ opacity)))
+                (max 0 (- (ldb (byte 4 4) light) (1+ opacity)))
+                (max 0 (- (ldb (byte 4 8) light) (1+ opacity)))))))))
+
+(define-test voxel-light-frontier-rejects-a-duration-as-loss
+  ;; The physical realization must fail at expansion, not tag runtime lanes.
+  (luv.frontier:define-frontier-program invalid-light-loss
+    :family :monotone-max-fixpoint
+    :frontier-layout (:buckets 15)
+    :neighborhood :voxel-face-relations
+    :fields ((level :relaxed t) loss)
+    :transfer (- (level source) (loss target)))
+  (let* ((level (luv.fields:field-definition-for :luft-block-lane))
+         (loss (luv.arithmetic:make-represented-value-declaration
+                :representation-type 'real
+                :quantity-specification
+                (luv.arithmetic:make-declared-quantity-specification
+                 '(:quantity :duration :unit :second)))))
+    (true
+     (handler-case
+         (progn
+           (macroexpand-1
+            `(luv.frontier:with-frontier-kernel
+                 (invalid-light-loss
+                  :fields (list (luv.frontier:make-frontier-field-binding
+                                 'level :declaration ',level)
+                                (luv.frontier:make-frontier-field-binding
+                                 'loss :declaration ',loss))
+                  (transfer :transfer (((level source) level) ((loss target) loss))))
+               (transfer 15 1)))
+           nil)
+       (luv.arithmetic.language:arithmetic-language-error () t)))))
+
 (defparameter *stone*
   (make-instance 'terrain:material-placement
                  :name :stone

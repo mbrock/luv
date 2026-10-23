@@ -36,19 +36,20 @@
   (check-type red (integer 0 15))
   (check-type green (integer 0 15))
   (check-type blue (integer 0 15))
-  (logior red (ash green 4) (ash blue 8)))
+  (logior red (ash green #.(third (light-point-byte 1)))
+          (ash blue #.(third (light-point-byte 2)))))
 
 (defun voxel-light-red (light)
   (check-type light voxel-light)
-  (ldb (byte 4 0) light))
+  (ldb #.(light-point-byte 0) light))
 
 (defun voxel-light-green (light)
   (check-type light voxel-light)
-  (ldb (byte 4 4) light))
+  (ldb #.(light-point-byte 1) light))
 
 (defun voxel-light-blue (light)
   (check-type light voxel-light)
-  (ldb (byte 4 8) light))
+  (ldb #.(light-point-byte 2) light))
 
 (defun %voxel-light-priority (light)
   (max (voxel-light-red light)
@@ -69,6 +70,9 @@
                   visits pushes stale-pops))
              (:copier nil))
   (domain (make-world-domain) :type world-domain :read-only t)
+  ;; One semantic owner per field, never one tag per page element.
+  (definition (luv.fields:field-definition-for :luft-rgb4)
+              :type luv.fields:voxel-field-definition)
   (pages nil :read-only t)
   (direct-p nil :type boolean :read-only t)
   (x-pages 0 :type (integer 0 *) :read-only t)
@@ -84,6 +88,19 @@
   (visits 0 :type (integer 0 *) :read-only t)
   (pushes 0 :type (integer 0 *) :read-only t)
   (stale-pops 0 :type (integer 0 *) :read-only t))
+
+(defmethod luv.fields:materialized-field-definition
+    ((field voxel-light-field) name)
+  (let ((definition (voxel-light-field-definition field)))
+    (when (eq name (luv.fields:voxel-field-definition-name definition))
+      definition)))
+
+(defmethod luv.fields:materialized-field-representation
+    ((field voxel-light-field) name)
+  (when (luv.fields:materialized-field-definition field name) field))
+
+(defmethod luv.fields:field-representation-domain ((field voxel-light-field))
+  (voxel-light-field-domain field))
 
 (declaim (inline %voxel-light-page-key %voxel-light-page-index
                  %voxel-light-directory-index %voxel-light-page-at
@@ -304,12 +321,29 @@ many mesh points in one derived render population."
 (defun %voxel-light-source-value (source)
   (ldb (byte +voxel-light-value-bits+ 48) source))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (luv.frontier:define-frontier-program light-channel-addition
+    :family :monotone-max-fixpoint
+    :frontier-layout (:buckets 15)
+    :neighborhood :voxel-face-relations
+    :fields ((level :relaxed t) loss)
+    :transfer (max (luv.frontier:as-field-quantity level 0)
+                   (luv.frontier:as-field-quantity level
+                     (- (level source)
+                        (luv.frontier:as-field-quantity level (loss target)))))))
+
 (defun %attenuate-voxel-light (light loss)
-  (flet ((lane (level)
-           (max 0 (- level loss))))
-    (pack-voxel-light (lane (voxel-light-red light))
-                      (lane (voxel-light-green light))
-                      (lane (voxel-light-blue light)))))
+  ;; Packed RGB realizes the checked scalar law independently in each lane.
+  (luv.frontier:with-frontier-kernel
+      (light-channel-addition
+       :fields (list (luv.frontier:make-frontier-field-binding 'level
+                       :declaration (luv.fields:field-definition-for :luft-block-lane))
+                     (luv.frontier:make-frontier-field-binding 'loss))
+       (lane :transfer (((level source) level) ((loss target) loss))))
+    (flet ((attenuate (level) (lane level loss)))
+      (pack-voxel-light (attenuate (voxel-light-red light))
+                        (attenuate (voxel-light-green light))
+                        (attenuate (voxel-light-blue light))))))
 
 (defun %material-opacity (material-cells opacity-table cell)
   (multiple-value-bind (material present-p)
@@ -333,6 +367,7 @@ many mesh points in one derived render population."
     :priority (%voxel-light-priority value))
   (defparameter *rgb4-paged-field-binding*
     (luv.frontier:make-frontier-field-binding 'level
+      :declaration (luv.fields:field-definition-for :luft-rgb4)
       :read '(light-at x y z)
       :write '(setf (aref (the voxel-light-page (page-for-write x y z))
                          (%voxel-light-page-index x y z)) value))))
@@ -347,7 +382,7 @@ many mesh points in one derived render population."
 
 (defun solve-voxel-light
     (domain material-cells opacity-table sources
-     &key (revision 0) region hashed-p baseline)
+     &key (revision 0) region hashed-p baseline (field-name :luft-rgb4))
   "Compute immutable colored local light with a packed brightest-first frontier.
 
 MATERIAL-CELLS is a hash table or a lookup function returning a dense material
@@ -516,7 +551,9 @@ baseline can improve a neighbour; only improvements over it enter the queue."
         (let ((field (%make-voxel-light-field
                       domain pages direct-p x-pages y-pages page-count revision
                       visits pushes stale-pops)))
-          (setf (voxel-light-field-baseline field) baseline)
+          (setf (voxel-light-field-baseline field) baseline
+                (voxel-light-field-definition field)
+                (luv.fields:field-definition-for field-name))
           field))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -577,6 +614,9 @@ part of its field it is exact over."
       (dolist (field fields)
         (unless (equalp (voxel-light-field-domain field) domain)
           (error "Voxel-light field ~S belongs to another domain." field))
+        (luv.arithmetic:ensure-declarations-compatible
+         (voxel-light-field-definition field)
+         (voxel-light-field-definition (first fields)))
         (incf visits (voxel-light-field-visits field))
         (incf pushes (voxel-light-field-pushes field))
         (incf stale-pops (voxel-light-field-stale-pops field))
@@ -605,6 +645,9 @@ part of its field it is exact over."
                      domain pages nil x-pages y-pages page-count revision
                      visits pushes stale-pops))
             (baselines (remove nil (mapcar #'voxel-light-field-baseline fields))))
+        (when fields
+          (setf (voxel-light-field-definition result)
+                (voxel-light-field-definition (first fields))))
         (when baselines
           (setf (voxel-light-field-baseline result)
                 (lambda (x y z)
@@ -633,6 +676,10 @@ Unchanged pages remain shared with the immutable old generation. Removed
 pages are not joined back: zero in REPLACEMENT really removes old light.
 The caller proves REGION contains the complete influence of its changes.
 REPLACEMENT's implicit baseline must describe the whole retained tile."
+  (when (and old replacement)
+    (luv.arithmetic:ensure-declarations-compatible
+     (voxel-light-field-definition old)
+     (voxel-light-field-definition replacement)))
   (destructuring-bind (x0 y0 x1 y1) region
     (unless (every (lambda (x) (zerop (mod x 8))) region)
       (error "Light invalidation bounds must be page aligned: ~S." region))
@@ -657,6 +704,9 @@ REPLACEMENT's implicit baseline must describe the whole retained tile."
                       (if replacement (voxel-light-field-visits replacement) 0)
                       (if replacement (voxel-light-field-pushes replacement) 0)
                       (if replacement (voxel-light-field-stale-pops replacement) 0))))
+          (when (or replacement old)
+            (setf (voxel-light-field-definition field)
+                  (voxel-light-field-definition (or replacement old))))
           (when replacement
             (setf (voxel-light-field-baseline field)
                   (voxel-light-field-baseline replacement)

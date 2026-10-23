@@ -15,6 +15,32 @@
 
 (in-package #:luft.render.tests)
 
+(define-test terrain-packed-products-retain-quantities-and-scales
+  (true (render::ensure-terrain-quantity-contract))
+  (let* ((declaration (math:value-declaration-for 'terrain:compile-terrain-material-descriptors))
+         (layout (math:declaration-quantity-layout declaration))
+         (emission (car (last (math:quantity-layout-projections layout))))
+         (specification (math:quantity-projection-specification emission)))
+    (true (= 256 (math:repeated-quantity-layout-stride layout)))
+    (true (equal '(216 217 218 219 220 221 222 223)
+                 (math:quantity-projection-positions emission)))
+    (true (= 4/255 (math:unit-conversion-factor
+                   (math:quantity-specification-unit specification) :one)))
+    (true (eq 'quantities::surface-emission (math:quantity-specification-name specification))))
+  ;; A raw vec4 cannot bypass the declared heterogeneous output contract.
+  (true
+   (handler-case
+       (progn
+         (luv.shader:parse-shader-specification
+          'invalid-light-product
+          `(:stage :vertex
+            :outputs ((result :vec4 :location 0
+                       :components ,(terrain::terrain-varying-components :light))))
+          '((luv.shader:set-output result (luv.shader:vec4 0.0 0.0 0.0 1.0))))
+         nil)
+     (luv.shader:shader-language-error (condition)
+       (eq :output-quantity-layout-mismatch (luv.shader:shader-language-error-reason condition))))))
+
 (defun scalar-star-light-words (mesh)
   "Uncached specification of the seven-corner sidecar, including its spare lane."
   (let* ((sites (luft:surface-mesh-star-site-words mesh))

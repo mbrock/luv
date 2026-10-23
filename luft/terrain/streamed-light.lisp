@@ -379,6 +379,7 @@ atmosphere is an implicit column reading, not millions of queued cells."
                        (luft:make-voxel-light-source cell candidate) sources)))))))))
       (let* ((solved (luft:solve-voxel-light
                       domain #'material closed-opacity sources
+                      :field-name :luft-sky
                       :region (or solve-region region) :hashed-p t :baseline #'direct))
              (field (luft:join-voxel-light-fields domain (list solved)
                                                  :region (or solve-region region))))

@@ -2155,3 +2155,93 @@ voxel-light gain is tracked by the shader parser, so changing it rebuilds
 the renderer cohort. Expensive controls preview during a drag and commit
 on release. These declarations do not add dispatch to dense GPU or physics
 loops: the hot paths still receive raw lanes and literals.
+
+* DONE Carry Luft's propagation quantities through paged fields
+:PROPERTIES:
+:ID: GGTU6H
+:END:
+
+Luft now uses the same voxel-field declarations as the original world
+(#Q7M4PF), extracted unchanged into =luv/fields=. Its old package name is a
+nickname, not a parallel registry. RGB4 block light, scalar block propagation,
+and scalar sky propagation have distinct definitions. Each paged field retains
+one definition object; joins and regional replacement reject incompatible
+meanings. Seed/stamp light arrays retain their RGB4 meaning through the record
+protocol (#FLRFU8). Sites, pages, revisions and provenance remain raw identities.
+
+The native frontier kernel accepts field bindings and uses the existing
+arithmetic parser, =as-field-quantity= and result judgment (#GZ53LD). Packed RGB
+attenuation realizes the checked scalar channel law three times, without
+semantic dispatch in the relation loop. Packed max/join and bucket priority
+remain representation operations, not fictitious arithmetic on an RGB integer.
+
+Evidence: the terrain tests exhaust all 4096 RGB4 values times 16 opacities,
+retain field identity, reject RGB/sky joins and replacements, and reject a
+duration used as propagation loss during kernel expansion. The terrain suite
+passes 132 tests; =make= and =make test= pass, including 688085 star checks.
+
+* DONE Declare the light and material products on both sides of the GPU seam
+:PROPERTIES:
+:ID: X5GB5S
+:END:
+
+Following the frame product (#F8U2LA), the light sidecar declares a repeated
+128-bit product: seven RGB4/sky4 readings and one spare u16. The material
+descriptor declares a repeated 256-bit product: three tones, surface response,
+pattern, mortar, accent/emission and padding. RGB8 and UNORM4 lanes record
+1/255 and 1/15 units; aspect records half rows; the high byte of word 6 records
+emission in units of 4/255, not 1/255. Codes and unused bits have no quantity.
+
+CPU packers and shader decoders share the declared bit positions. Descriptor
+decoders also take their literal normalization factors from that ledger.
+Decoded heterogeneous varyings carry component layouts, checked on vertex
+output and fragment input. The CPU population retains both declarations,
+checks actual storage strides and stage layouts, and validates arrays before
+upload, outside packing loops. Response curves explicitly cross back to raw
+representation after that checked boundary (#S00PRF).
+
+Evidence: existing scalar/SSE2 sidecar equality tests pass. A reference run of
+=scripts/profile-light.lisp= compares all 16 owner sidecars and prepared cached
+products exactly, before and after editing. Its fixture has 246975 stars and
+1728825 requests. Ten-run packing means were 55.6 ms before, 56.0 ms after,
+and 55.2 ms on a second after run; allocations were 12.978 MB before and
+13.013/13.007 MB after. This is no observed packing slowdown, not a claim of a
+speedup. Cold-cohort means were 347.2 ms before and 329.2/337.6 ms after;
+cold-tile means varied 165.2 to 170.4/185.2 ms and need controlled measurements
+before inferring a solver regression. The hot sidecar implementation is unchanged.
+An isolated 8388608-call attenuation comparison gave 168/168/168 ms for the
+original scalar law and 164/156/156 ms for the checked law, with identical
+checksums. Quantity checking has not added per-call work to that kernel.
+
+A temporary reference comparison also checked 10000 randomized material cases
+including clipping/rounding edges, and all 29 production shaders: packed words
+and SPIR-V words are identical; MSL executable source is identical after
+removing quantity comments. No rendered appearance change is intended.
+
+* DONE State honest meanings on Luft's bodies and game state
+:PROPERTIES:
+:ID: 9D5V6Y
+:END:
+
+Fixture vertex and instance products, figure products, character headings and
+gait, simulation clocks, wizard height/hour/timestamps/embers, viewer reports
+and agent journey timestamps now use the existing declaration protocol
+(#AVRNHW). Animals retain their original CRITTER/TURTLE quantity-bearing body
+through the Y-up/Z-up seam; the translated figure product states Luft's units.
+Journey timestamps are internal ticks, whereas wizard timestamps are seconds.
+Categorical body/part codes, picks, grain seeds and handles stay raw, with
+comments instead of invented dimensions. The fixture's overloaded U lane is
+intentionally not claimed to be a homogeneous texture quantity.
+
+The audit corrected two metadata errors without changing numbers: voxel-light
+gain supplies relative scene radiance, not a proportion; turtle gait stores
+radians, not the strides claimed by its old comment. No numerical unit bug was
+found. Existing knobs already state their units; the gain annotation was the
+incorrect one.
+
+Verification also ran the expanded 33-suite repository runner, including
+terrain, wizard, renderer, old-world and SPIR-V validation. Only the untouched
+Wayland suite failed to observe foot's mapped window in this orb; Ghostty and
+terminal suites were skipped because libghostty-vt was unavailable. The slim
+=make test= passed. =scripts/wiki dangling= still reports the two pre-existing
+portrait citations TR4VLR and H1GHLD; these figures introduce no dangling links.

@@ -76,6 +76,13 @@
   :components ((:file "frontiers/package")
                (:file "frontiers/frontier")))
 
+(defsystem "luv/fields"
+  :description "Inspectable voxel field declarations, independent of either game."
+  :depends-on ("luv/arithmetic")
+  :serial t
+  :components ((:file "domains/fields-package")
+               (:file "domains/fields")))
+
 (defsystem "luv/arithmetic"
   :description "Semantic quantities and their inspectable Lisp and shader arithmetic."
   :version "0.0.1"

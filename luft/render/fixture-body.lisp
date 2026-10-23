@@ -9,6 +9,15 @@
 
 (defconstant +fixture-body-vertex-scalar-count+ 8)
 
+(defmethod math:value-declaration-for ((name (eql '%make-fixture-body-vertex-data)))
+  (load-time-value
+   (luft.terrain::make-terrain-float-product-declaration
+    '%make-fixture-body-vertex-data 8
+    '(((0 1 2) :quantity quantities::fixture-position :unit quantities:cell)
+      ((4 5 6) :quantity quantities:world-direction :unit :one)))))
+
+;;; PART is categorical; U is part-dependent (stave index plus local position,
+;;; or a local texture coordinate). Neither is one honest homogeneous quantity.
 (defconstant +fixture-part-stave+ 0)
 (defconstant +fixture-part-hoop+ 1)
 (defconstant +fixture-part-head+ 2)

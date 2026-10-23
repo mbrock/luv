@@ -357,6 +357,7 @@ and four light words; the arrays keep their one-for-one order.  The runs are
 
 (zdefun (%upload-render-population :zone :luft/upload-slot) (renderer population)
   "Own each buffer before uploading, so even a failed write rolls back."
+  (ensure-population-quantity-declarations population)
   (let ((resident (make-instance 'resident-population :population population)))
     (with-gpu-construction (resident)
       (flet ((upload (label words)

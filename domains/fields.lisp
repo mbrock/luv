@@ -5,7 +5,7 @@
 ;;; their own specialized arrays and bind one definition object when they are
 ;;; materialized, making live redefinition visible without changing a lane.
 
-(in-package #:luvcraft.world.fields)
+(in-package #:luv.fields)
 
 (defclass voxel-field-definition (math:represented-value-declaration)
   ((name

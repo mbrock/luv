@@ -2,6 +2,9 @@
 
 ;;; Reuse the turtle's deterministic mind and box model, but never ask the
 ;;; old world for contact. Its Y-up body crosses this one Z-up seam (#CS2DOF).
+;;; Positions, velocities, yaw, dimensions and gait retain CRITTER/TURTLE's
+;;; quantity declarations. CONTACT owns only a categorical occupancy handle;
+;;; the translated figure rows declare Luft's quantities at PACK-FIGURE-INSTANCES.
 (defclass animal-contact ()
   ((solid :initarg :solid :reader animal-contact-solid)))
 

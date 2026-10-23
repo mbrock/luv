@@ -22,16 +22,23 @@ top or bottom one.")
 
 (defclass material-kind ()
   ((name :initarg :name :reader material-kind-name)
-   (base-tone :initarg :base-tone :reader material-kind-base-tone)
-   (top-tone :initarg :top-tone :initform nil :reader material-kind-top-tone)
-   (side-tone :initarg :side-tone :initform nil :reader material-kind-side-tone)
+   (base-tone :initarg :base-tone :reader material-kind-base-tone
+              :quantity (:quantity quantities::surface-tone :unit :one :tensor-order 1))
+   (top-tone :initarg :top-tone :initform nil :reader material-kind-top-tone
+             :quantity (:quantity quantities::surface-tone :unit :one :tensor-order 1))
+   (side-tone :initarg :side-tone :initform nil :reader material-kind-side-tone
+              :quantity (:quantity quantities::surface-tone :unit :one :tensor-order 1))
    (bottom-tone :initarg :bottom-tone :initform nil
+                :quantity (:quantity quantities::surface-tone :unit :one :tensor-order 1)
                 :reader material-kind-bottom-tone)
    (light-opacity :initarg :light-opacity :initform 15
+                  :quantity (:quantity luft::block-propagation-level :unit :one)
                   :reader material-kind-light-opacity)
    (light-emission :initarg :light-emission :initform '(0 0 0)
+                   :quantity (:quantity luft::block-propagation-level :unit :one :tensor-order 1)
                    :reader material-kind-light-emission)
    (surface-emission :initarg :surface-emission :initform 0.0
+                     :quantity (:quantity quantities::surface-emission :unit :one)
                      :reader material-kind-surface-emission)
    (attachment-form :initarg :attachment-form :initform nil
                     :type (member nil :torch :lantern)
@@ -44,10 +51,13 @@ an attachment on the face of a solid neighbour rather than a cube.")
            :reader material-kind-relief
            :documentation "The world-space height field the surface is cut from.")
    (relief-strength :initarg :relief-strength :initform 0.5
+                    :quantity (:quantity quantities::surface-relief :unit :one)
                     :reader material-kind-relief-strength)
    (roughness :initarg :roughness :initform 0.85
+              :quantity (:quantity quantities::surface-roughness :unit :one)
               :reader material-kind-roughness)
    (edge-wear :initarg :edge-wear :initform 0.5
+              :quantity (:quantity quantities::surface-wear :unit :one)
               :reader material-kind-edge-wear
               :documentation "How much convex edges lighten and hollows darken.")
    (pattern :initarg :pattern :initform nil :reader material-kind-pattern
@@ -76,6 +86,8 @@ inside a MORTAR-TONE rim.  These motifs repeat per cell, not per course.")
          :documentation
          "A drawn fixture which stands in the cell instead of its star surface.
 The cell stays solid for walking and light; only its drawing changes."))
+  ;; Names, relief/pattern/body codes, and attachment forms are categorical.
+  (:metaclass quantity-class)
   (:documentation
    "An authored cell substance: its tones, the relief and edge response the
 star shader cuts it with (#HYBFRT), and the facts needed by voxel light."))
@@ -104,7 +116,9 @@ star shader cuts it with (#HYBFRT), and the facts needed by voxel light."))
   (destructuring-bind (red green blue) tone
     (flet ((lane (value)
              (round (* 255 (max 0.0 (min 1.0 value))))))
-      (logior (lane red) (ash (lane green) 8) (ash (lane blue) 16)))))
+      (logior (dpb (lane red) #.(terrain-descriptor-byte :red) 0)
+              (dpb (lane green) #.(terrain-descriptor-byte :green) 0)
+              (dpb (lane blue) #.(terrain-descriptor-byte :blue) 0)))))
 
 (defun pack-terrain-surface (kind)
   "Pack KIND's relief, its strength, roughness, and edge wear.
@@ -114,9 +128,12 @@ edge wear; the star shader unpacks the same layout."
   (flet ((unit (value bits)
            (round (* (1- (ash 1 bits)) (max 0.0 (min 1.0 value))))))
     (logior (position (material-kind-relief kind) +material-reliefs+)
-            (ash (unit (material-kind-relief-strength kind) 4) 4)
-            (ash (unit (material-kind-roughness kind) 8) 8)
-            (ash (unit (material-kind-edge-wear kind) 8) 16))))
+            (dpb (unit (material-kind-relief-strength kind) 4)
+                 #.(terrain-descriptor-byte :strength) 0)
+            (dpb (unit (material-kind-roughness kind) 8)
+                 #.(terrain-descriptor-byte :roughness) 0)
+            (dpb (unit (material-kind-edge-wear kind) 8)
+                 #.(terrain-descriptor-byte :wear) 0))))
 
 (defun pack-terrain-pattern (kind)
   "Pack KIND's laid pattern into a word, and return its mortar tone word and
@@ -136,14 +153,14 @@ surface emission over 4, which face-aware shapes glow by."
                (unit (value) (round (* 255 (max 0.0 (min 1.0 value))))))
           (values (logior (or (position shape +material-patterns+ :start 1)
                               (error "~S is not a laid pattern." shape))
-                          (ash (field courses 15) 4)
-                          (ash (field (* 2 aspect) 15) 8)
-                          (ash (unit mortar-width) 12)
-                          (ash (unit variance) 20))
+                          (dpb (field courses 15) #.(terrain-descriptor-byte :courses) 0)
+                          (dpb (field (* 2 aspect) 15) #.(terrain-descriptor-byte :aspect) 0)
+                          (dpb (unit mortar-width) #.(terrain-descriptor-byte :mortar-width) 0)
+                          (dpb (unit variance) #.(terrain-descriptor-byte :variance) 0))
                   (pack-terrain-tone mortar-tone)
                   (logior (pack-terrain-tone accent-tone)
-                          (ash (unit (/ (material-kind-surface-emission kind) 4))
-                               24)))))))
+                          (dpb (unit (/ (material-kind-surface-emission kind) 4))
+                               #.(terrain-descriptor-byte :emission) 0)))))))
 
 (defun compile-terrain-material-descriptors (placement-vocabulary)
   "Compile AIR plus the scene's u8 placements to two descriptor rows each:

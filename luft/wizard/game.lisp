@@ -32,22 +32,30 @@
    (character :initarg :character :accessor wizard-character)
    (camera :initarg :camera :reader wizard-camera)
    (isometric-height :initarg :isometric-height :initform 18.0
+                     :quantity (:quantity luft.quantities:world-distance
+                                :unit luft.quantities:cell)
                      :accessor wizard-isometric-height)
    (hour :initarg :hour :initform 16.5 :accessor wizard-hour
+         :quantity (:quantity luft.quantities::time-of-day :unit luft.render::sky-hour)
          :documentation "The fixed time of day the isle is shown at.")
-   (last-timestamp :initform nil :accessor wizard-last-timestamp)
+   (last-timestamp :initform nil :accessor wizard-last-timestamp
+                   :quantity (:quantity luft.quantities::monotonic-time :unit :second))
    (pointer :initform nil :accessor wizard-pointer)
    (hover :initform nil :accessor wizard-hover)
-   (embers :initform 0 :accessor wizard-embers)
+   (embers :initform 0 :accessor wizard-embers
+           :quantity (:quantity luft.quantities::ember-count :unit :one))
    (message :initform "FIND THE GREEN IN THE STONE CIRCLE"
             :accessor wizard-message)
-   (spell-time :initform nil :accessor wizard-spell-time)
+   (spell-time :initform nil :accessor wizard-spell-time
+               :quantity (:quantity luft.quantities::monotonic-time :unit :second))
    (hud-program :initform nil :accessor wizard-hud-program)
    (hud-slots :initform (make-hash-table :test #'equal) :reader wizard-hud-slots)
    (surface-views :initform (make-hash-table :test #'equal)
                   :reader wizard-surface-views)
    (running-p :initform t :accessor wizard-running-p)
    (stop-controller :initarg :stop-controller :reader wizard-stop-controller))
+  ;; Pointer/hover are discrete picks; remaining raw slots are handles/state.
+  (:metaclass luv.arithmetic.records:quantity-class)
   (:documentation "The isometric wizard game: an isle, a walker, a camera."))
 
 (defun wizard-scene (wizard)

@@ -4,9 +4,10 @@
   :description "Canonical cubical topology and integer manifold-sheet meshing."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("sb-simd" "luv/frontier")
+  :depends-on ("sb-simd" "luv/frontier" "luv/fields")
   :serial t
   :components ((:file "luft/luft")
+               (:file "luft/light-quantities")
                (:file "luft/fibers")
                (:file "luft/voxel-light")
                (:file "luft/mesh")

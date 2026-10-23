@@ -14,15 +14,18 @@
 
 (luv.knobs:define-knob voxel-light-gain
     (:group :grading :class 'luv.knobs:rebuild-knob
-     :quantity (:quantity :proportion :unit :one)
+     :quantity (:quantity quantities:scene-radiance :unit :one)
      :minimum 0.0 :maximum 3.0 :step 0.05)
   *voxel-light-gain*)
 
 (define-shader-function unpack-terrain-tone (packed)
   "Decode one RGB8 terrain descriptor into scene-linear colour."
-  (vec3 (/ (float (ldb (byte 8 0) packed)) 255.0)
-        (/ (float (ldb (byte 8 8) packed)) 255.0)
-        (/ (float (ldb (byte 8 16) packed)) 255.0)))
+  (vec3 (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :red) packed))
+           #.(luft.terrain::terrain-descriptor-divisor :red))
+        (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :green) packed))
+           #.(luft.terrain::terrain-descriptor-divisor :green))
+        (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :blue) packed))
+           #.(luft.terrain::terrain-descriptor-divisor :blue))))
 
 (define-shader-function terrain-material-sample
     (code selected descriptor normal)
@@ -66,10 +69,15 @@ convex edge or corner fewer occupied, and a concave one more."
   (let* ((occupied-count (cell-mask-count occupied))
          (incident (max 1.0 (+ occupied-count (cell-mask-count empty))))
          (convexity (clamp (* 4.0 (- 0.5 (/ occupied-count incident))) -1.0 1.0)))
-    (vec4 (float (ldb (byte 4 0) word))
-          (/ (float (ldb (byte 4 4) word)) 15.0)
-          (/ (float (ldb (byte 8 8) word)) 255.0)
-          (* convexity (/ (float (ldb (byte 8 16) word)) 255.0)))))
+    (assume-quantity
+     (vec4 (float (ldb #.(luft.terrain::terrain-descriptor-byte :relief-code) word))
+           (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :strength) word))
+              #.(luft.terrain::terrain-descriptor-divisor :strength))
+           (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :roughness) word))
+              #.(luft.terrain::terrain-descriptor-divisor :roughness))
+           (* convexity (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :wear) word))
+                           #.(luft.terrain::terrain-descriptor-divisor :wear))))
+     :components #.(luft.terrain::terrain-varying-components :surface))))
 
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
@@ -100,10 +108,14 @@ convex edge or corner fewer occupied, and a concave one more."
 
 (define-shader-function terrain-pattern-vector (word)
   "Unpack pattern WORD: shape, rows per cell, element length in rows, mortar."
-  (vec4 (float (ldb (byte 4 0) word))
-        (float (ldb (byte 4 4) word))
-        (* 0.5 (float (ldb (byte 4 8) word)))
-        (/ (float (ldb (byte 8 12) word)) 255.0)))
+  (assume-quantity
+   (vec4 (float (ldb #.(luft.terrain::terrain-descriptor-byte :pattern-code) word))
+         (float (ldb #.(luft.terrain::terrain-descriptor-byte :courses) word))
+         (* #.(/ (luft.terrain::terrain-descriptor-divisor :aspect))
+            (float (ldb #.(luft.terrain::terrain-descriptor-byte :aspect) word)))
+         (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :mortar-width) word))
+            #.(luft.terrain::terrain-descriptor-divisor :mortar-width)))
+   :components #.(luft.terrain::terrain-varying-components :pattern)))
 
 ;;; Laid patterns.  Bricks, tiles, and shingles are laid out in the face's
 ;;; own world coordinates: along a wall and up it, or across a floor.  Rows
@@ -835,12 +847,17 @@ the figure stays clear and only its far reaches recede."
               (shadow-sample :vec3 :location 4
                              :quantity quantities:shadow-coordinate :unit :one)
               (material-tone :vec3 :location 5 :interpolation :flat)
-              (material-surface :vec4 :location 6 :interpolation :flat)
-              (material-pattern :vec4 :location 7 :interpolation :flat)
-              (material-mortar :vec4 :location 8 :interpolation :flat)
-              (material-accent :vec4 :location 9 :interpolation :flat)
+              (material-surface :vec4 :location 6 :interpolation :flat
+                                :components #.(luft.terrain::terrain-varying-components :surface))
+              (material-pattern :vec4 :location 7 :interpolation :flat
+                                :components #.(luft.terrain::terrain-varying-components :pattern))
+              (material-mortar :vec4 :location 8 :interpolation :flat
+                               :components #.(luft.terrain::terrain-varying-components :mortar))
+              (material-accent :vec4 :location 9 :interpolation :flat
+                               :components #.(luft.terrain::terrain-varying-components :accent))
 
-              (voxel-light :vec4 :location 10))
+              (voxel-light :vec4 :location 10
+                           :components #.(luft.terrain::terrain-varying-components :light)))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -849,6 +866,8 @@ the figure stays clear and only its far reaches recede."
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
          (world (representation world-position))
+         ;; Response curves below intentionally operate on represented lanes;
+         ;; their heterogeneous inputs have been checked at the stage seam.
          (sun (representation (swizzle sun-vector :xyz)))
          (sun-color (representation (swizzle sun-color-vector :xyz)))
          (visibility
@@ -856,10 +875,10 @@ the figure stays clear and only its far reaches recede."
             shadow-map shadow-sampler shadow-sample normal sun
             (representation shadow-control)
             shadow-row-x shadow-row-y shadow-row-z))
-         (relief (swizzle material-surface :x))
-         (strength (swizzle material-surface :y))
-         (roughness (swizzle material-surface :z))
-         (wear (swizzle material-surface :w))
+         (relief (swizzle (representation material-surface) :x))
+         (strength (swizzle (representation material-surface) :y))
+         (roughness (swizzle (representation material-surface) :z))
+         (wear (swizzle (representation material-surface) :w))
          (eye (representation camera-position))
          (forward (representation (swizzle camera-forward :xyz)))
          (divisor (swizzle (representation render-parameters) :z))
@@ -869,34 +888,34 @@ the figure stays clear and only its far reaches recede."
          (distance (mix 20.0 (sqrt (dot to-eye to-eye)) divisor))
          (fade (- 1.0 (smoothstep 40.0 120.0
                                   (* distance
-                                     (/ (pattern-fineness material-pattern) 4.0)))))
+                                     (/ (pattern-fineness (representation material-pattern)) 4.0)))))
          ;; Fine nap filters independently: a tapestry's large figure and a
          ;; bale's bindings must survive after individual fibers disappear.
          (nap-fade (- 1.0 (smoothstep 12.0 40.0 distance)))
-         (laid (laid-pattern material-pattern normal world))
-         (height (surface-height relief material-pattern world fade nap-fade laid))
+         (laid (laid-pattern (representation material-pattern) normal world))
+         (height (surface-height relief (representation material-pattern) world fade nap-fade laid))
          (bent (relief-normal normal world relief strength
-                              material-pattern fade nap-fade height))
-         (mortar-tone (swizzle material-mortar :xyz))
+                              (representation material-pattern) fade nap-fade height))
+         (mortar-tone (swizzle (representation material-mortar) :xyz))
          (element-tone
            (* (if (> (swizzle laid :w) 0.5)
-                  (if (> (swizzle material-pattern :x) 3.5)
+                  (if (> (swizzle (representation material-pattern) :x) 3.5)
                       mortar-tone material-tone)
                   material-tone)
-              (+ 1.0 (* 2.0 (swizzle material-mortar :w)
+              (+ 1.0 (* 2.0 (swizzle (representation material-mortar) :w)
                         (- (swizzle laid :y) 0.5)))))
-         (joint-tone (if (> (swizzle material-pattern :x) 3.5)
+         (joint-tone (if (> (swizzle (representation material-pattern) :x) 3.5)
                          (* mortar-tone 0.6) mortar-tone))
          (laid-tone (mix joint-tone element-tone (swizzle laid :x)))
-         (face-tone (face-pattern-tone material-pattern laid normal
-                                       material-tone material-mortar
-                                       material-accent))
-         (base-tone (if (< (swizzle material-pattern :x) 0.5)
+         (face-tone (face-pattern-tone (representation material-pattern) laid normal
+                                       material-tone (representation material-mortar)
+                                       (representation material-accent)))
+         (base-tone (if (< (swizzle (representation material-pattern) :x) 0.5)
                         material-tone
-                        (if (> (swizzle material-pattern :x) 4.5)
+                        (if (> (swizzle (representation material-pattern) :x) 4.5)
                             (mix material-tone face-tone fade)
                             (mix (mix material-tone mortar-tone
-                                      (swizzle material-pattern :w))
+                                      (swizzle (representation material-pattern) :w))
                                  laid-tone fade))))
          ;; Hollows of the relief hold shade and dirt; convex edges are
          ;; worn lighter and concave ones gather darker (#HYBFRT).
@@ -908,9 +927,9 @@ the figure stays clear and only its far reaches recede."
          ;; diffuse coat.  A hemispherical environment approximation keeps
          ;; this in the same pass, without reflection rays or texture reads.
          (metal (if (> relief 11.5) 1.0 0.0))
-         (sky (* (swizzle voxel-light :w)
+         (sky (* (swizzle (representation voxel-light) :w)
                  (representation (swizzle sky-color-vector :xyz))))
-         (ground (* (swizzle voxel-light :w)
+         (ground (* (swizzle (representation voxel-light) :w)
                     (representation (swizzle ground-color-vector :xyz))))
          (reflected-z (- (* 2.0 (dot bent view) (swizzle bent :z))
                          (swizzle view :z)))
@@ -923,13 +942,15 @@ the figure stays clear and only its far reaches recede."
               (* sun-color
                  (mix (vec3 1.0 1.0 1.0) (+ (vec3 0.2 0.2 0.2) (* tone 5.0)) metal)
                  (* visibility (material-specular bent view sun roughness)))
-              (face-pattern-glow material-pattern laid normal material-accent
+              (face-pattern-glow (representation material-pattern) laid normal
+                                 (representation material-accent)
                                  fade)
               ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
               ;; and lava, warm by night and lost in the sun by day.  The
               ;; square keeps a light's falloff from flattening into a wash.
               (* tone (* voxel-light-gain
-                         (* (swizzle voxel-light :xyz) (swizzle voxel-light :xyz))))))
+                         (* (swizzle (representation voxel-light) :xyz)
+                            (swizzle (representation voxel-light) :xyz))))))
          (final
            (atmospheric-surface
             radiance world
@@ -976,12 +997,17 @@ the figure stays clear and only its far reaches recede."
                (shadow-sample-output :vec3 :location 4
                                      :quantity quantities:shadow-coordinate :unit :one)
                (material-tone-output :vec3 :location 5 :interpolation :flat)
-               (material-surface-output :vec4 :location 6 :interpolation :flat)
-               (material-pattern-output :vec4 :location 7 :interpolation :flat)
-               (material-mortar-output :vec4 :location 8 :interpolation :flat)
-               (material-accent-output :vec4 :location 9 :interpolation :flat)
+               (material-surface-output :vec4 :location 6 :interpolation :flat
+                                        :components #.(luft.terrain::terrain-varying-components :surface))
+               (material-pattern-output :vec4 :location 7 :interpolation :flat
+                                        :components #.(luft.terrain::terrain-varying-components :pattern))
+               (material-mortar-output :vec4 :location 8 :interpolation :flat
+                                       :components #.(luft.terrain::terrain-varying-components :mortar))
+               (material-accent-output :vec4 :location 9 :interpolation :flat
+                                       :components #.(luft.terrain::terrain-varying-components :accent))
 
-               (voxel-light-output :vec4 :location 10))
+               (voxel-light-output :vec4 :location 10
+                                   :components #.(luft.terrain::terrain-varying-components :light)))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (terrain-appearances :storage-buffer :binding 3 :element :uvec2)
@@ -1063,12 +1089,20 @@ the figure stays clear and only its far reaches recede."
                                    (ldb (byte 8 8) (swizzle record :w))))
          (material-pattern (terrain-pattern-vector (swizzle pattern-row :x)))
          (material-mortar
-           (vec4 (unpack-terrain-tone (swizzle pattern-row :y))
-                 (/ (float (ldb (byte 8 20) (swizzle pattern-row :x))) 255.0)))
+           (assume-quantity
+            (vec4 (unpack-terrain-tone (swizzle pattern-row :y))
+                  (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :variance)
+                                 (swizzle pattern-row :x)))
+                     #.(luft.terrain::terrain-descriptor-divisor :variance)))
+            :components #.(luft.terrain::terrain-varying-components :mortar)))
          ;; The accent tone, and the surface emission it glows by over 4.
          (material-accent
-           (vec4 (unpack-terrain-tone (swizzle pattern-row :z))
-                 (/ (float (ldb (byte 8 24) (swizzle pattern-row :z))) 63.75)))
+           (assume-quantity
+            (vec4 (unpack-terrain-tone (swizzle pattern-row :z))
+                  (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :emission)
+                                 (swizzle pattern-row :z)))
+                     #.(luft.terrain::terrain-descriptor-divisor :emission)))
+            :components #.(luft.terrain::terrain-varying-components :accent)))
          ;; A vertex lies within a tick of one of the seven lattice points
          ;; of the cube above its site; that point's RGB4 is its light.
          (lights (buffer-element terrain-lights instance-index))
@@ -1085,11 +1119,13 @@ the figure stays clear and only its far reaches recede."
                (ldb (byte 16 16) light-pair)
                (ldb (byte 16 0) light-pair)))
          (voxel-light
-           (/ (vec4 (float (ldb (byte 4 0) packed-light))
-                    (float (ldb (byte 4 4) packed-light))
-                    (float (ldb (byte 4 8) packed-light))
-                    (float (ldb (byte 4 12) packed-light)))
-              15.0))
+           (assume-quantity
+            (/ (vec4 (float (ldb #.(luft::light-point-byte 0) packed-light))
+                     (float (ldb #.(luft::light-point-byte 1) packed-light))
+                     (float (ldb #.(luft::light-point-byte 2) packed-light))
+                     (float (ldb #.(luft::light-point-byte 3) packed-light)))
+               15.0)
+            :components #.(luft.terrain::terrain-varying-components :light)))
          (divisor (swizzle (representation render-parameters) :z))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection divisor))

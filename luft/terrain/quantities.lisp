@@ -156,3 +156,168 @@
   :non-negative-p t
   :components
   (presented-red-color presented-green-color presented-blue-color))
+
+;;; A pigment is not radiance. Emission is a relative scene-linear gain;
+;;; neither the RGB8 tones nor the emission/4 byte claim SI radiometry.
+(defconstant surface-tone 'surface-tone)
+(defconstant surface-emission 'surface-emission)
+(defconstant surface-relief 'surface-relief)
+(defconstant surface-roughness 'surface-roughness)
+(defconstant surface-wear 'surface-wear)
+(defconstant pattern-courses 'pattern-courses)
+(defconstant pattern-aspect 'pattern-aspect)
+(defconstant mortar-width 'mortar-width)
+(defconstant tone-variance 'tone-variance)
+(define-quantity surface-tone :kind relative-color-signal
+  :non-negative-p t)
+(define-quantity surface-emission :kind relative-color-signal
+  :non-negative-p t)
+(define-quantity surface-relief :kind :proportion :non-negative-p t)
+(define-quantity surface-roughness :kind :proportion :non-negative-p t)
+(define-quantity surface-wear :kind :proportion)
+(define-quantity pattern-courses :kind sample-count :non-negative-p t)
+(define-quantity pattern-aspect :kind :proportion :non-negative-p t)
+(define-quantity mortar-width :kind :proportion :non-negative-p t)
+(define-quantity tone-variance :kind :proportion :non-negative-p t)
+
+(defconstant monotonic-time 'monotonic-time)
+(defconstant simulation-time 'simulation-time)
+(defconstant time-of-day 'time-of-day)
+(define-quantity monotonic-time :kind :duration :character :point)
+(define-quantity simulation-time :kind :duration :character :point)
+(define-quantity time-of-day :kind :duration :character :point)
+
+(defconstant ember-count 'ember-count)
+(define-quantity ember-count :kind sample-count :non-negative-p t)
+
+(defconstant fixture-position 'fixture-position)
+(define-quantity fixture-position :kind spatial-coordinate :character :point)
+
+;;; Encoded descriptor readings have a scale, not just a bit width.
+(define-unit 'descriptor-unorm8 :reference :one :magnitude 1/255
+  :quantity-kind :dimensionless)
+(define-unit 'descriptor-unorm4 :reference :one :magnitude 1/15
+  :quantity-kind :dimensionless)
+(define-unit 'descriptor-half-row :reference :one :magnitude 1/2
+  :quantity-kind :dimensionless)
+(define-unit 'descriptor-emission-byte :reference :one :magnitude 4/255
+  :quantity-kind :dimensionless)
+(define-unit 'internal-time-tick :reference :second
+  :magnitude (/ internal-time-units-per-second) :quantity-kind :duration)
+
+(in-package #:luft.terrain)
+
+;;; The fixed descriptor ABI, in bits within each u32. The code fields and
+;;; spare bits are categorical representation, deliberately without quantities.
+;;; (name offset width decoded-quantity decoding-divisor).
+(defparameter *terrain-descriptor-fields*
+  '((:red 0 8 quantities::surface-tone 255.0)
+    (:green 8 8 quantities::surface-tone 255.0)
+    (:blue 16 8 quantities::surface-tone 255.0)
+    (:relief-code 0 4 nil 1.0)
+    (:strength 4 4 quantities::surface-relief 15.0)
+    (:roughness 8 8 quantities::surface-roughness 255.0)
+    (:wear 16 8 quantities::surface-wear 255.0)
+    (:pattern-code 0 4 nil 1.0)
+    (:courses 4 4 quantities::pattern-courses 1.0)
+    (:aspect 8 4 quantities::pattern-aspect 2.0)
+    (:mortar-width 12 8 quantities::mortar-width 255.0)
+    (:variance 20 8 quantities::tone-variance 255.0)
+    (:emission 24 8 quantities::surface-emission 63.75)))
+
+(defun terrain-descriptor-field (name)
+  (or (assoc name *terrain-descriptor-fields*)
+      (error "Unknown terrain descriptor field ~S." name)))
+
+(defun terrain-descriptor-divisor (name)
+  (fifth (terrain-descriptor-field name)))
+
+(defun terrain-descriptor-byte (name)
+  (destructuring-bind (name offset width quantity divisor)
+      (terrain-descriptor-field name)
+    (declare (ignore name quantity divisor))
+    `(byte ,width ,offset)))
+
+(defun terrain-descriptor-bit-layout ()
+  "The two uvec4 rows, measured in bits rather than decoded float lanes."
+  (let ((projections nil))
+    (loop for word-fields in
+          '((:red :green :blue) (:red :green :blue)
+            (:red :green :blue) (:strength :roughness :wear)
+            (:courses :aspect :mortar-width :variance)
+            (:red :green :blue) (:red :green :blue :emission))
+          for word from 0 do
+      (dolist (name word-fields)
+        (destructuring-bind (name offset width quantity divisor)
+            (terrain-descriptor-field name)
+          (declare (ignore name))
+          (push (math:make-quantity-projection
+                 (loop for bit below width collect (+ (* word 32) offset bit))
+                 (math:make-declared-quantity-specification
+                  (list :quantity quantity :unit
+                        (ecase divisor
+                          (1.0 :one)
+                          (2.0 'quantities::descriptor-half-row)
+                          (15.0 'quantities::descriptor-unorm4)
+                          (255.0 'quantities::descriptor-unorm8)
+                          (63.75 'quantities::descriptor-emission-byte)))))
+                projections))))
+    (math:make-quantity-layout 256 (nreverse projections))))
+
+(defmethod math:value-declaration-for
+    ((name (eql 'compile-terrain-material-descriptors)))
+  (declare (ignore name))
+  (load-time-value
+   (math:make-represented-value-declaration
+    :representation-type '(simple-array (unsigned-byte 32) (*))
+    :quantity-layout
+    (math:make-repeated-quantity-layout (terrain-descriptor-bit-layout))
+    :source-form '(compile-terrain-material-descriptors :stride-bits 256))))
+
+(defun terrain-varying-components (name)
+  "Decoded products at the stage boundary; categorical lanes stay raw."
+  (ecase name
+    (:light
+     '((:x :quantity luft::block-light-proportion :unit :one)
+       (:y :quantity luft::block-light-proportion :unit :one)
+       (:z :quantity luft::block-light-proportion :unit :one)
+       (:w :quantity luft::sky-light-proportion :unit :one)))
+    (:surface
+     '((:y :quantity quantities::surface-relief :unit :one)
+       (:z :quantity quantities::surface-roughness :unit :one)
+       (:w :quantity quantities::surface-wear :unit :one)))
+    (:pattern
+     '((:y :quantity quantities::pattern-courses :unit :one)
+       (:z :quantity quantities::pattern-aspect :unit :one)
+       (:w :quantity quantities::mortar-width :unit :one)))
+    (:accent
+     '((:xyz :quantity quantities::surface-tone :unit :one)
+       (:w :quantity quantities::surface-emission :unit :one)))
+    (:mortar
+     '((:xyz :quantity quantities::surface-tone :unit :one)
+       (:w :quantity quantities::tone-variance :unit :one)))))
+
+(defun make-terrain-float-product-declaration (name stride fields)
+  "Describe repeated float rows while leaving unlisted categorical lanes raw."
+  (math:make-represented-value-declaration
+   :representation-type '(simple-array single-float (*))
+   :quantity-layout
+   (math:make-repeated-quantity-layout
+    (math:make-quantity-layout
+     stride
+     (loop for (positions . options) in fields collect
+       (math:make-quantity-projection
+        positions
+        (math:make-declared-quantity-specification
+         options :default-tensor-order (if (= 1 (length positions)) 0 1))))))
+   :source-form (list name :stride stride :fields fields)))
+
+(defmethod math:value-declaration-for ((name (eql 'pack-fixture-bodies)))
+  (load-time-value
+   (make-terrain-float-product-declaration
+    'pack-fixture-bodies 16
+    '(((0 1 2) :quantity quantities:world-position :unit quantities:cell)
+      ((4 5 6) :quantity quantities::surface-tone :unit :one)
+      ((7) :quantity :angle :unit :radian)
+      ((8 9 10) :quantity quantities::surface-tone :unit :one)
+      ((12 13 14) :quantity luft::block-light-proportion :unit :one)))))

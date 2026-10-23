@@ -9,6 +9,9 @@
 (defconstant +fixture-body-scalar-count+ 16
   "Floats per body: corner/code, side/yaw, top/seed, and sampled voxel light.")
 
+;;; PACK-FIXTURE-BODIES' repeated product is declared in quantities.lisp.
+;;; Body code, deterministic grain seed, and spare W remain raw categories.
+
 (defun material-body-table (placement-vocabulary)
   "A vector by placement offset of NIL or (CODE SIDE-TONE TOP-TONE)."
   (let* ((placements

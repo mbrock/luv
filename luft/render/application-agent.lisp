@@ -11,11 +11,16 @@
 (defclass viewer-agent-report ()
   ((projection :initarg :projection :reader viewer-report-projection)
    (camera-position :initarg :camera-position
+                    :quantity (:quantity quantities:world-position
+                               :unit quantities:cell :tensor-order 1)
                     :reader viewer-report-camera-position)
-   (bevel-width :initarg :bevel-width :reader viewer-report-bevel-width)
+   (bevel-width :initarg :bevel-width :reader viewer-report-bevel-width
+                :quantity (:quantity quantities:world-distance :unit atlas-tick))
    (construction-lines-p :initarg :construction-lines-p
                          :reader viewer-report-construction-lines-p)
-   (inspection :initarg :inspection :reader viewer-report-inspection)))
+   (inspection :initarg :inspection :reader viewer-report-inspection))
+  ;; Projection/switches are categorical; inspection is a discrete site.
+  (:metaclass quantity-class))
 
 (clim:define-presentation-method clim:present
     (object (type viewer-agent-report) stream (view clim:textual-view) &key)

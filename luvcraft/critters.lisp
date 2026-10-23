@@ -241,9 +241,10 @@ diagonal share a gait phase and the other pair is half a stride behind.")
                  :quantity (:quantity :critter-behavior-duration
                             :unit :second)
                  :accessor turtle-mood-seconds)
-   ;; How far this turtle has walked, in strides: the phase its legs swing
-   ;; on, kept as distance rather than time so a stopped turtle stands still.
+   ;; Distance-driven angular phase: 2 pi radians per step length, not seconds
+   ;; or a count of strides. A stopped turtle therefore stands still.
    (gait-phase :initform 0d0 :type double-float
+               :quantity (:quantity :angle :unit :radian)
                :accessor turtle-gait-phase))
   (:default-initargs :half-width +turtle-half-width+
                      :height +turtle-height+)

@@ -4,15 +4,13 @@
   :description "Renderer-independent coordinates, chunk domains, and resident voxel data."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv/arithmetic")
+  :depends-on ("luv/arithmetic" "luv/fields")
   :serial t
   :components
   ((:module "luvcraft"
     :serial t
     :components ((:file "world-quantities-package")
                  (:file "world-quantities")
-                 (:file "world-fields-package")
-                 (:file "world-fields")
                  (:file "world-package")
                  (:file "world")))))
 

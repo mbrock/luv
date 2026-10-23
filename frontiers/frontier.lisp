@@ -174,11 +174,15 @@ lowers it mechanically over bound fields."))
 Each operation is (NAME LAW ((PATTERN PARAMETER)...)). LAW is :TRANSFER,
 :JOIN, :PRIORITY or :ADMISSION. Patterns name field reads or law parameters.
 The physical realization owns scheduling and field access; the program owns
-the value laws. Unlike the quantity-checked columnar lowering, native packed
-laws use Lisp's ordinary representation types and compiler checks. No runtime
-dispatch, closures, or value wrappers are introduced in the relation loop."
+the value laws. Optional :FIELDS bindings use the same arithmetic parser and
+quantity judgment as the columnar lowering. Without them, opaque packed laws
+retain ordinary Lisp representation checks. No runtime semantic dispatch or
+value wrappers are introduced in the relation loop."
   (let ((definition (or (frontier-program-definition-for program)
-                        (error "Unknown frontier program ~S." program))))
+                        (error "Unknown frontier program ~S." program)))
+        (fields (when (eq (first operations) :fields)
+                  (prog1 (eval (second operations))
+                    (setf operations (cddr operations))))))
     (labels ((replace-patterns (form bindings)
                (let ((entry (assoc form bindings :test #'equal)))
                  (cond (entry (second entry))
@@ -194,7 +198,10 @@ dispatch, closures, or value wrappers are introduced in the relation loop."
                                  (:admission (frontier-program-definition-admission definition)))
                     do (unless form (error "Program ~S has no ~S law." program law))
                     collect `(,name ,(mapcar #'second bindings)
-                               ,(replace-patterns form bindings)))
+                               ,(if fields
+                                    (checked-frontier-kernel-law
+                                     definition law form bindings fields)
+                                    (replace-patterns form bindings))))
          (declare (inline ,@(mapcar #'first operations)))
          ,@body))))
 
@@ -792,6 +799,42 @@ baselines belong to these templates, not to the frontier value law."
                    derived
                    (frontier-field-binding-name (lowered-field-binding lowered))
                    field-specification condition)))))))
+
+(defun checked-frontier-kernel-law (definition law form bindings fields)
+  "Use the ordinary frontier quantity judgment for one inline scalar law."
+  (let* ((*frontier-compilation-fields*
+           (mapcar (lambda (binding)
+                     (cons (frontier-field-binding-name binding)
+                           (frontier-field-binding-quantity-specification binding)))
+                   fields))
+         (relaxed (frontier-field-role-name
+                   (frontier-program-relaxed-field definition)))
+         (parameters
+           (loop for (pattern name) in bindings collect
+             (make-frontier-parameter
+              name (cdr (assoc (if (consp pattern) (first pattern) relaxed)
+                               *frontier-compilation-fields*)))))
+         (environment (mapcar (lambda (parameter)
+                                (cons (lang:arithmetic-object-name parameter) parameter))
+                              parameters)))
+    (labels ((rewrite (expression)
+               (let ((binding (assoc expression bindings :test #'equal)))
+                 (cond (binding (second binding))
+                       ((atom expression) expression)
+                       (t (mapcar #'rewrite expression))))))
+      (let ((expression (lang:parse-arithmetic-expression (rewrite form) environment)))
+        (when (member law '(:transfer :join))
+          (ensure-law-fits-field
+           expression
+           (make-instance 'frontier-lowered-field
+                          :binding (find relaxed fields :key #'frontier-field-binding-name))
+           law))
+        (let ((lisp:*lisp-arithmetic-lowering* :scalar))
+          (lisp:lower-lisp-arithmetic-expression
+           expression
+           (mapcar (lambda (parameter)
+                     (cons parameter (lang:arithmetic-object-name parameter)))
+                   parameters)))))))
 
 (defun lower-law (compilation expression lowering-environment)
   (declare (ignore compilation))

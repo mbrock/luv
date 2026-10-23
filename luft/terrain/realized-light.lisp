@@ -15,10 +15,11 @@
 (deftype realized-light-rgb4-vector ()
   '(simple-array (unsigned-byte 12) (*)))
 
-(defstruct (realized-light-seeds
-             (:constructor %make-realized-light-seeds (sites lights))
-             (:copier nil)
-             (:conc-name %realized-light-seeds-))
+(luv.arithmetic.records:define-quantity-struct
+    (realized-light-seeds
+     (:constructor %make-realized-light-seeds (sites lights))
+     (:copier nil)
+     (:conc-name %realized-light-seeds-))
   "Canonical parallel lanes for positive voxel-light sources.
 
 SITES are strictly increasing positive cell sites.  LIGHTS are nonzero RGB4
@@ -27,14 +28,16 @@ are owned by this value and are never mutated after construction."
   (sites (make-array 0 :element-type 'luft:site)
          :type realized-light-site-vector :read-only t)
   (lights (make-array 0 :element-type '(unsigned-byte 12))
-          :type realized-light-rgb4-vector :read-only t))
+          :type realized-light-rgb4-vector :read-only t
+          :quantity (:quantity luft::rgb4-light :unit :one :tensor-order 1)))
 
-(defstruct (realized-light-stamp
-             (:constructor %make-realized-light-stamp
-                 (authored-light-provenance authored-light-revision
-                  seed-sites seed-lights))
-             (:copier nil)
-             (:conc-name %realized-light-stamp-))
+(luv.arithmetic.records:define-quantity-struct
+    (realized-light-stamp
+     (:constructor %make-realized-light-stamp
+         (authored-light-provenance authored-light-revision
+          seed-sites seed-lights))
+     (:copier nil)
+     (:conc-name %realized-light-stamp-))
   "Exact reusable identity of one realized attachment-light solve.
 
 AUTHORED-LIGHT-PROVENANCE is the caller's immutable finished-input token and is
@@ -46,7 +49,8 @@ attachment input.  No hash stands in for any value."
   (seed-sites (make-array 0 :element-type 'luft:site)
               :type realized-light-site-vector :read-only t)
   (seed-lights (make-array 0 :element-type '(unsigned-byte 12))
-               :type realized-light-rgb4-vector :read-only t))
+               :type realized-light-rgb4-vector :read-only t
+               :quantity (:quantity luft::rgb4-light :unit :one :tensor-order 1)))
 
 (defstruct (realized-light-generation
              (:constructor %make-realized-light-generation (stamp field))

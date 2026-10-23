@@ -4054,9 +4054,9 @@ NIL leaves the character to the named definition; T is the historical
 (defun parse-raw-quantity-boundary
     (class form environment &key constant-only-p)
   (destructuring-bind
-      (name operand-form &key quantity dimension unit affine-p character) form
+      (name operand-form &key quantity dimension unit affine-p character components) form
     (declare (ignore name))
-    (unless (or quantity dimension unit affine-p character)
+    (unless (or quantity dimension unit affine-p character components)
       (error 'shader-language-error
              :form form :reason :missing-quantity-interpretation))
     (let* ((operand (parse-shader-expression operand-form environment))
@@ -4079,6 +4079,8 @@ NIL leaves the character to the named definition; T is the historical
        (parse-declaration-quantity-specification
         quantity dimension unit (declared-character affine-p character)
         type form)
+       :quantity-layout
+       (parse-declaration-quantity-layout components type form)
        :source-form form))))
 
 (defmethod parse-shader-operator-call
