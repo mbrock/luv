@@ -1008,6 +1008,13 @@ before the operation boundary, or it would encode through resources which the
     (let ((pose (viewer-focus-camera-pose (viewer-modal-focus viewer) viewer)))
       (when pose (advance-camera-focus (viewer-camera viewer) pose dt)))
     (return-from advance-viewer-camera nil))
+  (when (and (viewer-focus-camera-origin viewer) (viewer-pointer-captured-p viewer))
+    ;; Recapture gives the view back to direct mouse look. Keep its chosen
+    ;; direction, restore the ordinary lens, and stop the cinematic return
+    ;; before it can pull a mouse delta toward the old focus-entry direction.
+    (setf (camera-field-of-view (viewer-camera viewer))
+          (camera-pose-field-of-view (viewer-focus-camera-origin viewer))
+          (viewer-focus-camera-origin viewer) nil))
   (when (viewer-focus-camera-origin viewer)
     ;; Ordinary following resumes from the saved viewing direction and FOV.
     (let ((origin (viewer-focus-camera-origin viewer))

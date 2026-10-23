@@ -87,6 +87,33 @@
       (ride-key viewer :escape)
       (true (null (render:viewer-modal-focus viewer))))))
 
+(define-test mouse-look-recapture-ends-the-focus-return
+  (let* ((viewer (riding-test-viewer))
+         (camera (render:viewer-camera viewer))
+         (fov (render:camera-field-of-view camera))
+         (turtle (make-instance 'luvcraft::turtle :seed 3
+                                :position (luv.arithmetic.lisp.vec3:make-vec3 8.5d0 2d0 8.5d0))))
+    (setf (host::viewer-animals viewer) (list turtle))
+    (host::update-viewer-rides viewer)
+    (ride-key viewer :tab)
+    (true (typep (render:viewer-modal-focus viewer) 'luvcraft::critter-ride))
+    (dotimes (i 120) (render::advance-viewer-camera viewer (/ 1d0 60) nil))
+    (true (< (render:camera-field-of-view camera) fov))
+    (ride-key viewer :escape)
+    (true (render::viewer-focus-camera-origin viewer))
+    ;; SDL offscreen has no relative capture. Establish only its routing
+    ;; flag, then exercise the ordinary portable mouse-look handler.
+    (setf (render:viewer-pointer-captured-p viewer) t)
+    (luv:handle-canvas-event
+     viewer nil (make-instance 'luv:canvas-pointer-motion-event :timestamp 0
+                              :x 400 :y 300 :delta-x 100 :delta-y 20))
+    (let ((yaw (render:camera-yaw camera)) (pitch (render:camera-pitch camera)))
+      (dotimes (i 120) (render::advance-viewer-camera viewer (/ 1d0 60) nil))
+      (is = yaw (render:camera-yaw camera))
+      (is = pitch (render:camera-pitch camera))
+      (is = fov (render:camera-field-of-view camera))
+      (true (null (render::viewer-focus-camera-origin viewer))))))
+
 (define-test riding-uses-real-tab-wasd-and-luft-slope-contact
   (let* ((viewer (riding-test-viewer :slope t))
          (turtle (make-instance 'luvcraft::turtle :seed 3 :yaw (/ pi 2) :heading (/ pi 2)

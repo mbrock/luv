@@ -1518,6 +1518,17 @@ The public host regression covers all four wall orientations, original
 framing equivalence, Shift-Tab dismissal and intermediate return FOV; removing
 the framing method makes it fail. Existing riding regressions remain green.
 
+/Player-session follow-up./ Recapturing the pointer during that return now
+ends the cinematic ownership and restores the ordinary FOV. Unlike the old
+host's recapture snap, Luft preserves the viewing direction already chosen
+by mouse look; the next camera tick must not ease it back toward the saved
+entry angle. Before the fix, the same portable mouse event after terminal
+dismissal set yaw to 1.408 and six ticks pulled it to 1.522 radians. After,
+it stays at 1.408 with the ordinary lens. Native software-Vulkan before/after
+captures were inspected with the fatal watchdog disabled. The regression
+exercises the same transition after dismount, while the existing terminal
+test retains the uncaptured eased-return control.
+
 /Diagnostic tooling, not missing gameplay./ The source audit corrects the
 earlier parity sweep: =gazetteer.lisp= defines seven fixed screenshot scenes
 with world/camera/sky factories and capture APIs, not a player's named-place
