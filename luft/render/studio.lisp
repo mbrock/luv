@@ -905,14 +905,11 @@ before the operation boundary, or it would encode through resources which the
                          (format nil "#x~2,'0X" star-mask))
           (inspector-row stream 241 "star topology"
                          (if (luft:star-singular-p star-mask)
-                             "singular · split sheets"
+                             "singular"
                              "regular"))
-          (inspector-row
-           stream 264 "spike junction"
-           (handler-case
-               (format nil "~D regular sheet~:P"
-                       (length (luft:decompose-star-mask star-mask)))
-             (error () "covered junction · next spike")))))))
+          (inspector-row stream 264 "atlas sheets"
+                         (format nil "~D"
+                                 (luft:star-sheet-count star-mask)))))))
 
 (defun refresh-viewer-inspector (viewer)
   (let ((pane (and (viewer-inspector-p viewer)

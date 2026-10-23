@@ -303,6 +303,28 @@ triangles and all 48 signed-axis symmetries."
   (%check (null (star-atlas-owned-triangles 0)))
   (%check (null (star-atlas-owned-triangles #xff))))
 
+(defun %test-star-topology ()
+  "The 128/128 regular/singular census, and what the atlas draws for each."
+  (let ((singular (loop for star below 256
+                        when (star-singular-p star) collect star)))
+    (%check (= 128 (length singular)))
+    (%check (= 8 (count-if-not #'%star-checkerboard-p singular)))
+    (dotimes (star 256)
+      (%check (eq (star-singular-p star)
+                  (star-singular-p (%complement-star star))))
+      (unless (star-singular-p star)
+        (%check (= (if (member star '(#x00 #xff)) 0 1)
+                   (star-sheet-count star))))))
+  ;; Opposite corners meet only at the vertex: two sheets.  Face-diagonal
+  ;; cells checkerboard a half-edge; the band joins them into one sheet and
+  ;; so separates the complement's two empty cells.
+  (%check (= 2 (star-sheet-count #x81)))
+  (%check (= 1 (star-sheet-count #x06)))
+  (%check (= 2 (star-sheet-count #xf9)))
+  (%check (= 4 (star-sheet-count #x69)))
+  (%check (every #'star-singular-p '(#x81 #x06 #xf9 #x69)))
+  (%check (notany #'star-singular-p '(#x00 #x01 #x03 #x0f #xff))))
+
 (defun %test-cubical-addressing ()
   (dotimes (star 256)
     (multiple-value-bind (representative transformation complemented-p)
@@ -461,6 +483,7 @@ triangles and all 48 signed-axis symmetries."
   (%test-word-parallel-star-selection)
   (%test-star-selection-instruction-kernel)
   (%test-atlas)
+  (%test-star-topology)
   (%test-atlas-appearance-selector-hypothesis)
   (%test-atlas-appearance-sample-set-policy)
   (%test-flat-atlas)

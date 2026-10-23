@@ -173,6 +173,69 @@ every lattice site tiles the width-one surface exactly once."
   (%check-star star)
   (svref *star-atlas-owned-appearance-masks* star))
 
+;;; Star topology
+;;;
+;;; A star is regular when its raw cubical boundary is one edge-manifold
+;;; sheet; the other 128 are singular.  The atlas draws every star, so
+;;; singularity no longer decides whether a site can be meshed; it says
+;;; where the atlas had to choose.  Bands join the solid pair across a
+;;; checkerboard half-edge, so a checkerboard star's atlas sheet count can
+;;; differ from the count of its raw occupied-side sheets.
+
+(defun star-sheet-count (star)
+  "Count the edge-connected sheets of STAR's whole local atlas patch."
+  (let* ((parts (star-atlas-parts star))
+         (triangles (append (loop for (_ part) in (getf parts :faces)
+                                  append part)
+                            (loop for (_ part) in (getf parts :bands)
+                                  append part)
+                            (getf parts :junction)))
+         (sheets (coerce (loop for index below (length triangles)
+                               collect index)
+                         'vector))
+         (edge-sheets (make-hash-table :test #'equal)))
+    (labels ((sheet (index)
+               (if (= index (svref sheets index))
+                   index
+                   (setf (svref sheets index)
+                         (sheet (svref sheets index))))))
+      (loop for (a b c) in triangles
+            for index from 0
+            do (loop for (from to) in (list (list a b) (list b c) (list c a))
+                     for edge = (if (minusp (or (find-if-not #'zerop
+                                                             (mapcar #'- from to))
+                                                0))
+                                    (list from to)
+                                    (list to from))
+                     for other = (gethash edge edge-sheets)
+                     do (if other
+                            (setf (svref sheets (sheet index)) (sheet other))
+                            (setf (gethash edge edge-sheets) index))))
+      (length (remove-duplicates
+               (loop for index below (length triangles)
+                     collect (sheet index)))))))
+
+(defun %star-checkerboard-p (star)
+  "Whether a lattice half-edge of STAR has only diagonal solid quadrants."
+  (loop for axis below 3
+        thereis (loop for positive-p in '(nil t)
+                      for solids = (loop for sample below 8
+                                         when (and (eq positive-p
+                                                       (logbitp axis sample))
+                                                   (logbitp sample star))
+                                           collect sample)
+                      thereis (and (= 2 (length solids))
+                                   (= (logxor (first solids) (second solids))
+                                      (logxor #b111 (ash 1 axis)))))))
+
+(defun star-singular-p (star)
+  "Whether STAR's raw cubical boundary fails to be one edge-manifold sheet.
+
+A checkerboard half-edge makes the boundary non-manifold there; otherwise
+the raw boundary and the atlas patch have the same sheets."
+  (or (%star-checkerboard-p star)
+      (> (star-sheet-count star) 1)))
+
 ;;; Meshing a solid
 ;;;
 ;;; The basic mesher is a table lookup: enumerate the lattice sites

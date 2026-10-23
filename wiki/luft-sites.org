@@ -220,8 +220,12 @@ script, the =blender-arc-stars.sexp= mapping, and the =make= targets are
 deleted.  The one fact production code still drew from the corpus — which
 sheet masks are /regular/ — proved to be exactly the complement of
 [[lisp:luft::star-singular-p]] over all 256 masks, so =decompose-star-mask=
-now asks that predicate directly.  What Blender contributed survives as the
+asked that predicate directly.  What Blender contributed survives as the
 census language of this page and the regular/singular split it certified.
+The atlas now draws every star, so =decompose-star-mask= went with the old
+mesher; the predicate stays as a checkerboard half-edge test plus
+[[lisp:luft::star-sheet-count]], which counts the sheets the atlas actually
+draws, and the studio inspector reports both for the pointed-at star.
 
 * Faces, bands, and fans: three instance streams
 :PROPERTIES:

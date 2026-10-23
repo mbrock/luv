@@ -109,7 +109,7 @@
    #:surface-attachment-frame-normal #:surface-attachment-frame-tangent
    #:surface-attachment-frame-primitive-kinds
    #:surface-attachment-frame-stocks
-   #:star-singular-p #:decompose-star-mask
+   #:star-singular-p #:star-sheet-count
    #:compiled-chamfer-algebra #:make-compiled-chamfer-algebra
    #:width-one-material-source #:make-width-one-material-source
    #:map-chain-facts-cells-ranked
