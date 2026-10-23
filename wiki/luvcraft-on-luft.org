@@ -1,0 +1,194 @@
+#+title: Luvcraft on a Luft core
+#+startup: overview
+
+An inventory, taken in October 2026, of what it would mean to move the
+Luvcraft game onto Luft, or, read the other way, to grow in Luft what
+Luvcraft has and Luft lacks.  It extends the crossing rule of #WO50UR, under
+which a feature moves once Luft owns its command and state transition and its
+Luvcraft form is then deleted, with a map of every feature and the seams
+that will be hard.  It deliberately does not propose a common engine; the
+workbench pages (#QRP6YG, #Z96DF9) explain why.
+
+* The two games are closer than their code suggests
+:PROPERTIES:
+:ID: BBKLUG
+:END:
+
+Luvcraft is about 54,000 lines: a world model, a CPU mesher, a frontier
+light solver, streaming, a 3,200-line renderer, physics, critters, agents,
+and a long tail of devices in the world -- terminals, a phone, portals,
+video screens, tapes, fireworks.  Luft is about 28,000: a topology core, a
+star-atlas renderer whose plain cubes now cost less than Luvcraft's and whose
+bevels about one and a half to two times as much (#8TUEPF, #72Y245, #A4ZWDZ), streaming, a walking character, editing, and a McCLIM
+atelier on the shared workbench.  Luft has almost none of the game; Luvcraft
+has an older version of nearly all of the machinery.
+
+The surprise is the world itself.  Luvcraft's 72 block kinds are every one an
+opaque full cube -- =blocks.lisp= says so: "the world has no transparent
+cells" -- and a Luft cell is exactly one occupancy bit and one material from
+a vocabulary of up to 255.  Every Luvcraft world is already a Luft world;
+=scripts/terrain-comparison.lisp= converts one cell for cell (#PWX5RT).  What
+differs is what a material means and what lives beside the cells.
+
+* What maps directly, and what does not
+:PROPERTIES:
+:ID: R15JJS
+:END:
+
+| Concern | Luvcraft | Luft | Crossing |
+|-
+| Cell | 72 opaque cube kinds | solid bit + material, ≤255 | direct |
+| Axes, chunk | Y up; 16×64×16 | Z up; 64×64×255 columns | coordinate map only |
+| Material appearance | painted 16-px texture and normal tiles per face | top, side, and bottom tones | *decision* |
+| Block behaviour | tape, film, fountain, lava spring, terminal kinds | none | needs a behaviour layer |
+| Light | sky and block light, incremental, streamed | RGB4 field, off in the streamed world | port or finish |
+| Generator | meadow and alpine relief, caves, crystals, trees, rocks | alpine relief already ported | rest is pure functions |
+| Edits and saves | seed + sparse edit overlay + resume + inhabitants | seed + sparse edits + pose + hour | same shape; extend |
+
+Luvcraft's generator is the easiest substantial thing to move: its noise and
+height functions are pure and only its materialization writes chunks, and
+Luft's authored world already took the alpine relief that way.  Saves have
+the same form on both sides, a seed and a sparse overlay, so an old
+Luvcraft save could be replayed onto a Luft world built from the ported
+generator.
+
+* The feature map
+:PROPERTIES:
+:ID: R1T4AY
+:END:
+
+Rough sizes are Luvcraft's.  /Neutral/ means the code does not depend on
+the block model or the renderer and moves nearly as is.
+
+| Luvcraft feature | Size | Luft today | What the crossing needs |
+|-
+| Terrain generator | 1.1k | alpine relief only | port caves, crystals, trees, rocks as world sources |
+| Block vocabulary | 1.4k | 8 placements, tones | materials for 72 kinds; texture decision |
+| Light (sky, block) | 1.1k + frontier 1.6k | voxel light, unstreamed | extract frontier (#LX8GZ2) or stream Luft's field (#JDB26Y) |
+| Meshing, renderer, TAA, pacing | 8k | done, and cheaper | delete on the Luvcraft side |
+| Streaming, production | 1k | done | delete |
+| Player, walking, step-up | 0.6k | done (#8E110Y) | delete |
+| Pathing (Move To) | 0.3k | click-to-walk A* | delete |
+| Place, mine, pick | in =app.lisp= | done, with undo | carried kind, reach rules |
+| Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | none | McCLIM side is neutral; icons need the atlas decision |
+| Physics, balls | 3.7k | none | solver is neutral; swap the terrain probe for fibers |
+| Critters | 0.7k | none | minds neutral; bodies and walking need re-hosting |
+| Particles | 0.2k | none | small; needs a Luft drawing |
+| First-person hands, held items | 1k | none | animation neutral; needs a viewmodel stage |
+| Sky, clock, night | 0.4k | done, and further | delete |
+| World text | 0.4k | done | delete |
+| Terminal walls, phone, agent wall | 2.8k | terminal walls done | phone and wall need the overlay seam |
+| Portals, mirror, video, tape, film | 2.6k | none | Darwin and libav hosting; tape and film are block behaviours |
+| Agents: gnome, cat, Fantus | 5.8k | bodiless agent | plumbing neutral; tools and prompts are written in block cells |
+| Birthday content | 3.2k | none | follows overlays and agents |
+| Knobs, intent, camera, sound, lobby | 1k | knobs via metabar, lobby | mostly neutral |
+| CLIM menus, legend, metabar | 1.4k + 4.8k | workbench | Luft already owns these on the workbench |
+| Capture, gazetteer, benchmark | 0.9k | frame recording, Tracy | gazetteer needs named views |
+
+About a quarter of Luvcraft, some 13,000 lines of renderer, meshing,
+streaming, walking, sky, world text, and terminal walls, is machinery Luft
+has already rebuilt and would simply delete.  Roughly 12--15k lines are
+neutral and move nearly as they are.  The rest sits on five seams.
+
+* Five seams carry the cost
+:PROPERTIES:
+:ID: NFNM1C
+:END:
+
+1. *Appearance.*  Luvcraft paints a texture and a normal map per face;
+   Luft's star shading has tones and bevels, and no textures.  Either Luft's
+   materials gain an atlas that the star patches sample by face, or the 72
+   kinds become tones and Luvcraft's look changes.  Everything downstream --
+   the inventory icons, the gazetteer's views, the way a child recognizes a
+   block -- follows this choice.
+
+2. *Light.*  Luvcraft's sky and block light is incremental, streamed, and
+   paid for by a compiled frontier language; Luft's RGB4 field is solid but
+   not streamed.  #LX8GZ2 already names Luft needing streamed light as the
+   trigger to move the frontier language below both games.
+
+3. *The overlay and device seam.*  About twenty Luvcraft files hang off one
+   session protocol whose stages -- scene, world panel, viewmodel, held
+   display, HUD -- are Luvcraft's own passes.  Phones, portals, video
+   screens, held items, and the hands all need equivalents in Luft's frame
+   graph.  This is the largest piece of work that is neither deletion nor a
+   straight port.  The workbench notes (#M9MI6Y) say Luvcraft's overlays are
+   not the substrate's template, so Luft should grow its own stages, one
+   device at a time.
+
+4. *Block behaviour.*  Tapes, films, fountains, lava springs, and terminal
+   blocks are kinds with behaviour; a Luft cell has only a material.  A small
+   behaviour table keyed by material, with persistent per-cell state where a
+   kind needs it, would carry them.
+
+5. *Agents' words.*  The gnome's tools and prompts speak integer cells,
+   "y is up", and block boxes.  The plumbing moves unchanged; the tool
+   vocabulary is rewritten in Luft's terms, Z up and material names.
+
+* An order for the crossings
+:PROPERTIES:
+:ID: Q758FV
+:END:
+
+Each step leaves both games working, and each deletes its Luvcraft side
+once it has crossed.  Steps that only need a decision come first; the
+overlay seam comes once a device needs it.
+
+** TODO Decide how Luft materials look: tones, or textures by face
+:PROPERTIES:
+:ID: Q3KI72
+:END:
+
+/Intent./ Choose whether the 72 Luvcraft kinds cross as Luft tones or
+whether Luft's star patches sample a face texture atlas.  Measure the cost
+of sampling a texture in the star fragment stage on the exported world
+(#PWX5RT) before deciding.
+
+/Done when./ The exported world renders with every Luvcraft kind
+recognizably itself, in whichever form, at a measured cost.
+
+** TODO Port the rest of Luvcraft's generator as Luft world sources
+:PROPERTIES:
+:ID: MF8JGD
+:END:
+
+/Intent./ Move caves, crystals, trees, and rocks into Luft's authored world
+the way the alpine relief crossed, so a seed raises the same world in both
+games.  Then replay a Luvcraft save onto it.
+
+/Done when./ One Luvcraft save opens in Luft with its edits in place.
+
+** TODO Stream voxel light in Luft's large world
+:PROPERTIES:
+:ID: BQMYNU
+:END:
+
+/Intent./ Turn #JDB26Y back on: regional sky and block light in the streamed
+world, extracting the frontier language under #LX8GZ2 if Luft's own solver
+cannot be streamed cheaply.
+
+/Done when./ Torches and lanterns light the streamed world, and Luvcraft's
+light solver has a replacement it can be deleted for.
+
+** TODO Carry a block, and fill an inventory
+:PROPERTIES:
+:ID: 291ELY
+:END:
+
+/Intent./ Give the Luft player a carried material and a quickbar, reusing
+the neutral McCLIM inventory and hotbar, and make placement draw from it.
+
+/Done when./ Place, mine, and pick in Luft follow what the player carries,
+and Luvcraft's inventory code serves both or is deleted.
+
+** IDEA Grow Luft's own device stages one device at a time
+:PROPERTIES:
+:ID: CS2DOF
+:END:
+
+/Intent./ Begin the overlay seam with the cheapest real device -- held items
+and first-person hands, then the phone -- as stages of Luft's frame, not as a
+port of Luvcraft's session protocol.  Physics bodies (with a fiber terrain
+probe), critters, and agents with bodies follow on the same stages.
+
+/Done when./ One held device works in Luft and its Luvcraft host is gone.
