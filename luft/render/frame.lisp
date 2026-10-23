@@ -13,6 +13,9 @@
 (defvar *frame-uniform-data* nil
   "The scene uniform floats of the frame being encoded, for culling.")
 
+(defvar *renderer-scene-overlay-encoder* nil
+  "Optional host replay callback, called with the open depth-tested scene pass.")
+
 (defun camera-clip-function (data)
   "Project a world point to the camera's homogeneous clip, as MESH-VIEW-CLIP."
   (let ((divisor (aref data 22)))
@@ -274,6 +277,8 @@ final pass."
                           (make-gpu-draw-command :vertex-count 6
                                                  :instance-count (mesh-slot-lattice-point-count slot)))))))
   ;; A benchmark repetition is not this frame's input to the scaler.
+  (when (and *renderer-scene-overlay-encoder* (not repetition-p))
+    (funcall *renderer-scene-overlay-encoder* pass))
   (when (and (renderer-metalfx-temporal-p renderer) (not repetition-p))
     (signal-temporal-scaler-inputs pass
                                    (renderer-temporal-scaler renderer)))

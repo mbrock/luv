@@ -208,6 +208,17 @@
            #:raycast-site
            #:reset-viewer-camera
            ;; What a game hosted in a viewer specializes and calls.
+           #:viewer-overlays #:add-viewer-overlay #:remove-viewer-overlay
+           #:attach-viewer-overlay #:refresh-viewer-overlay #:advance-viewer-overlay
+           #:viewer-overlay-stage #:encode-viewer-overlay #:handle-viewer-overlay-event
+           #:quiesce-viewer-overlay #:release-viewer-overlay #:evict-viewer-overlay-frame-key
+           #:viewer-overlay-focus-insets
+           #:viewer-modal-focus #:focus-viewer #:unfocus-viewer
+           #:viewer-focus-score #:viewer-focus-entered #:viewer-focus-left
+           #:handle-viewer-focus-event #:viewer-focus-camera-pose
+           #:camera-pose #:make-camera-pose #:camera-pose-position
+           #:camera-pose-yaw #:camera-pose-pitch #:camera-pose-field-of-view
+           #:camera-pose-from-camera #:advance-camera-focus
            #:viewer-source
            #:viewer-edit-material
            #:viewer-last-edit-status

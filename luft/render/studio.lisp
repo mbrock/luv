@@ -2,6 +2,91 @@
 
 (defvar *viewer* nil)
 
+;;; Host protocols deliberately name neither a game nor a widget toolkit.
+;;; Attachment and detachment run on the canvas thread (or before it starts).
+(defgeneric attach-viewer-overlay (overlay viewer)
+  (:method (overlay viewer) (declare (ignore overlay viewer)) nil))
+(defgeneric refresh-viewer-overlay (overlay viewer)
+  (:documentation "Publish retained state before any render pass opens.")
+  (:method (overlay viewer) (declare (ignore overlay viewer)) nil))
+(defgeneric advance-viewer-overlay (overlay viewer seconds)
+  (:method (overlay viewer seconds) (declare (ignore overlay viewer seconds)) nil))
+(defgeneric viewer-overlay-stage (overlay)
+  (:documentation "Return :SCENE, :WORLD-PANEL, :HUD, or :NONE.")
+  (:method (overlay) (declare (ignore overlay)) :none))
+(defgeneric encode-viewer-overlay (overlay viewer pass surface-texture)
+  (:documentation "Replay prepared state into the host's open PASS.")
+  (:method (overlay viewer pass surface-texture)
+    (declare (ignore overlay viewer pass surface-texture)) nil))
+(defgeneric handle-viewer-overlay-event (overlay viewer canvas event)
+  (:method (overlay viewer canvas event)
+    (declare (ignore overlay viewer canvas event)) nil))
+(defgeneric quiesce-viewer-overlay (overlay)
+  (:method (overlay) (declare (ignore overlay)) nil))
+(defgeneric release-viewer-overlay (overlay)
+  (:method (overlay) (declare (ignore overlay)) nil))
+(defgeneric evict-viewer-overlay-frame-key (overlay frame-key)
+  (:method (overlay frame-key) (declare (ignore overlay frame-key)) nil))
+(defgeneric viewer-overlay-focus-insets (overlay viewer)
+  (:method (overlay viewer) (declare (ignore overlay viewer)) (values 0 0 0 0)))
+(defgeneric viewer-focus-score (focus viewer)
+  (:method (focus viewer) (declare (ignore focus viewer)) nil))
+(defgeneric viewer-focus-entered (focus viewer)
+  (:method (focus viewer) (declare (ignore focus viewer)) nil))
+(defgeneric viewer-focus-left (focus viewer)
+  (:method (focus viewer) (declare (ignore focus viewer)) nil))
+(defgeneric handle-viewer-focus-event (focus viewer canvas event)
+  (:method (focus viewer canvas event)
+    (declare (ignore focus viewer canvas event)) nil))
+(defgeneric viewer-focus-camera-pose (focus viewer)
+  (:documentation "Return a host CAMERA-POSE in Luft's Z-up coordinates, or NIL.")
+  (:method (focus viewer) (declare (ignore focus viewer)) nil))
+
+(defun add-viewer-overlay (viewer overlay)
+  (unless (member overlay (viewer-overlays viewer) :test #'eq)
+    (attach-viewer-overlay overlay viewer)
+    (setf (viewer-overlays viewer)
+          (append (viewer-overlays viewer) (list overlay))))
+  overlay)
+
+(defun remove-viewer-overlay (viewer overlay)
+  (when (member overlay (viewer-overlays viewer) :test #'eq)
+    (when (eq overlay (viewer-modal-focus viewer)) (unfocus-viewer viewer))
+    (setf (viewer-overlays viewer) (remove overlay (viewer-overlays viewer) :test #'eq))
+    (release-viewer-overlay overlay))
+  overlay)
+
+(defun encode-viewer-overlays (viewer stage pass surface-texture)
+  (dolist (overlay (viewer-overlays viewer))
+    (when (eq stage (viewer-overlay-stage overlay))
+      (encode-viewer-overlay overlay viewer pass surface-texture))))
+
+(defun unfocus-viewer (viewer)
+  (let ((focus (viewer-modal-focus viewer)))
+    (when focus
+      (setf (viewer-modal-focus viewer) nil)
+      (clear-viewer-controls viewer)
+      (viewer-focus-left focus viewer))
+    focus))
+
+(defun focus-viewer (viewer focus)
+  (when (null focus) (error "Use UNFOCUS-VIEWER to leave focus."))
+  (unless (eq focus (viewer-modal-focus viewer))
+    (unfocus-viewer viewer)
+    (unless (viewer-focus-camera-origin viewer)
+      (setf (viewer-focus-camera-origin viewer)
+            (camera-pose-from-camera (viewer-camera viewer))))
+    (clear-viewer-controls viewer)
+    (when (viewer-pointer-captured-p viewer)
+      (set-canvas-relative-pointer-mode (viewer-canvas viewer) nil)
+      (setf (viewer-pointer-captured-p viewer) nil))
+    (setf (viewer-modal-focus viewer) focus)
+    (handler-case (viewer-focus-entered focus viewer)
+      (error (condition)
+        (unfocus-viewer viewer)
+        (error condition))))
+  focus)
+
 (defun soft-follow-step (current target seconds quiet-radius)
   "Move CURRENT toward TARGET outside a quiet zone, catching up with distance."
   (let* ((difference (- target current))
@@ -429,6 +514,8 @@ cohort and retire the previous one.  No frame may borrow that previous cohort
 before the operation boundary, or it would encode through resources which the
   same canvas thread has just retired."
   (refresh-viewer-tracy-capture viewer)
+  (dolist (overlay (copy-list (viewer-overlays viewer)))
+    (refresh-viewer-overlay overlay viewer))
   ;; Inspector repaint is semantic and therefore sparse.  Shader definitions
   ;; are independently live, so the static retained stream still refreshes its
   ;; direct compositor here, before ENCODE-RENDERER-FRAME opens a pass.
@@ -451,6 +538,10 @@ before the operation boundary, or it would encode through resources which the
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
   (let* ((renderer (prepare-viewer-frame-renderer viewer))
+         (*renderer-scene-overlay-encoder*
+           (lambda (pass)
+             (encode-viewer-overlays viewer :scene pass surface-texture)
+             (encode-viewer-overlays viewer :world-panel pass surface-texture)))
          (inspection
            (and (or inspector-p
                     (viewer-mode-inspection-p (viewer-mode viewer)))
@@ -475,18 +566,18 @@ before the operation boundary, or it would encode through resources which the
                           (not (typep (viewer-source viewer)
                                       'streaming-scene)))
      :overlay-encoder
-     (and (or inspector-p (luv.workbench:application-workbench viewer))
-          (lambda (pass)
-            (when inspector-p
-              (mcluv:encode-direct-gpu-mirror
-               (viewer-inspector-compositor viewer) pass surface-texture
-               (viewer-inspector-state viewer extent)))
-            ;; The application supplies only its open final pass; the shell
-            ;; remains the owner of layout, retained media, and replay state.
-            (when-let
-                ((workbench (luv.workbench:application-workbench viewer)))
-              (luv.workbench:encode-workbench
-               workbench pass surface-texture)))))))
+     (lambda (pass)
+       (encode-viewer-overlays viewer :hud pass surface-texture)
+       (when inspector-p
+         (mcluv:encode-direct-gpu-mirror
+          (viewer-inspector-compositor viewer) pass surface-texture
+          (viewer-inspector-state viewer extent)))
+       ;; The application supplies only its open final pass; the shell
+       ;; remains the owner of layout, retained media, and replay state.
+       (when-let
+           ((workbench (luv.workbench:application-workbench viewer)))
+         (luv.workbench:encode-workbench
+          workbench pass surface-texture))))))
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
@@ -645,6 +736,9 @@ before the operation boundary, or it would encode through resources which the
     (clim:standard-application-frame canvas-event-handler
      viewer-service-state)
   ((canvas :initarg :canvas :initform nil :reader viewer-canvas)
+   (overlays :initform nil :accessor viewer-overlays)
+   (modal-focus :initform nil :accessor viewer-modal-focus)
+   (focus-camera-origin :initform nil :accessor viewer-focus-camera-origin)
    (context :initarg :context :initform nil :reader viewer-context)
    (device :initarg :device :initform nil :reader viewer-device)
    (simulation :initarg :simulation :accessor viewer-simulation)
@@ -791,6 +885,8 @@ before the operation boundary, or it would encode through resources which the
   (let* ((context (viewer-context viewer))
          (key (canvas-frame-resource-key context surface))
          (views (viewer-surface-views viewer)))
+    (dolist (overlay (viewer-overlays viewer))
+      (evict-viewer-overlay-frame-key overlay key))
     (multiple-value-bind (view present-p) (gethash key views)
       (when present-p
         (when view (destroy view))
@@ -859,6 +955,8 @@ before the operation boundary, or it would encode through resources which the
                 (not (viewer-player-ground-resident-p viewer)))
       (advance-world-simulation (viewer-simulation viewer) dt))
     (advance-viewer-game viewer dt)
+    (dolist (overlay (copy-list (viewer-overlays viewer)))
+      (advance-viewer-overlay overlay viewer dt))
     (values dt (null last))))
 
 (defun viewer-player-ground-resident-p (viewer)
@@ -874,6 +972,18 @@ before the operation boundary, or it would encode through resources which the
 
 (defun advance-viewer-camera (viewer dt first-frame-p)
   "Observe the simulated character, or move a free inspection camera."
+  (when (viewer-modal-focus viewer)
+    (let ((pose (viewer-focus-camera-pose (viewer-modal-focus viewer) viewer)))
+      (when pose (advance-camera-focus (viewer-camera viewer) pose dt)))
+    (return-from advance-viewer-camera nil))
+  (when (viewer-focus-camera-origin viewer)
+    ;; Ordinary following resumes from the saved viewing direction and FOV.
+    (let ((origin (viewer-focus-camera-origin viewer))
+          (camera (viewer-camera viewer)))
+      (setf (camera-yaw camera) (camera-pose-yaw origin)
+            (camera-pitch camera) (camera-pose-pitch origin)
+            (camera-field-of-view camera) (camera-pose-field-of-view origin)
+            (viewer-focus-camera-origin viewer) nil)))
   (let ((camera (viewer-camera viewer))
         (step (* dt (viewer-speed viewer))))
     (if (and (viewer-player viewer)
@@ -1322,6 +1432,31 @@ inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
                                 (canvas-key-event-modifiers event)))
           (mcluv:canvas-key-event-command
            viewer event :command-table atelier)))))
+
+(defmethod handle-canvas-event :around
+    ((viewer game-host) canvas (event canvas-event))
+  ;; Window lifecycle events must always reach the host. Only input is modal.
+  (if (typep event '(or canvas-key-event canvas-pointer-event))
+      (let ((focus (viewer-modal-focus viewer)))
+        (cond
+          ((and focus (typep event 'canvas-key-press-event)
+                (member (canvas-key-event-key-name event) '(:escape :tab)))
+           (unfocus-viewer viewer) t)
+          ((and (null focus) (typep event 'canvas-key-press-event)
+                (eq :tab (canvas-key-event-key-name event))
+                (let ((best nil) (score nil))
+                  (dolist (overlay (viewer-overlays viewer))
+                    (let ((candidate (viewer-focus-score overlay viewer)))
+                      (when (and candidate (or (null score) (< candidate score)))
+                        (setf best overlay score candidate))))
+                  (when best (focus-viewer viewer best))))
+           t)
+          (focus (handle-viewer-focus-event focus viewer canvas event) t)
+          ((some (lambda (overlay)
+                   (handle-viewer-overlay-event overlay viewer canvas event))
+                 (reverse (viewer-overlays viewer))) t)
+          (t (call-next-method))))
+      (call-next-method)))
 
 (defmethod handle-canvas-event
     ((viewer game-host) canvas (event canvas-window-close-request-event))
@@ -2464,6 +2599,8 @@ it makes no claim about which earlier render pass caused a discontinuity."
   ;; Named nonvisual services quiesce while the canvas still accepts the final
   ;; application calls of an active agent turn.
   (quiesce-viewer-services viewer)
+  (dolist (overlay (viewer-overlays viewer))
+    (quiesce-viewer-overlay overlay))
   (setf (viewer-running-p viewer) nil)
   (when (viewer-frame-recorder viewer)
     (stop-viewer-frame-recording viewer))
@@ -2485,6 +2622,9 @@ it makes no claim about which earlier render pass caused a discontinuity."
                canvas (lambda (timestamp) (declare (ignore timestamp))))))
           (releasing :event-handler
             (setf (canvas-event-handler canvas) nil))
+          (releasing :overlays
+            (dolist (overlay (copy-list (viewer-overlays viewer)))
+              (remove-viewer-overlay viewer overlay)))
           ;; The Luv shell owns retained compositor resources. It must detach
           ;; after the terminal frame fence but before application renderer
           ;; resources and the device are destroyed.

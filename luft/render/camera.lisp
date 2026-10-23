@@ -21,6 +21,36 @@ projection to judge a shape rule in.")
 (defconstant +orthographic-far+ 4096.0)
 (defconstant +camera-yaw-response-rate+ 8.0)
 
+(defstruct camera-pose
+  "A Z-up camera position, yaw, pitch and vertical field of view."
+  position yaw pitch field-of-view)
+
+(defun camera-pose-from-camera (camera)
+  (let ((p (camera-position camera)))
+    (make-camera-pose :position (make-vec3 (vec3-x p) (vec3-y p) (vec3-z p))
+                      :yaw (camera-yaw camera) :pitch (camera-pitch camera)
+                      :field-of-view (camera-field-of-view camera))))
+
+(defun advance-camera-focus (camera pose seconds)
+  "Ease CAMERA toward POSE using an exact exponential response."
+  (let ((blend (- 1.0 (exp (* -8.0 seconds))))
+        (position (camera-position camera))
+        (target (camera-pose-position pose)))
+    (setf (camera-position camera)
+          (add-scaled-directions position
+                                 (make-vec3 (- (vec3-x target) (vec3-x position))
+                                            (- (vec3-y target) (vec3-y position))
+                                            (- (vec3-z target) (vec3-z position))) blend)
+          (camera-yaw camera)
+          (+ (camera-yaw camera)
+             (* blend (shortest-angle-difference (camera-pose-yaw pose) (camera-yaw camera))))
+          (camera-pitch camera)
+          (+ (camera-pitch camera) (* blend (- (camera-pose-pitch pose) (camera-pitch camera))))
+          (camera-field-of-view camera)
+          (+ (camera-field-of-view camera)
+             (* blend (- (camera-pose-field-of-view pose) (camera-field-of-view camera))))))
+  camera)
+
 (defclass fly-camera ()
   ((position :initarg :position :accessor camera-position)
    (yaw :initarg :yaw :initform 0.0 :accessor camera-yaw)
