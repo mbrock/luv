@@ -19,6 +19,9 @@
            #:torch-body-shadow-vertex-specification
            #:torch-body-fragment-specification
            #:star-fragment-specification
+           #:fixture-body-vertex-specification
+           #:fixture-body-shadow-vertex-specification
+           #:fixture-body-fragment-specification
            #:terrain-vertex-specification
            #:terrain-shadow-vertex-specification
            #:sky-fragment-specification

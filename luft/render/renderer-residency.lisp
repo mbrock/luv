@@ -165,7 +165,10 @@ cohort untouched. No frame can interleave with the owner-thread publication."
    (star-runs :initform nil :accessor resident-population-star-runs)
    ;; World-cell box (MIN-X MIN-Y MIN-Z MAX-X MAX-Y MAX-Z) around the drawn
    ;; geometry, or NIL when the population draws nothing.
-   (bounds :initform nil :accessor resident-population-bounds)))
+   (bounds :initform nil :accessor resident-population-bounds)
+   ;; Fixture bodies, sorted by code, and their (CODE FIRST COUNT) runs.
+   (body-buffer :initform nil :accessor resident-population-body-buffer)
+   (body-runs :initform nil :accessor resident-population-body-runs)))
 
 (defstruct (renderer-slot-provenance
              (:constructor %make-renderer-slot-provenance
@@ -361,7 +364,14 @@ words; the two arrays keep their one-for-one order.  The runs are
                 (upload "luft terrain material descriptors"
                         (render-population-descriptor-words population))
                 (resident-population-star-runs resident) runs
-                (resident-population-bounds resident) (site-bounds instances)))))))
+                (resident-population-bounds resident) (site-bounds instances)))
+        (let ((bodies (render-population-body-data population)))
+          (when (plusp (length bodies))
+            (setf (resident-population-body-buffer resident)
+                  (upload "luft resident fixture bodies" bodies)
+                  (resident-population-body-runs resident) (fixture-body-runs bodies)
+                  (resident-population-bounds resident)
+                  (fixture-body-bounds bodies (resident-population-bounds resident)))))))))
 
 (defun prospective-renderer-slot-entries (renderer candidates removed-keys)
   "Return the sorted slot population after applying one candidate cohort."

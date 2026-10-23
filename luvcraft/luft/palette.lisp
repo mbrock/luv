@@ -99,6 +99,9 @@ these choose the closest of the shader's world-space fields.")
   "Which block kinds are laid in a pattern of bricks, tiles, shingles, or
 boards, and how.  The kind's tone is the elements'; mortar has its own.")
 
+(defparameter *block-bodies* '((:barrel . :barrel) (:crate . :crate))
+  "Block kinds drawn as fixture bodies rather than cubical surfaces.")
+
 (defun block-pattern (name)
   (first (find name *block-patterns* :key #'rest :test #'member)))
 
@@ -121,7 +124,8 @@ boards, and how.  The kind's tone is the elements'; mortar has its own.")
    :relief-strength (second (block-surface (luvcraft:block-kind-name kind)))
    :roughness (third (block-surface (luvcraft:block-kind-name kind)))
    :edge-wear (fourth (block-surface (luvcraft:block-kind-name kind)))
-   :pattern (block-pattern (luvcraft:block-kind-name kind))))
+   :pattern (block-pattern (luvcraft:block-kind-name kind))
+   :body (or (cdr (assoc (luvcraft:block-kind-name kind) *block-bodies*)) :none)))
 
 (defclass luvcraft-palette ()
   ((vocabulary :initarg :vocabulary :reader luvcraft-palette-vocabulary)

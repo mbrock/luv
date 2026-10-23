@@ -11,7 +11,9 @@
     '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss)
     "The relief fields the star shader knows, in the order of their codes.")
   (defparameter +material-patterns+ '(:none :bond :grid :shingle :checker)
-    "The laid patterns the star shader knows, in the order of their codes."))
+    "The laid patterns the star shader knows, in the order of their codes.")
+  (defparameter +material-bodies+ '(:none :barrel :crate)
+    "The drawn fixture bodies the renderer knows, in the order of their codes."))
 
 (defclass material-kind ()
   ((name :initarg :name :reader material-kind-name)
@@ -43,7 +45,12 @@ MORTAR-TONE VARIANCE): bricks, tiles, or shingles cut into the surface in
 world space.  SHAPE is one of +MATERIAL-PATTERNS+ but :NONE.  COURSES rows
 fill a cell; each element is ASPECT rows long; MORTAR-WIDTH is the joint's
 share of a row, MORTAR-TONE its colour, and VARIANCE how far each element's
-tone strays.  The kind's tones are the elements' own, not mortar and all."))
+tone strays.  The kind's tones are the elements' own, not mortar and all.")
+   (body :initarg :body :initform :none :type #.`(member ,@+material-bodies+)
+         :reader material-kind-body
+         :documentation
+         "A drawn fixture which stands in the cell instead of its star surface.
+The cell stays solid for walking and light; only its drawing changes."))
   (:documentation
    "An authored cell substance: its tones, the relief and edge response the
 star shader cuts it with (#HYBFRT), and the facts needed by voxel light."))

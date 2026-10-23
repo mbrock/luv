@@ -210,6 +210,9 @@ its exact empty light field so normal publication validation still applies."
             (luft:surface-mesh-voxel-light root) field
             (luft:surface-mesh-attachments root)
             (mapcan (lambda (mesh) (copy-list (luft:surface-mesh-attachments mesh))) meshes)
+            (luft:surface-mesh-bodies root)
+            (apply #'concatenate '(simple-array single-float (*))
+                   (mapcar #'luft:surface-mesh-bodies meshes))
             (luft:surface-mesh-companions root)
             (mapcan (lambda (mesh) (copy-list (luft:surface-mesh-companions mesh))) meshes))
       root)))

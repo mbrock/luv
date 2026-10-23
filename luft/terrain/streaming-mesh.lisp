@@ -232,8 +232,26 @@ appearance reads authored cells directly and needs no meshed context owners."
          (neighborhood (streaming-mesh-snapshot-union-neighborhood snapshot))
          (descriptors
            (compile-terrain-material-descriptors (scene-material-vocabulary scene)))
+         (body-table (material-body-table (scene-material-vocabulary scene)))
+         (materials (scene-material-cells scene))
+         (body-cells (make-hash-table :test #'eql))
+         (meshing-fibers (make-hash-table :test #'eql))
          (products nil))
-    (labels ((mesh-owner (key)
+    (labels ((chunk-body-cells (key)
+               ;; Fixture bodies are drawn, not meshed (fixtures.lisp).
+               (multiple-value-bind (cells present-p) (gethash key body-cells)
+                 (if present-p
+                     cells
+                     (setf (gethash key body-cells)
+                           (and body-table (typep materials 'material-store)
+                                (material-chunk-body-cells
+                                 body-table
+                                 (gethash key (material-store-chunks materials))))))))
+             (fibers-for-meshing (key fibers)
+               (or (gethash key meshing-fibers)
+                   (setf (gethash key meshing-fibers)
+                         (fibers-without-cells fibers (chunk-body-cells key)))))
+             (mesh-owner (key)
                (let* ((fibers (gethash key neighborhood))
                       (signature (streaming-owner-input-signature snapshot key))
                       (cached
@@ -255,7 +273,8 @@ appearance reads authored cells directly and needs no meshed context owners."
                               (luft:surface-mesh-star-site-words old-mesh))
                              (zone :luft/mesh-owner
                                (luft:mesh-star-chunk
-                                fibers key :outside-domain-policy :air)))))
+                                (fibers-for-meshing key fibers) key
+                                :outside-domain-policy :air)))))
                    ;; New metadata shell: never change an installed mesh's light
                    ;; or attachment witnesses when borrowing immutable arrays.
                    (if old-mesh
@@ -266,6 +285,10 @@ appearance reads authored cells directly and needs no meshed context owners."
                        (zone :luft/compile-appearance
                          (compile-surface-mesh-appearance
                           mesh (scene-material-cells scene) descriptors)))
+                   (setf (luft:surface-mesh-bodies mesh)
+                         (if old-mesh
+                             (luft:surface-mesh-bodies old-mesh)
+                             (pack-fixture-bodies (chunk-body-cells key))))
                    (push (list key signature prepared) products)
                    mesh)))
              (decorate-owners (owners)
@@ -283,7 +306,9 @@ appearance reads authored cells directly and needs no meshed context owners."
                (multiple-value-bind (fibers present-p)
                    (gethash (luft:missing-chunk-key condition) neighborhood)
                  (if present-p
-                     (invoke-restart 'luft:use-chunk fibers)
+                     (invoke-restart 'luft:use-chunk
+                                     (fibers-for-meshing
+                                      (luft:missing-chunk-key condition) fibers))
                      (invoke-restart 'luft:treat-as-air)))))
            (luft:outside-domain
              (lambda (condition)
