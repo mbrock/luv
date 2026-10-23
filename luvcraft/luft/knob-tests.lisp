@@ -51,6 +51,20 @@
   (make-instance 'host:luvcraft-viewer :source scene :player player
                  :hotbar (list (game:block-placement luvcraft::*stone-block*))))
 
+(define-test photographic-game-keeps-paper-controls-out-of-its-metabar
+  (let* ((scene (ball-test-scene))
+         (viewer (make-knob-test-viewer scene))
+         (atelier (make-instance 'render:viewer :source scene))
+         (paper-controls (list (luv.knobs:find-knob 'render::paper-grain)
+                               (luv.knobs:find-knob 'render::haze-height))))
+    (dolist (knob paper-controls)
+      (true (not (member knob (luv.knobs:knobs-for-host viewer))))
+      (true (member knob (luv.knobs:knobs-for-host atelier))))
+    (true (member (luv.knobs:find-knob 'render::haze-density)
+                  (luv.knobs:knobs-for-host viewer)))
+    (is = luvcraft::*luvcraft-exposure*
+        (render:exposure-value (host::make-luvcraft-exposure nil)))))
+
 (defmethod luv.knobs:realize-knob :around
     ((knob luv.knobs:knob) (viewer render:game-host))
   (when *realized-knobs* (push knob (car *realized-knobs*)))

@@ -2323,6 +2323,16 @@ distribution overhead."
     (clamp (/ numerator denominator)
            (vec3 0.0 0.0 0.0) (vec3 1.0 1.0 1.0))))
 
+(define-shader-function photographic-grade (graded saturation contrast)
+  "The original display-linear saturation and smoothstep contrast, shared by hosts."
+  (let* ((luminance (dot graded (vec3 0.2126 0.7152 0.0722)))
+         (grey (vec3 luminance luminance luminance))
+         (saturated (+ grey (* (- graded grey) saturation)))
+         (curved
+           (* saturated (* saturated (- (vec3 3.0 3.0 3.0)
+                                        (* saturated 2.0))))))
+    (mix saturated curved contrast)))
+
 (define-shader-method shader-specification-for
     focus-post-vertex-specification
     ((role (eql :focus-post)) (stage (eql :vertex)))
@@ -2593,12 +2603,7 @@ distribution overhead."
          ;; midtones without ever clipping either end the way a gain about a
          ;; pivot would.
          (luminance (dot graded (vec3 0.2126 0.7152 0.0722)))
-         (grey (vec3 luminance luminance luminance))
-         (saturated (+ grey (* (- graded grey) grade-saturation)))
-         (curved
-           (* saturated (* saturated (- (vec3 3.0 3.0 3.0)
-                                        (* saturated 2.0)))))
-         (contrasted (mix saturated curved grade-contrast))
+         (contrasted (photographic-grade graded grade-saturation grade-contrast))
          ;; A restrained corner falloff; the frame should feel photographed,
          ;; not port-holed.
          (vignette

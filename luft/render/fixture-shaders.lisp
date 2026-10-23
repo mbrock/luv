@@ -271,7 +271,7 @@
                  (* voxel-light-gain (* voxel-light voxel-light)))))
          (final
            (atmospheric-surface
-            radiance world eye divisor
+            radiance world eye forward divisor
             (representation character-parameters)
             sun (representation fog-color-vector)
             (representation zenith-color-vector)

@@ -615,8 +615,9 @@ not reproduced pixel for pixel: thatch and parquet remain plainer, and the
 weathered brick is not a fractured atlas tile. The side-by-side worlds also
 expose Luft's brighter finish and cool atmospheric cast in shadow, notably
 on obsidian and black wool. Neutral metal ambient removes the false
-sky/ground reflection, not that shared atmospheric grade; changing the sky
-and finishing is a separate experiment.
+sky/ground reflection, not that shared atmospheric grade. The separate
+finishing experiment #0TU71R now addresses exposure, grading, and extinction
+without replacing #S84HR6's sky.
 
 Objects rather than surfaces are drawn as bodies.  A lantern cell becomes a
 surface attachment standing on the cell below it or hanging from the one
@@ -634,6 +635,74 @@ plank deck, lantern, barrel, and crate, change black silhouettes into warm,
 readable wood.  Voxel-only light loses the small directional point-light
 hotspot but keeps the yard lit without shining through walls; it is not
 clearly worse, so the point-light fallback is gone (#BQMYNU).
+
+** DONE Give the crossing its original photographic finish
+:PROPERTIES:
+:ID: 0TU71R
+:END:
+
+The washed-out #Q3KI72 comparisons combined three different things, not a
+different ACES curve. Both renderers already use the same 2.51/0.03,
+2.43/0.59/0.14 fit. The material sampler used exposure 1.0 while original
+Luvcraft defaults to 0.45: over twice the radiance enters that shoulder.
+The game also inherited Luft's automatic meter (starting at 1.0, adapting
+within 0.3..1.9), rather than Luvcraft's fixed photographic policy.
+Luft then applies a cool-shadow/warm-light split tone and square-root-space
+contrast, lifting the shadows; its screen-space AO adds blue pigment, and
+its exponential height fog veils nearby dark surfaces with sky colour.
+Grading alone did not clear that veil in the first matched captures.
+
+The game's renderer factories now choose fixed exposure from the original
+=*luvcraft-exposure*= (0.45), the original display-linear saturation (1.10)
+and contrast (0.16), neutral AO without paper pigment, and no screen-locked
+paper fibre. =photographic-grade= is extracted unchanged from the original
+post shader and called by both hosts. Terrain, fixture and torch surfaces
+reuse =luvcraft.arithmetic:fog-amount-at-view-distance=: quadratic view-depth
+fog from 0 to 180 cells at the default haze density. The density knob scales
+that range; the now-irrelevant paper-grain and height-falloff controls are
+absent only from this game's metabar. Explicit fixed-exposure captures still
+override the default, and the engine exposure-gain knob still multiplies it.
+
+#S84HR6 remains intact: original game clock/profile, shared atmospheric sky
+and cloud shadows, moonlight, rotating stars, and the common aerial colour
+at the resident horizon. Only surface extinction changes, not that endpoint.
+The original renderer's ambient is itself a mixture of profile ambient,
+zenith/horizon and ground bounce, with per-face voxel/seam AO; Luft still
+uses its two ambient lobes and screen AO. This pass does not pretend those
+different irradiance/material models are identical or compensate by changing
+the shared sun/sky profile.
+
+=scripts/capture-luvcraft-finish.lisp= repeats native software-Vulkan
+comparisons: the same occupied 32 by 32 seed-7 alpine/meadow regions and
+camera in the original renderer and the game host, 960 by 640, hours 00:00,
+06:42, 12:00 and 17:18, fixed exposure 0.45, TAA and dynamic resolution off.
+The before arm keeps the previous paper finish and height fog; noon also
+captures exposure 1.0 separately. A six-material control contains black
+wool, obsidian, iron plate, copper, stone and white wool at noon and sunset.
+All were inspected. Grass loses the mint wash, stone keeps deeper midtones,
+and near black/metal shadows lose much of the blue veil. Midnight retains
+Luft's deliberately more readable moonlight. Sunset stone remains darker
+and smoother than old; atlas mottling is not recovered by grading, and dark
+wool/obsidian can still lose fine detail. Cool sky illumination and distant
+fog are not removed from every shadow. This is a tonal correction, not
+pixel-identical material or lighting parity; hardware and Metal execution
+remain unverified.
+
+A separate real =play :seed 7= run, without a fixed-exposure argument,
+observed the installed fixed control at 0.45 and captured the streamed world.
+Atelier and wizard controls each settled nine resident owners and rendered
+without retained canvas failures; their default paper policies are unchanged.
+The first smoke captures were discarded because demand-driven clocks had
+not yet published terrain. All long captures disable the fatal watchdog
+timeout, not health reporting. =make= and =make test= pass in the slim orb;
+the explicit =make luvcraft luft= builds both standalone applications too.
+The full 33 available ASDF suites pass with two workers (Ghostty/terminal
+unavailable), including shader validation and both renderer shards. The
+photographic presentation, terrain, fixture and torch specifications compile
+to SPIR-V and MSL. System =foot= needs its inherited Nix library path cleared,
+and =spirv-val= must be on PATH for that full run. The game regression checks
+the exposure policy and that paper-only controls remain in the atelier.
+The [[https://ampcode.com/threads/T-01a16846-931d-74ec-be0d-975619917079][finishing evidence thread]] holds the inspected old/before/after comparisons.
 
 ** NEXT Start Luvcraft as a game on the engine
 :PROPERTIES:

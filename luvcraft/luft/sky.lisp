@@ -74,6 +74,37 @@
 
 (in-package #:luft.render.shaders)
 
+(define-shader-function luvcraft-presentation-grade (color)
+  (assume-quantity
+   (luvcraft.shaders::photographic-grade
+    (representation color)
+    #.luvcraft.shaders::*grade-saturation* #.luvcraft.shaders::*grade-contrast*)
+   :quantity quantities:presented-color :unit :one))
+
+(define-shader-function luvcraft-surface-haze (eye point forward density)
+  "Original quadratic view-depth fog; the density knob scales its 180-cell range."
+  ;; At the engine's default density, keep the original profile's 0..180
+  ;; cell fog range. Zero density leaves only the residency fade.
+  (let* ((depth (* (max 0.0 (dot (- point eye) forward)) (/ density 0.007))))
+    (representation
+     (luvcraft.arithmetic:fog-amount-at-view-distance
+      (assume-quantity depth :quantity :view-distance :unit :cell)
+      (quantity 0.0 :quantity :view-distance :unit :cell)
+      (quantity 180.0 :quantity :view-distance :unit :cell)))))
+
+(define-shader-function luvcraft-atmospheric-surface
+    (radiance world eye forward divisor character sun fog zenith parameters)
+  "Original fog extinction, retaining Luft's shared sky-ground endpoint."
+  (let* ((viewer (mix (swizzle character :xyz) (swizzle eye :xyz) divisor))
+         (delta (- world viewer))
+         (distance (sqrt (dot delta delta)))
+         (direction (/ delta (max distance 0.001)))
+         (haze (luvcraft-surface-haze viewer world forward (swizzle fog :w)))
+         (edge (* divisor (smoothstep 180.0 310.0 distance)))
+         (air (aerial-perspective-color (swizzle fog :xyz) direction sun
+                                        (swizzle zenith :w))))
+    (mix radiance air (max haze edge))))
+
 (define-shader-function luvcraft-cloud-visibility (point sun elapsed cloudiness origin)
   (luvcraft.shaders::cloud-deck-visibility
    (- (swizzle point :xzy) (vec3 origin 0.0 origin))
@@ -153,12 +184,30 @@
 
 (in-package #:luvcraft.luft.game)
 
+(defun make-luvcraft-image-finishing (device color-format)
+  "Reuse the original photographic grade without the atelier's paper medium."
+  (let ((luft.render.shaders::*presentation-grade-function*
+          'luft.render.shaders::luvcraft-presentation-grade)
+        (luft.render.shaders::*presentation-paper-p* nil))
+    (render::make-image-finishing device color-format)))
+
+(defun make-luvcraft-exposure (device)
+  (declare (ignore device))
+  (render:make-fixed-exposure luvcraft::*luvcraft-exposure*))
+
 (defun make-luvcraft-terrain-drawing (device target-formats sample-count)
   (let ((luft.render.shaders::*terrain-cloud-visibility-function*
-          'luft.render.shaders::luvcraft-cloud-visibility))
+          'luft.render.shaders::luvcraft-cloud-visibility)
+        (luft.render.shaders::*surface-atmosphere-function*
+          'luft.render.shaders::luvcraft-atmospheric-surface))
     (render:make-terrain-drawing
      device target-formats sample-count
      :fragment (luft.render.shaders:star-fragment-specification))))
+
+(defun make-luvcraft-torch-drawing (device target-formats sample-count)
+  (let ((luft.render.shaders::*surface-atmosphere-function*
+          'luft.render.shaders::luvcraft-atmospheric-surface))
+    (render::make-framed-torch-drawing device target-formats sample-count)))
 
 (defun make-luvcraft-sky-drawing (device target-formats sample-count)
   (render::make-pipeline-scene-drawing

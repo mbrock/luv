@@ -622,6 +622,19 @@ which is what makes a printed illustration read as solid."
      (clamp (* contrasted contrasted) black white)
      :quantity quantities:presented-color :unit :one)))
 
+(defvar *presentation-grade-function* nil
+  "Optional game grade of bounded display-linear colour; NIL keeps paper.")
+(defvar *presentation-paper-p* t
+  "Select the atelier's AO pigment and screen-locked paper grain at construction.")
+
+(define-shader-abstraction presentation-grade (color)
+  (if *presentation-grade-function*
+      `(,*presentation-grade-function* ,color)
+      `(paper-grade ,color)))
+
+(define-shader-abstraction presentation-medium (paper neutral)
+  (if *presentation-paper-p* paper neutral))
+
 (define-shader-function mesh-view-clip
     (point position right up forward projection divisor)
   (let* ((relative (- point (swizzle position :xyz)))
@@ -788,6 +801,14 @@ that density along the straight ray."
          (depth (* density (* distance (* base integral)))))
     (- 1.0 (exp (- depth)))))
 
+(defvar *surface-atmosphere-function* nil
+  "Optional game atmosphere; NIL keeps the height-falling paper haze.")
+
+(define-shader-abstraction atmospheric-surface
+    (radiance world eye forward divisor character sun fog zenith parameters)
+  `(,(or *surface-atmosphere-function* 'paper-atmospheric-surface)
+    ,radiance ,world ,eye ,forward ,divisor ,character ,sun ,fog ,zenith ,parameters))
+
 ;;; Paper surfaces.  Lonely Mountains: Downhill reads as cut card under a
 ;;; strong soft sun: each facet one flat, slightly irregular tone; lit faces
 ;;; warm, shaded faces taking the sky's blue rather than going grey; and
@@ -819,8 +840,8 @@ that density along the straight ray."
                     (+ 1.0 (* 0.06 facet) (* 0.08 fibre)))))
     (* albedo (+ ambient direct))))
 
-(define-shader-function atmospheric-surface
-    (radiance world eye divisor character sun fog zenith parameters)
+(define-shader-function paper-atmospheric-surface
+    (radiance world eye forward divisor character sun fog zenith parameters)
   "Fade RADIANCE at WORLD into the aerial colour seen from the eye.
 
 An isometric camera's position is not a place anyone stands, so its haze is
@@ -987,6 +1008,7 @@ NIL leaves the atelier's direct light unchanged.")
            (atmospheric-surface
             radiance world
             (representation camera-position)
+            forward
             (swizzle (representation render-parameters) :z)
             (representation character-parameters)
             sun (representation fog-color-vector)
@@ -1667,6 +1689,7 @@ NIL leaves the atelier's direct light unchanged.")
          (pigmented (* shadowed
                        (mix (vec3 1.0 1.0 1.0)
                             shadow-pigment pooling)))
+         (surface-color (presentation-medium pigmented shadowed))
          ;; A gentle screen-space tilt shift holds the player's projected
          ;; height crisp and gives the near/far route a miniature depth cue.
          ;; It is deliberately only a five-tap gather after MetalFX resolves.
@@ -1698,7 +1721,7 @@ NIL leaves the atelier's direct light unchanged.")
                           :xyz))))
          (glowing
            (mix (assume-quantity
-                 (swizzle pigmented :xyz)
+                 (swizzle surface-color :xyz)
                  :quantity quantities:scene-radiance :unit :one)
                 (assume-quantity blurred
                                  :quantity quantities:scene-radiance
@@ -1747,7 +1770,7 @@ NIL leaves the atelier's direct light unchanged.")
                          :quantity quantities:scene-radiance :unit :one)
               (* exposed-radiance world-share)))
          (graded
-           (representation (paper-grade (paper-tonemap view-radiance))))
+           (representation (presentation-grade (paper-tonemap view-radiance))))
          ;; A restrained corner falloff; the frame should feel printed, not
          ;; port-holed.
          (centered (- uv (vec2 0.5 0.5)))
@@ -1769,7 +1792,9 @@ NIL leaves the atelier's direct light unchanged.")
                                        (* (swizzle pixel :y) 0.21) 9.1))
                     0.5)
                  0.35)))
-         (grain (+ 1.0 (* fibre (* 2.0 (swizzle atmosphere-parameters :z)))))
+         (grain (presentation-medium
+                 (+ 1.0 (* fibre (* 2.0 (swizzle atmosphere-parameters :z))))
+                 1.0))
          ;; Eight bits cannot hold a sky gradient; interleaved gradient noise
          ;; at half a step turns the contour into grain too fine to see.
          (dither-phase

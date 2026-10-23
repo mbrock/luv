@@ -2,7 +2,12 @@
 
 ;;; These are the very same objects and places as the original solver UI.
 (defmethod luv.knobs:knobs-for-host ((viewer luvcraft-viewer))
-  (append (call-next-method)
+  (append (remove-if (lambda (knob)
+                       ;; These belong to the atelier's paper medium, not
+                       ;; this game's photographic grade and quadratic fog.
+                       (member (luv.knobs:knob-name knob)
+                               '(render::paper-grain render::haze-height)))
+                     (call-next-method))
           (mapcar #'luv.knobs:find-knob
                   '(luvcraft::physics-gravity luvcraft::ball-bounce
                     luvcraft::physics-substeps))

@@ -281,6 +281,7 @@ brightest beside it and dims toward the frame."
            (atmospheric-surface
             radiance (representation world-position)
             (representation camera-position)
+            (representation (swizzle camera-forward :xyz))
             (swizzle (representation render-parameters) :z)
             (representation character-parameters)
             sun (representation fog-color-vector)
