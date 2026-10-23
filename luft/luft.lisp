@@ -104,7 +104,7 @@
    #:surface-mesh-appearance-codes
    #:surface-mesh-appearance-descriptor-words
    #:surface-mesh-voxel-light #:surface-mesh-companions
-   #:surface-mesh-attachments
+   #:surface-mesh-attachments #:surface-mesh-bodies
    #:surface-attachment-frame #:surface-attachment-frame-origin
    #:surface-attachment-frame-normal #:surface-attachment-frame-tangent
    #:surface-attachment-frame-primitive-kinds

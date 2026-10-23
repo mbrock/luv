@@ -132,7 +132,9 @@
           (draw-resident-opaque-population
            (renderer-terrain renderer) shadow-pass resident
            (renderer-frame-resident-bind-group
-            renderer frame resident t) :shadow-p t))))
+            renderer frame resident t) :shadow-p t)
+          (draw-resident-fixture-bodies renderer frame shadow-pass resident
+                                        :shadow-p t))))
     (when (plusp (renderer-flame-instance-count renderer))
       (encode-torch-bodies
        (renderer-torches renderer) shadow-pass
@@ -192,7 +194,8 @@
       (when (resident-drawn-p resident nil)
         (draw-resident-opaque-population
          (renderer-terrain renderer) pass resident
-         (renderer-frame-resident-bind-group renderer frame resident nil)))))
+         (renderer-frame-resident-bind-group renderer frame resident nil))
+        (draw-resident-fixture-bodies renderer frame pass resident))))
   (when (plusp (renderer-flame-instance-count renderer))
     (encode-torch-bodies
      (renderer-torches renderer) pass

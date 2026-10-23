@@ -26,7 +26,7 @@
 (defstruct (render-population
              (:constructor %make-render-population
                  (instance-words appearance-words descriptor-words
-                  site-count))
+                  site-count &optional body-data))
              (:copier nil))
   "Geometry sites plus a one-for-one, independently replaceable appearance."
   (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
@@ -34,7 +34,10 @@
                     :read-only t)
   (descriptor-words #() :type (simple-array (unsigned-byte 32) (*))
                     :read-only t)
-  (site-count 0 :type (integer 0 *) :read-only t))
+  (site-count 0 :type (integer 0 *) :read-only t)
+  ;; Fixture bodies (LUFT.TERRAIN::PACK-FIXTURE-BODIES), drawn beside the stars.
+  (body-data #.(make-array 0 :element-type 'single-float)
+             :type (simple-array single-float (*)) :read-only t))
 
 (defstruct (prepared-render-mesh
              (:constructor %make-prepared-render-mesh (mesh population))
@@ -86,7 +89,9 @@
           (error "One terrain population contains incompatible material palettes."))))
     (%make-render-population
      site-words (pack-terrain-appearance-codes appearance-codes)
-     descriptor-words (/ (length site-words) 4))))
+     descriptor-words (/ (length site-words) 4)
+     (apply #'concatenate '(simple-array single-float (*))
+            (mapcar #'luft:surface-mesh-bodies meshes)))))
 
 (zdefun (make-render-population :zone :luft/build-render-population
                                 :value (length meshes))

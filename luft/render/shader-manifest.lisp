@@ -20,6 +20,9 @@
     torch-body-vertex-specification
     torch-body-fragment-specification
     torch-body-shadow-vertex-specification
+    fixture-body-vertex-specification
+    fixture-body-fragment-specification
+    fixture-body-shadow-vertex-specification
     torch-flame-vertex-specification
     torch-flame-fragment-specification
     hdr-copy-fragment-specification

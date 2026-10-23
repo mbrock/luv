@@ -161,6 +161,7 @@ this package draws; the renderer and the ateliers use it.")
            #:material-kind
            #:material-kind-attachment-form
            #:material-kind-base-tone
+           #:material-kind-body
            #:material-kind-oriented-tones
            #:material-kind-pattern
            #:material-kind-surface-emission

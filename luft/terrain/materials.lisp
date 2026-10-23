@@ -14,7 +14,9 @@
     '(:none :bond :grid :shingle :checker :shelf :window :timbered :panel)
     "The laid patterns the star shader knows, in the order of their codes.
 From :SHELF on they are face-aware: a side face is laid differently from a
-top or bottom one."))
+top or bottom one.")
+  (defparameter +material-bodies+ '(:none :barrel :crate)
+    "The drawn fixture bodies the renderer knows, in the order of their codes."))
 
 (defclass material-kind ()
   ((name :initarg :name :reader material-kind-name)
@@ -63,7 +65,12 @@ on top; :WINDOW glazes COURSES by COURSES panes of ACCENT-TONE behind a
 grooved MORTAR-TONE frame, glowing by the kind's surface emission;
 :TIMBERED braces ACCENT-TONE infill with MORTAR-TONE posts; :PANEL raises a
 field inside a MORTAR-TONE stile-and-rail frame.  Their MORTAR-WIDTH is the
-frame's share of a cell."))
+frame's share of a cell.")
+   (body :initarg :body :initform :none :type #.`(member ,@+material-bodies+)
+         :reader material-kind-body
+         :documentation
+         "A drawn fixture which stands in the cell instead of its star surface.
+The cell stays solid for walking and light; only its drawing changes."))
   (:documentation
    "An authored cell substance: its tones, the relief and edge response the
 star shader cuts it with (#HYBFRT), and the facts needed by voxel light."))

@@ -16,7 +16,9 @@
    (shadow-vertices :initform nil :accessor terrain-shadow-vertices)
    (shadow-indices :initform nil :accessor terrain-shadow-indices)
    (scene-program :accessor terrain-scene-program)
-   (shadow-program :accessor terrain-shadow-program)))
+   (shadow-program :accessor terrain-shadow-program)
+   ;; Barrels and crates standing in body cells (fixture-drawing.lisp).
+   (fixtures :initform nil :accessor terrain-fixtures)))
 
 (defgeneric make-terrain-binding
     (drawing device sites camera
@@ -212,4 +214,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
               device :label "luft sun shadow sites"
               :vertex (shaders:terrain-shadow-vertex-specification)
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                               :depth-compare :less)))))))
+                               :depth-compare :less)))
+            (terrain-fixtures drawing)
+            (own-gpu-object
+             drawing (make-fixture-drawing device target-formats sample-count))))))

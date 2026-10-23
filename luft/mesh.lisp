@@ -26,7 +26,11 @@
   ;; Renderer publication metadata.  None of these participate in geometry.
   (voxel-light nil)
   (companions nil :type list)
-  (attachments nil :type list))
+  (attachments nil :type list)
+  ;; Drawn fixture bodies standing in cells the star mesh leaves open: twelve
+  ;; floats each, laid out by LUFT.TERRAIN:PACK-FIXTURE-BODIES.
+  (bodies #.(make-array 0 :element-type 'single-float)
+          :type (simple-array single-float (*))))
 
 (defstruct (surface-attachment-frame
              (:constructor make-surface-attachment-frame

@@ -170,3 +170,26 @@ releases for retry, but those retired bindings must never be served again. #RBNW
 (defun draw-resident-opaque-population (terrain pass resident bind-group &key shadow-p)
   "Draw RESIDENT's terrain: one indexed draw per star, or one mesh workgroup per site."
   (encode-terrain terrain pass bind-group resident :shadow-p shadow-p))
+
+(defun renderer-frame-fixture-bind-group (renderer frame resident shadow-p)
+  "Bind RESIDENT's fixture bodies to FRAME's camera upload, or NIL."
+  (let ((fixtures (terrain-fixtures (renderer-terrain renderer))))
+    (when (and fixtures (resident-population-body-buffer resident))
+      (renderer-frame-component-binding
+       frame (list :fixtures resident shadow-p (renderer-shadow-view renderer))
+       (lambda ()
+         (make-fixture-binding
+          fixtures (renderer-device renderer)
+          (resident-population-body-buffer resident)
+          (renderer-frame-state-camera-buffer frame)
+          :shadow-map (renderer-shadow-view renderer)
+          :shadow-sampler (renderer-shadow-sampler renderer)
+          :shadow-p shadow-p))))))
+
+(defun draw-resident-fixture-bodies (renderer frame pass resident &key shadow-p)
+  "Draw RESIDENT's barrels and crates, if it has any."
+  (let ((binding (renderer-frame-fixture-bind-group renderer frame resident shadow-p)))
+    (when binding
+      (encode-fixture-bodies (terrain-fixtures (renderer-terrain renderer))
+                             pass binding (resident-population-body-runs resident)
+                             :shadow-p shadow-p))))
