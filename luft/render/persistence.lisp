@@ -41,6 +41,17 @@
               (make-scene-material-vocabulary))
         :key #'material-placement-name))
 
+(defgeneric viewer-world-description (viewer)
+  (:documentation
+   "Return VIEWER's world as a save description, or NIL when it has none.
+A game hosted in a viewer answers with its own save format.")
+  (:method ((viewer viewer)) (luft-world-description viewer)))
+
+(defgeneric write-viewer-world-description (viewer description pathname)
+  (:documentation "Replace PATHNAME with VIEWER's save DESCRIPTION.")
+  (:method ((viewer viewer) description pathname)
+    (write-luft-world-description description pathname)))
+
 (defun luft-world-description (viewer)
   "Return VIEWER's world as a save description, or NIL without one."
   (let ((source (persistent-world-source (viewer-source viewer))))
@@ -163,12 +174,12 @@ alone rather than applied to the wrong landscape."
   "Write VIEWER's world if it changed since the last write; return its path."
   (let ((save (gethash viewer *viewer-world-saves*)))
     (when save
-      (let ((description (luft-world-description viewer)))
+      (let ((description (viewer-world-description viewer)))
         (when (and description
                    (or force-p
                        (not (equalp description (viewer-world-save-written save)))))
-          (write-luft-world-description description
-                                        (viewer-world-save-pathname save))
+          (write-viewer-world-description viewer description
+                                          (viewer-world-save-pathname save))
           (setf (viewer-world-save-written save) description)
           (viewer-world-save-pathname save))))))
 

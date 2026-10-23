@@ -1,17 +1,11 @@
 ;;; LUFT's vocabulary for the workbench palette and keymap legend.
 ;;;
-;;; The palette shows the placements a player can build with, lit the way
-;;; the world lights them; the legend reads the atelier's own command tables.
-;;; Neither owns input: 1-4 and the wheel still choose, F1 or H explains.
+;;; The palette shows the viewer's hotbar, the placements a player can build
+;;; with, lit the way the world lights them; the legend reads the viewer's
+;;; own command tables.  Neither owns input: the number keys and the wheel
+;;; still choose, F1 or H explains.
 
 (in-package #:luft.render)
-
-(defun viewer-palette-vocabulary (viewer)
-  (let ((source (viewer-source viewer)))
-    (when (typep source 'scene)
-      (coerce (domains:identity-vocabulary-members
-               (scene-material-vocabulary source))
-              'list))))
 
 (defun display-tone (tone)
   "Lift one scene-linear RGB TONE into a panel color that reads like the lit
@@ -20,11 +14,11 @@ the tone stays linear; a small gain stands in for the sun and exposure."
   (mapcar (lambda (value) (max 0.0 (min 1.0 (* 1.25 value)))) tone))
 
 (defmethod mcluv:palette-items-for ((viewer viewer))
-  (viewer-palette-vocabulary viewer))
+  (viewer-hotbar viewer))
 
 (defmethod mcluv:palette-visible-p ((viewer viewer))
   (and (typep (viewer-mode viewer) '(or world-edit-mode first-person-mode))
-       (not (null (viewer-palette-vocabulary viewer)))))
+       (not (null (viewer-hotbar viewer)))))
 
 (defmethod mcluv:palette-selected-item ((viewer viewer))
   (viewer-edit-material viewer))
@@ -97,6 +91,7 @@ the pointer on the first click; every later click edits.")
 (defmethod mcluv:keymap-legend-sections-for ((viewer viewer))
   (declare (ignore viewer))
   `(("In the world" . luft-atelier)
+    ("Moving" . luft-play)
     ("Pointer" . ,*viewer-pointer-legend-rows*)
     ("Any time" . luft-window)))
 

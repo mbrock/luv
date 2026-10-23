@@ -154,7 +154,8 @@ the Luft world loaded.
 protocol with Luvcraft's own generator and its own palette, and a source
 names its spawn through [[lisp:luft.terrain:world-source-spawn]], so the
 studio no longer assumes the atelier's large world when it places a
-character.
+character.  =luvcraft/luft/game= hosts it in a viewer frame of its own
+(#J3WZZS), the first game to do so, and what that forced is listed there.
 
 A streaming scene's consumer may realize each finished mesh on the worker
 through [[lisp:luft.terrain:prepare-streamed-mesh]], with
@@ -431,14 +432,68 @@ sixteen Luvcraft chunks under it through Luvcraft's own chunk producer and
 landmarks, with Luvcraft's (x, y, z) at Luft's (x + 1024, z + 1024, y).
 Its test compares that cell for cell against Luvcraft's real load request
 on alpine and meadow chunks, edits included, and finds no difference.  The
-real =default.sexp= save imports with all 174 edits in place.  The birthday
-saves use a =:birthday-meadow= source the import does not yet know.  A
-source names its own spawn, and a Luft character dropped there falls onto
-Luvcraft's ground and stands.  =./sly play luvcraft-on-luft= opens the
-player's save, or a fresh seed, in the atelier through
-=luvcraft/luft/atelier=, the atelier standing in as host until Luvcraft has
-its own; the viewer edits with the scene's own palette.  Edits made there
-are not yet saved back, and no one has yet looked at the frame.
+real =default.sexp= save imports with all 174 edits in place.  A source
+names its own spawn, above whatever a save built there, and a Luft character
+dropped there falls onto Luvcraft's ground and stands.
+
+Each Luvcraft chunk is now raised through the source's own load request, the
+very request Luvcraft streams with, so the birthday meadow -- whose
+=:birthday-meadow= saves carry their own request class -- imports too; its
+lawn, flowers, trees, and a placed plank match Luvcraft cell for cell.
+
+Luvcraft on Luft is a game of its own, =luvcraft/luft/game= in the
+=luvcraft.luft.game= package, played by =./sly play luvcraft-on-luft=.  Its
+frame is a subclass of the viewer, so it has the renderer, streaming,
+walking, flight, first person, and the workbench, and it brings Luvcraft's
+title, its status line and workbench name, a ten-slot hotbar of Luvcraft's
+blocks (picking a block puts it in the selected slot), and its own keys --
+E place, X mine, C pick, 1 to 0 -- in a command table that inherits the
+viewer's walking and tools but not the atelier's instruments.  The legend
+reads that table.  Edits and the player's position, look, and block in hand
+are written back into the Luvcraft save as the game plays and when it stops;
+Luvcraft's reader reads the result, an edit Luft could not hold or a film's
+own reel survives, and inhabitants and carried blocks pass through as they
+were.  A fresh seed writes only where it is told to, never over the
+player's save.  Luvcraft's test plays a birthday save through Luft edits and
+back into Luvcraft.  In the orb, under software Vulkan, a gazebo save opened,
+took bricks, lost one to mining, and reopened with both and the player on
+the roof where it stood.  The old Luvcraft program cannot render there (its
+render pass is unsupported by lavapipe), so the same file was checked only
+through Luvcraft's own loader.
+
+To host the game the studio gave up three atelier assumptions, now protocol
+in =luft.render=: the playing commands -- walk, jump, fly, M-x, metabar,
+lobby -- moved into =luft-play=, which the atelier's table inherits; key
+tables, the hotbar, picking, editing at the crosshair, and the save format
+are generic functions on the viewer
+([[lisp:luft.render:viewer-key-event-tables]],
+[[lisp:luft.render:viewer-hotbar]], [[lisp:luft.render:viewer-pick-material]],
+[[lisp:luft.render:viewer-edit-at-crosshair]],
+[[lisp:luft.render:viewer-world-description]]); and =start-viewer= takes a
+frame class, its initargs, and a saved pose.
+
+What still reaches past the line, which is where the next cut goes:
+
+- The viewer is one McCLIM frame that is both the host and the atelier, so a
+  game's frame restates the atelier's inspector pane and layout and names its
+  display function, =luft.render::display-site-inspector=.  The host wants
+  to be a frame of its own with the inspector as one game's instrument.
+- The playing tables still carry the atelier's notions of mode: M and F5
+  switch a Luvcraft player into the isometric walk and orbit cameras.
+- Saving reaches into Luvcraft's unexported save writer, world description,
+  and edit overlay; those are a protocol the old program never needed to
+  publish.
+- =luft.render= cannot be reloaded live once the atelier has attached
+  =luft.world= to it, so changing the renderer's exports needs a restart.
+
+Old Luvcraft's meshing is not needed to show any of this: the frame is the
+Luft renderer's.  Its load requests are, as the generator.  Deleting the rest
+-- =mesher.lisp=, the mesh half of =streaming.lisp=, and the chunk passes of
+=render.lisp=, about 4,000 lines -- is not yet safe, because the old program is
+still the game a child starts and draws its phone, portals, critters, agents,
+and party through them.  It takes the old game's remaining features crossing
+first (#R1T4AY), the load half of =streaming.lisp= kept as Luvcraft's
+generator, and the mesh claims in =luvcraft/core/test= retired with it.
 
 ** TODO Stream voxel light in the terrain engine
 :PROPERTIES:

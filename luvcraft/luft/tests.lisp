@@ -9,22 +9,21 @@
 
 (in-package #:luvcraft.luft.tests)
 
-(defun luvcraft-oracle-world (seed relief height edits chunk-keys)
-  "A Luvcraft world whose CHUNK-KEYS were loaded as Luvcraft streams them."
-  (let* ((world (luvcraft:make-empty-little-block-world
-                 :seed seed :relief relief :chunk-height height))
-         (source (luvcraft:block-world-source world)))
+(defun luvcraft-oracle-world (little height edits chunk-keys)
+  "A Luvcraft world over LITTLE whose CHUNK-KEYS were loaded as Luvcraft streams them."
+  (let ((world (luvcraft::make-block-world :chunk-height height :source little)))
     (loop for (block x y z) in edits
           do (luvcraft::record-block-edit
-              (luvcraft:little-world-source-edits source) block x y z))
+              (luvcraft:little-world-source-edits little) block x y z))
     (dolist (key chunk-keys world)
-      (let* ((request (luvcraft::make-block-chunk-load-request source world key 1 0))
+      (let* ((request (luvcraft::make-block-chunk-load-request little world key 1 0))
              (payload (luv.production:perform-production-request request)))
         (destructuring-bind (x y z) key
           (luvcraft::install-world-chunk-storage
            world x y z (luvcraft::block-chunk-load-payload-content payload)))))))
 
-(defun compare-luft-chunk (seed relief height luft-key edits)
+(defun compare-luft-chunk (seed relief height luft-key edits
+                           &key (class 'luvcraft:little-world-source))
   "Count cells of Luft chunk LUFT-KEY that differ from Luvcraft's world."
   (let* ((offset 1024)
          (keys (let ((x0 (floor (- (luft:chunk-origin-x luft-key) offset) 16))
@@ -32,7 +31,9 @@
                  (loop for i below 4
                        nconc (loop for j below 4
                                    collect (list (+ x0 i) 0 (+ z0 j))))))
-         (world (luvcraft-oracle-world seed relief height edits keys))
+         (world (luvcraft-oracle-world
+                 (make-instance class :seed seed :relief relief)
+                 height edits keys))
          (little (luvcraft:block-world-source world))
          (source (game::little-world-luft-source little height :offset offset))
          (chunk (terrain:materialize-world-source-chunk
@@ -144,3 +145,75 @@
                                materials))))
         (true (gethash (cell -20 13 -30) materials))
         (true (gethash (cell -24 14 -30) materials))))))
+
+(define-test the-birthday-meadow-matches-luvcraft-cell-for-cell
+  ;; The party lawn at the origin, its flowers and its ring of trees, with a
+  ;; plank placed on the lawn the way the gazebo's edits are.
+  (multiple-value-bind (differences solid count)
+      (compare-luft-chunk 121 :alpine 32 (luft:chunk-key-at 1000 1000)
+                          (list (list luvcraft::*planks-block* 3 7 -4))
+                          :class 'luvcraft.birthday:birthday-world-source)
+    (is = 0 differences)
+    (true (< 10000 solid))
+    (is = solid count)))
+
+(defun write-save (world pathname &key resume)
+  (luvcraft::write-luvcraft-save-description
+   (luvcraft:make-luvcraft-save-description world) pathname)
+  (when resume
+    (let ((description (with-open-file (stream pathname) (read stream))))
+      (setf (getf (rest description) :resume) resume)
+      (luvcraft::write-luvcraft-save-description description pathname)))
+  pathname)
+
+(define-test luft-edits-save-back-into-a-luvcraft-save
+  (uiop:with-temporary-file (:pathname pathname :type "sexp")
+    (let ((world (luvcraft.birthday:make-birthday-world :seed 7 :chunk-radius nil)))
+      ;; A film keeps its own reel; a block outside the Luft domain is kept.
+      (luvcraft::record-block-edit
+       (luvcraft:little-world-source-edits (luvcraft:block-world-source world))
+       luvcraft::*crystal-block* 2 9 2)
+      (luvcraft::record-block-edit
+       (luvcraft:little-world-source-edits (luvcraft:block-world-source world))
+       luvcraft::*stone-block* 5000 3 0)
+      (write-save world pathname
+                  :resume (list :player-position '(1.5d0 7d0 2.5d0)
+                                :look '(:yaw 0.25d0 :pitch -0.1d0)
+                                :selected-block '(:block :name :grass)
+                                :carried '((:block :name :planks)))))
+    (multiple-value-bind (source dropped world resume)
+        (game:luvcraft-save-world-source pathname)
+      (is = 1 dropped)
+      (multiple-value-bind (position yaw pitch)
+          (game:luvcraft-resume-luft-pose source resume)
+        (is equal '(1025.5d0 1026.5d0 7d0) position)
+        (true (< (abs (- yaw (- (/ pi 2) 0.25))) 1e-5))
+        (true (< (abs (+ pitch 0.1)) 1e-5)))
+      ;; Two edits in Luft: carve the crystal, build bricks above the lawn.
+      (let ((edits (terrain:world-source-edits source)))
+        (setf (gethash (game:luvcraft-cell-site source 2 9 2) edits) nil
+              (gethash (game:luvcraft-cell-site source -3 8 4) edits)
+              (game:block-placement luvcraft::*bricks-block*)))
+      (luvcraft::write-luvcraft-save-description
+       (game:luvcraft-save-description
+        source world :resume resume
+        :position '(1030.5 1020.5 9.0) :yaw 1.0 :pitch 0.2
+        :selected (game:block-placement luvcraft::*bricks-block*))
+       pathname))
+    ;; Luvcraft itself reads the result: the same meadow, both edits, the
+    ;; out-of-domain block, and the player where Luft left them.
+    (multiple-value-bind (world resume) (luvcraft:read-luvcraft-save pathname)
+      (let* ((little (luvcraft:block-world-source world))
+             (entries (luvcraft::block-edit-overlay-entries
+                       (luvcraft:little-world-source-edits little))))
+        (true (typep little 'luvcraft.birthday:birthday-world-source))
+        (is = 7 (luvcraft:little-world-source-seed little))
+        (is = 3 (hash-table-count entries))
+        (multiple-value-bind (block present-p) (gethash '(2 9 2) entries)
+          (true present-p) (is eq nil block))
+        (is eq luvcraft::*bricks-block* (gethash '(-3 8 4) entries))
+        (is eq luvcraft::*stone-block* (gethash '(5000 3 0) entries)))
+      (is equalp '(6.5d0 9d0 -3.5d0) (getf resume :player-position))
+      (true (< (abs (- (getf (getf resume :look) :yaw) (- (/ pi 2) 1))) 1e-5))
+      (is equal '(:block :name :bricks) (getf resume :selected-block))
+      (is equal '((:block :name :planks)) (getf resume :carried)))))

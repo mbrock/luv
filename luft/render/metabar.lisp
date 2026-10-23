@@ -294,7 +294,7 @@
        (error "~S has no attached workbench." viewer))))
 
 (clim:define-command (com-toggle-metabar
-                      :command-table luft-atelier
+                      :command-table luft-play
                       :name "Toggle Metabar"
                       :keystroke (:return))
     ()

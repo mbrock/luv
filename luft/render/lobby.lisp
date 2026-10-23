@@ -62,7 +62,7 @@
        (error "~S has no attached workbench." viewer))))
 
 (clim:define-command (com-toggle-lobby-panel
-                      :command-table luft-atelier
+                      :command-table luft-play
                       :name "Toggle Lobby Panel")
     ()
   (toggle-viewer-lobby (viewer-command-viewer)))

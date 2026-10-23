@@ -813,8 +813,12 @@ before the operation boundary, or it would encode through resources which the
 
 (clim:define-command-table luft-window)
 (clim:define-command-table luft-window-release)
-(clim:define-command-table luft-atelier)
-(clim:define-command-table luft-atelier-release)
+;;; Walking, jumping, flight, and the workbench's tools belong to any game
+;;; played in a viewer; the atelier's own instruments inherit them.
+(clim:define-command-table luft-play)
+(clim:define-command-table luft-play-release)
+(clim:define-command-table luft-atelier :inherit-from (luft-play))
+(clim:define-command-table luft-atelier-release :inherit-from (luft-play-release))
 
 (defconstant +site-inspector-width+ 372)
 (defconstant +site-inspector-height+ 306)
@@ -1272,12 +1276,12 @@ before the operation boundary, or it would encode through resources which the
     (lambda () (%perform-viewer-stop viewer))
     :thread-name "LUFT viewer quit")))
 
-(clim:define-command (com-start-moving :command-table luft-atelier
+(clim:define-command (com-start-moving :command-table luft-play
                                        :name "Start Moving")
     ((direction 'keyword :prompt "direction"))
   (set-viewer-control (viewer-command-viewer) direction t))
 
-(clim:define-command (com-stop-moving :command-table luft-atelier-release
+(clim:define-command (com-stop-moving :command-table luft-play-release
                                       :name "Stop Moving")
     ((direction 'keyword :prompt "direction"))
   (set-viewer-control (viewer-command-viewer) direction nil))
@@ -1314,7 +1318,7 @@ A completed pair is spent, so a third quick press starts a new one."
     (set-viewer-control viewer :down nil)
     (character-flying-p player)))
 
-(clim:define-command (com-jump :command-table luft-atelier
+(clim:define-command (com-jump :command-table luft-play
                                 :name "Jump, Rise, or Double-Tap to Fly"
                                 :keystroke (:space))
     ()
@@ -1327,7 +1331,7 @@ A completed pair is spent, so a third quick press starts a new one."
              (set-viewer-control viewer :up t))
             (t (request-character-jump player))))))
 
-(clim:define-command (com-toggle-flight :command-table luft-atelier
+(clim:define-command (com-toggle-flight :command-table luft-play
                                         :name "Toggle Flight"
                                         :keystroke (:f6))
     ()
@@ -1473,11 +1477,32 @@ A completed pair is spent, so a third quick press starts a new one."
                (orbit-mode 'free-camera-mode)
                (t 'first-person-mode))))))
 
-(defun select-viewer-material (viewer index)
-  (let ((members (domains:identity-vocabulary-members
-                  (scene-material-vocabulary (viewer-source viewer)))))
-    (setf (viewer-edit-material viewer) (aref members (mod index (length members)))
+(defgeneric viewer-hotbar (viewer)
+  (:documentation
+   "Return the placements VIEWER's player chooses among, in key order.
+
+The number keys, the wheel, and the workbench palette all read this row.  The
+atelier offers its scene's whole small palette; a game with a larger one
+offers the few its player carries.")
+  (:method ((viewer viewer))
+    (let ((source (viewer-source viewer)))
+      (when (typep source 'scene)
+        (coerce (domains:identity-vocabulary-members
+                 (scene-material-vocabulary source))
+                'list)))))
+
+(defgeneric viewer-pick-material (viewer placement)
+  (:documentation
+   "Take up PLACEMENT, the material of a cell VIEWER's player picked.")
+  (:method ((viewer viewer) placement)
+    (setf (viewer-edit-material viewer) placement
           (viewer-last-edit-status viewer) :selected)))
+
+(defun select-viewer-material (viewer index)
+  (let ((hotbar (viewer-hotbar viewer)))
+    (when hotbar
+      (setf (viewer-edit-material viewer) (nth (mod index (length hotbar)) hotbar)
+            (viewer-last-edit-status viewer) :selected))))
 
 (clim:define-command (com-select-material :command-table luft-atelier
                                          :name "Select Material")
@@ -1525,7 +1550,7 @@ A completed pair is spent, so a third quick press starts a new one."
       (let ((gesture (list key :any)))
         ;; Definition reloads replace the live vocabulary instead of stacking
         ;; another item at the same gesture coordinate.
-        (dolist (table '(luft-atelier luft-atelier-release))
+        (dolist (table '(luft-play luft-play-release))
           (clim:remove-keystroke-from-command-table
            table gesture :errorp nil))
         (flet ((command-item (command)
@@ -1534,10 +1559,10 @@ A completed pair is spent, so a third quick press starts a new one."
                      (declare (ignore gesture numeric-argument))
                      (list command direction)))))
           (clim:add-keystroke-to-command-table
-           'luft-atelier gesture :function
+           'luft-play gesture :function
            (command-item 'com-start-moving) :errorp nil)
           (clim:add-keystroke-to-command-table
-           'luft-atelier-release gesture :function
+           'luft-play-release gesture :function
            (command-item 'com-stop-moving) :errorp nil)))))
   (values))
 
@@ -1546,24 +1571,28 @@ A completed pair is spent, so a third quick press starts a new one."
 ;;; Space presses through COM-JUMP, which may start a rise; its release ends
 ;;; one, whether or not the player is flying.
 (clim:add-keystroke-to-command-table
- 'luft-atelier-release '(:space :any) :function
+ 'luft-play-release '(:space :any) :function
  (lambda (gesture numeric-argument)
    (declare (ignore gesture numeric-argument))
    (list 'com-stop-moving :up))
  :errorp nil)
 
-(defgeneric viewer-key-event-tables (event)
-  (:documentation "Return the window and atelier tables for key EVENT."))
+(defgeneric viewer-key-event-tables (viewer event)
+  (:documentation
+   "Return the window and in-world command tables VIEWER reads key EVENT in.
 
-(defmethod viewer-key-event-tables ((event canvas-key-press-event))
+A game played in a viewer names its own in-world tables, which usually
+inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
+
+(defmethod viewer-key-event-tables ((viewer viewer) (event canvas-key-press-event))
   (values 'luft-window 'luft-atelier))
 
-(defmethod viewer-key-event-tables ((event canvas-key-release-event))
+(defmethod viewer-key-event-tables ((viewer viewer) (event canvas-key-release-event))
   (values 'luft-window-release 'luft-atelier-release))
 
 (defun viewer-key-command (viewer event)
   "Return the named McCLIM command VIEWER binds to key EVENT, or NIL."
-  (multiple-value-bind (window atelier) (viewer-key-event-tables event)
+  (multiple-value-bind (window atelier) (viewer-key-event-tables viewer event)
     ;; Window commands are global application controls: fullscreen, Tracy,
     ;; quit, and pointer release remain available after Escape.  Unmodified
     ;; atelier/gameplay commands still require captured input; modified tools
@@ -1613,29 +1642,39 @@ A completed pair is spent, so a third quick press starts a new one."
        (viewer-mode viewer) viewer canvas event))
   nil)
 
-(defmethod handle-viewer-mode-pointer-press
-    ((mode world-edit-mode) viewer canvas event)
-  (declare (ignore mode canvas))
+(defun viewer-edit-at-crosshair (viewer action)
+  "Smash, build against, or pick the cell under VIEWER's pointer or crosshair.
+
+ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
   (let ((inspection (update-viewer-inspection viewer)))
     (when inspection
-      (case (canvas-pointer-event-button event)
-        (:left
+      (ecase action
+        (:smash
          (record-viewer-world-edit
           viewer (site-inspection-cell inspection) nil))
-        (:right
+        (:build
          (handler-case
              (record-viewer-world-edit
               viewer (site-inspection-adjacent-cell inspection)
               (viewer-edit-material viewer))
            (luft:outside-domain ()
              (setf (viewer-last-edit-status viewer) :outside-domain))))
-        (:middle
+        (:pick
          (let ((source (viewer-source viewer)))
            (when (typep source 'scene)
-             (setf (viewer-edit-material viewer)
-                   (scene-material-placement-at
-                    source (site-inspection-cell inspection))
-                   (viewer-last-edit-status viewer) :selected))))))))
+             (let ((placement (scene-material-placement-at
+                               source (site-inspection-cell inspection))))
+               (when placement
+                 (viewer-pick-material viewer placement)))))))
+      inspection)))
+
+(defmethod handle-viewer-mode-pointer-press
+    ((mode world-edit-mode) viewer canvas event)
+  (declare (ignore mode canvas))
+  (let ((action (case (canvas-pointer-event-button event)
+                  (:left :smash) (:right :build) (:middle :pick))))
+    (when action
+      (viewer-edit-at-crosshair viewer action))))
 
 (defmethod handle-viewer-mode-pointer-press
     ((mode isometric-walk-mode) viewer canvas event)
@@ -1680,9 +1719,9 @@ A completed pair is spent, so a third quick press starts a new one."
   (declare (ignore canvas))
   (when (typep (viewer-mode viewer) 'first-person-mode)
     (when (viewer-pointer-captured-p viewer)
-      (let* ((vocabulary (scene-material-vocabulary (viewer-source viewer)))
-             (index (domains:identity-vocabulary-offset
-                     vocabulary (viewer-edit-material viewer))))
+      (let ((index (or (position (viewer-edit-material viewer)
+                                 (viewer-hotbar viewer))
+                       0)))
         (select-viewer-material
          viewer (- index (signum (round (canvas-pointer-event-scroll-y event)))))))
     (return-from handle-canvas-event nil))
@@ -1756,8 +1795,10 @@ A completed pair is spent, so a third quick press starts a new one."
                        (frames-per-second 60)
                        (provider *gpu-provider*)
                        (world-pathname (default-luft-world-pathname))
-                     &aux (saved-world
-                           (load-luft-world-description solid world-pathname)))
+                       (saved-world
+                        (load-luft-world-description solid world-pathname))
+                       (frame-class 'viewer)
+                       frame-initargs)
   "Open the fixed-star LUFT renderer as a McCLIM atelier.
 
 SKY-FACTORY and PLAYER-FACTORY select independently owned scene drawings;
@@ -1775,7 +1816,12 @@ cohort. EXPOSURE-FACTORY receives the device and constructs a fresh exposure
 control. FIXED-EXPOSURE selects a constant control instead, omitting GPU
 measurement entirely for reproducible evidence.  When SOLID is the authored
 large world, WORLD-PATHNAME (NIL for none) is where its edits and player are
-loaded from and saved to; see persistence.lisp."
+loaded from and saved to; see persistence.lisp.
+
+A game hosts itself in a viewer by naming its FRAME-CLASS, a subclass of
+VIEWER, with FRAME-INITARGS for its own slots; its SAVED-WORLD is a Luft save
+description whose player, flight, and look the viewer starts from, and its
+WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
   (check-type solid scene)
   (when fixed-exposure
     (setf fixed-exposure (checked-exposure-value fixed-exposure)))
@@ -1855,8 +1901,9 @@ loaded from and saved to; see persistence.lisp."
                             (setf production-system
                                   (production:make-single-worker-production-system
                                    :name "LUFT mesh producer")))
-                          (clim:make-application-frame
-                           'viewer :frame-manager manager :enable t
+                          (apply
+                           #'clim:make-application-frame
+                           frame-class :frame-manager manager :enable t
                                    :canvas canvas :context context
                                    :device device* :renderer renderer*
                                    :stop-controller
@@ -1870,7 +1917,8 @@ loaded from and saved to; see persistence.lisp."
                                                  solid))
                                    :bevel-width bevel-width
                                    :fixed-exposure fixed-exposure
-                                   :inspector-p inspector-p)))))
+                                   :inspector-p inspector-p
+                                   frame-initargs)))))
            ;; Establish the following pose before the first streaming tick;
            ;; otherwise the legacy sanctuary camera demands the wrong chunks.
            (when (viewer-player viewer)
@@ -1880,7 +1928,7 @@ loaded from and saved to; see persistence.lisp."
              (face-viewer-spawn-view viewer)
              (when saved-world
                (restore-luft-world-player viewer saved-world)))
-           (when (persistent-world-source solid)
+           (when world-pathname
              (note-viewer-world-pathname viewer world-pathname))
            (cond
              (surface-mesh
