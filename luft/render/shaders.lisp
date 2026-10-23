@@ -12,6 +12,12 @@
   (defvar *voxel-light-gain* 0.7
     "Radiance of full terrain voxel light on a surface of unit tone."))
 
+(luv.knobs:define-knob voxel-light-gain
+    (:group :grading :class 'luv.knobs:rebuild-knob
+     :quantity (:quantity :proportion :unit :one)
+     :minimum 0.0 :maximum 3.0 :step 0.05)
+  *voxel-light-gain*)
+
 (define-shader-function unpack-terrain-tone (packed)
   "Decode one RGB8 terrain descriptor into scene-linear colour."
   (vec3 (/ (float (ldb (byte 8 0) packed)) 255.0)
@@ -922,7 +928,7 @@ the figure stays clear and only its far reaches recede."
               ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
               ;; and lava, warm by night and lost in the sun by day.  The
               ;; square keeps a light's falloff from flattening into a wash.
-              (* tone (* #.*voxel-light-gain*
+              (* tone (* voxel-light-gain
                          (* (swizzle voxel-light :xyz) (swizzle voxel-light :xyz))))))
          (final
            (atmospheric-surface

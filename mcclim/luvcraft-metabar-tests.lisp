@@ -9,7 +9,7 @@
               (handler-case
                   (progn (luvcraft:knob-value candidate session) t)
                 (error () nil)))
-            luvcraft:*knobs*))
+            (luv.knobs:knobs-for-host session)))
          (group (and knob (luvcraft:knob-group knob)))
          (action (first luvcraft:*actions*)))
     (true knob)

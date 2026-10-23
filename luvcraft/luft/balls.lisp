@@ -1,5 +1,17 @@
 (in-package #:luvcraft.luft.game)
 
+;;; These are the very same objects and places as the original solver UI.
+(defmethod luv.knobs:knobs-for-host ((viewer luvcraft-viewer))
+  (append (call-next-method)
+          (mapcar #'luv.knobs:find-knob
+                  '(luvcraft::physics-gravity luvcraft::ball-bounce
+                    luvcraft::physics-substeps))
+          (remove-if-not
+           (lambda (knob)
+             (eq (symbol-package (luv.knobs:knob-name knob))
+                 (find-package :luvcraft.luft.game)))
+           luv.knobs:*knobs*)))
+
 ;;; The solver and palette stay Y-up. Only this boundary knows Luft's axes.
 (defclass ball-terrain ()
   ((scene :initarg :scene :reader ball-terrain-scene)))

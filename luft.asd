@@ -100,7 +100,7 @@
   :description "The indexed integer-mesh GPU renderer for LUFT solids."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luft/terrain")
+  :depends-on ("luft/terrain" "luv/knobs")
   :serial t
   :components ((:module "render"
                 :pathname "luft/render"

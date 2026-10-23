@@ -62,6 +62,13 @@
   :components ((:file "domains/package")
                (:file "domains/domains")))
 
+(defsystem "luv/knobs"
+  :description "Host-neutral live values, semantic units, and realizations."
+  :depends-on ("luv/shader" "alexandria")
+  :serial t
+  :components ((:file "knobs/package")
+               (:file "knobs/knobs")))
+
 (defsystem "luv/frontier"
   :description "Inspectable frontier programs and specialized scalar realizations."
   :depends-on ("luv/arithmetic")
@@ -557,7 +564,7 @@ offsets and of headers."
   :description "An experimental McCLIM backend presented through luv canvases."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv" "luv/build" "luv/lobby" "mcclim-render" "cl-dejavu")
+  :depends-on ("luv" "luv/knobs" "luv/build" "luv/lobby" "mcclim-render" "cl-dejavu")
   :serial t
   :components ((:module "mcclim"
                 :serial t
@@ -570,6 +577,7 @@ offsets and of headers."
                              (:file "command-menu")
                              (:file "source-update")
                              (:file "metabar")
+                             (:file "knob-metabar")
                              (:file "palette")
                              (:file "keymap-legend")
                              (:file "prompt")

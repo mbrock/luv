@@ -13,7 +13,7 @@
             (unintern symbol package)))))))
 
 (defpackage #:luvcraft
-  (:use #:cl #:luv #:luvcraft.world)
+  (:use #:cl #:luv #:luvcraft.world #:luv.knobs)
   (:import-from #:luv.production
                 #:production-request
                 #:production-request-key

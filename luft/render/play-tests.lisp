@@ -6,8 +6,9 @@
          (atelier (make-instance 'render:viewer :source scene)))
     (true (equal (mcluv:metabar-groups-for host)
                  (mcluv:metabar-groups-for atelier)))
-    (mcluv:perform-metabar-control-set-fraction :movement-speed host 0.5)
-    (true (= 6.5 (mcluv:metabar-control-value :movement-speed host)))
+    (let ((knob (luv.knobs:find-knob 'render::movement-speed)))
+      (mcluv:perform-metabar-control-set-fraction knob host 0.5)
+      (true (= 6.5 (mcluv:metabar-control-value knob host))))
     (dolist (mode '(render:isometric-walk-mode render:orbit-mode
                     render:free-camera-mode render:world-edit-mode))
       (true (not (render:viewer-allows-mode-p host (make-instance mode))))

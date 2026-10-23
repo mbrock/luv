@@ -39,6 +39,28 @@
 (defparameter *terminal-rows-per-cell* 5
   "Text rows per cell of wall height.")
 
+(defparameter *terminal-font-scale* 1.0
+  "Multiplier of wall glyph size; resizing also changes the shell grid.")
+
+(defclass terminal-emission-knob (knobs:scalar-knob) ())
+(defclass terminal-layout-knob (terminal-emission-knob) ())
+
+(knobs:define-knob terminal-ink-emission
+    (:group :terminal :class 'terminal-emission-knob
+     :quantity (:quantity quantities:scene-radiance :unit :one)
+     :minimum 0.0 :maximum 8.0 :step 0.1)
+  *terminal-ink-emission*)
+(knobs:define-knob terminal-background-emission
+    (:group :terminal :class 'terminal-emission-knob
+     :quantity (:quantity quantities:scene-radiance :unit :one)
+     :minimum 0.0 :maximum 4.0 :step 0.1)
+  *terminal-background-emission*)
+(knobs:define-knob terminal-font-scale
+    (:group :terminal :class 'terminal-layout-knob
+     :quantity (:quantity :proportion :unit :one)
+     :minimum 0.5 :maximum 3.0 :step 0.1)
+  *terminal-font-scale*)
+
 (defparameter *terminal-margin* 0.10
   "Cells of bare screen kept around the text grid.")
 
@@ -193,8 +215,9 @@ and as many columns as that cell height affords across the wall."
                                (* 2 *terminal-margin*)))
            (available-height (- (terminal-surface-height surface)
                                 (* 2 *terminal-margin*)))
-           (rows (max 1 (round (* *terminal-rows-per-cell*
-                                  (terminal-surface-height surface)))))
+           (rows (max 1 (round (/ (* *terminal-rows-per-cell*
+                                     (terminal-surface-height surface))
+                                  *terminal-font-scale*))))
            (cell-height (/ available-height rows))
            (cell-width (* cell-height (/ font-advance font-height))))
       (values (max 1 (floor available-width cell-width)) rows))))
@@ -220,8 +243,8 @@ and as many columns as that cell height affords across the wall."
 
 (defclass world-terminal ()
   ((surface :initarg :surface :reader world-terminal-surface)
-   (columns :initarg :columns :reader world-terminal-columns)
-   (rows :initarg :rows :reader world-terminal-rows)
+   (columns :initarg :columns :accessor world-terminal-columns)
+   (rows :initarg :rows :accessor world-terminal-rows)
    (terminal :initarg :terminal :reader world-terminal-terminal)
    (device :initform nil :accessor world-terminal-device)
    (glyph-cache :initarg :glyph-cache :reader world-terminal-glyph-cache)
@@ -472,6 +495,31 @@ and as many columns as that cell height affords across the wall."
 (defun viewer-terminals (viewer)
   (or (gethash viewer *viewer-terminals*)
       (setf (gethash viewer *viewer-terminals*) (make-viewer-terminals))))
+
+(defmethod knobs:realize-knob progn
+    ((knob terminal-emission-knob) (session game-host))
+  ;; Specials are shared: invalidate quiet shells in every live host too.
+  (maphash (lambda (viewer state)
+             (declare (ignore viewer))
+             (dolist (terminal (viewer-terminals-terminals state))
+               (setf (world-terminal-dirty-p terminal) t)))
+           *viewer-terminals*))
+
+(defmethod knobs:realize-knob progn
+    ((knob terminal-layout-knob) (session game-host))
+  (maphash
+   (lambda (viewer state)
+     (declare (ignore viewer))
+     (dolist (terminal (viewer-terminals-terminals state))
+       (zpb-ttf:with-font-loader (loader *terminal-font-pathname*)
+         (multiple-value-bind (columns rows)
+             (terminal-grid-size (world-terminal-surface terminal) loader)
+           (when (world-terminal-device terminal)
+             (luv.terminal:resize-pty-device (world-terminal-device terminal)
+                                             columns rows))
+           (setf (world-terminal-columns terminal) columns
+                 (world-terminal-rows terminal) rows)))))
+   *viewer-terminals*))
 
 (defun same-terminal-surface-p (a b)
   (and (equal (terminal-surface-normal a) (terminal-surface-normal b))

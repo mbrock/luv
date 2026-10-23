@@ -29,7 +29,7 @@
   :description "The renderer, simulation, and devices of the luvcraft block world."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv"
+  :depends-on ("luv" "luv/knobs"
                "luv/tracy-capture"
                "luv/ghostty"
                "luv/libav"
@@ -244,7 +244,8 @@
   :depends-on ("luvcraft/luft/game" "luv/test-support")
   :serial t
   :components ((:file "luvcraft/luft/game-tests")
-               (:file "luvcraft/luft/ball-tests"))
+               (:file "luvcraft/luft/ball-tests")
+               (:file "luvcraft/luft/knob-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package

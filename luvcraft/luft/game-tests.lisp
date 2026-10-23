@@ -33,16 +33,20 @@
              (luvcraft:block-inventory-entry-for inventory block)))))
 
 (define-test game-host-m-x-and-metabar-have-their-executable-vocabulary
-  (let* ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
+  (let* ((viewer (make-instance 'host:luvcraft-viewer
+                                :hotbar (list (game:block-placement luvcraft::*stone-block*))
+                                :source (luft.world:make-mountain-sanctuary-scene)))
          (labels (mapcar #'mcluv:command-menu-entry-label
                          (mcluv:command-menu-entries-for-tables
                           (mcluv:command-menu-tables-for viewer)))))
     (dolist (label '("Execute Command" "Toggle Metabar" "Inventory" "Creative Mode"))
       (true (member label labels :test #'string=)))
-    (true (member :navigation (mcluv:metabar-groups-for viewer)))
-    (true (member :movement-speed (mcluv:metabar-controls-for viewer :navigation)))
-    (is eq :scalar (mcluv:metabar-control-kind :movement-speed viewer))
-    (is eq :scalar (mcluv:metabar-control-kind :time-of-day viewer))
+    (true (member :player (mcluv:metabar-groups-for viewer)))
+    (let ((walk (luv.knobs:find-knob 'render::movement-speed))
+          (clock (luv.knobs:find-knob 'render::time-of-day)))
+      (true (member walk (mcluv:metabar-controls-for viewer :player)))
+      (is eq :scalar (mcluv:metabar-control-kind walk viewer))
+      (is eq :scalar (mcluv:metabar-control-kind clock viewer)))
     ;; The vocabulary alone is insufficient: McCLIM needs inherited menus
     ;; enabled for inherited keystrokes, even though the commands are present.
     (setf (render:viewer-pointer-captured-p viewer) nil

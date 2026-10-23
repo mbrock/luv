@@ -79,8 +79,10 @@
              (viewer-animals-initialized-p viewer) t))
       ((and player (render::viewer-player-ground-resident-p viewer))
        (let ((p (terrain:body-position (terrain:character-body player))))
-         (loop for (dx dy) in '((3 2) (-3 2) (5 -2) (-5 -3) (1 -5) (-2 5))
-               for seed from 1
+         (loop for seed from 1 to (* 8 (viewer-animal-count viewer))
+               for dx = (- (mod (* seed 7) 17) 8)
+               for dy = (- (mod (* seed 11) 19) 9)
+               while (< (length (viewer-animals viewer)) (viewer-animal-count viewer))
                do (multiple-value-bind (face x y z point)
                       (terrain:raycast-face
                        scene (vec3:make-vec3 (+ (vec3:vec3-x p) dx) (+ (vec3:vec3-y p) dy) 254.0)
@@ -105,8 +107,26 @@
                                                       (coerce (vec3:vec3-z point) 'double-float)
                                                       (coerce (- (vec3:vec3-y point) 1024) 'double-float)))
                             (viewer-animals viewer)))))
-         (when (viewer-animals viewer)
+         (when (or (viewer-animals viewer) (zerop (viewer-animal-count viewer)))
            (setf (viewer-animals-initialized-p viewer) t)))))))
+
+(defclass turtle-population-knob (luv.knobs:scalar-knob) ())
+
+(defmethod luv.knobs:realize-knob progn
+    ((knob turtle-population-knob) (session luvcraft-viewer))
+  ;; Re-seed the requested population on the next resident ground frame.
+  (setf (viewer-animals session) nil
+        (viewer-animals-initialized-p session) nil
+        (slot-value session 'inhabitants)
+        (remove :luft-critters (luvcraft-viewer-inhabitants session) :key #'first))
+  (clrhash (viewer-animal-previous-figures session))
+  (initialize-viewer-animals session))
+
+(luv.knobs:define-knob turtle-count
+    (:group :critters :label "turtles" :class 'turtle-population-knob
+     :quantity (:quantity :body-count :unit :one)
+     :type integer :minimum 0 :maximum 32 :step 1)
+  (viewer-animal-count session))
 
 (defmethod render:advance-viewer-game ((viewer luvcraft-viewer) seconds)
   (initialize-viewer-animals viewer)

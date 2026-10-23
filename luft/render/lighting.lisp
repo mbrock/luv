@@ -35,9 +35,9 @@
    (shadow-depth-radius :initarg :shadow-depth-radius
                         :reader light-shadow-depth-radius)
    (shadow-base-bias :initarg :shadow-base-bias
-                     :reader light-shadow-base-bias)
+                     :accessor light-shadow-base-bias)
    (shadow-filter-radius :initarg :shadow-filter-radius
-                         :reader light-shadow-filter-radius))
+                         :accessor light-shadow-filter-radius))
   (:documentation
    "One inspectable environment light, packed into raw per-frame GPU lanes.
 
@@ -339,6 +339,73 @@ The sun lanes carry the key light: the sun by day and the moon by night."
 
 (defparameter *haze-height* 0.018
   "Exponential falloff of the haze with world height, per cell.")
+
+;;; Knobs belong to the values packed below, not to a UI vocabulary.
+(math:define-unit 'sky-hour :reference :second :magnitude 3600
+                          :quantity-kind :duration)
+(defmethod knobs:unit-abbreviation ((unit (eql 'sky-hour))) "h")
+(defmethod knobs:unit-abbreviation ((unit (eql quantities:cell))) "cell")
+
+(knobs:define-knob time-of-day
+    (:group :sky :quantity (:quantity :duration :unit sky-hour)
+     :minimum 0.0 :maximum 24.0 :step 0.25)
+  *sky-hour*)
+(knobs:define-knob star-brightness
+    (:group :sky :quantity (:quantity quantities:scene-radiance :unit :one)
+     :minimum 0.0 :maximum 6.0 :step 0.1)
+  *star-brightness*)
+(knobs:define-knob galaxy-strength
+    (:group :sky :quantity (:quantity :proportion :unit :one)
+     :minimum 0.0 :maximum 1.5 :step 0.05)
+  *galaxy-strength*)
+(knobs:define-knob moon-radiance
+    (:group :sky :quantity (:quantity quantities:scene-radiance :unit :one)
+     :minimum 0.0 :maximum 8.0 :step 0.1)
+  *moon-radiance*)
+(knobs:define-knob bloom-gain
+    (:group :grading :quantity (:quantity :proportion :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.02)
+  *bloom-gain*)
+(knobs:define-knob bloom-threshold
+    (:group :grading :quantity (:quantity quantities:scene-luminance :unit :one)
+     :minimum 0.2 :maximum 4.0 :step 0.1)
+  *bloom-threshold*)
+(knobs:define-knob shaft-gain
+    (:group :grading :label "sun shafts"
+     :quantity (:quantity :proportion :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.02)
+  *shaft-gain*)
+(knobs:define-knob shaft-decay
+    (:group :grading :label "shaft reach"
+     :quantity (:quantity :proportion :unit :one)
+     :minimum 0.8 :maximum 0.995 :step 0.005)
+  *shaft-decay*)
+(knobs:define-knob vignette
+    (:group :grading :quantity (:quantity :proportion :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.02)
+  *vignette*)
+(knobs:define-knob paper-grain
+    (:group :grading :quantity (:quantity :proportion :unit :one)
+     :minimum 0.0 :maximum 0.15 :step 0.005)
+  *paper-grain*)
+(knobs:define-knob haze-density
+    (:group :sky :quantity (:quantity :dimensionless :unit ((quantities:cell -1)))
+     :minimum 0.0 :maximum 0.03 :step 0.001)
+  *haze-density*)
+(knobs:define-knob haze-height
+    (:group :sky :label "haze falloff"
+     :quantity (:quantity :dimensionless :unit ((quantities:cell -1)))
+     :minimum 0.0 :maximum 0.08 :step 0.002)
+  *haze-height*)
+(knobs:define-knob shadow-base-bias
+    (:group :shadows :quantity (:quantity quantities:shadow-bias :unit :one)
+     :minimum 0.0 :maximum 0.005 :step 0.0001)
+  (light-shadow-base-bias *light*))
+(knobs:define-knob shadow-filter-radius
+    (:group :shadows
+     :quantity (:quantity quantities:shadow-filter-radius :unit :one)
+     :unit-label " texels" :minimum 0.0 :maximum 5.0 :step 0.25)
+  (light-shadow-filter-radius *light*))
 
 (defun atmosphere-uniform-data
     (light &optional (elapsed 0.0) (hour *sky-hour*))

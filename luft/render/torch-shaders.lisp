@@ -267,7 +267,7 @@ brightest beside it and dims toward the frame."
          (form (floor (/ (+ code 0.5) 4.0)))
          (part (- code (* 4.0 form)))
          (metal (if (> form 0.5) (vec3 0.045 0.040 0.036) (vec3 0.47 0.17 0.04)))
-         (local-light (* #.*voxel-light-gain* (* voxel-light voxel-light)))
+         (local-light (* voxel-light-gain (* voxel-light voxel-light)))
          (lit
            (* metal
               (+ (* ambient 0.72)

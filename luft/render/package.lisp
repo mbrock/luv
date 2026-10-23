@@ -51,6 +51,7 @@
   (:import-from #:luv.arithmetic.records #:quantity-class #:record-slot-declaration)
   (:local-nicknames (#:domains #:luv.domains)
                     (#:shaders #:luft.render.shaders)
+                    (#:knobs #:luv.knobs)
                     (#:production #:luv.production)
                     (#:quantities #:luft.quantities)
                     (#:math #:luv.arithmetic))

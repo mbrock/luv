@@ -108,8 +108,9 @@ final pass."
          (view (capture-frame-view camera width height jitter))
          (previous (or (renderer-previous-view renderer) view))
          (exposure
-           (or fixed-exposure
-               (advance-exposure (renderer-exposure-control renderer)))))
+           (* *exposure-gain*
+              (or fixed-exposure
+                  (advance-exposure (renderer-exposure-control renderer))))))
     (unless (frame-views-continuous-p (renderer-previous-view renderer) view)
       (setf (renderer-history-valid-p renderer) nil))
     (when (typep (renderer-player renderer) 'figure-drawing)

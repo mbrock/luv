@@ -52,6 +52,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
    (inhabitants :initarg :inhabitants :initform nil
                 :reader luvcraft-viewer-inhabitants)
    (animals :initform nil :accessor viewer-animals)
+   (animal-count :initform 6 :accessor viewer-animal-count)
    (animal-previous-figures :initform (make-hash-table :test #'eq)
                             :reader viewer-animal-previous-figures)
    (animals-initialized-p :initform nil :accessor viewer-animals-initialized-p)

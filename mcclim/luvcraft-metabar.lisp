@@ -3,89 +3,28 @@
 (in-package #:mcluv)
 
 ;;; ---------------------------------------------------------------------
-;;; Luvcraft's existing knob and action vocabulary.
+;;; Only host ownership is game-specific. Controls use KNOB-METABAR.
 
-(defmethod metabar-groups-for ((session luvcraft:luvcraft-session))
+(defmethod luv.knobs:knobs-for-host ((session luvcraft:luvcraft-session))
   (declare (ignore session))
-  (luvcraft:knob-groups))
+  (remove-if-not (lambda (knob)
+                   (eq (symbol-package (luv.knobs:knob-name knob))
+                       (find-package :luvcraft)))
+                 luv.knobs:*knobs*))
 
-(defmethod metabar-controls-for
-    ((session luvcraft:luvcraft-session) group)
+(defmethod luv.knobs:actions-for-host ((session luvcraft:luvcraft-session))
   (declare (ignore session))
-  (luvcraft:knobs-in-group group))
+  (remove-if-not (lambda (action)
+                   (eq (symbol-package (luv.knobs:action-name action))
+                       (find-package :luvcraft)))
+                 luv.knobs:*actions*))
 
-(defmethod metabar-actions-for ((session luvcraft:luvcraft-session))
-  (declare (ignore session))
-  luvcraft:*actions*)
-
-(defmethod metabar-control-kind
-    ((knob luvcraft:scalar-knob) (session luvcraft:luvcraft-session))
-  (declare (ignore knob session))
-  :scalar)
-
-(defmethod metabar-control-kind
-    ((knob luvcraft:switch-knob) (session luvcraft:luvcraft-session))
-  (declare (ignore knob session))
-  :switch)
-
-(defmethod metabar-control-label
-    ((knob luvcraft:knob) (session luvcraft:luvcraft-session))
-  (declare (ignore session))
-  (luvcraft:knob-label knob))
-
-(defmethod metabar-control-value
-    ((knob luvcraft:knob) (session luvcraft:luvcraft-session))
-  (luvcraft:knob-value knob session))
-
-(defmethod metabar-control-value-label
-    ((knob luvcraft:knob) (session luvcraft:luvcraft-session) value)
-  (declare (ignore value))
-  (luvcraft:format-knob-value knob session))
-
-(defmethod metabar-control-fraction
-    ((knob luvcraft:knob) (session luvcraft:luvcraft-session) value)
-  (declare (ignore value))
-  (luvcraft:knob-fraction knob session))
-
-(defmethod metabar-control-change-kind
-    ((knob luvcraft:knob) (session luvcraft:luvcraft-session))
-  (declare (ignore session))
-  (and (luvcraft:shader-knob-p knob) :rebuild))
-
-(defmethod metabar-control-update-policy
-    ((knob luvcraft:scalar-knob) (session luvcraft:luvcraft-session))
-  (declare (ignore session))
-  ;; A shader source literal should rebuild once at release, not once per
-  ;; pointer-motion frame.  Plain live values remain continuous.
-  (if (luvcraft:shader-knob-p knob) :commit-on-release :continuous))
-
-(defmethod perform-metabar-control-step
-    ((knob luvcraft:knob) (session luvcraft:luvcraft-session)
-     direction multiplier)
-  (luvcraft:step-knob knob session direction multiplier))
-
-(defmethod perform-metabar-control-set-fraction
-    ((knob luvcraft:scalar-knob) (session luvcraft:luvcraft-session)
-     fraction)
-  (let* ((minimum (luvcraft:knob-minimum knob))
-         (maximum (luvcraft:knob-maximum knob))
-         (step (luvcraft:knob-step knob))
-         (raw (+ minimum (* fraction (- maximum minimum))))
-         (quantized (* step (round raw step))))
-    (luvcraft:set-knob-value knob quantized session)))
-
-(defmethod perform-metabar-control-toggle
-    ((knob luvcraft:switch-knob) (session luvcraft:luvcraft-session))
-  (luvcraft:toggle-knob knob session))
-
-(defmethod metabar-action-label
-    ((action luvcraft:action) (session luvcraft:luvcraft-session))
-  (declare (ignore session))
-  (luvcraft:action-label action))
-
-(defmethod perform-metabar-action
-    ((action luvcraft:action) (session luvcraft:luvcraft-session))
-  (luvcraft:run-action action session))
+(defmethod luv.knobs:knob-rebuild-p
+    ((knob luv.knobs:knob) (session luvcraft:luvcraft-session))
+  (some (lambda (pipeline)
+          (assoc (luv.knobs:knob-name knob)
+                 (luvcraft::live-shader-pipeline-attempted-source-values pipeline)))
+        (luvcraft::luvcraft-session-live-shader-pipelines session)))
 
 ;;; ---------------------------------------------------------------------
 ;;; Luvcraft overlay lifecycle.

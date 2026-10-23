@@ -8,6 +8,15 @@
 ;;; Read this file from the interface, through its two implementations, to
 ;;; the automatic meter's construction and numerical details. See #I4PRMD.
 
+(defparameter *exposure-gain* 1.0
+  "Artistic multiplier after metering, also applied to fixed exposure.")
+
+(knobs:define-knob exposure-gain
+    (:group :grading :label "exposure"
+     :quantity (:quantity quantities:exposure :unit :one)
+     :minimum 0.1 :maximum 4.0 :step 0.1)
+  *exposure-gain*)
+
 (defclass exposure-control () ()
   (:documentation "A renderer-owned brightness policy with an independent lifetime."))
 

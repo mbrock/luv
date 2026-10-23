@@ -241,7 +241,7 @@
               (* sun-color
                  (* visibility (material-specular normal view sun roughness)))
               (* (* tone contact)
-                 (* #.*voxel-light-gain* (* voxel-light voxel-light)))))
+                 (* voxel-light-gain (* voxel-light voxel-light)))))
          (final
            (atmospheric-surface
             radiance world eye divisor

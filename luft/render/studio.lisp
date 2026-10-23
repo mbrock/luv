@@ -174,7 +174,7 @@ predict.")
 (defclass first-person-mode (viewer-mode) ()
   (:documentation "Eye-level walking, mouse look, and short-reach block editing."))
 
-(defconstant +first-person-eye-height+ 1.62)
+(defparameter *first-person-eye-height* 1.62)
 (defconstant +first-person-reach+ 6.0)
 
 (defclass orbit-mode (viewer-mode) ()
@@ -1272,7 +1272,7 @@ A completed pair is spent, so a third quick press starts a new one."
     (let ((position (body-position (character-body (viewer-player viewer)))))
       (setf (camera-position (viewer-camera viewer))
             (make-vec3 (vec3-x position) (vec3-y position)
-                       (+ (vec3-z position) +first-person-eye-height+))))))
+                       (+ (vec3-z position) *first-person-eye-height*))))))
 
 (defun set-viewer-mode (viewer mode)
   "Install MODE, its projection, and its pointer ownership together."
@@ -2690,3 +2690,111 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
     (unwind-protect
          (loop while (viewer-running-p viewer) do (sleep 0.05))
       (stop-viewer viewer))))
+
+;;; The host's tunable places and their frame-boundary realizations.
+(math:define-unit 'atlas-tick :reference quantities:cell
+                            :magnitude (/ luft:+mesh-cell-size+)
+                            :quantity-kind quantities:spatial-coordinate)
+(math:define-unit 'resident-chunk :reference quantities:cell
+                                :magnitude luft:+chunk-size+
+                                :quantity-kind quantities:spatial-coordinate)
+(math:define-unit 'pointer-pixel :dimension nil :quantity-kind :dimensionless)
+(defmethod knobs:unit-abbreviation ((unit (eql 'atlas-tick))) "ticks")
+(defmethod knobs:unit-abbreviation ((unit (eql 'resident-chunk))) "chunks")
+(defmethod knobs:unit-abbreviation ((unit (eql 'pointer-pixel))) "px")
+
+(defclass bevel-knob (knobs:rebuild-knob) ())
+(defclass construction-knob (knobs:switch-knob) ())
+(defclass walking-speed-knob (knobs:scalar-knob) ())
+(defclass walking-gravity-knob (knobs:scalar-knob) ())
+
+(defmethod knobs:coerce-knob-value ((knob bevel-knob) value session)
+  (declare (ignore knob session))
+  (cond ((< value 1.5) 1) ((< value 3) 2) (t 4)))
+
+(defmethod knobs:step-knob
+    ((knob bevel-knob) session direction &optional (multiplier 1))
+  (let* ((widths '(1 2 4))
+         (index (position (knobs:knob-value knob session) widths)))
+    (knobs:set-knob-value
+     knob (nth (mod (+ index (* direction multiplier)) 3) widths) session)))
+
+(defmethod knobs:realize-knob progn ((knob bevel-knob) (session game-host))
+  (when (viewer-renderer session)
+    (refresh-viewer-renderer session :solid (viewer-source session)
+                             :bevel-width (viewer-bevel-width session)))
+  (refresh-viewer-inspector session))
+
+(defun construction-lines-p () (plusp *wireframe*))
+(defun (setf construction-lines-p) (enabled-p)
+  (setf *wireframe* (if enabled-p 1.0 0.0))
+  enabled-p)
+
+(defmethod knobs:realize-knob progn
+    ((knob construction-knob) (session game-host))
+  (when (viewer-renderer session)
+    (setf (renderer-history-valid-p (viewer-renderer session)) nil))
+  (refresh-viewer-inspector session))
+
+(defmethod knobs:realize-knob progn
+    ((knob walking-speed-knob) (session game-host))
+  (when (viewer-player session)
+    (setf (character-speed (viewer-player session)) (viewer-speed session))))
+
+(defun walking-gravity-magnitude () (- luft.terrain::*walking-gravity*))
+(defun (setf walking-gravity-magnitude) (value)
+  (setf luft.terrain::*walking-gravity* (- value))
+  value)
+
+(defmethod knobs:realize-knob progn
+    ((knob walking-gravity-knob) (session game-host))
+  (when (and (viewer-player session)
+             (not (character-flying-p (viewer-player session))))
+    (setf (body-gravity (character-body (viewer-player session)))
+          luft.terrain::*walking-gravity*)))
+
+(knobs:define-knob bevel-width
+    (:group :geometry :class 'bevel-knob :type integer
+     :quantity (:quantity quantities:world-distance :unit atlas-tick)
+     :minimum 1 :maximum 4 :step 1)
+  (viewer-bevel-width session))
+(knobs:define-knob construction-lines
+    (:group :geometry :class 'construction-knob)
+  (construction-lines-p))
+(knobs:define-knob movement-speed
+    (:group :player :class 'walking-speed-knob :label "walk speed"
+     :quantity (:quantity quantities:world-velocity
+                :unit ((quantities:cell 1) (:second -1)))
+     :minimum 1.0 :maximum 12.0 :step 0.5)
+  (viewer-speed session))
+(knobs:define-knob jump-speed
+    (:group :player
+     :quantity (:quantity quantities:world-velocity
+                :unit ((quantities:cell 1) (:second -1)))
+     :minimum 0.0 :maximum 20.0 :step 0.5)
+  (character-jump-speed (viewer-player session)))
+(knobs:define-knob player-gravity
+    (:group :player :class 'walking-gravity-knob
+     :quantity (:quantity quantities:world-acceleration
+                :unit ((quantities:cell 1) (:second -2)))
+     :minimum 0.0 :maximum 60.0 :step 1.0)
+  (walking-gravity-magnitude))
+(knobs:define-knob eye-height
+    (:group :player
+     :quantity (:quantity quantities:world-distance :unit quantities:cell)
+     :minimum 0.4 :maximum 2.0 :step 0.02)
+  *first-person-eye-height*)
+(knobs:define-knob mouse-sensitivity
+    (:group :camera
+     :quantity (:quantity :angle :unit ((:radian 1) (pointer-pixel -1)))
+     :minimum 0.0005 :maximum 0.01 :step 0.0005)
+  (viewer-sensitivity session))
+(knobs:define-knob field-of-view
+    (:group :camera :quantity (:quantity :angle :unit :radian)
+     :minimum 0.45 :maximum 1.75 :step 0.05)
+  (camera-field-of-view (viewer-camera session)))
+(knobs:define-knob residency-radius
+    (:group :streaming :type integer
+     :quantity (:quantity quantities:world-distance :unit resident-chunk)
+     :minimum 0 :maximum 4 :step 1)
+  (streaming-scene-residency-radius (viewer-source session)))
