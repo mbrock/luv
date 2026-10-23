@@ -65,6 +65,28 @@
               (true (< (luv.arithmetic.lisp.vec3:vec3-x p) 1034.71)))))
       (true (luft.terrain:body-grounded-p body)))))
 
+(define-test riding-window-focus-loss-releases-held-reins
+  (let* ((viewer (riding-test-viewer))
+         (turtle (make-instance 'luvcraft::turtle :seed 3
+                                :position (luv.arithmetic.lisp.vec3:make-vec3 8.5d0 2d0 8.5d0))))
+    (setf (host::viewer-animals viewer) (list turtle))
+    (host::update-viewer-rides viewer)
+    (ride-key viewer :tab)
+    (let ((ride (render:viewer-modal-focus viewer)))
+      (true (typep ride 'luvcraft::critter-ride))
+      (ride-key viewer :w)
+      (ride-key viewer :d)
+      (true (not (luvcraft::movement-intent-still-p (host::viewer-rider-intent viewer))))
+      (luv:handle-canvas-event
+       viewer nil (make-instance 'luv:canvas-window-focus-lost-event :timestamp 0))
+      ;; Remain mounted, but do not rely on releases from the other window.
+      (is eq ride (render:viewer-modal-focus viewer))
+      (true (luvcraft::movement-intent-still-p (host::viewer-rider-intent viewer)))
+      (ride-key viewer :w)
+      (true (luvcraft:movement-urging-p (host::viewer-rider-intent viewer) :forward))
+      (ride-key viewer :escape)
+      (true (null (render:viewer-modal-focus viewer))))))
+
 (define-test riding-uses-real-tab-wasd-and-luft-slope-contact
   (let* ((viewer (riding-test-viewer :slope t))
          (turtle (make-instance 'luvcraft::turtle :seed 3 :yaw (/ pi 2) :heading (/ pi 2)

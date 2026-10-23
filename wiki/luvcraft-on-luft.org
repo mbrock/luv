@@ -1183,6 +1183,11 @@ remain authoritative. The host suspends walking while carried; the existing
 Luft contact adapter moves the animal, and dismount checks Luft's player box
 against the original candidate offsets. The three original =:riding= knobs
 are exposed through =luv/knobs=, not copied into a game-only control panel.
+Losing window focus releases the held reins without dismounting, as in old
+Luvcraft. The player's walking controls and the ride use different intents;
+both must be cleared when a key may be released outside the game window.
+The portable-event regression mounts with Tab, holds W/D, loses focus, and
+checks that the ride stays mounted with neither urge retained.
 
 The original bounded SDF hands, palm poses, walking bob and landing animation
 now use a native HDR =:viewmodel= stage after terrain reconstruction, without

@@ -9,6 +9,13 @@
 (defmethod luvcraft:luvcraft-session-movement-intent ((viewer luvcraft-viewer))
   (viewer-rider-intent viewer))
 
+(defmethod luv:handle-canvas-event :after
+    ((viewer luvcraft-viewer) canvas (event luv:canvas-window-focus-lost-event))
+  (declare (ignore canvas event))
+  ;; Riding owns the original game's intent, not the walking controller the
+  ;; host clears. A key released outside the window will never reach it.
+  (luvcraft:clear-movement-intent (viewer-rider-intent viewer)))
+
 (defmethod luvcraft::carry-luvcraft-player ((viewer luvcraft-viewer) animal)
   (let ((player (render:viewer-player viewer)))
     (when player
