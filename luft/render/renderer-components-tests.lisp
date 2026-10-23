@@ -1,5 +1,40 @@
 (in-package #:luft.render.tests)
 
+(define-test figure-light-follows-the-published-terrain-field
+  (let* ((device (make-instance 'gpu-test-device))
+         (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
+         (domain (luft:make-world-domain :horizontal-bits 7))
+         (cells (make-hash-table :test #'eql))
+         (opacity (make-array 1 :element-type '(unsigned-byte 8) :initial-element 15))
+         (site (luft:make-site domain 63 10 4 luft:+cell-extent+ 1))
+         (figure (render:box-figure (make-vec3 63.5 10.5 4.5) (make-vec3 64.5 10.5 4.5)
+                                    0.0 1.0 '(0.2 0.2 0.2) '(1.0 1.0 1.0))))
+    (unwind-protect
+         (dolist (state '(:sun :cave :lantern :removed))
+           (let* ((field (luft:solve-voxel-light
+                          domain cells opacity
+                          (if (eq state :lantern)
+                              (vector (luft:make-voxel-light-source site (luft:pack-voxel-light 15 8 2)))
+                              #())))
+                  (sky (luft:solve-voxel-light
+                        domain cells opacity
+                        (if (eq state :sun) (vector (luft:make-voxel-light-source site 15)) #())))
+                  (mesh (luft:make-surface-mesh domain (make-array 0 :element-type '(unsigned-byte 32)))))
+             (setf (luft:voxel-light-field-skylight field) sky
+                   (luft:surface-mesh-voxel-light mesh) field)
+             (render:renderer-set-mesh renderer (luft:chunk-key-at 63 10) mesh)
+             (let ((data (render:pack-figure-instances
+                          (list figure) (lambda (x y z) (render:renderer-light-at renderer x y z)))))
+               (true (equalp (subseq data 20)
+                             (coerce (case state
+                                       (:sun '(0.0 0.0 0.0 1.0))
+                                       (:lantern (list 1.0 (/ 8.0 15) (/ 2.0 15) 0.0))
+                                       (t '(0.0 0.0 0.0 0.0))) 'vector))))
+             ;; The neighbour reads its own publication, not this owner's
+             ;; halo or the previous center's light across the chunk seam.
+             (true (equal '(0.0 0.0 0.0 1.0) (render:renderer-light-at renderer 64.5 10.5 4.5)))))
+      (render:destroy-renderer renderer))))
+
 (define-test renderer-composition-rolls-back-every-allocation-prefix
   (dolist (temporal '(nil t))
     (let* ((render::*temporal-upscaling-p* temporal)

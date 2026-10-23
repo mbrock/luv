@@ -8,12 +8,12 @@
   ((box-program :accessor figure-box-program)
    (box-vertices :accessor figure-box-vertices)))
 
-(defconstant +figure-scalar-count+ 20)
+(defconstant +figure-scalar-count+ 24)
 
 (defmethod math:value-declaration-for ((name (eql 'pack-figure-instances)))
   (load-time-value
    (luft.terrain::make-terrain-float-product-declaration
-    'pack-figure-instances 20
+    'pack-figure-instances 24
     '(((0 1 2) :quantity quantities:world-position :unit quantities:cell)
       ((3) :quantity quantities:gait-phase :unit :radian)
       ((4 5 6) :quantity quantities:world-position :unit quantities:cell)
@@ -21,18 +21,25 @@
       ((8 9) :quantity quantities:horizontal-direction :unit :one)
       ((10 11) :quantity quantities:horizontal-direction :unit :one)
       ((12 13 14) :quantity quantities:world-distance :unit quantities:cell)
-      ((16 17 18) :quantity quantities::surface-tone :unit :one)))))
+      ((16 17 18) :quantity quantities::surface-tone :unit :one)
+      ((20 21 22) :quantity luft::block-light-proportion :unit :one)
+      ((23) :quantity luft::sky-light-proportion :unit :one)))))
 
 ;;; Kind (lane 15) and padding (19) are categorical, not dimensions.
-(defun pack-figure-instances (figures)
-  "Pack five vec4 rows per figure: current and previous center/gait,
+(defun pack-figure-instances (figures &optional light-reader)
+  "Pack six vec4 rows per figure: current and previous center/gait,
 headings, half extents/kind (0 wizard, 1 box), and linear albedo.
+The last row is normalized RGB4 and sky, sampled at the current center by
+LIGHT-READER. Without a field reader, the stage retains its open-sky default.
 There is no population limit. FIGURE-LANES constructs the wizard kind."
   (make-array (* +figure-scalar-count+ (length figures))
               :element-type 'single-float
               :initial-contents
               (loop for figure in figures append
-                (loop for row in figure append
+                (loop for row in (append figure
+                                         (list (if light-reader
+                                                   (apply light-reader (subseq (first figure) 0 3))
+                                                   '(0.0 0.0 0.0 1.0)))) append
                   (mapcar (lambda (x) (coerce x 'single-float)) row)))))
 
 (defun box-figure (center previous-center heading-x heading-y half-extents color)
@@ -946,13 +953,14 @@ that he is standing on something."
                (current-clip-output :vec4 :location 2)
                (previous-clip-output :vec4 :location 3)
                (pose-output :vec4 :location 4 :interpolation :flat)
-               (heading-output :vec4 :location 5 :interpolation :flat))
+               (heading-output :vec4 :location 5 :interpolation :flat)
+               (body-light-output :vec4 :location 6 :interpolation :flat))
      :resources ((camera-state :uniform-block :binding 0
                   :members #.*scene-uniform-members*)
                  (shadow-map :depth-texture-2d :binding 1)
                  (shadow-sampler :sampler :binding 2)
                  (figure-instances :storage-buffer :binding 3 :element :vec4)))
-  (let* ((base (* instance-index (uint 5)))
+  (let* ((base (* instance-index (uint 6)))
          (pose (buffer-element figure-instances base))
          (old-pose (buffer-element figure-instances (+ base (uint 1))))
          (heading (buffer-element figure-instances (+ base (uint 2))))
@@ -1036,6 +1044,7 @@ that he is standing on something."
                 (vec4 (representation center) (representation radius)))
     (set-output pose-output pose)
     (set-output heading-output heading)
+    (set-output body-light-output (buffer-element figure-instances (+ base (uint 5))))
     (set-output current-clip-output current-clip)
     (set-output previous-clip-output previous-clip)))
 
@@ -1048,7 +1057,8 @@ that he is standing on something."
               (current-clip :vec4 :location 2)
               (previous-clip :vec4 :location 3)
               (pose :vec4 :location 4 :interpolation :flat)
-              (figure-heading :vec4 :location 5 :interpolation :flat))
+              (figure-heading :vec4 :location 5 :interpolation :flat)
+              (body-light :vec4 :location 6 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 0
@@ -1167,8 +1177,11 @@ that he is standing on something."
            (* sun-color
               (* 0.085 direct-shape (- 1.0 direct-visibility))))
          (lit (* albedo
-                 (+ (* sun-color (* direct-shape direct-visibility))
-                    indirect warm-return)))
+                 (+ (* (+ (* sun-color (* direct-shape direct-visibility
+                                          (smoothstep 0.90 1.0 (swizzle body-light :w))))
+                          indirect warm-return)
+                       (swizzle body-light :w) (swizzle body-light :w))
+                    (* voxel-light-gain (swizzle body-light :xyz) (swizzle body-light :xyz)))))
          (paper (* lit 1.08))
          (rim (expt (- 1.0 (max 0.0 (dot normal (* ray -1.0)))) 3.0))
          (radiance
@@ -1235,11 +1248,12 @@ that he is standing on something."
                (normal-output :vec3 :location 0)
                (tone-output :vec3 :location 1 :interpolation :flat)
                (current-output :vec4 :location 2)
-               (previous-output :vec4 :location 3))
+               (previous-output :vec4 :location 3)
+               (body-light-output :vec4 :location 4 :interpolation :flat))
      :resources ((camera-state :uniform-block :binding 0 :members #.*scene-uniform-members*)
                  (figure-instances :storage-buffer :binding 1 :element :vec4)
                  (box-vertices :storage-buffer :binding 2 :element :vec4)))
-  (let* ((base (* instance-index (uint 5)))
+  (let* ((base (* instance-index (uint 6)))
          (pose (buffer-element figure-instances base))
          (old-pose (buffer-element figure-instances (+ base (uint 1))))
          (heading (buffer-element figure-instances (+ base (uint 2))))
@@ -1269,6 +1283,7 @@ that he is standing on something."
     (set-output normal-output (player-world-direction local-normal (swizzle heading :xy)))
     (set-output tone-output (swizzle tone :xyz))
     (set-output current-output current)
+    (set-output body-light-output (buffer-element figure-instances (+ base (uint 5))))
     (set-output previous-output previous)))
 
 (define-live-shader figure-box-fragment-specification
@@ -1276,17 +1291,21 @@ that he is standing on something."
      :inputs ((normal :vec3 :location 0)
               (tone :vec3 :location 1 :interpolation :flat)
               (current :vec4 :location 2)
-              (previous :vec4 :location 3))
+              (previous :vec4 :location 3)
+              (body-light :vec4 :location 4 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0) (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 0 :members #.*scene-uniform-members*)))
   (let* ((n (normalize normal))
          (sun (representation (swizzle sun-vector :xyz)))
-         (direct (smoothstep 0.0 0.72 (max 0.0 (dot n sun))))
+         (direct (* (smoothstep 0.90 1.0 (swizzle body-light :w))
+                    (smoothstep 0.0 0.72 (max 0.0 (dot n sun)))))
          (upness (swizzle n :z))
          (light (+ (* (representation (swizzle sun-color-vector :xyz)) direct)
                    (* (representation (swizzle sky-color-vector :xyz))
                       (+ 0.15 (* 0.54 (+ 0.5 (* 0.5 upness)))))
                    (* (representation (swizzle ground-color-vector :xyz))
                       (+ 0.05 (* 0.34 (- 0.5 (* 0.5 upness))))))))
-    (set-output color-output (vec4 (* tone light) 1.0))
+    (set-output color-output
+                (vec4 (* tone (+ (* light (* (swizzle body-light :w) (swizzle body-light :w)))
+                                 (* voxel-light-gain (swizzle body-light :xyz) (swizzle body-light :xyz)))) 1.0))
     (set-output motion-output (mesh-temporal-motion previous current))))

@@ -302,7 +302,8 @@
                (edge-shaping-output :vec4 :location 7)
                (tile-offset-output :float :location 8
                                    :quantity :atlas-tile-offset :unit :one
-                                   :interpolation :flat))
+                                   :interpolation :flat)
+               (block-rgb-output :vec3 :location 12 :quantity :block-light-level :unit :one))
      :resources
      ((frame-state :uniform-block :set 0 :binding 2
                    :members #.*frame-uniform-members*)))
@@ -374,6 +375,11 @@
     (set-output normal-output normal-input)
     (set-output fog-output fog-amount)
     (set-output light-output light-input)
+    ;; Encode the old scalar/warm response without changing its fragment curve.
+    (set-output block-rgb-output
+                (interpret (* (swizzle light-input :y)
+                              (quantity (vec3 1.0 #.(sqrt 0.82) #.(sqrt 0.58)) :unit :one))
+                           :quantity :block-light-level :unit :one))
     (set-output shadow-uv-output (swizzle shadow-projection :xy))
     (set-output shadow-depth-output shadow-depth)
     (set-output world-position-output world-position)
@@ -1241,7 +1247,8 @@ negative inside.  RADIUS is the corner radius in world cells."
       (edge-shaping-input :vec4 :location 7)
       (tile-offset-input :float :location 8
                          :quantity :atlas-tile-offset :unit :one
-                         :interpolation :flat))
+                         :interpolation :flat)
+      (block-rgb-input :vec3 :location 12 :quantity :block-light-level :unit :one))
      :outputs ((color-output :vec4 :location 0))
      :resources ((block-atlas :texture-2d :set 0 :binding 0
                               :sample-transfer :srgb-to-linear
@@ -1552,10 +1559,8 @@ negative inside.  RADIUS is the corner radius in world cells."
          ;; curve and balance below is an art parameter editable live
          ;; without remeshing the world.
          (sky-input (swizzle light-input :x))
-         (block-input (swizzle light-input :y))
          (emission-input (swizzle light-input :z))
          (sky-level (* sky-input sky-input))
-         (block-level (* block-input block-input))
          (day-factor (swizzle sun-vector :w))
          ;; Lateral skylight gives ambient visibility but not a hard sun
          ;; beam; the shadow map gates only the direct solar term.
@@ -1628,11 +1633,12 @@ negative inside.  RADIUS is the corner radius in world cells."
                (* direct-light-gain n-dot-l sun-visibility day-factor direct-shadow
                   cloud-shadow (mix 0.55 1.0 ao)))
             :quantity :linear-rgb :unit :one))
+         ;; Warm tint is encoded by the scalar host's vertex stage; RGB hosts
+         ;; supply their actual field colour instead of tinting it twice.
          (torch-color
-           (quantity (vec3 1.0 0.82 0.58)
-                     :quantity :linear-rgb :unit :one))
+           (quantity (vec3 1.0 1.0 1.0) :quantity :linear-rgb :unit :one))
          (local-light
-           (interpret (* torch-color block-level)
+           (interpret (* torch-color block-rgb-input block-rgb-input)
                       :quantity :linear-rgb :unit :one))
          (albedo
            (assume-quantity

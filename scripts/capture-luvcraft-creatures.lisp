@@ -16,13 +16,21 @@
                     (#:ter #:luft.terrain) (#:old #:luvcraft)))
 (in-package #:creature-proof)
 
+(defvar *scenario* :sun)
+
 (defun world ()
   (let* ((world (old:make-empty-little-block-world :seed 7 :chunk-height 16 :relief :meadow))
          (edits (old:little-world-source-edits (old:block-world-source world))))
     (loop for x below 16 do
       (loop for z below 16 do
         (loop for y below 16 do
-          (old::record-block-edit edits (and (= y 3) old::*grass-block*) x y z))))
+          (old::record-block-edit
+           edits (cond ((= y 3) old::*grass-block*)
+                       ((and (not (eq *scenario* :sun))
+                             (or (= y 7) (and (<= 4 y 7) (or (= x 0) (= x 15) (= z 0) (= z 15)))))
+                        old::*stone-block*)
+                       ((and (eq *scenario* :lantern) (= x 6) (= y 4) (= z 6))
+                        old::*lantern-block*)) x y z))))
     world))
 
 (defun animal ()
@@ -50,9 +58,12 @@
                                     :yaw (/ pi 2) :pitch -0.35d0))
          (viewer (r:start-game-host
                   :solid scene :camera camera :player-p nil :width 1000 :height 700
-                  :frames-per-second 1 :fixed-exposure 0.7
+                  :frames-per-second 1
                   :sky-factory 'h::make-luvcraft-sky-drawing
                   :terrain-factory 'h::make-luvcraft-terrain-drawing
+                  :torch-factory 'h::make-luvcraft-torch-drawing
+                  :finishing-factory 'h::make-luvcraft-image-finishing
+                  :exposure-factory 'h::make-luvcraft-exposure
                   :figure-factory 'h::make-creature-figure-drawing
                   :frame-class 'h:luvcraft-viewer
                   :frame-initargs (list :luvcraft-world world
@@ -68,40 +79,47 @@
                  (old::sky-clock-paused-p (h::viewer-sky-clock viewer)) t)
            (settle viewer)
            (assert (= 10 (length (r:viewer-figures viewer))))
-           (r:capture-viewer-frame (format nil ".amp/in/artifacts/creatures-new~A.png" suffix) viewer)
-           ;; A control removes only the caster from the sun pass, not its surface.
-           (let ((drawing (r::renderer-player (r:viewer-renderer viewer))))
-             (defmethod r::encode-scene-drawing-shadow :after
-                 ((drawing h::creature-figure-drawing) pass (binding h::creature-figure-binding))
-               (declare (ignore drawing pass binding)))
-             (r:capture-viewer-frame
-              (format nil ".amp/in/artifacts/creatures-new~A-no-shadow.png" suffix) viewer)
-             (defmethod r::encode-scene-drawing-shadow :after
-                 ((drawing h::creature-figure-drawing) pass (binding h::creature-figure-binding))
-               (h::encode-creatures drawing pass binding t))
-             (assert (typep drawing 'h::creature-figure-drawing)))
-           (format t "~&NEW native ~S, creature surface plus sun-map caster/control captured.~%"
+           (assert (= 0.45 (r:exposure-value (r::renderer-exposure-control (r:viewer-renderer viewer)))))
+           (r:capture-viewer-frame
+            (format nil ".amp/in/artifacts/creatures-new-~(~A~)~A.png" *scenario* suffix) viewer)
+           (format t "~&BODY LIGHT ~A ~S~%" *scenario*
+                   (r:renderer-light-at (r:viewer-renderer viewer) 1032 1030 4))
+           (format t "~&NEW native ~S, creature surface plus local light captured.~%"
                    (r::renderer-render-extent (r:viewer-renderer viewer))))
       (r:stop-viewer viewer))))
 
 (defun old-proof ()
-  (let* ((clock (make-instance 'old::sky-clock :day-fraction (/ 10d0 24) :paused-p t))
+  (let* ((world (world))
+         ;; Empty little worlds have no resident chunks. Raise exactly the
+         ;; authored chunk before starting, so MINIMUM cannot silently be zero.
+         (chunk (g::load-luvcraft-chunk (old:block-world-source world) world 0 0))
+         (lit (old::relight-block-world world))
+         (clock (make-instance 'old::sky-clock :day-fraction (/ 10d0 24) :paused-p t))
          (camera (make-instance 'old::fly-camera :position (v:make-vec3 8d0 5.5d0 2d0)
                                 :yaw 0d0 :pitch -0.35d0 :field-of-view (* 60d0 (/ pi 180))))
          (population (make-instance 'old::critter-population))
-         (session (old:start-luvcraft :world (world) :camera camera :width 1000 :height 700
+         (session (old:start-luvcraft :world world :camera camera :width 1000 :height 700
                                       :visible-p nil :frames-per-second nil :residency-radius 0
                                       :critters population :sky-clock clock)))
+    (declare (ignore chunk lit))
     (unwind-protect
          (progn
-           (old::wait-for-luvcraft-products session)
+           (old::wait-for-luvcraft-products session :minimum 1 :timeout 60)
            (setf (fill-pointer (old::critter-population-critters population)) 0)
            (old::add-critter population (animal))
-           (old:capture-luvcraft-screenshot session ".amp/in/artifacts/creatures-old.png")
+           (old:capture-luvcraft-screenshot
+            session (format nil ".amp/in/artifacts/creatures-old-~(~A~).png" *scenario*))
+           (format t "~&OLD BODY LIGHT ~A ~S~%" *scenario*
+                   (multiple-value-list (old::critter-light-levels (animal) (old:luvcraft-session-world session))))
+           (multiple-value-bind (sky block state) (old:world-light-at world 8 4 6)
+             (format t "~&OLD RAW FIELD ~A sky=~D block=~D state=~S~%" *scenario* sky block state)
+             (assert (member state '(:stable :provisional)))
+             (assert (= sky (if (eq *scenario* :sun) 15 0)))
+             (assert (if (eq *scenario* :lantern) (plusp block) (zerop block))))
            (format t "~&OLD native 1000x700, original creature captured.~%"))
       (old:stop-luvcraft session))))
 
 (ensure-directories-exist #P".amp/in/artifacts/creatures-old.png")
-(old-proof)
-(new-proof)
-(let ((r::*temporal-upscaling-p* t)) (new-proof "-temporal"))
+(dolist (*scenario* '(:sun :cave :lantern))
+  (old-proof)
+  (new-proof))

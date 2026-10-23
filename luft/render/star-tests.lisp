@@ -210,12 +210,12 @@
          (box (render:box-figure (make-vec3 40.0 50.0 6.0) (make-vec3 39.0 48.0 5.0)
                                 0.0 -1.0 '(0.2d0 0.3d0 0.4d0) '(0.1 0.2 0.3)))
          (data (render:pack-figure-instances (list wizard box))))
-    (true (= 40 (length data)))
+    (true (= 48 (length data)))
     (true (typep data '(simple-array single-float (*))))
     (true (equalp #(10.0 20.0 4.48 1.5 9.0 18.0 3.48 0.75 1.0 0.0 0.0 1.0)
                   (subseq data 0 12)))
-    (true (equalp #(40.0 50.0 6.0 0.0 39.0 48.0 5.0 0.0 0.0 -1.0 0.0 -1.0 0.2 0.3 0.4 1.0 0.1 0.2 0.3 0.0)
-                  (subseq data 20)))
+    (true (equalp #(40.0 50.0 6.0 0.0 39.0 48.0 5.0 0.0 0.0 -1.0 0.0 -1.0 0.2 0.3 0.4 1.0 0.1 0.2 0.3 0.0 0.0 0.0 0.0 1.0)
+                  (subseq data 24)))
     (true (zerop (length (render:pack-figure-instances nil))))))
 
 (define-test camera-input-is-translated-only-at-the-viewer-boundary

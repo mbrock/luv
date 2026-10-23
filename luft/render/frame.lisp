@@ -20,6 +20,22 @@
 (defvar *renderer-viewmodel-encoder* nil
   "Optional host replay callback into native HDR, with isolated viewmodel depth.")
 
+(defun renderer-light-at (renderer x y z)
+  "Return normalized (R G B SKY) from terrain's installed light publication.
+Missing residency retains the old creature open-sky fallback."
+  (let* ((x (floor x)) (y (floor y)) (z (floor z))
+         (slots (renderer-mesh-slots renderer))
+         (slot (gethash (luft:chunk-key-at x y) slots))
+         (field (and slot (luft:surface-mesh-voxel-light (mesh-slot-mesh slot)))))
+    (if field
+        (let ((rgb (luft:voxel-light-at field x y z))
+              (sky (luft:voxel-light-field-skylight field)))
+          (list (/ (luft:voxel-light-red rgb) 15.0)
+                (/ (luft:voxel-light-green rgb) 15.0)
+                (/ (luft:voxel-light-blue rgb) 15.0)
+                (if sky (/ (luft:voxel-light-at sky x y z) 15.0) 1.0)))
+        '(0.0 0.0 0.0 1.0))))
+
 (defun camera-clip-function (data)
   "Project a world point to the camera's homogeneous clip, as MESH-VIEW-CLIP."
   (let ((divisor (aref data 22)))
@@ -119,7 +135,8 @@ final pass."
       (upload-figure-instances
        (renderer-player renderer)
        (renderer-frame-drawing-binding renderer frame (renderer-player renderer))
-       (pack-figure-instances figures)))
+       (pack-figure-instances figures
+                              (lambda (x y z) (renderer-light-at renderer x y z)))))
     (encode-renderer-frame
      renderer frame encoder surface-view extent
      (camera-uniform-data

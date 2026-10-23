@@ -1110,8 +1110,8 @@ rows into the old Y-up shader ABI. The original depth shader casts those
 same vertices into Luft's existing sun map, beside terrain and sphere figures;
 the original surface samples that map too. There is no creature-only shadow
 map or painted contact smear. Global exposure, contrast and grading are
-unchanged. The current light lanes still assume open sky/no blocklight for
-creatures; sampling their streamed voxel light is separate work.
+unchanged. The original open-sky/no-blocklight limitation is closed by the
+local-light follow-up below.
 
 =scripts/capture-luvcraft-creatures.lisp= compares old and new native software
 Vulkan at 1000 by 700, seed 7, the same turtle pose and camera, 60-degree FOV
@@ -1127,6 +1127,49 @@ distinct tile identities and independent previous poses. =make= and
 =make test= pass, including all 33 available suites; Ghostty and terminal
 are unavailable in the slim closure. The system foot test needs its Nix
 library path cleared, and shader validation needs spirv-val on PATH.
+
+/Local-light follow-up./ Old Luvcraft's =critter-light-levels= is designed to
+sample the cell at half the animal's height, normalize its scalar sky and
+block lanes, and give those readings to the original box emitter. Its stale
+=:resident= guard actually rejects the solver's =:stable=/=:provisional=
+states, so even loaded old creatures fall back to open sky. That old-host
+bug is not copied into the adapter or repaired here. The figure stage now
+does the same cell sampling at each current figure center, using
+=renderer-light-at= against the /installed mesh publication/, not the mutable
+source or an independently solved light model. Its sixth vec4 carries
+normalized RGB4 and sky. Each turtle part keeps its original atlas geometry
+and sky response; the shared block shader accepts RGB block light instead
+of forcing every source through the old warm scalar tint. The scalar host
+encodes that original tint in its vertex stage, preserving its response.
+Balls, ordinary boxes and the wizard figure consume the same row, with
+squared field falloff and the terrain's voxel-light gain. Sphere paint and
+emission stay unchanged. Missing published residency keeps the old open-sky
+fallback; a resident dark cell does not. Updates read the new publication
+every frame even if geometry is reused. There is no new light solver or
+change to #0TU71R's exposure, grade or fog policy. Companions' separate SDF
+overlay and first-person hands are not figure-stage bodies in this pass.
+
+The capture script now repeats open sun, a sealed stone cave, and the same
+cave with a supported lantern, all seed 7 at native 1000 by 700, frozen
+10:00, matched camera/pose, TAA and dynamic resolution off, fatal watchdog
+disabled, with the game's photographic factories and fixed 0.45 exposure.
+The old arm explicitly materializes and relights its authored chunk and
+requires a mesh, then asserts the raw resident sky/block readings separately
+from the old animal's fallback. Preliminary captures without that residency
+check and the photographic factories were discarded.
+
+The inspected final captures retain the atlas turtle in open sun, leave it
+almost invisible in the unlit cave, and reveal its warm shell and legs beside
+the lantern. The new center samples are respectively sky 1, all zero, and
+RGB4 (12,8,3) with sky zero; the old raw fields are sky 15/block 0,
+sky 0/block 0, and sky 0/block 12, despite its creature fallback staying
+sky 1/block 0. No visibility floor disguises a genuinely dark cell.
+The public renderer/figure-packing regression exercises solved publications,
+colored light, removal and current-center sampling: eight assertions pass,
+and replacing the reader with open-sky readings makes the regression fail.
+=make=, =make test=, both application builds and all 33 available suites pass.
+Eleven affected shader specifications lower to SPIR-V and MSL; native Metal
+and hardware-GPU execution remain unverified.
 
 *** DONE Ride the original turtles with the original hands
 :PROPERTIES:

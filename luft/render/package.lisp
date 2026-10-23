@@ -106,6 +106,7 @@
            #:make-exposure-binding #:encode-exposure #:release-exposure
            #:scene-drawing #:make-sky-drawing #:make-figure-drawing
            #:box-figure #:pack-figure-instances #:viewer-figures #:advance-viewer-game
+           #:renderer-light-at
            #:make-scene-drawing-binding #:encode-scene-drawing
            #:release-scene-drawing
            #:torch-drawing #:make-framed-torch-drawing

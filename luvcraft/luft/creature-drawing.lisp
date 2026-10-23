@@ -1,16 +1,17 @@
 (in-package #:luft.render.shaders)
 
 ;;; Retain the original material/UV program verbatim. The host contributes
-;;; only projection, jitter and velocity, not another surface implementation.
+;;; projection, jitter, velocity and field readings, not another surface model.
 (define-live-shader creature-projection-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index))
      :outputs ((host-clip :vec4 :built-in :position)
                (creature-current :vec4 :location 9)
-               (creature-previous :vec4 :location 10))
+               (creature-previous :vec4 :location 10)
+               (creature-rgb :vec3 :location 12 :quantity :block-light-level :unit :one))
      :resources ((camera-state :uniform-block :binding 7 :members #.*scene-uniform-members*)
                  (creature-positions :storage-buffer :binding 8 :element :vec4)))
-  (let* ((base (* vertex-index (uint 2)))
+  (let* ((base (* vertex-index (uint 3)))
          (world (assume-quantity (swizzle (buffer-element creature-positions base) :xyz)
                                  :quantity quantities:world-position :unit quantities:cell))
          (old (assume-quantity (swizzle (buffer-element creature-positions (+ base (uint 1))) :xyz)
@@ -26,6 +27,9 @@
                       (+ (swizzle current :y) (* (swizzle jitter :y) (swizzle current :w)))
                       (swizzle current :z) (swizzle current :w)))
     (set-output creature-current current)
+    (set-output creature-rgb
+                (assume-quantity (swizzle (buffer-element creature-positions (+ base (uint 2))) :xyz)
+                                 :quantity :block-light-level :unit :one))
     (set-output creature-previous previous)))
 
 (define-live-shader creature-motion-specification
@@ -45,13 +49,15 @@
                   (:vertex (luft.render.shaders::creature-projection-specification))
                   (:fragment (and temporal-p (luft.render.shaders::creature-motion-specification))))))
     (if (null extra) old
-        (flet ((position-p (output)
-                 (eq :position (luv.shader:shader-interface-built-in output))))
+        (flet ((host-output-p (output)
+                 (or (eq :position (luv.shader:shader-interface-built-in output))
+                     (and (eq stage :vertex)
+                          (eql 12 (luv.shader:shader-interface-location output))))))
           (make-instance
            'luv.shader:shader-specification :name 'creature-surface :stage stage
            :inputs (append (luv.shader:shader-specification-inputs old)
                            (luv.shader:shader-specification-inputs extra))
-           :outputs (append (remove-if #'position-p (luv.shader:shader-specification-outputs old))
+           :outputs (append (remove-if #'host-output-p (luv.shader:shader-specification-outputs old))
                             (luv.shader:shader-specification-outputs extra))
            :resources (append (luv.shader:shader-specification-resources old)
                               (luv.shader:shader-specification-resources extra))
@@ -61,7 +67,7 @@
            (append (remove-if
                     (lambda (statement)
                       (and (typep statement 'luv.shader:shader-output-assignment)
-                           (position-p (luv.shader:shader-assignment-output statement))))
+                           (host-output-p (luv.shader:shader-assignment-output statement))))
                     (luv.shader:shader-specification-statements old))
                    (luv.shader:shader-specification-statements extra)))))))
 
@@ -159,7 +165,8 @@ Lane 19 is the original tile identity, not a sampled or averaged colour."
               (luvcraft::emit-critter-box
                vertices animal 0.0 0.0 0.0
                (aref data (+ base 12)) (aref data (+ base 14)) (aref data (+ base 13))
-               (luvcraft::block-atlas-tile-at-offset (round (aref data (+ base 19)))) 1.0 0.0)))
+               (luvcraft::block-atlas-tile-at-offset (round (aref data (+ base 19))))
+               (aref data (+ base 23)) 0.0)))
     vertices))
 
 (defmethod render::upload-figure-instances :after
@@ -175,7 +182,7 @@ Lane 19 is the original tile identity, not a sampled or averaged colour."
                     :usage '(:vertex :copy-dst)))
               (creature-positions binding)
               (own (luv:make-buffer-descriptor
-                    :size (* (render::figure-binding-capacity binding) 36 32)
+                    :size (* (render::figure-binding-capacity binding) 36 48)
                     :usage '(:storage :copy-dst)))
               (creature-uniforms binding)
               (own (luv:make-buffer-descriptor :size (* 76 4) :usage '(:uniform :copy-dst)))
@@ -196,15 +203,24 @@ Lane 19 is the original tile identity, not a sampled or averaged colour."
               (creature-source-buffer binding) (render::figure-binding-buffer binding)))))
   (let* ((vertices (creature-figure-vertices data))
          (previous (creature-figure-vertices data t))
-         (positions (make-array (* (/ (length vertices) 14) 8) :element-type 'single-float)))
+         (positions (make-array (* (/ (length vertices) 14) 12) :element-type 'single-float
+                                                                         :initial-element 0.0)))
     (setf (creature-count binding) (/ (length vertices) luvcraft::+block-mesh-floats-per-vertex+))
     (loop for vertex from 0 below (length vertices) by 14
-          for target from 0 by 8 do
+          for target from 0 by 12 do
             (loop for source in (list vertices previous) for base from target by 4 do
               (setf (aref positions base) (+ 1024.0 (aref source vertex))
                     (aref positions (+ base 1)) (+ 1024.0 (aref source (+ vertex 2)))
                     (aref positions (+ base 2)) (aref source (+ vertex 1))
                     (aref positions (+ base 3)) 0.0)))
+    (loop with target = 0
+          for base from 0 below (length data) by render::+figure-scalar-count+
+          when (= 4.0 (aref data (+ base 15))) do
+            (dotimes (vertex 36)
+              (loop for channel below 3 do
+                (setf (aref positions (+ target 8 channel))
+                      (* (sqrt luft.render.shaders::*voxel-light-gain*) (aref data (+ base 20 channel)))))
+              (incf target 12)))
     (when (plusp (length vertices))
       (luv:write-buffer (creature-vertices binding) vertices)
       (luv:write-buffer (creature-positions binding) positions))))
