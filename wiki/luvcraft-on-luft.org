@@ -181,7 +181,8 @@ that the wizard uses them as they are (#CERUZY).
 
 Figures are now a stage a game adds, with per-instance storage rather
 than one pose in the scene uniforms. The wizard and Luvcraft's turtles
-use it (#CS2DOF); hands, held devices, and agent bodies still need stages.
+use it (#CS2DOF), as do Luvcraft's embodied companions (#LEQ5SP); hands
+and held devices still need stages.
 
 What still sits on the wrong side of the line:
 
@@ -301,7 +302,7 @@ the layer of #W9QMPT that owns the feature afterwards.
 | World text | 0.4k | done | renderer | delete |
 | Terminal walls, phone, agent wall | 2.8k | terminal walls done | game, on renderer stages | phone and wall need stages |
 | Portals, mirror, video, tape, film | 2.6k | none | game, on renderer stages | Darwin and libav hosting; tape and film are behaviours |
-| Agents: gnome, cat, Fantus | 5.8k | bodiless agent | game | plumbing neutral; tools speak Luft terms |
+| Agents: gnome, cat, Fantus | 5.8k | embodied companions (#LEQ5SP) | game | shared harness; Luft tools, simple figure bodies; old SDFs and wall remain |
 | Birthday content | 3.2k | none | game | follows stages and agents |
 | Knobs, intent, camera, sound, lobby | 1k | knobs via metabar, lobby | game, luv | mostly neutral |
 | CLIM menus, legend, metabar | 1.4k + 4.8k | workbench | luv | Luft already owns these on the workbench |
@@ -343,9 +344,11 @@ sits on five seams.
    state, and learns of edits through the engine's change facts.
 
 5. *Agents' words.*  The gnome's tools and prompts speak integer cells,
-   "y is up", and block boxes.  The plumbing moves unchanged; the tool
-   vocabulary is rewritten over the terrain queries, Z up and material
-   names.
+   "y is up", and block boxes in the old game. The Luft game now speaks
+   integer X/Y/Z cells with Z up, resident terrain rays, routes, source edits,
+   and the game's finite inventory (#LEQ5SP). The shared harness still owns
+   turns, tools, transcript, and provider lifetime; no terrain query goes
+   through an old Luvcraft session.
 
 * The plan
 :PROPERTIES:
@@ -644,6 +647,12 @@ decision count, resting spell, and gait, while other inhabitants pass
 through. Animals in nonresident chunks freeze and remain in the save,
 rather than falling through missing cells or despawning (#L4OMIZ).
 
+G now summons a gnome onto clear resident ground, T opens the shared
+workbench's conversation prompt, and F7 chooses a companion. The same
+tools and saves serve the cat and Fantus through their named summon
+commands (#LEQ5SP). These bodies use the figure stage, not the old game's
+SDF overlay or the atelier's bodiless agent.
+
 To host the game the studio gave up three atelier assumptions, now protocol
 in =luft.render=: the playing commands -- walk, jump, fly, M-x, metabar,
 lobby -- moved into =luft-play=, which the atelier's table inherits; key
@@ -854,8 +863,66 @@ backends compile. Headless SDL with software Vulkan captures five turtles
 on seed 7's meadow and the original wizard on his isle. The live turtles
 walk and rest, and their descriptions round-trip through Luvcraft's own save
 reader. Still open: turtle atlas relief rather than flat tones, shadows
-cast by animal boxes, riding, agent bodies, and held-device stages. The old
-critter renderer remains because old Luvcraft still plays through it.
+cast by animal boxes, riding, and held-device stages. Agent bodies now use
+the same box stage (#LEQ5SP). The old critter renderer remains because old
+Luvcraft still plays through it.
+
+*** DONE Give Luvcraft companions bodies and tools on Luft
+:PROPERTIES:
+:ID: LEQ5SP
+:END:
+
+=luvcraft/luft/game= now owns gnome, cat, and Fantus inhabitants. G summons
+a gnome; T talks to the selected companion through the workbench's typed
+prompt and message HUD; F7 selects another. M-x offers Summon Cat and
+Summon Fantus. Y approves a proposed edit, N declines, and T returns
+revision guidance. Conversation and approval keys work with the pointer
+released as well as captured; prompt typing is still owned by the shell.
+
+The application-agent frame boundary now specializes the generic game
+host rather than the atelier. Each companion uses that shared harness,
+with provider setup off the canvas, serialized turns, CLIM command tools,
+typed transcript records, and teardown before the host's terminal fence.
+The old approval state machine is reused with a cell-edit payload that
+revalidates the target, reach and inventory at approval time. Closing the
+game wakes parked walking and approval tools before releasing providers.
+
+The tools say Z up: Look Around reports feet, nearby surfaces, the player
+and inventory; Cell At reads resident material names; Walk To runs Luft's
+bounded A* and waits for the physical body's arrival; Place Cell applies
+one inventory-backed world-source edit; Fetch Block walks beside a block,
+mines it and collects it into the player's bag. Propose Cell leaves the
+world unchanged until approval. Unknown cells are not called air, reach
+is bounded and ray-checked, failed or occupied edits spend nothing, and
+companions freeze outside resident terrain. A walk times out rather than
+parking a provider forever behind an edit or a departed chunk.
+
+The figure stage draws simple box models: red hat and beard, a small
+eared cat, and purple Fantus. The gnome's feet animate from actual travel;
+present and previous poses go to the instanced stage. This is not a port
+of their detailed SDF appearances. Their saved =:gnome=, =:cat= and
+=:fantus= entries use the existing inhabitant format, with a coordinate
+map at the boundary: cell, heading, last question and answer, and provider
+response ID. Old Luvcraft reads them too. Unhostable agents and unrelated
+inhabitants pass through rather than being erased. Routes are transient;
+reopening resumes standing, not an unfinished tool effect.
+
+=scripts/luft-companion-proof.lisp= runs a real SDL/offscreen game with
+software Vulkan and substitutes only a scripted provider. G/T and typed
+Return start a turn whose real tools look, walk, build two brick cells,
+fetch the top brick, and propose two plank edits, one approved and one
+declined through the real keys. Bricks go 3 → 1 → 2, planks 3 → 2; the
+declined cell remains air. Zero-stock and companion-overlap controls
+refuse edits. Captures show the prompt, approval, result and reopened
+world, and the save restores all three companions, inventory and response
+ID. A real provider also looked, walked one cell east, read the grass
+underfoot, and replied without editing. The game-save regression checks
+coordinate mapping, the old inhabitant reader, and unknown inhabitants.
+
+Still open: detailed SDF bodies and their knobs, world-space transcript
+cassettes and agent walls, construction-box previews, wider perception
+than nearby terrain samples, and resuming in-flight actions across saves.
+The old session-bound tools and overlays remain for the old game.
 
 ** IDEA Keep block behaviour in a game's table
 :PROPERTIES:

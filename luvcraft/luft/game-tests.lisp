@@ -63,3 +63,42 @@
              (luvcraft:block-inventory-entry-for inventory film)))
     (is = 0 (luvcraft:block-inventory-entry-quantity
              (luvcraft:block-inventory-entry-for inventory luvcraft::*stone-block*)))))
+
+(define-test companions-cross-the-inhabitant-save-without-losing-other-inhabitants
+  (let* ((world (luvcraft:make-empty-little-block-world :seed 7 :chunk-height 16))
+         (source (game:luvcraft-world-luft-source world))
+         (viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
+         (descriptions '((:gnome :cell (3 5 0) :facing-yaw 0.4
+                                 :conversation "response-test" :asked "Build" :said "Yes")
+                         (:cat :cell (0 5 3)) (:fantus :cell (-3 5 0))
+                         (:gnome :cell (99999 5 0))
+                         (:luft-critters :animals nil) (:future-inhabitant :value 42))))
+    (setf (slot-value viewer 'host::inhabitants) descriptions
+          (slot-value viewer 'host::agents) nil
+          (slot-value viewer 'host::agents-initialized-p) nil
+          (slot-value viewer 'render::simulation)
+          (render:make-world-simulation (game:make-luvcraft-streaming-scene source)))
+    (host::initialize-viewer-agents viewer)
+    (is = 3 (length (host::viewer-agents viewer)))
+    (let* ((gnome (find :gnome (host::viewer-agents viewer) :key #'host::inhabitant-kind))
+           (position (host::inhabitant-position gnome)))
+      ;; Move in Luft's horizontal Y and save in old Luvcraft's horizontal Z.
+      (incf (luv.arithmetic.lisp.vec3:vec3-y position) 2)
+      (let* ((saved (host::agent-inhabitant-descriptions viewer descriptions))
+             (record (assoc :gnome saved)))
+        (is = 6 (length saved))
+        (true (member (fourth descriptions) saved))
+        (true (member (sixth descriptions) saved))
+        (is equal '(3 5 2) (getf (rest record) :cell))
+        (is equal "response-test" (getf (rest record) :conversation))
+        (is equal "Build" (getf (rest record) :asked))
+        ;; Old Luvcraft's inhabitant reader accepts the new game's record.
+        (let ((old (luvcraft.agent::described-embodied-agent 'luvcraft.agent:gnome nil (rest record))))
+          (is equal '(3 5 2) (list (luvcraft.agent::gnome-x old)
+                                   (luvcraft.agent::gnome-y old) (luvcraft.agent::gnome-z old))))
+        (setf (slot-value viewer 'host::inhabitants) saved
+              (slot-value viewer 'host::agents-initialized-p) nil
+              (slot-value viewer 'host::agents) nil)
+        (host::initialize-viewer-agents viewer)
+        (is = 3 (length (host::viewer-agents viewer)))
+        (is equal saved (host::agent-inhabitant-descriptions viewer saved))))))

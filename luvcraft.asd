@@ -229,7 +229,9 @@
   :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
   :serial t
   :components ((:file "luvcraft/luft/game")
-               (:file "luvcraft/luft/animals"))
+               (:file "luvcraft/luft/animals")
+               (:file "luvcraft/luft/agents")
+               (:file "luvcraft/luft/agent-tools"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"

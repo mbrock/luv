@@ -45,6 +45,9 @@ quickbar begins: things to build a house with, colours, and a lamp.")
    (animal-previous-figures :initform (make-hash-table :test #'eq)
                             :reader viewer-animal-previous-figures)
    (animals-initialized-p :initform nil :accessor viewer-animals-initialized-p)
+   (agents :initform nil :accessor viewer-agents)
+   (agents-initialized-p :initform nil :accessor viewer-agents-initialized-p)
+   (conversation-agent :initform nil :accessor viewer-conversation-agent)
    (hotbar :initarg :hotbar :accessor luvcraft-viewer-hotbar)
    (inventory :accessor viewer-inventory)
    (creative-p :initform nil :accessor viewer-creative-p)
@@ -130,6 +133,9 @@ quickbar begins: things to build a house with, colours, and a lamp.")
     ((viewer luvcraft-viewer) cell placement)
   ;; Commit inventory changes only after the engine accepts the edit.  Undo
   ;; and redo pass through this same boundary, so they conserve stock too.
+  (when (and placement (companion-occupies-cell-p viewer cell))
+    (setf (render:viewer-last-edit-status viewer) :occupied)
+    (return-from render:apply-viewer-world-edit (values nil :occupied)))
   (let* ((inventory (viewer-inventory viewer))
          (block (and placement (selected-block viewer placement)))
          (entry (and block (luvcraft:block-inventory-entry-for inventory block)))
@@ -343,7 +349,8 @@ quickbar begins: things to build a house with, colours, and a lamp.")
     (game:luvcraft-save-description
      (streaming-source viewer) (luvcraft-viewer-world viewer)
      :resume (inventory-resume viewer)
-     :inhabitants (viewer-inhabitant-descriptions viewer)
+     :inhabitants (agent-inhabitant-descriptions
+                   viewer (viewer-inhabitant-descriptions viewer))
      :position (and player
                     (let ((position (render:body-position
                                      (render:character-body player))))

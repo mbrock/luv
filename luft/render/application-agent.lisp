@@ -68,11 +68,11 @@
 atelier and game experiment. Use the viewer's own commands to inspect or alter
 its developer presentation. Keep answers short and prefer acting through tools.")
 
-(defmethod luv.application-agent:application-command-frame ((viewer viewer))
+(defmethod luv.application-agent:application-command-frame ((viewer game-host))
   viewer)
 
 (defmethod luv.application-agent:call-in-application-frame
-    ((viewer viewer) function)
+    ((viewer game-host) function)
   (request-canvas-frame
    (viewer-canvas viewer)
    (lambda (timestamp)
@@ -175,7 +175,10 @@ With WAIT, require provider and worker quiescence before returning."
         (luv.application-agent:wait-for-application-agent-release agent))
       t)))
 
-(defun quiesce-viewer-services (viewer)
+(defgeneric quiesce-viewer-services (viewer)
+  (:documentation "Quiesce game services before the host's terminal canvas fence."))
+
+(defmethod quiesce-viewer-services ((viewer game-host))
   "Detach and quiesce every named nonvisual service before the terminal fence."
   (with-release-report
     (releasing :application-agent
