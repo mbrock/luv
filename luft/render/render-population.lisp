@@ -26,15 +26,70 @@
 (defstruct (render-population
              (:constructor %make-render-population
                  (instance-words appearance-words descriptor-words
-                  site-count))
+                  site-count light-words))
              (:copier nil))
-  "Geometry sites plus a one-for-one, independently replaceable appearance."
+  "Geometry sites plus a one-for-one, independently replaceable appearance
+and voxel light."
   (instance-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
   (appearance-words #() :type (simple-array (unsigned-byte 32) (*))
                     :read-only t)
   (descriptor-words #() :type (simple-array (unsigned-byte 32) (*))
                     :read-only t)
-  (site-count 0 :type (integer 0 *) :read-only t))
+  (site-count 0 :type (integer 0 *) :read-only t)
+  ;; Four words per site: STAR-LATTICE-LIGHT-WORDS.
+  (light-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t))
+
+;;; Voxel light reaches the star shader at lattice points (#BQMYNU).  Every
+;;; star-table vertex lies within a tick of one of the seven lattice points
+;;; of the cube on the star's +X+Y+Z side, the eighth corner never being
+;;; owned, so a site carries the light of those seven points.  Each is
+;;; VOXEL-LIGHT-AT-LATTICE-POINT, the one value every star meeting there
+;;; reads, so light is continuous across stars, owners, and seams.
+
+(defun %light-page-near-p (field domain x y z)
+  "Whether FIELD stores any page over the cells around lattice point X/Y/Z's cube."
+  (let ((x-limit (1- (luft:world-domain-x-limit domain)))
+        (y-limit (1- (luft:world-domain-y-limit domain))))
+    (dolist (cx (list (- x 1) (+ x 1)) nil)
+      (dolist (cy (list (- y 1) (+ y 1)))
+        (dolist (cz (list (- z 1) (+ z 1)))
+          (when (luft:voxel-light-page-present-p
+                 field (max 0 (min x-limit cx)) (max 0 (min y-limit cy))
+                 (max 0 (min 254 cz)))
+            (return-from %light-page-near-p t)))))))
+
+(zdefun (star-lattice-light-words :zone :luft/star-lattice-light
+                                  :value (length (luft:surface-mesh-star-site-words mesh)))
+    (mesh)
+  "Pack MESH's lattice light: four words per site, sixteen bits per point.
+
+Point DX + 2 DY + 4 DZ of a site at X/Y/Z is lattice point (X+DX, Y+DY, Z+DZ),
+for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
+  (let* ((sites (luft:surface-mesh-star-site-words mesh))
+         (field (luft:surface-mesh-voxel-light mesh))
+         (words (make-array (length sites) :element-type '(unsigned-byte 32)
+                                           :initial-element 0)))
+    (when (and field (plusp (luft:voxel-light-field-page-count field)))
+      (let ((domain (luft:voxel-light-field-domain field))
+            (points (make-hash-table :test #'eql)))
+        (flet ((point-light (x y z)
+                 (let ((key (logior z (ash y 9) (ash x 27))))
+                   (or (gethash key points)
+                       (setf (gethash key points)
+                             (luft:voxel-light-at-lattice-point field x y z))))))
+          (loop for offset from 0 below (length sites) by 4
+                for x = (aref sites offset)
+                for y = (aref sites (+ offset 1))
+                for z = (aref sites (+ offset 2))
+                when (%light-page-near-p field domain x y z)
+                  do (dotimes (point 7)
+                       (let ((light (point-light (+ x (ldb (byte 1 0) point))
+                                                 (+ y (ldb (byte 1 1) point))
+                                                 (+ z (ldb (byte 1 2) point)))))
+                         (setf (aref words (+ offset (floor point 2)))
+                               (logior (aref words (+ offset (floor point 2)))
+                                       (ash light (* 16 (mod point 2)))))))))))
+    words))
 
 (defstruct (prepared-render-mesh
              (:constructor %make-prepared-render-mesh (mesh population))
@@ -86,7 +141,9 @@
           (error "One terrain population contains incompatible material palettes."))))
     (%make-render-population
      site-words (pack-terrain-appearance-codes appearance-codes)
-     descriptor-words (/ (length site-words) 4))))
+     descriptor-words (/ (length site-words) 4)
+     (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
+            (mapcar #'star-lattice-light-words meshes)))))
 
 (zdefun (make-render-population :zone :luft/build-render-population
                                 :value (length meshes))
@@ -102,11 +159,32 @@
 
 (defmethod prepare-streamed-mesh
     ((preparer render-population-preparer) mesh previous)
+  "Reuse PREVIOUS's sites and appearance, and its light when MESH's is the same.
+
+Each cohort joins a fresh regional field, so the light is compared by value:
+an owner far from any changed tile keeps its whole population."
   (if previous
-      (%make-prepared-render-mesh mesh (prepared-render-mesh-population previous))
+      (let* ((population (prepared-render-mesh-population previous))
+             (lights
+               (if (eq (luft:surface-mesh-voxel-light mesh)
+                       (luft:surface-mesh-voxel-light
+                        (prepared-render-mesh-mesh previous)))
+                   (render-population-light-words population)
+                   (star-lattice-light-words mesh))))
+        (%make-prepared-render-mesh
+         mesh
+         (if (equalp lights (render-population-light-words population))
+             population
+             (%make-render-population
+              (render-population-instance-words population)
+              (render-population-appearance-words population)
+              (render-population-descriptor-words population)
+              (render-population-site-count population)
+              lights))))
       (prepare-render-mesh mesh)))
 
 (defmethod streamed-mesh-preparation-signature
     ((preparer render-population-preparer))
   (list (symbol-function 'make-render-population)
-        (symbol-function 'pack-terrain-appearance-codes)))
+        (symbol-function 'pack-terrain-appearance-codes)
+        (symbol-function 'star-lattice-light-words)))

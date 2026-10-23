@@ -237,3 +237,67 @@
          (is eq (luft:surface-mesh-star-site-words (second first))
              (luft:surface-mesh-star-site-words (second second)))))
      preparer)))
+
+(defun stream-cohort (scene system keys)
+  "Mesh KEYS as one cohort on SYSTEM's worker and publish it as a renderer would."
+  (terrain:schedule-streaming-scene-cohort scene system keys 1 0)
+  (loop for (result present-p)
+          = (multiple-value-list
+             (production:receive-production-result-no-hang system))
+        until present-p do (sleep 0.005)
+        finally (terrain::receive-streaming-mesh-result scene result))
+  (let ((result (terrain::streaming-replacement-result
+                 (terrain:streaming-scene-replacement scene))))
+    (terrain:install-streaming-light-tiles
+     scene (terrain:streaming-mesh-result-light-tiles result))
+    (setf (terrain:streaming-scene-replacement scene) nil)
+    (terrain:streaming-mesh-result-meshes result)))
+
+(define-test streamed-light-crosses-a-chunk-seam-and-follows-edits
+  ;; A floor over four chunks, a wall with a gap across the x = 64 seam, and
+  ;; one emitter just west of it: its light must cross the seam, and owners
+  ;; on both sides must sample one value where they meet (#BQMYNU).
+  (let ((builder (terrain:make-scene-builder
+                  :horizontal-bits 7 :material-vocabulary (make-palette)
+                  :ground-material *stone* :architecture-material *glow*)))
+    (dotimes (x 128) (dotimes (y 128) (terrain:scene-builder-cell builder x y 0)))
+    (loop for y below 30 unless (= y 12)
+          do (terrain:scene-builder-cell builder 66 y 1))
+    (terrain:scene-builder-cell builder 62 10 1 :material *glow*)
+    (let* ((authored (terrain:finish-scene-builder builder))
+           (oracle (terrain:scene-authored-voxel-light authored))
+           (scene (terrain:make-streaming-scene authored))
+           (domain (terrain:scene-domain scene))
+           (west (luft:chunk-key-at 0 0))
+           (east (luft:chunk-key-at 64 0))
+           (keys (list west east (luft:chunk-key-at 0 64) (luft:chunk-key-at 64 64)))
+           (system (production:make-single-worker-production-system
+                    :name "streamed light test")))
+      (dolist (key keys) (setf (gethash key (terrain:streaming-scene-loaded scene)) 1))
+      (unwind-protect
+           (flet ((field (meshes key)
+                    (luft:surface-mesh-voxel-light (cdr (assoc key meshes)))))
+             (let* ((meshes (stream-cohort scene system keys))
+                    (west-field (field meshes west))
+                    (east-field (field meshes east)))
+               (true (terrain:scene-regional-light-p scene))
+               ;; Two steps across the seam, behind the wall's gap, exactly
+               ;; as the whole-domain solver has it.
+               (is = (luft:pack-voxel-light 12 9 1) (luft:voxel-light-at east-field 65 10 1))
+               (is = (luft:voxel-light-at oracle 67 12 1)
+                   (luft:voxel-light-at east-field 67 12 1))
+               (true (plusp (luft:voxel-light-at oracle 67 12 1)))
+               (dotimes (y 30)
+                 (is = (luft:voxel-light-at-lattice-point west-field 64 y 1)
+                     (luft:voxel-light-at-lattice-point east-field 64 y 1)))
+               ;; Removing the emitter dirties the two lit tiles; every owner
+               ;; whose neighbourhood reads them is relit, and the light is
+               ;; gone on both sides of the seam.
+               (terrain:edit-streaming-scene-cell
+                scene (luft:make-site domain 62 10 1 luft:+cell-extent+ 1) nil)
+               (let* ((dirty (terrain:streaming-light-dirty-owners scene keys)))
+                 (is equal keys (sort (copy-list dirty) #'<))
+                 (let ((meshes (stream-cohort scene system dirty)))
+                   (is = 0 (luft:voxel-light-at (field meshes east) 65 10 1))
+                   (is = 0 (luft:voxel-light-at (field meshes west) 61 10 1))))))
+        (production:stop-production-system system)))))

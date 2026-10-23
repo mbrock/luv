@@ -252,6 +252,7 @@ this package draws; the renderer and the ateliers use it.")
            #:streaming-mesh-request
            #:streaming-mesh-result-generation
            #:streaming-mesh-result-mesh-cache
+           #:streaming-mesh-result-light-tiles
            #:streaming-mesh-result-meshes
            #:streaming-replacement-failure
            #:streaming-replacement-removals
@@ -264,6 +265,13 @@ this package draws; the renderer and the ateliers use it.")
            #:streaming-scene-frame-counter
            #:streaming-scene-frames-per-load
            #:streaming-scene-light-generation
+           #:streaming-scene-light-tiles
+           ;; Streamed regional light (#BQMYNU).
+           #:light-tile #:light-tile-key #:light-tile-field
+           #:light-tile-source-count #:light-tile-inputs
+           #:scene-regional-light-p #:chunk-emitter-sources
+           #:solve-light-tile #:realize-streaming-light-tiles
+           #:streaming-light-dirty-owners #:install-streaming-light-tiles
            #:streaming-scene-load-outstanding
            #:streaming-scene-loaded
            #:streaming-scene-mesh-cache

@@ -70,6 +70,7 @@ releases for retry, but those retired bindings must never be served again. #RBNW
       (renderer-terrain renderer) (renderer-device renderer)
       (resident-population-instance-buffer resident) (renderer-frame-state-camera-buffer frame)
       :appearances (resident-population-appearance-buffer resident)
+      :lights (resident-population-light-buffer resident)
       :descriptors (resident-population-descriptor-buffer resident)
       :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer)
       :shadow-p shadow-p))))

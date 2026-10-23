@@ -77,6 +77,7 @@
                              (:file "bodies")
                              (:file "world-source")
                              (:file "streaming-state")
+                             (:file "streamed-light")
                              (:file "streaming")
                              (:file "streaming-mesh")
                              (:file "streaming-publication"))))

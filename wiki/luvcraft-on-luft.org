@@ -488,7 +488,7 @@ and party through them.  It takes the old game's remaining features crossing
 first (#R1T4AY), the load half of =streaming.lisp= kept as Luvcraft's
 generator, and the mesh claims in =luvcraft/core/test= retired with it.
 
-** TODO Stream voxel light in the terrain engine
+** NEXT Stream voxel light in the terrain engine
 :PROPERTIES:
 :ID: BQMYNU
 :END:
@@ -499,6 +499,36 @@ block light in the streamed world, extracting the frontier language under
 
 /Done when./ Torches and lanterns light the streamed world in every game,
 and Luvcraft's light solver is deleted.
+
+/Evidence./ Luft's own solver streams; no frontier language was needed.  A
+light value loses at least one level per step and starts at fifteen, while
+a chunk column is sixty-four cells wide, so the exact light over one column
+depends only on the emitters, attachments, and opacities of its 3 by 3
+neighbourhood.  =luft/terrain/streamed-light.lisp= makes that a /light
+tile/: =solve-voxel-light= over the neighbourhood's sources, pruned by a new
+=:region= bound to the tile's own columns and kept only there.  A tile's
+identity is its neighbours' immutable material tables (by identity) and
+their emitting attachments (by =surface-attachment-light-emission=), so the
+mesh worker solves tiles beside the meshes and reuses every unchanged one;
+an owner's field joins the tiles its stars can sample by sharing their
+pages.  A seam is consistent because both owners meeting there read the same
+tile.  Before scheduling, the owner thread asks =streaming-light-dirty-owners=
+which published owners sit beside a tile whose inputs changed and which held
+or now has light; an edit or arrival relights those and nothing else, and a
+dark world relights nothing.  World-source scenes now build with
+propagation on.  The renderer packs each site's seven lattice-point lights
+(=voxel-light-at-lattice-point=, shared by every star meeting there) into a
+four-word sidecar the star shader adds as local radiance.  A differential
+check found 0 mismatches against the whole-domain solver over 3,099 lit
+cells across a four-chunk corner, and
+=streamed-light-crosses-a-chunk-seam-and-follows-edits= keeps that.  On
+Luvcraft seed 7's spawn window (16 owners, 36 tiles, 4,133 cave-crystal
+sources) a cohort meshes in 204 ms with light against 72 ms without;
+tiles cost 124 ms cold and nothing cached, the sidecar 132 ms; materializing
+those chunks takes 13.7 s.  The atelier's large world has no emitters and
+pays nothing.  Open: attachments still light from their authored face, not a
+realized frame; Luvcraft's solver is not deleted; sky light is not yet
+regional; tile solving should move off the cohort's critical path.
 
 ** TODO Carry a block, and fill an inventory
 :PROPERTIES:

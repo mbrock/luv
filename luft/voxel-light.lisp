@@ -115,13 +115,18 @@
               (%voxel-light-page-index x y z))
         0)))
 
-(defun %make-voxel-light-page-storage (domain)
+(defun %make-voxel-light-page-storage (domain &optional hashed-p)
+  "Page storage for DOMAIN: a direct directory when small, else a hash table.
+
+HASHED-P forces the hash table, for sparse fields over a small part of a
+domain whose directory alone would outweigh their light."
   (let* ((x-pages
            (ceiling (world-domain-x-limit domain) +voxel-light-page-size+))
          (y-pages
            (ceiling (world-domain-y-limit domain) +voxel-light-page-size+))
          (directory-count (* x-pages y-pages 32))
-         (direct-p (<= directory-count +voxel-light-direct-page-limit+)))
+         (direct-p (and (not hashed-p)
+                        (<= directory-count +voxel-light-direct-page-limit+))))
     (values (if direct-p
                 (make-array directory-count :initial-element nil)
                 (make-hash-table :test #'eql))
@@ -265,7 +270,8 @@ many mesh points in one derived render population."
         0)))
 
 (defun solve-voxel-light
-    (domain material-cells opacity-table sources &key (revision 0))
+    (domain material-cells opacity-table sources
+     &key (revision 0) region hashed-p)
   "Compute immutable colored local light with a packed brightest-first frontier.
 
 MATERIAL-CELLS is a hash table or a lookup function returning a dense material
@@ -273,14 +279,25 @@ index and presence flag for a positive cell site.
 OPACITY-TABLE maps those indices to entered-cell loss in 0..15.  Every ordinary
 step additionally costs one level.  SOURCES are values from
 MAKE-VOXEL-LIGHT-SOURCE; a source illuminates its own cell regardless of that
-cell's opacity.  Concurrent colors and sources meet by componentwise maximum."
+cell's opacity.  Concurrent colors and sources meet by componentwise maximum.
+
+REGION, a list (X0 Y0 X1 Y1) of half-open cell bounds, asks only for the light
+of the columns inside it.  Every step costs at least one level, so a value at
+horizontal L1 distance D outside REGION can still reach it only while its
+brightest lane exceeds D; the frontier admits nothing else.  The field is then
+exact inside REGION and a partial witness outside it.  HASHED-P forces sparse
+hashed page storage (#BQMYNU)."
   (check-type domain world-domain)
   (check-type material-cells (or hash-table function))
   (check-type opacity-table (vector (unsigned-byte 8)))
   (check-type revision (integer 0 *))
   (multiple-value-bind (pages direct-p x-pages y-pages)
-      (%make-voxel-light-page-storage domain)
+      (%make-voxel-light-page-storage domain hashed-p)
     (let ((buckets (make-array 16))
+          (region-x0 (if region (first region) 0))
+          (region-y0 (if region (second region) 0))
+          (region-x1 (if region (third region) most-positive-fixnum))
+          (region-y1 (if region (fourth region) most-positive-fixnum))
           (visits 0)
           (pushes 0)
           (stale-pops 0)
@@ -315,11 +332,16 @@ cell's opacity.  Concurrent colors and sources meet by componentwise maximum."
                                  page))
                        (incf page-count)
                        page)))
+               (region-distance (x y)
+                 (+ (max 0 (- region-x0 x) (- x (1- region-x1)))
+                    (max 0 (- region-y0 y) (- y (1- region-y1)))))
                (admit (cell x y z proposed)
                  (let* ((old (light-at x y z))
                         (joined
                           (voxel-light-componentwise-max old proposed)))
-                   (unless (= old joined)
+                   (unless (or (= old joined)
+                               (<= (%voxel-light-priority proposed)
+                                   (region-distance x y)))
                      (setf (aref (the voxel-light-page
                                       (page-for-write x y z))
                                  (%voxel-light-page-index x y z))
@@ -386,3 +408,89 @@ cell's opacity.  Concurrent colors and sources meet by componentwise maximum."
         (%make-voxel-light-field
          domain pages direct-p x-pages y-pages page-count revision
          visits pushes stale-pops)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Regional fields
+;;;
+;;; A streamed world solves its light one chunk column at a time (#BQMYNU).
+;;; Each such tile owns only the pages over its own columns; a cohort's field
+;;; joins the tiles it needs by sharing their immutable pages.
+
+(defun map-voxel-light-pages (function field)
+  "Call FUNCTION with the X, Y, and Z origin of each page of FIELD and the page."
+  (check-type field voxel-light-field)
+  (let ((pages (voxel-light-field-pages field))
+        (y-pages (voxel-light-field-y-pages field)))
+    (if (voxel-light-field-direct-p field)
+        (loop for index from 0 below (length (the simple-vector pages))
+              for page = (aref (the simple-vector pages) index)
+              when page
+                do (multiple-value-bind (column page-z) (floor index 32)
+                     (multiple-value-bind (page-x page-y) (floor column y-pages)
+                       (funcall function
+                                (* page-x +voxel-light-page-size+)
+                                (* page-y +voxel-light-page-size+)
+                                (* page-z +voxel-light-page-size+)
+                                page))))
+        (maphash (lambda (key page)
+                   (funcall function
+                            (* (ldb (byte 14 0) key) +voxel-light-page-size+)
+                            (* (ldb (byte 14 14) key) +voxel-light-page-size+)
+                            (* (ash key -28) +voxel-light-page-size+)
+                            page))
+                 (the hash-table pages)))))
+
+(defun voxel-light-page-present-p (field x y z)
+  "Whether FIELD stores a page over in-domain cell X/Y/Z."
+  (check-type field voxel-light-field)
+  (not (null (%voxel-light-page-at
+              (voxel-light-field-pages field)
+              (voxel-light-field-direct-p field)
+              (voxel-light-field-x-pages field)
+              (voxel-light-field-y-pages field) x y z))))
+
+(defun join-voxel-light-fields (domain fields &key (revision 0) region)
+  "Return the componentwise join of FIELDS as one sparse field over DOMAIN.
+
+Pages present in only one field are shared, never copied; overlapping pages
+are joined into a fresh page.  REGION, a list (X0 Y0 X1 Y1), keeps only the
+pages whose columns lie inside it, so a regional solve can keep exactly the
+part of its field it is exact over."
+  (check-type domain world-domain)
+  (multiple-value-bind (pages direct-p x-pages y-pages)
+      (%make-voxel-light-page-storage domain t)
+    (declare (ignore direct-p))
+    (let ((page-count 0)
+          (visits 0)
+          (pushes 0)
+          (stale-pops 0))
+      (dolist (field fields)
+        (unless (equalp (voxel-light-field-domain field) domain)
+          (error "Voxel-light field ~S belongs to another domain." field))
+        (incf visits (voxel-light-field-visits field))
+        (incf pushes (voxel-light-field-pushes field))
+        (incf stale-pops (voxel-light-field-stale-pops field))
+        (map-voxel-light-pages
+         (lambda (x y z page)
+           (when (or (null region)
+                     (and (<= (first region) x) (< x (third region))
+                          (<= (second region) y) (< y (fourth region))))
+             (let* ((key (%voxel-light-page-key x y z))
+                    (old (gethash key pages)))
+               (cond
+                 ((null old)
+                  (incf page-count)
+                  (setf (gethash key pages) page))
+                 ((not (eq old page))
+                  (let ((joined (make-array +voxel-light-page-cell-count+
+                                            :element-type '(unsigned-byte 16))))
+                    (dotimes (index +voxel-light-page-cell-count+)
+                      (setf (aref joined index)
+                            (voxel-light-componentwise-max
+                             (aref (the voxel-light-page old) index)
+                             (aref (the voxel-light-page page) index))))
+                    (setf (gethash key pages) joined)))))))
+         field))
+      (%make-voxel-light-field
+       domain pages nil x-pages y-pages page-count revision
+       visits pushes stale-pops))))

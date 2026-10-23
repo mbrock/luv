@@ -32,9 +32,9 @@
 
 (defmethod render::make-terrain-binding
     ((drawing replacement-terrain) device sites camera
-     &key appearances descriptors shadow-map shadow-sampler shadow-p)
-  (declare (ignore sites camera appearances descriptors shadow-map shadow-sampler
-                   shadow-p))
+     &key appearances lights descriptors shadow-map shadow-sampler shadow-p)
+  (declare (ignore sites camera appearances lights descriptors shadow-map
+                   shadow-sampler shadow-p))
   (luv:create device (luv:make-bind-group-descriptor :label "replacement terrain")))
 
 (defmethod render::encode-terrain

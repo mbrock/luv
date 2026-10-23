@@ -84,6 +84,8 @@
    #:make-voxel-light-source #:solve-voxel-light
    #:voxel-light-at #:voxel-light-at-site
    #:voxel-light-at-lattice-point #:voxel-light-at-mesh-point
+   #:map-voxel-light-pages #:voxel-light-page-present-p
+   #:join-voxel-light-fields
    ;; Manifold-sheet mesh.
    #:+mesh-cell-size+ #:+mesh-bevel-width+ #:+mesh-instance-word-count+
    #:+mesh-instance-stock-bit-count+

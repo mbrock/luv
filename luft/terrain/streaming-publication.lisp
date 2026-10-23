@@ -135,9 +135,10 @@
                    scene request (production:production-result-value result))
             (remhash key (streaming-scene-load-outstanding scene)))))))
 
-;;; An edit changes the shared light field, so all resident owners must receive
-;;; the resulting geometry/light generation together. Camera retargeting uses
-;;; the same scheduling interface but may choose a smaller affected region.
+;;; An edit changes one whole-scene light field, so all resident owners must
+;;; receive the resulting geometry/light generation together; regional light
+;;; (#BQMYNU) relights only the owners beside the tiles it dirtied.  Camera
+;;; retargeting uses the same scheduling interface.
 
 (defun schedule-streaming-scene-edit
     (scene production-system changed-source-key bevel-width)
@@ -152,7 +153,18 @@
         (setf (gethash changed-source-key loaded) bevel-width)))
     (let* ((source-keys
              (sort (loop for key being the hash-keys of loaded collect key) #'<))
-           (affected (streaming-scene-canonical-owner-closure scene source-keys)))
+           (owners (streaming-scene-canonical-owner-closure scene source-keys))
+           ;; Regional light confines an edit: geometry reads one chunk past
+           ;; a seam, and light changes only owners next to a dirty tile.
+           (affected
+             (if (scene-regional-light-p scene)
+                 (sort (union (remove-if-not
+                               (lambda (key)
+                                 (chunk-keys-neighbor-p key changed-source-key))
+                               owners)
+                              (streaming-light-dirty-owners scene owners))
+                       #'<)
+                 owners)))
       (when affected
         (schedule-streaming-scene-cohort
          scene production-system affected bevel-width
