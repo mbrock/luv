@@ -722,9 +722,8 @@ mesh worker solves tiles beside the meshes and reuses every unchanged one;
 an owner's field joins the tiles its stars can sample by sharing their
 pages.  A seam is consistent because both owners meeting there read the same
 tile.  Before scheduling, the owner thread asks =streaming-light-dirty-owners=
-which published owners sit beside a tile whose inputs changed and which held
-or now has light; an edit or arrival relights those and nothing else, and a
-dark world relights nothing.  World-source scenes now build with
+which published owners sit beside a tile whose inputs changed; roofs and
+unknown boundaries matter even without emitters. World-source scenes build with
 propagation on.  The renderer packs each site's seven lattice-point lights
 (=voxel-light-at-lattice-point=, shared by every star meeting there) into a
 four-word sidecar the star shader adds as local radiance.  A differential
@@ -734,8 +733,8 @@ cells across a four-chunk corner, and
 Luvcraft seed 7's spawn window (16 owners, 36 tiles, 4,133 cave-crystal
 sources) a cohort meshes in 204 ms with light against 72 ms without;
 tiles cost 124 ms cold and nothing cached, the sidecar 132 ms; materializing
-those chunks takes 13.7 s.  The atelier's large world has no emitters and
-pays nothing.  Lanterns now seed their realized attachment cell, standing
+those chunks takes 13.7 s. The atelier's large world has no emitters and
+paid nothing in that RGB-only implementation. Lanterns seed their realized attachment cell, standing
 or hanging, and both fixtures and attachment bodies sample the published
 field.  A placed lantern takes that path on the next remesh, without a
 residency rebuild.  The regression
@@ -745,10 +744,38 @@ light; =body-relighting-survives-reused-star-geometry= checks body-only
 relighting through the renderer's geometry cache.  Headless seed-7 night
 captures also exercise the viewer's live edit/schedule/publication path.
 Open: off-centre torches still use the authored flat frame; Luvcraft's
-solver is not deleted; sky light is not yet regional; tile solving should
-move off the cohort's critical path.  The voxel pool is softer than the
+solver is not deleted; diffuse tile solving should move off the cohort's
+critical path. The voxel pool is softer than the
 removed point lights and body light is one RGB value per cell, not a
 directional irradiance field.
+
+/Regional sky follow-up./ Direct sky now sweeps opacity down full resident
+columns, and diffuse sky uses the same finite solver's red lane, losing one
+plus opacity per step. Unknown columns are closed, the domain top is open,
+and a 14-cell halo makes the retained tile exact. Direct sky and chunk-local
+diffuse interfaces are memoized with immutable material tables during chunk
+materialization, off the mesh cohort's path. Only seam interfaces need the
+neighbour's captured table. Sky and RGB publish together through the existing
+guard-stable cohort; roof edits and arrivals invalidate their input identities.
+The seven samples use the spare high nibble of each existing 16-bit sample:
+no extra sidecar bytes. Sky scales ambient sky and ground, not direct sun or
+local RGB. Chunk-local preparation, solve-local page reuse, single-page RGB
+sampling, scalar sky early exit, and a bounded dense lattice cache avoid the
+first naive sky implementation's 1,120 ms tile / 340 ms packing cost.
+
+The repeatable benchmark and its limitations are in #WLLATM. Final seed-7
+cold tiles cost 196 ms against 192 ms RGB-only on this orb; cohort meshing
+300 against 244 ms; packing 140 against 144 ms. This is /not/ an overall
+cold latency improvement. Fifteen of sixteen geometry arrays survive each
+repeated roof edit. The sky regression compares 491,520 cells against explicit
+whole-domain direct seeds with zero mismatches, including closure and
+partial-opacity reopening; the original RGB solver agrees over 4,177,920
+cells and 20,000 lattice samples. =scripts/capture-streamed-sky.lisp= captured
+and inspected the seed-7 natural cave and atelier citadel gate at noon and
+18:30 after 30 seconds of real streaming, using SDL offscreen/software Vulkan.
+The software captures retain temporal blur/dither; they are not GPU timings.
+#JDB26Y remains open for separately revised fields and broader publication
+evidence, rather than declaring the whole facility done.
 
 ** NEXT Carry a block, and fill an inventory
 :PROPERTIES:

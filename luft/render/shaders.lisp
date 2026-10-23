@@ -834,7 +834,7 @@ the figure stays clear and only its far reaches recede."
               (material-mortar :vec4 :location 8 :interpolation :flat)
               (material-accent :vec4 :location 9 :interpolation :flat)
 
-              (voxel-light :vec3 :location 10))
+              (voxel-light :vec4 :location 10))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -902,8 +902,10 @@ the figure stays clear and only its far reaches recede."
          ;; diffuse coat.  A hemispherical environment approximation keeps
          ;; this in the same pass, without reflection rays or texture reads.
          (metal (if (> relief 11.5) 1.0 0.0))
-         (sky (representation (swizzle sky-color-vector :xyz)))
-         (ground (representation (swizzle ground-color-vector :xyz)))
+         (sky (* (swizzle voxel-light :w)
+                 (representation (swizzle sky-color-vector :xyz))))
+         (ground (* (swizzle voxel-light :w)
+                    (representation (swizzle ground-color-vector :xyz))))
          (reflected-z (- (* 2.0 (dot bent view) (swizzle bent :z))
                          (swizzle view :z)))
          (environment (mix ground sky (smoothstep -0.2 0.4 reflected-z)))
@@ -920,7 +922,8 @@ the figure stays clear and only its far reaches recede."
               ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
               ;; and lava, warm by night and lost in the sun by day.  The
               ;; square keeps a light's falloff from flattening into a wash.
-              (* tone (* #.*voxel-light-gain* (* voxel-light voxel-light)))))
+              (* tone (* #.*voxel-light-gain*
+                         (* (swizzle voxel-light :xyz) (swizzle voxel-light :xyz))))))
          (final
            (atmospheric-surface
             radiance world
@@ -972,7 +975,7 @@ the figure stays clear and only its far reaches recede."
                (material-mortar-output :vec4 :location 8 :interpolation :flat)
                (material-accent-output :vec4 :location 9 :interpolation :flat)
 
-               (voxel-light-output :vec3 :location 10))
+               (voxel-light-output :vec4 :location 10))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (terrain-appearances :storage-buffer :binding 3 :element :uvec2)
@@ -1073,12 +1076,13 @@ the figure stays clear and only its far reaches recede."
                        (swizzle lights :w)))))
          (packed-light
            (if (> (ldb (byte 1 0) point) (uint 0.0))
-               (ldb (byte 12 16) light-pair)
-               (ldb (byte 12 0) light-pair)))
+               (ldb (byte 16 16) light-pair)
+               (ldb (byte 16 0) light-pair)))
          (voxel-light
-           (/ (vec3 (float (ldb (byte 4 0) packed-light))
+           (/ (vec4 (float (ldb (byte 4 0) packed-light))
                     (float (ldb (byte 4 4) packed-light))
-                    (float (ldb (byte 4 8) packed-light)))
+                    (float (ldb (byte 4 8) packed-light))
+                    (float (ldb (byte 4 12) packed-light)))
               15.0))
          (divisor (swizzle (representation render-parameters) :z))
          (clip (mesh-view-clip world camera-position camera-right camera-up

@@ -68,30 +68,70 @@ and voxel light."
 
 Point DX + 2 DY + 4 DZ of a site at X/Y/Z is lattice point (X+DX, Y+DY, Z+DZ),
 for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
+  (declare (optimize (speed 3) (safety 1)))
   (let* ((sites (luft:surface-mesh-star-site-words mesh))
          (field (luft:surface-mesh-voxel-light mesh))
+         (sky (and field (luft:voxel-light-field-skylight field)))
          (words (make-array (length sites) :element-type '(unsigned-byte 32)
-                                           :initial-element 0)))
-    (when (and field (plusp (luft:voxel-light-field-page-count field)))
-      (let ((domain (luft:voxel-light-field-domain field))
-            (points (make-hash-table :test #'eql)))
-        (flet ((point-light (x y z)
-                 (let ((key (logior z (ash y 9) (ash x 27))))
-                   (or (gethash key points)
-                       (setf (gethash key points)
-                             (luft:voxel-light-at-lattice-point field x y z))))))
-          (loop for offset from 0 below (length sites) by 4
-                for x = (aref sites offset)
-                for y = (aref sites (+ offset 1))
-                for z = (aref sites (+ offset 2))
-                when (%light-page-near-p field domain x y z)
-                  do (dotimes (point 7)
-                       (let ((light (point-light (+ x (ldb (byte 1 0) point))
-                                                 (+ y (ldb (byte 1 1) point))
-                                                 (+ z (ldb (byte 1 2) point)))))
-                         (setf (aref words (+ offset (floor point 2)))
-                               (logior (aref words (+ offset (floor point 2)))
-                                       (ash light (* 16 (mod point 2)))))))))))
+                                           :initial-element #xf000f000)))
+    (when field
+      (let* ((domain (luft:voxel-light-field-domain field))
+             (xmin 0) (ymin 0) (zmin 0)
+             (xmax 0) (ymax 0) (zmax 0))
+        (declare (type fixnum xmin ymin zmin xmax ymax zmax))
+        (when (plusp (length sites))
+          (setf xmin (aref sites 0) ymin (aref sites 1) zmin (aref sites 2))
+          (loop for offset from 0 below (length sites) by 4 do
+            (setf xmin (min xmin (aref sites offset))
+                  ymin (min ymin (aref sites (+ offset 1)))
+                  zmin (min zmin (aref sites (+ offset 2)))
+                  xmax (max xmax (aref sites offset))
+                  ymax (max ymax (aref sites (+ offset 1)))
+                  zmax (max zmax (aref sites (+ offset 2))))))
+        (let* ((width (+ 2 (- xmax xmin)))
+               (height (+ 2 (- ymax ymin)))
+               (volume (* width height (+ 2 (- zmax zmin))))
+               ;; Regional meshes have compact bounds. Avoid allocating the
+               ;; entire enclosing world for a sparse, non-regional mesh.
+               (dense (when (<= volume 1048576)
+                        (make-array volume :element-type '(unsigned-byte 32)
+                                           :initial-element #x10000)))
+               (points (unless dense (make-hash-table :test #'eql))))
+          (declare (type fixnum width height volume)
+                   (type (or null (simple-array (unsigned-byte 32) (*))) dense))
+          (flet ((point-light (x y z)
+                   (declare (type fixnum x y z))
+                   (let* ((key (if dense
+                                   (+ (- x xmin) (* width (+ (- y ymin) (* height (- z zmin)))))
+                                   (logior z (ash y 9) (ash x 27))))
+                          (cached (if dense (aref dense key) (gethash key points #x10000))))
+                     (declare (type fixnum key cached))
+                     (if (< cached #x10000)
+                         cached
+                         (let ((light (logior
+                                       (luft:voxel-light-at-lattice-point field x y z)
+                                       (ash (if sky
+                                                (luft:voxel-sky-at-lattice-point sky x y z)
+                                                15) 12))))
+                           (if dense (setf (aref dense key) light)
+                               (setf (gethash key points) light))
+                           light)))))
+            (loop for offset from 0 below (length sites) by 4
+                  for x = (aref sites offset)
+                  for y = (aref sites (+ offset 1))
+                  for z = (aref sites (+ offset 2))
+                  when (or sky (%light-page-near-p field domain x y z))
+                    do (setf (aref words offset) 0
+                             (aref words (+ offset 1)) 0
+                             (aref words (+ offset 2)) 0
+                             (aref words (+ offset 3)) 0)
+                       (dotimes (point 7)
+                         (let ((light (point-light (+ x (ldb (byte 1 0) point))
+                                                   (+ y (ldb (byte 1 1) point))
+                                                   (+ z (ldb (byte 1 2) point)))))
+                           (setf (aref words (+ offset (floor point 2)))
+                                 (logior (aref words (+ offset (floor point 2)))
+                                         (ash light (* 16 (mod point 2))))))))))))
     words))
 
 (defstruct (prepared-render-mesh

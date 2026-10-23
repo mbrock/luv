@@ -225,7 +225,15 @@ accent (PACK-TERRAIN-PATTERN)."
 
 (defun material-cell-reader (field)
   "A read-only lookup that retains this exact material snapshot."
-  (lambda (cell) (material-cell-at field cell)))
+  (declare (optimize (speed 3) (safety 1)))
+  (etypecase field
+    (function field)
+    (hash-table (lambda (cell) (gethash cell field)))
+    (material-store
+     (let ((chunks (material-store-chunks field)))
+       (lambda (cell)
+         (let ((chunk (gethash (luft:site-chunk-key cell) chunks)))
+           (if chunk (gethash cell chunk) (values nil nil))))))))
 
 (defun compile-surface-mesh-appearance (mesh material-cells descriptors)
   "Compile one eight-u8 material record per active star in MESH.

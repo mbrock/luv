@@ -2,8 +2,10 @@
 
 ;;; Streamed voxel light (#BQMYNU)
 ;;;
-;;; A light value loses at least one level per step and starts at most at
-;;; fifteen, so it never travels fifteen cells.  A chunk column is sixty-four
+;;; Diffuse light loses at least one level per step and starts at most at
+;;; fifteen, so it never travels fifteen cells. Direct vertical sky is an
+;;; implicit column sweep; residency always includes the full height.
+;;; A chunk column is sixty-four
 ;;; cells wide, so the exact light over one column depends only on the
 ;;; emitters, attachments, and opacities of its own column and its eight
 ;;; neighbours.  That bound makes streamed light a pure function of resident
@@ -30,7 +32,7 @@
     (error "A light tile needs chunks wider than the light's reach.")))
 
 (defstruct (light-tile
-             (:constructor %make-light-tile (key inputs field source-count))
+             (:constructor %make-light-tile (key inputs field source-count sky))
              (:copier nil))
   "The exact light over chunk KEY's columns, and the inputs that justify it.
 
@@ -41,6 +43,7 @@ NIL when nothing in reach emits, which is most of any world."
   (key 0 :type luft:chunk-key :read-only t)
   (inputs nil :type list :read-only t)
   (field nil :type (or null luft:voxel-light-field) :read-only t)
+  (sky nil :type (or null luft:voxel-light-field) :read-only t)
   (source-count 0 :type (integer 0 *) :read-only t))
 
 (defun scene-regional-light-p (scene)
@@ -159,19 +162,166 @@ face's tangents by U and V, and the canonical half-cell wick off it."
                      (equal (third a) (third b))))
               left right)))
 
-(defun light-inputs-emit-p (inputs vocabulary)
-  "Whether anything in INPUTS emits, so its tile may hold light."
-  (loop for (nil table attachments) in inputs
-        thereis (or attachments
-                    (and table
-                         (plusp (length (chunk-emitter-sources table vocabulary)))))))
-
 ;;; Solving
 
 (defun light-tile-region (key)
   (let ((x (luft:chunk-origin-x key))
         (y (luft:chunk-origin-y key)))
     (list x y (+ x luft:+chunk-size+) (+ y luft:+chunk-size+))))
+
+(defvar *chunk-sky-columns*
+  (make-hash-table :test #'eq :weakness :key :synchronized t))
+
+(defun chunk-sky-columns (table opacity)
+  "Direct sky below each column's highest attenuator; NIL columns are open.
+
+These immutable byte columns are shared by every tile reading TABLE. Direct
+vertical sky loses only opacity; light which leaves a column loses one per
+step as well. Unknown residency is handled by the tile, never as open sky."
+  (or (gethash table *chunk-sky-columns*)
+      (setf (gethash table *chunk-sky-columns*)
+            (let ((columns (make-array 4096 :initial-element nil)))
+              (maphash
+               (lambda (cell material)
+                 (when (plusp (aref opacity material))
+                   (let* ((index (+ (logand (luft:site-x cell) 63)
+                                    (* 64 (logand (luft:site-y cell) 63))))
+                          (column (or (aref columns index)
+                                      (setf (aref columns index)
+                                            (make-array luft:+top-z+
+                                             :element-type '(unsigned-byte 8)
+                                             :initial-element 0)))))
+                     (setf (aref column (luft:site-z cell))
+                           (aref opacity material)))))
+               table)
+              (dotimes (index 4096)
+                (let* ((column (aref columns index))
+                       (top (and column (position-if #'plusp column :from-end t))))
+                  (when top
+                    (let ((direct (make-array (1+ top)
+                                   :element-type '(unsigned-byte 8)))
+                          (level 15))
+                      (loop for z from top downto 0 do
+                        (setf level (max 0 (- level (aref column z)))
+                              (aref direct z) level))
+                      (setf (aref columns index) direct)))))
+              columns))))
+
+(defvar *chunk-sky-interfaces*
+  (make-hash-table :test #'eq :weakness :key :synchronized t))
+
+(defun chunk-sky-interfaces (table opacity domain)
+  "Chunk-local diffuse seeds and shadowed seam cells, prepared with TABLE.
+
+Interior interfaces cannot change when a neighbour arrives. Only the small
+seam frontier must read the regional guard on the mesh worker."
+  (or (gethash table *chunk-sky-interfaces*)
+      (setf (gethash table *chunk-sky-interfaces*)
+            (let* ((columns (chunk-sky-columns table opacity))
+                   (first (loop for cell being the hash-keys of table return cell))
+                   (x0 (if first (luft:chunk-origin-x (luft:site-chunk-key first)) 0))
+                   (y0 (if first (luft:chunk-origin-y (luft:site-chunk-key first)) 0))
+                   (sources nil) (fringe nil))
+              (labels ((direct (x y z)
+                         (if (and (<= 0 x 63) (<= 0 y 63) (<= 0 z) (< z luft:+top-z+))
+                             (let ((column (aref columns (+ x (* 64 y)))))
+                               (if (or (null column) (>= z (length column)))
+                                   15 (aref column z)))
+                             0)))
+                (dotimes (y 64)
+                  (dotimes (x 64)
+                    (let ((column (aref columns (+ x (* 64 y)))))
+                      (when column
+                        (dotimes (z (length column))
+                          (let* ((cell (luft:make-site domain (+ x0 x) (+ y0 y) z luft:+cell-extent+ 1))
+                                 (level (aref column z))
+                                 (loss (1+ (multiple-value-bind (index present-p) (gethash cell table)
+                                             (if present-p (aref opacity index) 0)))))
+                            (when (and (< loss 15) (< level 14))
+                              (when (or (= x 0) (= y 0) (= x 63) (= y 63))
+                                (push cell fringe))
+                              (let ((candidate
+                                      (- (max (direct (1- x) y z) (direct (1+ x) y z)
+                                              (direct x (1- y) z) (direct x (1+ y) z)
+                                              (direct x y (1- z)) (direct x y (1+ z)))
+                                         loss)))
+                                (when (> candidate level)
+                                  (push (luft:make-voxel-light-source cell candidate) sources)))))))))))
+              (cons sources fringe)))))
+
+(zdefun (solve-sky-tile :zone :luft/solve-sky-tile :value key)
+    (scene key inputs)
+  "Exact sky over KEY, with closed unknown columns and open domain top.
+
+Only direct/diffuse interfaces seed the ordinary bounded frontier. Open
+atmosphere is an implicit column reading, not millions of queued cells."
+  (declare (optimize (speed 3) (safety 1)))
+  (let* ((domain (scene-domain scene))
+         (opacity (scene-authored-light-opacity-table scene))
+         (region (light-tile-region key))
+         (x0 (max 0 (- (first region) 14)))
+         (y0 (max 0 (- (second region) 14)))
+         (x1 (min (luft:world-domain-x-limit domain) (+ (third region) 14)))
+         (y1 (min (luft:world-domain-y-limit domain) (+ (fourth region) 14)))
+         (width (- x1 x0))
+         (columns (make-array (* width (- y1 y0)) :initial-element :unknown))
+         (reader (material-cell-reader (scene-material-cells scene)))
+         (closed-opacity (concatenate '(vector (unsigned-byte 8)) opacity #(15)))
+         (interfaces nil)
+         (sources (make-array 0 :element-type '(unsigned-byte 64)
+                               :adjustable t :fill-pointer 0)))
+    (declare (type fixnum x0 y0 x1 y1 width))
+    (loop for (neighbour table) in inputs when table do
+      (let ((sky (chunk-sky-columns table opacity))
+            (cx (luft:chunk-origin-x neighbour))
+            (cy (luft:chunk-origin-y neighbour)))
+        (push (chunk-sky-interfaces table opacity domain) interfaces)
+        (loop for y from (max y0 cy) below (min y1 (+ cy 64)) do
+          (loop for x from (max x0 cx) below (min x1 (+ cx 64)) do
+            (setf (aref columns (+ (- x x0) (* width (- y y0))))
+                  (aref sky (+ (- x cx) (* 64 (- y cy)))))))))
+    (labels ((known-p (x y)
+               (and (<= x0 x) (< x x1) (<= y0 y) (< y y1)
+                    (not (eq :unknown
+                             (aref columns (+ (- x x0) (* width (- y y0))))))))
+             (material (cell)
+               (if (known-p (luft:site-x cell) (luft:site-y cell))
+                   (funcall reader cell)
+                   (values (length opacity) t)))
+             (direct (x y z)
+               (declare (type fixnum x y z))
+               (if (and (<= x0 x) (< x x1) (<= y0 y) (< y y1)
+                        (<= 0 z) (< z luft:+top-z+))
+                   (let ((column (aref columns (+ (- x x0) (* width (- y y0))))))
+                     (cond ((eq column :unknown) 0)
+                           ((or (null column) (>= z (length column))) 15)
+                           (t (aref (the (simple-array (unsigned-byte 8) (*)) column) z))))
+                   0)))
+      (dolist (interface interfaces)
+        (dolist (source (car interface))
+          (let ((cell (ldb (byte 48 0) source)))
+            (when (known-p (luft:site-x cell) (luft:site-y cell))
+              (vector-push-extend source sources))))
+        (dolist (cell (cdr interface))
+          (let ((x (luft:site-x cell)) (y (luft:site-y cell)) (z (luft:site-z cell)))
+            (when (known-p x y)
+              (let* ((level (direct x y z))
+                     (incoming (max (direct (1- x) y z) (direct (1+ x) y z)
+                                    (direct x (1- y) z) (direct x (1+ y) z)
+                                    (direct x y (1- z)) (direct x y (1+ z)))))
+                (when (> incoming (1+ level))
+                  (let* ((loss (1+ (multiple-value-bind (index present-p) (material cell)
+                                    (if present-p (aref closed-opacity index) 0))))
+                         (candidate (max 0 (- incoming loss))))
+                    (when (> candidate level)
+                      (vector-push-extend
+                       (luft:make-voxel-light-source cell candidate) sources)))))))))
+      (let* ((solved (luft:solve-voxel-light
+                      domain #'material closed-opacity sources
+                      :region region :hashed-p t :baseline #'direct))
+             (field (luft:join-voxel-light-fields domain (list solved) :region region)))
+        (setf (luft:voxel-light-field-baseline field) #'direct)
+        field))))
 
 (zdefun (solve-light-tile :zone :luft/solve-light-tile :value key)
     (scene key inputs)
@@ -212,7 +362,8 @@ face's tangents by U and V, and the canonical half-cell wick off it."
                (coerce sources '(simple-array (unsigned-byte 64) (*)))
                :region region :hashed-p t))
         :region region))
-     (length sources))))
+     (length sources)
+     (solve-sky-tile scene key inputs))))
 
 (zdefun (realize-streaming-light-tiles :zone :luft/realize-light-tiles
                                        :value (length keys))
@@ -227,33 +378,51 @@ face's tangents by U and V, and the canonical half-cell wick off it."
 
 (defun light-tiles-generation (scene tiles revision)
   "One realized-light generation whose field joins TILES' fields."
-  (make-realized-light-generation
-   (scene-authored-light-provenance scene) revision
-   (make-realized-light-seeds #() #())
-   (luft:join-voxel-light-fields
-    (scene-domain scene)
-    (remove nil (mapcar #'light-tile-field tiles))
-    :revision revision)))
+  (declare (optimize (speed 3) (safety 1)))
+  (let* ((domain (scene-domain scene))
+         (x0 (reduce #'min tiles :key (lambda (tile) (luft:chunk-key-x (light-tile-key tile)))))
+         (y0 (reduce #'min tiles :key (lambda (tile) (luft:chunk-key-y (light-tile-key tile)))))
+         (width (1+ (- (reduce #'max tiles :key (lambda (tile) (luft:chunk-key-x (light-tile-key tile)))) x0)))
+         (height (1+ (- (reduce #'max tiles :key (lambda (tile) (luft:chunk-key-y (light-tile-key tile)))) y0)))
+         (baselines (make-array (* width height) :initial-element nil))
+         (sky (luft:join-voxel-light-fields domain (mapcar #'light-tile-sky tiles)
+                                          :revision revision))
+         (field (luft:join-voxel-light-fields
+                 domain (remove nil (mapcar #'light-tile-field tiles))
+                 :revision revision)))
+    (declare (type fixnum x0 y0 width height))
+    (dolist (tile tiles)
+      (setf (aref baselines (+ (- (luft:chunk-key-x (light-tile-key tile)) x0)
+                              (* width (- (luft:chunk-key-y (light-tile-key tile)) y0))))
+            (luft:voxel-light-field-baseline (light-tile-sky tile))))
+    (setf (luft:voxel-light-field-baseline sky)
+          (lambda (x y z)
+            (declare (type fixnum x y z))
+            (let ((cx (- (ash x -6) x0)) (cy (- (ash y -6) y0)))
+              (if (and (<= 0 cx) (< cx width) (<= 0 cy) (< cy height))
+                  (let ((baseline (aref baselines (+ cx (* width cy)))))
+                    (if baseline (funcall baseline x y z) 0))
+                  0)))
+          (luft:voxel-light-field-skylight field) sky)
+    (make-realized-light-generation
+     (scene-authored-light-provenance scene) revision
+     (make-realized-light-seeds #() #()) field)))
 
 ;;; Publication
 
 (defun streaming-light-dirty-owners (scene owner-keys)
   "OWNER-KEYS whose published light may differ from their current inputs.
 
-A tile is dirty when its inputs changed and it either held light or now has
-an emitter in reach; a tile that was dark and has nothing to emit stays dark.
-Every owner whose 3 by 3 neighbourhood holds a dirty tile is relit."
+A tile is dirty whenever its inputs change: roofs and unknown boundaries
+matter even when nothing emits. Every owner whose 3 by 3 neighbourhood holds
+a dirty tile is relit, using its unchanged cached geometry."
   (let ((tiles (streaming-scene-light-tiles scene))
-        (vocabulary (scene-material-vocabulary scene))
         (dirty (make-hash-table :test #'eql)))
     (dolist (key (streaming-scene-dependency-guard-keys scene owner-keys))
       (let ((installed (gethash key tiles))
             (inputs (chunk-light-inputs scene key)))
-        (when (if installed
-                  (and (not (light-inputs= inputs (light-tile-inputs installed)))
-                       (or (light-tile-field installed)
-                           (light-inputs-emit-p inputs vocabulary)))
-                  (light-inputs-emit-p inputs vocabulary))
+        (when (or (null installed)
+                  (not (light-inputs= inputs (light-tile-inputs installed))))
           (setf (gethash key dirty) t))))
     (remove-if-not
      (lambda (owner)

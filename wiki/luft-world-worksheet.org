@@ -279,7 +279,7 @@ publication edge.  The orb still renders the four canonical owner meshes at
 about one frame per second; their roughly 736,000 triangles are a measured
 renderer-budget concern, not hidden as a lighting task.
 
-** TODO Publish stable regional sky and RGB4 light
+** NEXT Publish stable regional sky and RGB4 light
 :PROPERTIES:
 :ID: JDB26Y
 :END:
@@ -293,6 +293,26 @@ publication.
 Luvcraft supplies proven field, frontier, boundary, and coherent-publication
 patterns.  The first implementation may specialize their laws to Luft rather
 than generalize the executor prematurely.
+
+/Regional implementation./ #BQMYNU now publishes a distinct scalar sky field
+beside RGB4 through one immutable regional generation. Full-height columns
+make direct sky local; diffuse reach is fourteen cells, so the existing 3 by 3
+guard suffices. Unknown residency is closed, known air is open, and the top
+boundary admits sky. Both owners at a seam use the same retained tile.
+Opacity-only roof edits invalidate light even without any RGB emitter.
+Publication still waits for the existing stable guard; no relaxed or partial
+cohort was introduced. The room/skylight regression compares all 128 by 128 by
+10 cells with explicitly seeded whole-domain light in three states: open,
+closed, and partially opaque. Zero mismatches; old publications retain their
+previous values. The seed-7 edit benchmark retains 15/16 geometry arrays.
+
+Noon/dusk software-Vulkan captures cover a natural Luvcraft cave near
+(1001,1086,8) and the atelier citadel gate near (1462,650,22). The latter is
+deliberately not the open heightfield at atelier spawn. #WLLATM records costs:
+sky columns/interfaces move to materialization, but diffuse solving and
+packing still block prepared cohorts. Separate sky/RGB revision succession,
+an end-to-end edit/residency latency trace, and a larger visibility-churn
+proof remain open. This is progress toward #DLH49J, not its completion note.
 
 /Done when./ Open ground, a roofed room, a skylight, and an RGB emitter render
 correctly; one source and receiver cross a chunk seam; entering visible chunks

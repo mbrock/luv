@@ -976,8 +976,46 @@ regional light-generation succession and partial prepared-owner cohort, not a
 weaker publication boundary.  The repeatable burst capture and relight-cell
 counters above remain outstanding.
 
-Next experiment: add the repeatable edit/residency burst and relight-cell
-counters, then let one regional light generation retain prepared owners whose
+/Regional-sky measurements./ =scripts/measure-streamed-light.lisp= now
+materializes seed 7's 64 captured chunks, meshes 16 owners against 36 tiles,
+measures separate sidecar packing, then places/removes a high roof cell four
+times through the real geometry cache and renderer preparer. Run with
+=./env --slim sbcl --script scripts/measure-streamed-light.lisp=.
+The same script in a worktree at =21d9992= supplies the RGB-only control.
+Single-process timings on this software-rendering orb, in milliseconds:
+
+| CPU stage                    | RGB-only control | Regional sky + RGB |
+|------------------------------+------------------+--------------------|
+| Materialize captured chunks  |            14676 |              15488 |
+| Cold tiles                   |              192 |                196 |
+| Cold mesh cohort             |              244 |                300 |
+| Cold sidecar packing         |              144 |                140 |
+| Cached tiles                 |                0 |                  0 |
+| Warm mesh, no geometry cache |            80–84 |             96–104 |
+| Warm packing                 |          136–144 |                132 |
+| Roof edit owner CPU          |              0–4 |                0–4 |
+| Roof edit prepared cohort    |          192–224 |            216–236 |
+
+Cold tile and cold cohort timings are independent trials: the cohort also
+solves its own tiles, so do not add those two rows. Packing is measured
+separately from mesh time. The burst includes packing but not GPU submission,
+owner/frame scheduling, or publication latency. All four roof edits touch
+16 light owners and preserve 15/16 geometry arrays. Both versions retain
+3,951,600 sidecar bytes and 193,911 RGB visits/pushes; these counters are not
+sky visits. Earlier cold RGB trials varied from 152 to 192 ms.
+
+The initial naive regional sky cost 1,120 ms tiles and 340 ms packing.
+Moving direct columns and interior interface discovery to materialization,
+retaining solve-local pages, joining RGB lattice samples within a page,
+early-exiting scalar sky at fifteen, and replacing per-point hashes with a
+bounded dense mesh-local cache brought that down to the table above. The
+added sky work is now affordable but /total cold latency has not improved
+over RGB-only/. Diffuse tiles and packing still sit on the prepared cohort's
+critical path; do not weaken the stable guard to hide them. Exact differential
+checks and inspected day/dusk cave/gate captures are recorded in #BQMYNU.
+
+Next experiment: add an end-to-end edit/residency publication trace and sky
+frontier counters, then let one regional light generation retain prepared owners whose
 sample envelopes are provably disjoint from the edited light influence.  Keep
 the complete-cohort publication as the correctness oracle; the captured 8 ms
 publication cost is already too small to justify weakening it.

@@ -363,3 +363,95 @@
                    (is = 0 (luft:voxel-light-at (field meshes east) 65 10 1))
                    (is = 0 (luft:voxel-light-at (field meshes west) 61 10 1))))))
         (production:stop-production-system system)))))
+
+(define-test streamed-sky-roof-skylight-and-replacement
+  ;; An enclosed room spans the x=64 seam. Its central skylight admits
+  ;; direct sun; the surrounding roof admits only attenuated lateral sky.
+  (let ((builder (terrain:make-scene-builder
+                  :horizontal-bits 7 :material-vocabulary (make-palette)
+                  :ground-material *stone*)))
+    (loop for x from 44 below 84 do
+      (loop for y from 44 below 84 do
+        (terrain:scene-builder-cell builder x y 0)
+        (unless (and (= x 63) (= y 63))
+          (terrain:scene-builder-cell builder x y 8))
+        (when (or (= x 44) (= x 83) (= y 44) (= y 83))
+          (loop for z from 1 below 8 do
+            (terrain:scene-builder-cell builder x y z)))))
+    (let* ((authored (terrain:finish-scene-builder builder))
+           (scene (terrain:make-streaming-scene authored))
+           (domain (terrain:scene-domain scene))
+           (keys (loop for x in '(0 64) nconc
+                   (loop for y in '(0 64) collect (luft:chunk-key-at x y))))
+           (system (production:make-single-worker-production-system
+                    :name "streamed sky test")))
+      (dolist (key keys) (setf (gethash key (terrain:streaming-scene-loaded scene)) 1))
+      (unwind-protect
+           (labels ((sky (meshes key)
+                      (luft:voxel-light-field-skylight
+                       (luft:surface-mesh-voxel-light (cdr (assoc key meshes)))))
+                    (compare-oracle (meshes)
+                      ;; Independent whole-domain oracle: explicitly seed
+                      ;; every directly lit cell, rather than use implicit
+                      ;; columns or interface-only sources. No REGION prune.
+                      (let ((sources nil)
+                            (materials (terrain:scene-material-cells scene))
+                            (opacity (terrain:scene-authored-light-opacity-table scene)))
+                        (dotimes (x 128)
+                          (dotimes (y 128)
+                            (let ((level 15))
+                              (loop for z from 9 downto 0
+                                    for cell = (luft:make-site domain x y z luft:+cell-extent+ 1)
+                                    do (multiple-value-bind (material present-p)
+                                           (terrain:material-cell-at materials cell)
+                                         (when present-p
+                                           (setf level (max 0 (- level (aref opacity material))))))
+                                       (when (plusp level)
+                                         (push (luft:make-voxel-light-source cell level) sources))))))
+                        (let ((oracle (luft:solve-voxel-light
+                                       domain (terrain:material-cell-reader materials)
+                                       opacity (coerce sources 'vector)))
+                              (mismatches 0))
+                          (dotimes (x 128)
+                            (dotimes (y 128)
+                              (dotimes (z 10)
+                                (unless (= (luft:voxel-light-at oracle x y z)
+                                           (luft:voxel-light-at
+                                            (sky meshes (luft:chunk-key-at x y)) x y z))
+                                  (incf mismatches)))))
+                          (is = 0 mismatches)))))
+             (let* ((meshes (stream-cohort scene system keys))
+                    (field (sky meshes (first keys))))
+               (is = 15 (luft:voxel-light-at field 63 63 1))
+               (is = 14 (luft:voxel-light-at field 62 63 1))
+               (is = 0 (luft:voxel-light-at field 48 48 1))
+               (compare-oracle meshes)
+               ;; A roof edit has no emitter, but must invalidate light on
+               ;; both sides and preserve the cached geometry of other owners.
+               (terrain:edit-streaming-scene-cell
+                scene (luft:make-site domain 63 63 8 luft:+cell-extent+ 1) *stone*)
+               (let ((dirty (terrain:streaming-light-dirty-owners scene keys)))
+                 (is = 4 (length dirty))
+                 (let ((closed (stream-cohort scene system dirty)))
+                   (is = 0 (luft:voxel-light-at (sky closed (first keys)) 63 63 1))
+                   ;; The immutable previous publication still reads open.
+                   (is = 15 (luft:voxel-light-at field 63 63 1))
+                   (compare-oracle closed)))
+               ;; A partially opaque roof admits attenuated direct sky all
+               ;; the way down, not one extra loss per vertical cell.
+               (is eq :edited
+                   (nth-value 1 (terrain:edit-streaming-scene-cell
+                                 scene (luft:make-site domain 63 63 8 luft:+cell-extent+ 1) nil)))
+               (terrain:edit-streaming-scene-cell
+                scene (luft:make-site domain 63 63 8 luft:+cell-extent+ 1) *glow*)
+               (let ((partial (stream-cohort scene system keys)))
+                 (is = 14 (luft:voxel-light-at (sky partial (first keys)) 63 63 1))
+                 (compare-oracle partial)))
+             ;; A departure must not make a missing column an open sky source.
+             (let* ((key (first keys))
+                    (inputs (terrain::chunk-light-inputs scene key))
+                    (unknown (copy-tree inputs)))
+               (setf (second (first unknown)) nil)
+               (let ((field (terrain::solve-sky-tile scene key unknown)))
+                 (is = 0 (luft:voxel-light-at field 20 20 20)))))
+        (production:stop-production-system system)))))

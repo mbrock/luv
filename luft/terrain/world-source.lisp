@@ -176,6 +176,9 @@ materializes and the descriptors the scene compiles name the same palette."
       ;; Find the chunk's emitters here, on the worker, before the owner
       ;; thread asks which tiles its arrival may light.
       (chunk-emitter-sources materials vocabulary)
+      ;; Direct sky and interior interfaces depend only on this chunk; prepare
+      ;; them with materialization rather than on the mesh cohort's path.
+      (chunk-sky-interfaces materials (compile-material-light-opacity-table vocabulary) domain)
       (%make-resident-cell-chunk key incarnation fibers materials attachments))))
 
 (defclass authored-chunk-load-request (production:production-request)

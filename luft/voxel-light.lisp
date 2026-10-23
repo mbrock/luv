@@ -75,6 +75,9 @@
   (y-pages 0 :type (integer 0 *) :read-only t)
   (page-count 0 :type (integer 0 *) :read-only t)
   (revision 0 :type (integer 0 *) :read-only t)
+  ;; Implicit direct-column light avoids materializing the open atmosphere.
+  (baseline nil :type (or null function))
+  (skylight nil :type (or null voxel-light-field))
   (visits 0 :type (integer 0 *) :read-only t)
   (pushes 0 :type (integer 0 *) :read-only t)
   (stale-pops 0 :type (integer 0 *) :read-only t))
@@ -142,11 +145,15 @@ domain whose directory alone would outweigh their light."
              (< x (world-domain-x-limit domain))
              (< y (world-domain-y-limit domain))
              (< z +top-z+))
-        (%voxel-light-at-coordinates
-         (voxel-light-field-pages field)
-         (voxel-light-field-direct-p field)
-         (voxel-light-field-x-pages field)
-         (voxel-light-field-y-pages field) x y z)
+        (let ((stored (%voxel-light-at-coordinates
+                       (voxel-light-field-pages field)
+                       (voxel-light-field-direct-p field)
+                       (voxel-light-field-x-pages field)
+                       (voxel-light-field-y-pages field) x y z)))
+          (if (voxel-light-field-baseline field)
+              (voxel-light-componentwise-max
+               stored (funcall (voxel-light-field-baseline field) x y z))
+              stored))
         0)))
 
 (defun voxel-light-at-site (field cell)
@@ -154,12 +161,7 @@ domain whose directory alone would outweigh their light."
   (checked-site (voxel-light-field-domain field) cell)
   (unless (= (site-extent cell) +cell-extent+)
     (error "Voxel light is defined on cells, not site ~S." cell))
-  (%voxel-light-at-coordinates
-   (voxel-light-field-pages field)
-   (voxel-light-field-direct-p field)
-   (voxel-light-field-x-pages field)
-   (voxel-light-field-y-pages field)
-   (site-x cell) (site-y cell) (site-z cell)))
+  (voxel-light-at field (site-x cell) (site-y cell) (site-z cell)))
 
 (defun voxel-light-at-lattice-point (field x y z)
   "Sample light at a cubical lattice point by joining its incident cells.
@@ -168,15 +170,63 @@ This canonical point-owned value is shared by every bevel primitive meeting
 there, so independently emitted face, band, and fan instances remain lit
 continuously."
   (check-type field voxel-light-field)
-  (let ((answer 0))
-    (declare (type voxel-light answer))
-    (dolist (dx '(-1 0))
-      (dolist (dy '(-1 0))
-        (dolist (dz '(-1 0))
+  (let* ((domain (voxel-light-field-domain field))
+         (pages (voxel-light-field-pages field))
+         (direct-p (voxel-light-field-direct-p field))
+         (xp (voxel-light-field-x-pages field))
+         (yp (voxel-light-field-y-pages field))
+         (baseline (voxel-light-field-baseline field))
+         (red 0) (green 0) (blue 0))
+    (declare (type fixnum x y z red green blue))
+    ;; Most lattice points lie inside one page. Look it up once rather than
+    ;; hashing all eight incident cells independently.
+    (when (and (null baseline)
+               (< 0 x (world-domain-x-limit domain))
+               (< 0 y (world-domain-y-limit domain)) (< 0 z +top-z+)
+               (not (zerop (logand x 7)))
+               (not (zerop (logand y 7)))
+               (not (zerop (logand z 7))))
+      (let ((page (%voxel-light-page-at pages direct-p xp yp x y z))
+            (index (%voxel-light-page-index (1- x) (1- y) (1- z))))
+        (when page
+          (dolist (offset '(0 1 8 9 64 65 72 73))
+            (let ((light (aref (the voxel-light-page page) (+ index offset))))
+              (setf red (max red (ldb (byte 4 0) light))
+                    green (max green (ldb (byte 4 4) light))
+                    blue (max blue (ldb (byte 4 8) light))))))
+        (return-from voxel-light-at-lattice-point (pack-voxel-light red green blue))))
+    (loop for cx fixnum from (max 0 (1- x)) below (min (1+ x) (world-domain-x-limit domain)) do
+      (loop for cy fixnum from (max 0 (1- y)) below (min (1+ y) (world-domain-y-limit domain)) do
+        (loop for cz fixnum from (max 0 (1- z)) below (min (1+ z) +top-z+) do
+          (let* ((stored (%voxel-light-at-coordinates pages direct-p xp yp cx cy cz))
+                 (light (if baseline
+                            (voxel-light-componentwise-max
+                             stored (funcall baseline cx cy cz))
+                            stored)))
+            (setf red (max red (ldb (byte 4 0) light))
+                  green (max green (ldb (byte 4 4) light))
+                  blue (max blue (ldb (byte 4 8) light)))))))
+    (pack-voxel-light red green blue)))
+
+(defun voxel-sky-at-lattice-point (field x y z)
+  "Scalar sky join, stopping as soon as an incident cell sees the open sky."
+  (let* ((answer 0)
+         (domain (voxel-light-field-domain field))
+         (baseline (voxel-light-field-baseline field)))
+    (declare (type fixnum x y z answer))
+    (loop for cx fixnum from (max 0 (1- x)) below (min (1+ x) (world-domain-x-limit domain)) do
+      (loop for cy fixnum from (max 0 (1- y)) below (min (1+ y) (world-domain-y-limit domain)) do
+        (loop for cz fixnum from (min z (1- +top-z+)) downto (max 0 (1- z)) do
+          (when baseline
+            (setf answer (max answer (the (integer 0 15) (funcall baseline cx cy cz))))
+            (when (= answer 15) (return-from voxel-sky-at-lattice-point 15)))
           (setf answer
-                (voxel-light-componentwise-max
-                 answer
-                 (voxel-light-at field (+ x dx) (+ y dy) (+ z dz)))))))
+                (max answer (%voxel-light-at-coordinates
+                             (voxel-light-field-pages field)
+                             (voxel-light-field-direct-p field)
+                             (voxel-light-field-x-pages field)
+                             (voxel-light-field-y-pages field) cx cy cz)))
+          (when (= answer 15) (return-from voxel-sky-at-lattice-point 15)))))
     answer))
 
 (defun %voxel-light-lattice-key (x y z)
@@ -271,7 +321,7 @@ many mesh points in one derived render population."
 
 (defun solve-voxel-light
     (domain material-cells opacity-table sources
-     &key (revision 0) region hashed-p)
+     &key (revision 0) region hashed-p baseline)
   "Compute immutable colored local light with a packed brightest-first frontier.
 
 MATERIAL-CELLS is a hash table or a lookup function returning a dense material
@@ -285,8 +335,10 @@ REGION, a list (X0 Y0 X1 Y1) of half-open cell bounds, asks only for the light
 of the columns inside it.  Every step costs at least one level, so a value at
 horizontal L1 distance D outside REGION can still reach it only while its
 brightest lane exceeds D; the frontier admits nothing else.  The field is then
-exact inside REGION and a partial witness outside it.  HASHED-P forces sparse
-hashed page storage (#BQMYNU)."
+exact inside REGION and a partial witness outside it. HASHED-P forces sparse
+hashed page storage (#BQMYNU). BASELINE, when supplied, reads immutable
+implicit RGB4 at X,Y,Z. SOURCES must include every interface at which that
+baseline can improve a neighbour; only improvements over it enter the queue."
   (check-type domain world-domain)
   (check-type material-cells (or hash-table function))
   (check-type opacity-table (vector (unsigned-byte 8)))
@@ -302,6 +354,8 @@ hashed page storage (#BQMYNU)."
           (pushes 0)
           (stale-pops 0)
           (page-count 0)
+          (cached-key -1)
+          (cached-page nil)
           (queued 0)
           (current-priority 0)
           (x-limit (world-domain-x-limit domain))
@@ -310,12 +364,26 @@ hashed page storage (#BQMYNU)."
         (setf (aref buckets level)
               (make-array 64 :element-type '(unsigned-byte 64)
                              :adjustable t :fill-pointer 0)))
-      (labels ((light-at (x y z)
-                 (%voxel-light-at-coordinates
-                  pages direct-p x-pages y-pages x y z))
+      (labels ((page-at (x y z)
+                 ;; Frontier neighbours overwhelmingly share a page. This
+                 ;; solve-local cache includes misses and never escapes.
+                 (if direct-p
+                     (%voxel-light-page-at pages t x-pages y-pages x y z)
+                     (let ((key (%voxel-light-page-key x y z)))
+                       (unless (= key cached-key)
+                         (setf cached-key key cached-page (gethash key pages)))
+                       cached-page)))
+               (light-at (x y z)
+                 (let* ((page (page-at x y z))
+                        (stored (if page
+                                    (aref (the voxel-light-page page)
+                                          (%voxel-light-page-index x y z))
+                                    0)))
+                   (if baseline
+                       (voxel-light-componentwise-max stored (funcall baseline x y z))
+                       stored)))
                (page-for-write (x y z)
-                 (or (%voxel-light-page-at
-                      pages direct-p x-pages y-pages x y z)
+                 (or (page-at x y z)
                      (let ((page
                              (make-array
                               +voxel-light-page-cell-count+
@@ -328,8 +396,9 @@ hashed page storage (#BQMYNU)."
                                    x-pages y-pages x y z))
                                  page)
                            (setf (gethash (%voxel-light-page-key x y z)
-                                          (the hash-table pages))
-                                 page))
+                                          (the hash-table pages)) page
+                                 cached-key (%voxel-light-page-key x y z)
+                                 cached-page page))
                        (incf page-count)
                        page)))
                (region-distance (x y)
@@ -354,7 +423,9 @@ hashed page storage (#BQMYNU)."
                              (max current-priority priority)))
                      (incf queued)
                      (incf pushes))))
-               (drain-neighbor (x y z light dx dy dz)
+               (drain-neighbor (cell x y z light dx dy dz)
+                 (declare (type site cell) (type fixnum x y z)
+                          (type voxel-light light) (type (integer -1 1) dx dy dz))
                  (let ((target-x (+ x dx))
                        (target-y (+ y dy))
                        (target-z (+ z dz)))
@@ -362,8 +433,16 @@ hashed page storage (#BQMYNU)."
                               (<= 0 target-y) (< target-y y-limit)
                               (<= 0 target-z) (< target-z +top-z+))
                      (let* ((target
-                              (make-site domain target-x target-y target-z
-                                         +cell-extent+ 1))
+                              ;; Only a horizontal chunk crossing needs a
+                              ;; new Morton key. Everywhere else the packed
+                              ;; local lanes can advance without revalidation.
+                              (if (or (and (= dx -1) (zerop (logand x 63)))
+                                      (and (= dx 1) (= (logand x 63) 63))
+                                      (and (= dy -1) (zerop (logand y 63)))
+                                      (and (= dy 1) (= (logand y 63) 63)))
+                                  (make-site domain target-x target-y target-z +cell-extent+ 1)
+                                  (+ cell (ash dx +x-local-shift+)
+                                     (ash dy +y-local-shift+) (ash dz +z-shift+))))
                             (loss
                               (1+ (%material-opacity
                                    material-cells opacity-table target)))
@@ -399,15 +478,17 @@ hashed page storage (#BQMYNU)."
                 (incf stale-pops)
                 (progn
                   (incf visits)
-                  (drain-neighbor x y z light -1 0 0)
-                  (drain-neighbor x y z light 1 0 0)
-                  (drain-neighbor x y z light 0 -1 0)
-                  (drain-neighbor x y z light 0 1 0)
-                  (drain-neighbor x y z light 0 0 -1)
-                  (drain-neighbor x y z light 0 0 1)))))
-        (%make-voxel-light-field
-         domain pages direct-p x-pages y-pages page-count revision
-         visits pushes stale-pops)))))
+                  (drain-neighbor cell x y z light -1 0 0)
+                  (drain-neighbor cell x y z light 1 0 0)
+                  (drain-neighbor cell x y z light 0 -1 0)
+                  (drain-neighbor cell x y z light 0 1 0)
+                  (drain-neighbor cell x y z light 0 0 -1)
+                  (drain-neighbor cell x y z light 0 0 1)))))
+        (let ((field (%make-voxel-light-field
+                      domain pages direct-p x-pages y-pages page-count revision
+                      visits pushes stale-pops)))
+          (setf (voxel-light-field-baseline field) baseline)
+          field)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Regional fields
@@ -491,6 +572,18 @@ part of its field it is exact over."
                              (aref (the voxel-light-page page) index))))
                     (setf (gethash key pages) joined)))))))
          field))
-      (%make-voxel-light-field
-       domain pages nil x-pages y-pages page-count revision
-       visits pushes stale-pops))))
+      (let ((result (%make-voxel-light-field
+                     domain pages nil x-pages y-pages page-count revision
+                     visits pushes stale-pops))
+            (baselines (remove nil (mapcar #'voxel-light-field-baseline fields))))
+        (when baselines
+          (setf (voxel-light-field-baseline result)
+                (lambda (x y z)
+                  (if (and region
+                           (not (and (<= (first region) x) (< x (third region))
+                                     (<= (second region) y) (< y (fourth region)))))
+                      0
+                      (reduce #'voxel-light-componentwise-max baselines
+                              :key (lambda (baseline) (funcall baseline x y z))
+                              :initial-value 0)))))
+        result))))
