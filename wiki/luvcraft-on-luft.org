@@ -427,6 +427,42 @@ wizard had to reach for became engine protocol (#CERUZY).  The atelier keeps
 its own isometric mode, which now shares that protocol rather than code with
 the wizard.
 
+*** DONE Give the wizard an ember journey
+:PROPERTIES:
+:ID: 7D3HOK
+:END:
+
+The first small answer to #DLH49J is /The Ember Walk/: leave the path for the
+standing-stone green, kindle its plinth with Space, carry that spell to the
+ridge, then awaken the pond-bank plinth. A gold compass waymark stays on the
+screen edge when its destination is offscreen; the objective names the next
+place, its distance, and when the wizard is close enough to cast. Three
+lights finish the journey. R returns to spawn without erasing the lights.
+
+The pointer has a green cell outline and crosshair on a standing surface,
+red where a ray finds no floor. Clicks use the terrain's existing bounded
+eight-connected A*; gold breadcrumbs show the route rather than promising a
+straight walk through a tree. Refused routes say so. Tests walk around a
+wall, reject a corner-enclosed destination and an occupied cell, handle an
+already-reached cell, and actually traverse all three journey legs.
+
+Kindling adds an emissive amber cell above the stone plinth through the
+authored edit protocol and schedules its mesh/light cohort. The world-source
+overlay retains it through residency changes. This is a small first spell,
+not a claim that the beam reference plate in #YRDFFH is finished: no beam,
+fluid volume, or transient-light API was added. The game owns its compact
+bitmap HUD and cast sigil; it still depends on neither McCLIM nor the atelier.
+
+=scripts/wizard-journey.lisp= drives a fresh =./sly play wizard= through
+screen-space clicks, A*, simulation and each real streamed edit, with no
+teleportation. It captures the start, route, and three lights using software
+Vulkan and checks that returning to spawn keeps completion. The source cache
+can become resident before the collision cohort is published; movement now
+waits for the published collision chunk, so cold startup cannot drop the
+wizard through not-yet-playable ground. Progress remains session-local:
+save/resume, branching journeys and the larger worksheet's fortress loop are
+still open.
+
 ** NEXT Give materials tones, relief, and edge response
 :PROPERTIES:
 :ID: Q3KI72

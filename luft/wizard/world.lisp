@@ -6,7 +6,7 @@
 ;;; column, so it answers the terrain's world-source protocol directly and a
 ;;; streaming worker can raise any chunk of it alone.
 
-;;; The palette.  Seven kinds and their placements; the terrain says what a
+;;; The palette. Nine kinds and their placements; the terrain says what a
 ;;; material means, this file says which ones the wizard's world has.
 
 (defun wizard-kind (name &rest initargs)
@@ -70,11 +70,21 @@
    (wizard-kind :leaves :base-tone '(0.14 0.30 0.10) :relief :leaves
                         :relief-strength 0.7)))
 
+(defparameter *ember*
+  (wizard-placement
+   :ember (wizard-kind :ember :base-tone '(1.0 0.32 0.035)
+                             :surface-emission 4.0
+                             :light-emission '(15 8 2))))
+
+(defparameter *wizard-beacons*
+  '(("GREEN" 96 107) ("RIDGE" 126 129) ("POND" 156 146))
+  "The ember journey, in order. Each destination has a stone plinth.")
+
 (defun make-wizard-palette ()
   "The wizard world's placement vocabulary."
   (domains:make-identity-vocabulary-domain
    :members (list *meadow* *flagstone* *standing-stone* *bedrock*
-                  *sand* *water* *bark* *leaves*)
+                  *sand* *water* *bark* *leaves* *ember*)
    :limit #xff))
 
 ;;; The isle.
@@ -154,6 +164,9 @@
       (when (and (> (abs (- x (wizard-path-centre-x y))) 4.0)
                  (> (wizard-distance x y *wizard-stone-circle*) 14.0)
                  (> (wizard-distance x y *wizard-pond*) 11.0)
+                 (every (lambda (beacon)
+                          (> (wizard-distance x y (cdr beacon)) 5.0))
+                        *wizard-beacons*)
                  (> (wizard-ground-height x y) (+ 2 *wizard-sea-level*)))
         (values x y)))))
 
@@ -202,6 +215,11 @@
                 (place sx sy (+ ground 3) *standing-stone*))))
           (loop for x from (1- cx) to (1+ cx) do
             (place x cy ground *standing-stone*))))
+      ;; Low, recognizable destinations; leave the surrounding cells walkable.
+      (dolist (beacon *wizard-beacons*)
+        (destructuring-bind (name x y) beacon
+          (declare (ignore name))
+          (place x y (wizard-ground-height x y) *standing-stone*)))
       ;; Trees whose trunks may stand in this chunk or beside it.
       (loop for i from (1- (floor x0 11)) to (1+ (floor x1 11)) do
         (loop for j from (1- (floor y0 11)) to (1+ (floor y1 11)) do

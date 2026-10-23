@@ -123,3 +123,56 @@
         (is eq nil (terrain:raycast-standing-cell scene origin east))
         (is eq nil (terrain:raycast-standing-cell
                     scene origin (make-vec3 0.0 0.0 1.0)))))))
+
+(defun route-fixture (walls)
+  (let ((builder (terrain:make-scene-builder
+                  :horizontal-bits 5
+                  :material-vocabulary (wizard:make-wizard-palette))))
+    (dotimes (x 16)
+      (dotimes (y 16)
+        (terrain:scene-builder-cell builder x y 0 :material wizard::*flagstone*)))
+    (dolist (xy walls)
+      (loop for z from 1 to 4 do
+        (terrain:scene-builder-cell builder (first xy) (second xy) z
+                                    :material wizard::*standing-stone*)))
+    (terrain:finish-scene-builder builder)))
+
+(defun walk-route (character scene x y z)
+  (let* ((simulation (terrain:make-world-simulation scene))
+         (route (terrain:start-character-route character scene x y z)))
+    (terrain:add-simulation-character simulation character)
+    (loop repeat 18000 while (eq :running (terrain:walking-route-status route))
+          do (terrain:advance-world-simulation simulation (/ 1.0 60)))
+    route))
+
+(define-test click-routes-detour-around-a-wall-and-actually-arrive
+  (let* ((scene (route-fixture (loop for y from 2 to 12 collect (list 7 y))))
+         (character (terrain:make-walking-character :position (make-vec3 4.5 7.5 1.0)))
+         (route (terrain:start-character-route character scene 10 7 1)))
+    (is eq :running (terrain:walking-route-status route))
+    (true (some (lambda (cell) (or (< (luft:site-y cell) 2) (> (luft:site-y cell) 12)))
+                (terrain:walking-route-cells route)))
+    (is eq :arrived (terrain:walking-route-status (walk-route character scene 10 7 1)))))
+
+(define-test routes-refuse-blocked-corners-and-enclosed-destinations
+  (let* ((scene (route-fixture '((6 7) (7 6) (8 7) (7 8))))
+         (character (terrain:make-walking-character :position (make-vec3 4.5 4.5 1.0))))
+    (is eq :failed (terrain:walking-route-status
+                   (terrain:start-character-route character scene 7 7 1)))
+    (is eq :failed (terrain:walking-route-status
+                   (terrain:start-character-route character scene 6 7 1)))
+    (is eq :arrived (terrain:walking-route-status
+                    (terrain:start-character-route character scene 4 4 1)))))
+
+(define-test the-ember-journey-is-walkable-from-spawn
+  (let* ((source (wizard:make-wizard-world-source))
+         (scene (isle-scene source 80 90 180 165))
+         (character (wizard::make-wizard-character
+                     ;; MAKE-WIZARD-CHARACTER needs only the source spawn.
+                     (terrain:make-world-source-streaming-scene source))))
+    (dolist (beacon wizard::*wizard-beacons*)
+      (let ((x (- (second beacon) 2)) (y (third beacon)))
+        (is eq :arrived
+            (terrain:walking-route-status
+             (walk-route character scene x y (wizard:wizard-ground-height x y)))
+            "The walker reaches ~A without teleporting" (first beacon))))))

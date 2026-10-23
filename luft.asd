@@ -174,7 +174,9 @@
                 :serial t
                 :components ((:file "package")
                              (:file "world")
-                             (:file "game"))))
+                             (:file "game")
+                             (:file "journey")
+                             (:file "hud"))))
   :in-order-to ((test-op (test-op "luft/wizard/test"))))
 
 (defsystem "luft/wizard/test"

@@ -4,6 +4,7 @@
 ;;; character drawn as the renderer's robed figure, and an isometric camera
 ;;; that follows him.  A click on the top of a cell walks him there.  Q and E
 ;;; turn the view an eighth, the wheel zooms, R returns him to the path.
+;;; Space carries an ember from the stone circle to the ridge and pond.
 ;;;
 ;;; Everything below is a client of the engine: the terrain streams and
 ;;; answers the ray and the route, the simulation steps the body, and the
@@ -35,6 +36,14 @@
    (hour :initarg :hour :initform 16.5 :accessor wizard-hour
          :documentation "The fixed time of day the isle is shown at.")
    (last-timestamp :initform nil :accessor wizard-last-timestamp)
+   (pointer :initform nil :accessor wizard-pointer)
+   (hover :initform nil :accessor wizard-hover)
+   (embers :initform 0 :accessor wizard-embers)
+   (message :initform "FIND THE GREEN IN THE STONE CIRCLE"
+            :accessor wizard-message)
+   (spell-time :initform nil :accessor wizard-spell-time)
+   (hud-program :initform nil :accessor wizard-hud-program)
+   (hud-slots :initform (make-hash-table :test #'equal) :reader wizard-hud-slots)
    (surface-views :initform (make-hash-table :test #'equal)
                   :reader wizard-surface-views)
    (running-p :initform t :accessor wizard-running-p)
@@ -102,9 +111,14 @@
 Return the route, whose status says whether the terrain found a way, or
 NIL when the point names nowhere to stand."
   (multiple-value-bind (cx cy cz) (wizard-pointed-cell wizard x y)
+    (setf (wizard-pointer wizard) (list x y))
     (when cx
-      (terrain:start-character-route (wizard-character wizard)
-                                     (wizard-scene wizard) cx cy cz))))
+      (let ((route (terrain:start-character-route (wizard-character wizard)
+                                                 (wizard-scene wizard) cx cy cz)))
+        (setf (wizard-message wizard)
+              (if (eq :failed (terrain:walking-route-status route))
+                  "NO PATH - TRY NEARER GROUND" "FOLLOWING THE PATH"))
+        route))))
 
 (defun reset-wizard (wizard)
   "Return the wizard to his spawn on the path."
@@ -120,14 +134,15 @@ NIL when the point names nowhere to stand."
 ;;; The world's clock and its streaming.
 
 (defun wizard-resident-p (wizard)
-  "Whether the ground under the wizard is resident, so he may move."
+  "Whether the collision scene under the wizard has been published.
+
+Source workers can finish a chunk before its cohort becomes playable. Do
+not let the wizard fall through that gap while the first meshes are built."
   (let ((feet (terrain:body-position
                (terrain:character-body (wizard-character wizard)))))
-    (not (eq :unknown-nonresident
-             (terrain:streaming-scene-cell-state
-              (wizard-scene wizard)
-              (floor (vec3-x feet)) (floor (vec3-y feet))
-              (max 0 (floor (vec3-z feet))))))))
+    (not (null (luft:fiber-store-chunk
+                (terrain:inspection-source-solid (wizard-scene wizard))
+                (luft:chunk-key-at (floor (vec3-x feet)) (floor (vec3-y feet))))))))
 
 (defun advance-wizard-streaming (wizard)
   "Publish finished chunks and demand those around the wizard."
@@ -197,7 +212,8 @@ NIL when the point names nowhere to stand."
      :projection :isometric
      :figure (wizard-figure wizard)
      :bevel-width *wizard-bevel-width*
-     :effect-time (or (wizard-last-timestamp wizard) 0.0))))
+     :effect-time (or (wizard-last-timestamp wizard) 0.0)
+     :overlay-encoder (lambda (pass) (encode-wizard-hud wizard pass surface)))))
 
 (defun render-wizard-frame (wizard)
   (when (wizard-running-p wizard)
@@ -216,6 +232,17 @@ NIL when the point names nowhere to stand."
       (render:pace-renderer-resolution renderer canvas))))
 
 ;;; Input.
+
+(defmethod handle-canvas-event ((wizard wizard) canvas (event canvas-pointer-motion-event))
+  (declare (ignore canvas))
+  (setf (wizard-pointer wizard)
+        (list (canvas-pointer-event-x event) (canvas-pointer-event-y event)))
+  nil)
+
+(defmethod handle-canvas-event ((wizard wizard) canvas (event canvas-pointer-exit-event))
+  (declare (ignore canvas event))
+  (setf (wizard-pointer wizard) nil)
+  nil)
 
 (defmethod handle-canvas-event ((wizard wizard) canvas (event canvas-pointer-button-press-event))
   (declare (ignore canvas))
@@ -237,6 +264,7 @@ NIL when the point names nowhere to stand."
     (case (canvas-key-event-key-name event)
       (:q (turn-wizard-view wizard -1))
       (:e (turn-wizard-view wizard 1))
+      (:space (cast-wizard-ember wizard))
       (:r (reset-wizard wizard))))
   nil)
 
@@ -271,6 +299,7 @@ NIL when the point names nowhere to stand."
       (request-canvas-frame
        canvas (lambda (timestamp)
                 (declare (ignore timestamp))
+                (release-wizard-hud-slot wizard target)
                 (release-wizard-surface-view wizard target)))))
   (values))
 
@@ -288,7 +317,7 @@ NIL when the point names nowhere to stand."
   (when *wizard*
     (error "The wizard is already playing: ~A" *wizard*))
   (let ((canvas (make-sdl-canvas
-                 :title "Wizard — click to walk · Q/E turn · wheel zoom · R return"
+                 :title "The Ember Walk — click to walk · Space cast · Q/E turn · wheel zoom · R return"
                  :width width :height height :visible-p nil
                  :fullscreen-p fullscreen-p :high-pixel-density-p t
                  :presentation-api (sdl-presentation-api-for provider)))
@@ -359,6 +388,12 @@ NIL when the point names nowhere to stand."
     (maphash (lambda (key view) (declare (ignore key)) (destroy view))
              (wizard-surface-views wizard))
     (clrhash (wizard-surface-views wizard))
+    (maphash (lambda (key resources)
+               (declare (ignore key))
+               (dolist (resource resources) (destroy resource)))
+             (wizard-hud-slots wizard))
+    (clrhash (wizard-hud-slots wizard))
+    (when (wizard-hud-program wizard) (destroy (wizard-hud-program wizard)))
     (render:destroy-renderer (wizard-renderer wizard))
     (when (member (canvas-state canvas) '(:opening :open))
       (close-canvas canvas))

@@ -314,6 +314,13 @@ large generated domain from becoming an oscillating height-map no-place.
 Persistence should save source description, semantic edits, and resume state,
 not resident chunks, light, meshes, or GPU products.
 
+/Small proved step./ The isometric wizard's /Ember Walk/ (#7D3HOK) now joins
+three named plinths with an actual walk-and-cast loop, obstacle-aware routes,
+and source-overlay light edits. Its scripted software-Vulkan session walks
+from spawn to green, ridge, and pond without teleportation. This advances
+the playable-journey bet, not the whole fortress/resume requirement below:
+the wizard's completion and edits are retained only for this session.
+
 /Done when./ A player can leave the initial fortress, follow and lose a road,
 cross at least one distant authored structure, return by another route, edit a
 cell, restart, and find both edit and position preserved while residency stays
