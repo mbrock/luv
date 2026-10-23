@@ -162,6 +162,30 @@ Without DXC, return NIL: the text claims still hold."
    (shader:counted-fold (index count sum 0.0 :until (> sum limit))
      (if (< index limit) (+ sum index) sum))))
 
+(shader:define-shader hlsl-branch-local-probe
+    (:stage :fragment
+     :inputs ((value :float :location 0))
+     :outputs ((result :float :location 0)))
+  (shader:set-output
+   result
+   (if (> value 0.0)
+       (if (< value 1.0) (hlsl-reused-local value 1.0) 0.0)
+       (shader:counted-fold (index 2.0 sum 0.0)
+         (if (< index value) (hlsl-reused-local sum index) sum)))))
+
+(define-test conditional-values-keep-helper-and-fold-work-in-their-arms
+  (multiple-value-bind (source document) (source-of (hlsl-branch-local-probe))
+    (true (< (search "if (stage_in.value > 0.0f)" source)
+             (search "if (stage_in.value < 1.0f)" source)
+             (search "(stage_in.value + stage_in.value)" source)
+             (search "} else {" source)
+             (search "for (float fold_index_1" source)
+             (search "if (fold_index_1 < stage_in.value)" source)
+             (search "(fold_state_1 + fold_state_1)" source)))
+    (false (search " ? " source))
+    (is string= source (source-of (hlsl-branch-local-probe)))
+    (compiles document)))
+
 (define-test vertex-pulling-lowers-to-direct3d-registers-and-system-values
   (multiple-value-bind (source document)
       (source-of (hlsl-pulling-vertex-probe))

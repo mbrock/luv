@@ -2143,7 +2143,7 @@
                 (shader:shader-interface-interpolation
                  (find location (shader:shader-specification-inputs specification)
                        :key #'shader:shader-interface-location)))))
-    (dolist (name '(d-pdx d-pdy select image-fetch))
+    (dolist (name '(d-pdx d-pdy selection-merge phi image-fetch))
       (true (find name names :test #'string-equal)))
     (true (= #x07230203
              (aref (spv:assemble-shader-specification specification) 0)))))
@@ -2164,7 +2164,8 @@
                     (spv:shader-module specification)))))
     (true (find "F-ORD-LESS-THAN" names
                 :key #'symbol-name :test #'string=))
-    (true (find "SELECT" names :key #'symbol-name :test #'string=))
+    (true (find "SELECTION-MERGE" names :key #'symbol-name :test #'string=))
+    (true (find "PHI" names :key #'symbol-name :test #'string=))
     (true (= #x07230203
              (aref (spv:assemble-shader-specification specification) 0)))))
 

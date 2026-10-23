@@ -63,6 +63,18 @@ defaults.  Other source values retain the native folded-literal semantics."))
   ((condition :initarg :condition :reader wgsl-if-statement-condition)
    (statements :initarg :statements :reader wgsl-if-statement-statements)))
 
+(defclass wgsl-conditional-value-statement ()
+  ((type :initarg :type :reader wgsl-conditional-value-type)
+   (name :initarg :name :reader wgsl-conditional-value-name)
+   (condition :initarg :condition :reader wgsl-conditional-value-condition)
+   (consequent :initarg :consequent :reader wgsl-conditional-value-consequent)
+   (alternative :initarg :alternative :reader wgsl-conditional-value-alternative)
+   (consequent-statements :initarg :consequent-statements
+                          :reader wgsl-conditional-value-consequent-statements)
+   (alternative-statements :initarg :alternative-statements
+                           :reader wgsl-conditional-value-alternative-statements)
+   (origin :initarg :origin :reader wgsl-conditional-value-origin)))
+
 (defclass wgsl-counted-fold-statement ()
   ((type :initarg :type :reader wgsl-counted-fold-statement-type)
    (state-name :initarg :state-name
@@ -122,13 +134,13 @@ returning :READ, :WRITE, or :READ-WRITE in place of the module's own use.")
     :documentation "Buffers and workgroup arrays some atomic touches: their
 elements are atomic<u32>, so every access to them is atomic.")
    (references :initform (make-hash-table :test #'eq)
-               :reader wgsl-context-references)
+               :accessor wgsl-context-references)
    (expression-occurrences :initform (make-hash-table :test #'eq)
                            :reader wgsl-context-expression-occurrences)
    (occurrence-expression :initform (make-hash-table :test #'eq)
                           :reader wgsl-context-occurrence-expression)
    (function-call-results :initform (make-hash-table :test #'eq)
-                          :reader wgsl-context-function-call-results)
+                          :accessor wgsl-context-function-call-results)
    (pending-statements :initform nil :accessor wgsl-context-pending-statements)
    (fold-counter :initform 0 :accessor wgsl-context-fold-counter)
    (declared-names
@@ -612,23 +624,55 @@ binding of one stands for the resource it names."
             (dolist (binding local-bindings)
               (remhash binding references)))))))
 
+(defun lower-wgsl-conditional-arm (context expression)
+  "Capture an arm's statements without exporting its local values.
+Parent values remain visible; names and provenance stay document-wide."
+  (let ((references (wgsl-context-references context))
+        (results (wgsl-context-function-call-results context))
+        (pending (drain-wgsl-pending-statements context)))
+    (unwind-protect
+         (progn
+           (setf (wgsl-context-references context) (alexandria:copy-hash-table references)
+                 (wgsl-context-function-call-results context)
+                 (alexandria:copy-hash-table results))
+           (let ((value (lower-wgsl-expression context expression)))
+             (values value (drain-wgsl-pending-statements context))))
+      (setf (wgsl-context-references context) references
+            (wgsl-context-function-call-results context) results
+            (wgsl-context-pending-statements context) pending))))
+
 (defmethod lower-wgsl-expression
     ((context wgsl-lowering-context) (expression shader:shader-conditional))
-  ;; WGSL has no conditional expression.  SELECT is valid here because the
-  ;; language's conditional chooses between scalars or vectors, never
-  ;; structures or matrices, and its arms are pure.
   (let ((condition
-          (wgsl-text context
-                     (lang:arithmetic-conditional-condition expression)))
-        (consequent
-          (wgsl-text context
-                     (lang:arithmetic-conditional-consequent expression)))
-        (alternative
-          (wgsl-text context
-                     (lang:arithmetic-conditional-alternative expression))))
-    (note-wgsl-occurrence
-     context expression
-     (format nil "select(~A, ~A, ~A)" alternative consequent condition))))
+          (lower-wgsl-expression
+           context (lang:arithmetic-conditional-condition expression))))
+    (multiple-value-bind (consequent consequent-statements)
+        (lower-wgsl-conditional-arm
+         context (lang:arithmetic-conditional-consequent expression))
+      (multiple-value-bind (alternative alternative-statements)
+          (lower-wgsl-conditional-arm
+           context (lang:arithmetic-conditional-alternative expression))
+        (note-wgsl-occurrence
+         context expression
+         (if (or consequent-statements alternative-statements)
+             (let ((name (wgsl-temporary-name context "conditional_value")))
+               (push-wgsl-pending
+                context
+                (make-instance
+                 'wgsl-conditional-value-statement
+                 :type (wgsl-type-name
+                        (shader:shader-expression-type expression))
+                 :name name :condition condition
+                 :consequent consequent :alternative alternative
+                 :consequent-statements consequent-statements
+                 :alternative-statements alternative-statements
+                 :origin expression))
+               name)
+             ;; Pure scalar/vector arms need no structured control flow.
+             (format nil "select(~A, ~A, ~A)"
+                     (wgsl-occurrence-text alternative)
+                     (wgsl-occurrence-text consequent)
+                     (wgsl-occurrence-text condition))))))))
 
 (defmethod lower-wgsl-expression
     ((context wgsl-lowering-context) (expression shader:shader-counted-fold))
@@ -644,10 +688,14 @@ binding of one stands for the resource it names."
          (initial
            (lower-wgsl-expression
             context (lang:arithmetic-counted-fold-initial expression)))
+         (outer-results (wgsl-context-function-call-results context))
          (index-binding
            (lang:arithmetic-counted-fold-index-binding expression))
          (state-binding
            (lang:arithmetic-counted-fold-state-binding expression)))
+    ;; Body-local call results do not dominate uses after the loop.
+    (setf (wgsl-context-function-call-results context)
+          (alexandria:copy-hash-table outer-results))
     (multiple-value-bind (old-index old-index-p)
         (gethash index-binding references)
       (multiple-value-bind (old-state old-state-p)
@@ -696,6 +744,7 @@ binding of one stands for the resource it names."
           (if old-state-p
               (setf (gethash state-binding references) old-state)
               (remhash state-binding references)))))
+    (setf (wgsl-context-function-call-results context) outer-results)
     (note-wgsl-occurrence context expression state-name)))
 
 (defun wgsl-projective-clip-components (context application)
@@ -1369,6 +1418,33 @@ handle), and its type."
   (let ((*wgsl-statement-indentation* (1+ *wgsl-statement-indentation*)))
     (dolist (child (wgsl-if-statement-statements statement))
       (write-wgsl-statement-form child stream)))
+  (write-wgsl-indent stream)
+  (format stream "}~%"))
+
+(defmethod write-wgsl-statement-form
+    ((statement wgsl-conditional-value-statement) stream)
+  (write-wgsl-indent stream)
+  (format stream "var ~A: ~A;~%"
+          (wgsl-conditional-value-name statement)
+          (wgsl-conditional-value-type statement))
+  (write-wgsl-indent stream)
+  (format stream "if (~A) {~%"
+          (wgsl-occurrence-text (wgsl-conditional-value-condition statement)))
+  (flet ((arm (statements value)
+           (let ((*wgsl-statement-indentation*
+                   (1+ *wgsl-statement-indentation*)))
+             (dolist (child statements)
+               (write-wgsl-statement-form child stream))
+             (write-wgsl-indent stream)
+             (format stream "~A = ~A;~%"
+                     (wgsl-conditional-value-name statement)
+                     (wgsl-occurrence-text value)))))
+    (arm (wgsl-conditional-value-consequent-statements statement)
+         (wgsl-conditional-value-consequent statement))
+    (write-wgsl-indent stream)
+    (format stream "} else {~%")
+    (arm (wgsl-conditional-value-alternative-statements statement)
+         (wgsl-conditional-value-alternative statement)))
   (write-wgsl-indent stream)
   (format stream "}~%"))
 

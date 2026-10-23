@@ -4709,6 +4709,12 @@ evaluate work which the condition excludes."
                  (push binding ordered)))
              (visit (expression hoist-p)
                (typecase expression
+                 (shader-conditional
+                  ;; The selector belongs to the enclosing block; neither
+                  ;; arm may publish its local work there. Backends lower
+                  ;; those owned expressions inside their selected branch.
+                  (visit (lang:arithmetic-conditional-condition expression)
+                         hoist-p))
                  (shader-counted-fold
                   ;; COUNT and INITIAL belong to the preheader.  UPDATE owns
                   ;; its lexical work inside the loop body.

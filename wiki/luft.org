@@ -1563,6 +1563,36 @@ of the default renderer. Reproduction, images' error metrics and both
 positive and negative timing evidence live in
 [[file:measurements/yawl-fragment-a31fc0b/README.org][the fragment-relief measurement bundle]].
 
+******* DONE Keep value-conditional shader work inside its chosen arm
+:PROPERTIES:
+:ID: YH5LWK
+:END:
+
+Inspecting the emitted shader after #57KXBH found a compiler problem:
+value =IF= hoisted both arms' helper locals before choosing a value.
+The isolated material-height shader evaluated fifteen noise lattices
+before its first material predicate, even in optimized Apple AIR.
+Statement =WHEN= already kept its work inside the branch.
+
+The shared collector now leaves value arms local. MSL, HLSL and WGSL
+emit scoped =if/else= when an arm needs statements; simple inline arms
+retain their existing ternary/select form. SPIR-V uses structured
+selection and a result phi. Branch and loop caches must not let local
+values escape: native compiler and SPIR-V validation caught precisely
+that failure when a helper argument was reused after a counted fold.
+
+This fixes the lowering without changing the terrain formulas. The
+native-1080 alpine capture is pixel-identical below the changing top HUD.
+It does /not/ establish a useful runtime speedup: four 300-frame runs in
+before/after/after/before order average 13.284 ms GPU before and 13.341 ms
+after. One overlapping replay moved the scene fragment interval from
+about 4.38 to 4.27 ms, but static native instructions grew from 8,669 to
+8,887. Source control dependence and optimized AIR are not sufficient
+evidence about final GPU scheduling or throughput. Preserve this fix as
+the correct compiler boundary, not as the large terrain optimization.
+The measurements and reproduction live in
+[[file:measurements/yawl-dsl-4909081/README.org][the conditional-lowering bundle]].
+
 ******* NEXT Make distant detail retire its shading work too
 :PROPERTIES:
 :ID: IE3WMY

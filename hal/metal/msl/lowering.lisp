@@ -83,6 +83,17 @@ follow the sixteen sampled texture bindings in one texture index space.")
    (statements :initarg :statements :reader msl-if-statement-statements)
    (origin :initarg :origin :reader msl-if-statement-origin)))
 
+(defclass msl-conditional-value-statement ()
+  ((type :initarg :type :reader msl-conditional-value-type)
+   (name :initarg :name :reader msl-conditional-value-name)
+   (condition :initarg :condition :reader msl-conditional-value-condition)
+   (consequent-bindings :initarg :consequent-bindings
+                        :reader msl-conditional-value-consequent-bindings)
+   (consequent :initarg :consequent :reader msl-conditional-value-consequent)
+   (alternative-bindings :initarg :alternative-bindings
+                         :reader msl-conditional-value-alternative-bindings)
+   (alternative :initarg :alternative :reader msl-conditional-value-alternative)))
+
 (defclass msl-mesh-output-counts-statement ()
   ((lane :initarg :lane :reader msl-mesh-output-counts-lane)
    (vertex-count
@@ -521,23 +532,56 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
                           old-reference)
                     (remhash binding (msl-context-references context))))))))))
 
+(defun lower-msl-conditional-arm (context expression)
+  "Lower an arm without publishing its local values to sibling scopes."
+  (let ((references (msl-context-references context))
+        (calls (msl-context-function-call-results context)))
+    (unwind-protect
+         (progn
+           (setf (slot-value context 'references)
+                 (alexandria:copy-hash-table references)
+                 (slot-value context 'function-call-results)
+                 (alexandria:copy-hash-table calls))
+           (let ((value (lower-msl-expression context expression)))
+             (values value (drain-msl-pending-statements context))))
+      (setf (slot-value context 'references) references
+            (slot-value context 'function-call-results) calls))))
+
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-conditional))
-  (let ((condition
-          (lower-msl-expression
-           context (lang:arithmetic-conditional-condition expression)))
-        (consequent
-          (lower-msl-expression
-           context (lang:arithmetic-conditional-consequent expression)))
-        (alternative
-          (lower-msl-expression
-           context (lang:arithmetic-conditional-alternative expression))))
-    (note-msl-occurrence
-     context expression
-     (format nil "(~A ? ~A : ~A)"
-             (msl-occurrence-text condition)
-             (msl-occurrence-text consequent)
-             (msl-occurrence-text alternative)))))
+  (let* ((condition
+           (lower-msl-expression
+            context (lang:arithmetic-conditional-condition expression)))
+         (outer (drain-msl-pending-statements context)))
+    (multiple-value-bind (consequent consequent-bindings)
+        (lower-msl-conditional-arm
+         context (lang:arithmetic-conditional-consequent expression))
+      (multiple-value-bind (alternative alternative-bindings)
+          (lower-msl-conditional-arm
+           context (lang:arithmetic-conditional-alternative expression))
+        (if (or consequent-bindings alternative-bindings)
+            (let ((name (msl-local-name
+                         context (format nil "conditional_value_~D"
+                                         (incf (msl-context-temporary-counter context))))))
+              (setf (msl-context-pending-statements context)
+                    (nconc outer
+                           (list (make-instance
+                                  'msl-conditional-value-statement
+                                  :type (msl-type-name (shader:shader-expression-type expression))
+                                  :name name :condition condition
+                                  :consequent-bindings consequent-bindings
+                                  :consequent consequent
+                                  :alternative-bindings alternative-bindings
+                                  :alternative alternative))))
+              (note-msl-occurrence context expression name))
+            (progn
+              (setf (msl-context-pending-statements context) outer)
+              (note-msl-occurrence
+               context expression
+               (format nil "(~A ? ~A : ~A)"
+                       (msl-occurrence-text condition)
+                       (msl-occurrence-text consequent)
+                       (msl-occurrence-text alternative)))))))))
 
 (defmethod lower-msl-expression
     ((context msl-lowering-context) (expression shader:shader-counted-fold))
@@ -550,10 +594,15 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
          (initial
            (lower-msl-expression
             context (lang:arithmetic-counted-fold-initial expression)))
+         (outer-results (msl-context-function-call-results context))
          (index-binding
            (lang:arithmetic-counted-fold-index-binding expression))
          (state-binding
            (lang:arithmetic-counted-fold-state-binding expression)))
+    ;; Only COUNT and INITIAL dominate uses after the loop. Calls first
+    ;; evaluated in its body must not export references to body-local names.
+    (setf (slot-value context 'function-call-results)
+          (alexandria:copy-hash-table outer-results))
     (multiple-value-bind (old-index old-index-p)
         (gethash index-binding (msl-context-references context))
       (multiple-value-bind (old-state old-state-p)
@@ -629,6 +678,7 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
                                (msl-context-references context))
                       old-state)
                 (remhash state-binding (msl-context-references context)))))))
+    (setf (slot-value context 'function-call-results) outer-results)
     (note-msl-occurrence context expression state-name)))
 
 (defgeneric lower-msl-shader-map-application
@@ -1360,6 +1410,29 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
   (write-msl-indent stream)
   (format stream "}~%"))
 
+(defmethod write-msl-statement ((statement msl-conditional-value-statement) stream)
+  (write-msl-indent stream)
+  (format stream "~A ~A;~%" (msl-conditional-value-type statement)
+          (msl-conditional-value-name statement))
+  (write-msl-indent stream)
+  (format stream "if ~A {~%"
+          (msl-control-condition-text
+           (msl-occurrence-text (msl-conditional-value-condition statement))))
+  (flet ((arm (bindings value)
+           (let ((*msl-statement-indentation* (1+ *msl-statement-indentation*)))
+             (dolist (child bindings) (write-msl-statement child stream))
+             (write-msl-indent stream)
+             (format stream "~A = ~A;~%" (msl-conditional-value-name statement)
+                     (msl-occurrence-text value)))))
+    (arm (msl-conditional-value-consequent-bindings statement)
+         (msl-conditional-value-consequent statement))
+    (write-msl-indent stream)
+    (format stream "} else {~%")
+    (arm (msl-conditional-value-alternative-bindings statement)
+         (msl-conditional-value-alternative statement)))
+  (write-msl-indent stream)
+  (format stream "}~%"))
+
 (defmethod write-msl-statement
     ((statement msl-mesh-output-counts-statement) stream)
   (write-msl-indent stream)
@@ -1475,12 +1548,9 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
       (write-msl-indent stream 1)
       (format stream "if ~A break;~%"
               (msl-control-condition-text (msl-occurrence-text until)))))
-  (dolist (binding (msl-counted-fold-statement-bindings statement))
-    (write-msl-indent stream 1)
-    (format stream "~A ~A = ~A;~%"
-            (msl-variable-statement-type binding)
-            (msl-variable-statement-name binding)
-            (msl-occurrence-text (msl-variable-statement-value binding))))
+  (let ((*msl-statement-indentation* (1+ *msl-statement-indentation*)))
+    (dolist (binding (msl-counted-fold-statement-bindings statement))
+      (write-msl-statement binding stream)))
   (write-msl-indent stream 1)
   (format stream "~A = ~A;~%"
           (msl-counted-fold-statement-state-name statement)

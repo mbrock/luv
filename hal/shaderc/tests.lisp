@@ -837,3 +837,97 @@ bind COMPILED to it, and run BODY."
           (is eq nil (run-tool
                       (list "spirv-val" "--target-env" "vulkan1.0"
                             (uiop:native-namestring path)))))))))
+
+(define-test conditional-work-stays-in-its-arm
+  ;; A value IF owns the work in both arms, including inlined function
+  ;; locals. Hoisting those locals computes both materials at every pixel.
+  (shader:define-shader-function guarded-root (x)
+    (let* ((root (sqrt x))) (+ root root)))
+  (let* ((specification
+           (stage-probe 'guarded-fragment :fragment
+                        :inputs '((x :float :location 0))
+                        :outputs '((color :float :location 0))
+                        :body '(shader:set-output color
+                                (if (> x 0.0)
+                                    (guarded-root x)
+                                    (let* ((wave (sin x))) (* wave wave))))))
+         (sources (list (luv.msl:msl-document-source
+                         (luv.msl:compile-msl specification))
+                        (hlsl:hlsl-document-source
+                         (hlsl:compile-hlsl specification))
+                        (wgsl:wgsl-document-source
+                         (wgsl:compile-wgsl specification)))))
+    (dolist (source sources)
+      ;; Check control dependence, not generated variable names or spacing.
+      (let ((branch (search "if (" source))
+            (root (search "sqrt(" source))
+            (alternative (search "else" source))
+            (wave (search "sin(" source)))
+        (true (and branch root alternative wave
+                   (< branch root alternative wave)))))
+    (let* ((module (spv:shader-lowering-module
+                    (shader:lower-shader-specification :spir-v specification)))
+           (blocks (spv:spir-v-function-basic-blocks
+                    (first (spv:spir-v-module-function-definitions module)))))
+      ;; The entry block must choose an arm before evaluating either root
+      ;; or sine. The values join through a PHI, not an eager OpSelect.
+      (false (find "EXT-INST" (spv:spir-v-basic-block-instructions
+                              (first blocks))
+                   :key (lambda (instruction)
+                          (symbol-name (spv:instruction-name instruction)))
+                   :test #'string=))
+      (true (find "PHI" (loop for block in blocks append
+                              (mapcar (lambda (instruction)
+                                        (symbol-name (spv:instruction-name instruction)))
+                                      (spv:spir-v-basic-block-instructions block)))
+                  :test #'string=)))))
+
+(define-test conditional-scopes-compose-with-folds
+  ;; Conditions in count, initial, UNTIL, and update exercise distinct CFG
+  ;; edges. Reusing a function argument after an IF catches cached values
+  ;; escaping their defining branch into a sibling or enclosing scope.
+  (shader:define-shader-function branch-reuse (x flag)
+    (+ (if flag (let* ((a (* x x))) (+ a x)) x) x))
+  (shader:define-shader-function fold-reuse (x)
+    (+ (shader:counted-fold (i 2.0 sum 0.0) (+ sum x)) x))
+  (stage-probe 'scope-vertex :vertex
+               :inputs '((index :uint :built-in :vertex-index))
+               :outputs '((position :vec4 :built-in :position)
+                          (x :float :location 0))
+               :body '(let* ((p (float index)))
+                       (shader:set-output position (shader:vec4 p 0.0 0.0 1.0))
+                       (shader:set-output x p)))
+  (let* ((specification
+           (stage-probe 'scope-fragment :fragment
+                        :inputs '((x :float :location 0))
+                        :outputs '((color :float :location 0))
+                        :body
+                        '(shader:set-output color
+                          (+ (branch-reuse (let* ((r (sqrt (abs x)))) (+ r 1.0))
+                                           (> x 1.0))
+                             (if (> x 0.0)
+                                 (fold-reuse (let* ((r (sqrt x))) (+ r 1.0)))
+                                 0.0)
+                             (shader:counted-fold
+                                 (i (if (> x 2.0) 3.0 2.0)
+                                    sum (if (> x 0.0) 1.0 4.0)
+                                    :until (if (> i 0.0)
+                                               (let* ((s (* sum sum))) (> s 30.0))
+                                               (> sum 50.0)))
+                               (if (> x i)
+                                   (shader:counted-fold (j 2.0 inner sum)
+                                     (+ inner j))
+                                   (let* ((s (* sum 0.5))) (+ s i))))))))
+         (compiled (shaderc:compile-shader-program
+                    (probe-program :vertex 'scope-vertex
+                                   :fragment 'scope-fragment))))
+    (with-scratch-directory (directory)
+      (shaderc:write-compiled-program compiled directory)
+      (is equal nil (native-diagnostics directory "probe_program" "fragment"))
+      (is eq nil (wgsl-program-diagnostics directory))
+      (let ((path (merge-pathnames "scope.spv" directory)))
+        (spv:write-spir-v (spv:assemble-shader-specification specification) path)
+        (when (tool-available-p "spirv-val" "--version")
+          (is eq nil (run-tool
+                      (list "spirv-val" "--target-env" "vulkan1.0"
+                            (uiop:native-namestring path)))))))))

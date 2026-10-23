@@ -187,6 +187,30 @@ Without Dawn, return NIL: the text claims still hold."
    (shader:counted-fold (index count sum 0.0 :until (> sum limit))
      (if (< index limit) (+ sum index) sum))))
 
+(shader:define-shader wgsl-branch-local-probe
+    (:stage :fragment
+     :inputs ((value :float :location 0))
+     :outputs ((result :float :location 0)))
+  (shader:set-output
+   result
+   (if (> value 0.0)
+       (if (< value 1.0) (wgsl-reused-local value 1.0) 0.0)
+       (shader:counted-fold (index 2.0 sum 0.0)
+         (if (< index value) (wgsl-reused-local sum index) sum)))))
+
+(define-test conditional-values-keep-helper-and-fold-work-in-their-arms
+  (multiple-value-bind (source document) (source-of (wgsl-branch-local-probe))
+    (true (< (search "if ((stage_in.value > 0.0f))" source)
+             (search "if ((stage_in.value < 1.0f))" source)
+             (search "(stage_in.value + stage_in.value)" source)
+             (search "} else {" source)
+             (search "for (var fold_index_1" source)
+             (search "if ((fold_index_1 < stage_in.value))" source)
+             (search "(fold_state_1 + fold_state_1)" source)))
+    (false (search "select(" source))
+    (is string= source (source-of (wgsl-branch-local-probe)))
+    (compiles document)))
+
 (define-test vertex-pulling-lowers-to-wgsl-bindings-and-built-ins
   (multiple-value-bind (source document)
       (placed-source-of (wgsl-pulling-vertex-probe))

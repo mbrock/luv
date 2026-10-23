@@ -107,6 +107,18 @@ initializer lists only in declarations, not in expressions."))
    (statements :initarg :statements :reader hlsl-if-statement-statements)
    (origin :initarg :origin :reader hlsl-if-statement-origin)))
 
+(defclass hlsl-conditional-value-statement ()
+  ((type :initarg :type :reader hlsl-conditional-value-type)
+   (name :initarg :name :reader hlsl-conditional-value-name)
+   (condition :initarg :condition :reader hlsl-conditional-value-condition)
+   (consequent :initarg :consequent :reader hlsl-conditional-value-consequent)
+   (alternative :initarg :alternative :reader hlsl-conditional-value-alternative)
+   (consequent-statements :initarg :consequent-statements
+                          :reader hlsl-conditional-value-consequent-statements)
+   (alternative-statements :initarg :alternative-statements
+                           :reader hlsl-conditional-value-alternative-statements)
+   (origin :initarg :origin :reader hlsl-conditional-value-origin)))
+
 (defclass hlsl-counted-fold-statement ()
   ((type :initarg :type :reader hlsl-counted-fold-statement-type)
    (state-name
@@ -171,7 +183,7 @@ initializer lists only in declarations, not in expressions."))
     :reader hlsl-context-comparison-samplers)
    (references
     :initform (make-hash-table :test #'eq)
-    :reader hlsl-context-references)
+    :accessor hlsl-context-references)
    (expression-occurrences
     :initform (make-hash-table :test #'eq)
     :reader hlsl-context-expression-occurrences)
@@ -180,7 +192,7 @@ initializer lists only in declarations, not in expressions."))
     :reader hlsl-context-occurrence-expression)
    (function-call-results
     :initform (make-hash-table :test #'eq)
-    :reader hlsl-context-function-call-results)
+    :accessor hlsl-context-function-call-results)
    (pending-statements
     :initform nil :accessor hlsl-context-pending-statements)
    (fold-counter :initform 0 :accessor hlsl-context-fold-counter)
@@ -521,25 +533,56 @@ inside the same function scope must be."
             (dolist (saved saved-references)
               (remhash (first saved) references)))))))
 
+(defun lower-hlsl-conditional-arm (context expression)
+  "Capture an arm's statements without exporting its local values.
+Parent values remain visible; names and provenance stay document-wide."
+  (let ((references (hlsl-context-references context))
+        (results (hlsl-context-function-call-results context))
+        (pending (drain-hlsl-pending-statements context)))
+    (unwind-protect
+         (progn
+           (setf (hlsl-context-references context) (alexandria:copy-hash-table references)
+                 (hlsl-context-function-call-results context)
+                 (alexandria:copy-hash-table results))
+           (let ((value (lower-hlsl-expression context expression)))
+             (values value (drain-hlsl-pending-statements context))))
+      (setf (hlsl-context-references context) references
+            (hlsl-context-function-call-results context) results
+            (hlsl-context-pending-statements context) pending))))
+
 (defmethod lower-hlsl-expression
     ((context hlsl-lowering-context) (expression shader:shader-conditional))
-  ;; The condition is always a scalar bool, so ?: selects whole values and
-  ;; means the same under HLSL 2018 and 2021 (where it also short-circuits).
   (let ((condition
           (lower-hlsl-expression
-           context (lang:arithmetic-conditional-condition expression)))
-        (consequent
-          (lower-hlsl-expression
-           context (lang:arithmetic-conditional-consequent expression)))
-        (alternative
-          (lower-hlsl-expression
-           context (lang:arithmetic-conditional-alternative expression))))
-    (note-hlsl-occurrence
-     context expression
-     (format nil "(~A ? ~A : ~A)"
-             (hlsl-text condition)
-             (hlsl-text consequent)
-             (hlsl-text alternative)))))
+           context (lang:arithmetic-conditional-condition expression))))
+    (multiple-value-bind (consequent consequent-statements)
+        (lower-hlsl-conditional-arm
+         context (lang:arithmetic-conditional-consequent expression))
+      (multiple-value-bind (alternative alternative-statements)
+          (lower-hlsl-conditional-arm
+           context (lang:arithmetic-conditional-alternative expression))
+        (note-hlsl-occurrence
+         context expression
+         (if (or consequent-statements alternative-statements)
+             (let ((name (hlsl-temporary-name context "conditional_value")))
+               (setf (hlsl-context-pending-statements context)
+                     (nconc
+                      (hlsl-context-pending-statements context)
+                      (list
+                       (make-instance
+                        'hlsl-conditional-value-statement
+                        :type (hlsl-type-name
+                               (shader:shader-expression-type expression))
+                        :name name :condition condition
+                        :consequent consequent :alternative alternative
+                        :consequent-statements consequent-statements
+                        :alternative-statements alternative-statements
+                        :origin expression))))
+               name)
+             ;; Scalar conditions select whole values in both HLSL dialects.
+             (format nil "(~A ? ~A : ~A)"
+                     (hlsl-text condition) (hlsl-text consequent)
+                     (hlsl-text alternative))))))))
 
 (defmethod lower-hlsl-expression
     ((context hlsl-lowering-context) (expression shader:shader-counted-fold))
@@ -553,10 +596,14 @@ inside the same function scope must be."
          (initial
            (lower-hlsl-expression
             context (lang:arithmetic-counted-fold-initial expression)))
+         (outer-results (hlsl-context-function-call-results context))
          (index-binding
            (lang:arithmetic-counted-fold-index-binding expression))
          (state-binding
            (lang:arithmetic-counted-fold-state-binding expression)))
+    ;; Body-local call results do not dominate uses after the loop.
+    (setf (hlsl-context-function-call-results context)
+          (alexandria:copy-hash-table outer-results))
     (multiple-value-bind (old-index old-index-p)
         (gethash index-binding references)
       (multiple-value-bind (old-state old-state-p)
@@ -608,6 +655,7 @@ inside the same function scope must be."
           (if old-state-p
               (setf (gethash state-binding references) old-state)
               (remhash state-binding references)))))
+    (setf (hlsl-context-function-call-results context) outer-results)
     (note-hlsl-occurrence context expression state-name)))
 
 (defun hlsl-projective-clip-components (context application)
@@ -1328,6 +1376,33 @@ the contract numbers them together although HLSL registers would not clash."
   (let ((*hlsl-indentation* (1+ *hlsl-indentation*)))
     (dolist (child (hlsl-if-statement-statements statement))
       (write-hlsl-statement child stream)))
+  (write-hlsl-indent stream)
+  (format stream "}~%"))
+
+(defmethod write-hlsl-statement
+    ((statement hlsl-conditional-value-statement) stream)
+  (write-hlsl-indent stream)
+  (format stream "~A ~A;~%"
+          (hlsl-conditional-value-type statement)
+          (hlsl-conditional-value-name statement))
+  (write-hlsl-indent stream)
+  (format stream "if ~A {~%"
+          (hlsl-condition-text
+           (hlsl-text (hlsl-conditional-value-condition statement))))
+  (flet ((arm (statements value)
+           (let ((*hlsl-indentation* (1+ *hlsl-indentation*)))
+             (dolist (child statements)
+               (write-hlsl-statement child stream))
+             (write-hlsl-indent stream)
+             (format stream "~A = ~A;~%"
+                     (hlsl-conditional-value-name statement)
+                     (hlsl-text value)))))
+    (arm (hlsl-conditional-value-consequent-statements statement)
+         (hlsl-conditional-value-consequent statement))
+    (write-hlsl-indent stream)
+    (format stream "} else {~%")
+    (arm (hlsl-conditional-value-alternative-statements statement)
+         (hlsl-conditional-value-alternative statement)))
   (write-hlsl-indent stream)
   (format stream "}~%"))
 

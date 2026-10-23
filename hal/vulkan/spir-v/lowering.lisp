@@ -1768,34 +1768,56 @@ OpShift* wants as many count components as value components."
     (alias-shader-expression context expression result)
     value))
 
+(defun call-with-shader-value-scope (context function)
+  "Inherit dominating values, but do not publish values from a nested block."
+  (let* ((slots '(expression-values map-component-values loaded-values
+                  loaded-blocks loaded-instructions fold-values))
+         (saved (mapcar (lambda (slot) (slot-value context slot)) slots)))
+    (unwind-protect
+         (progn
+           (loop for slot in slots for table in saved
+                 do (setf (slot-value context slot) (alexandria:copy-hash-table table)))
+           (funcall function))
+      (loop for slot in slots for table in saved
+            do (setf (slot-value context slot) table)))))
+
 (defmethod lower-shader-expression-value
     (context (expression shader-conditional))
   (let* ((type (shader-expression-type expression))
-         (count (shader-type-component-count (find-shader-type type)))
          (condition
            (lower-shader-expression
             context (lang:arithmetic-conditional-condition expression)))
-         (consequent
-           (lower-shader-expression
-            context (lang:arithmetic-conditional-consequent expression)))
-         (alternative
-           (lower-shader-expression
-            context (lang:arithmetic-conditional-alternative expression))))
-    ;; OpSelect took one boolean per component until SPIR-V 1.4 relaxed it,
-    ;; and a stage's module version is not this expression's business, so a
-    ;; scalar condition choosing between vectors is splatted rather than
-    ;; leaned on: the wider form is valid at every version.
-    (when (and count (> count 1))
-      (let ((splat (fresh-shader-id context "CONDITION-VECTOR")))
-        (emit-shader-instruction
-         context nil
-         (list* splat 'composite-construct
-                (ensure-bool-vector-type-id context count)
-                (make-list count :initial-element condition)))
-        (setf condition splat)))
-    (emit-value-instruction
-     context expression type 'select
-     (list condition consequent alternative))))
+         (then-label (fresh-shader-id context 'conditional-then))
+         (else-label (fresh-shader-id context 'conditional-else))
+         (merge-label (fresh-shader-id context 'conditional-merge)))
+    (emit-shader-instruction context expression (list 'selection-merge merge-label 'none))
+    (emit-shader-instruction context expression
+                             (list 'branch-conditional condition then-label else-label))
+    (flet ((arm (label value)
+             (begin-shader-basic-block context label)
+             (let ((result (call-with-shader-value-scope
+                            context (lambda () (lower-shader-expression context value))))
+                   (predecessor nil))
+               ;; Nested conditionals and loops finish in their own merge block.
+               (setf predecessor (spir-v-basic-block-label (context-current-block context)))
+               (emit-shader-instruction context expression (list 'branch merge-label))
+               (values result predecessor))))
+      (multiple-value-bind (consequent consequent-label)
+          (arm then-label (lang:arithmetic-conditional-consequent expression))
+        (multiple-value-bind (alternative alternative-label)
+            (arm else-label (lang:arithmetic-conditional-alternative expression))
+          (begin-shader-basic-block context merge-label)
+          (emit-value-instruction context expression type 'phi
+                                  (list consequent consequent-label
+                                        alternative alternative-label)))))))
+
+(defmethod lower-shader-expression-value :around
+    (context (expression shader-counted-fold))
+  ;; Preheader values dominate both the loop and its successors. Everything
+  ;; first evaluated inside the loop must stay in its own value scope.
+  (lower-shader-expression context (lang:arithmetic-counted-fold-count expression))
+  (lower-shader-expression context (lang:arithmetic-counted-fold-initial expression))
+  (call-with-shader-value-scope context (lambda () (call-next-method))))
 
 (defmethod lower-shader-expression-value
     (context (expression shader-counted-fold))
@@ -1803,16 +1825,17 @@ OpShift* wants as many count components as value components."
            (lang:arithmetic-counted-fold-count expression))
          (count-type (shader-expression-type count-expression))
          (unsigned-p (shader-uint-type-p count-type))
-         (preheader
-           (spir-v-basic-block-label (context-current-block context)))
          (count
            (lower-shader-expression
             context count-expression))
          (initial
            (lower-shader-expression
             context (lang:arithmetic-counted-fold-initial expression)))
+         (preheader
+           (spir-v-basic-block-label (context-current-block context)))
          (state-type (shader-expression-type expression))
          (header-label (fresh-shader-id context 'fold-header))
+         (condition-label (fresh-shader-id context 'fold-test))
          (body-label (fresh-shader-id context 'fold-body))
          (continue-label (fresh-shader-id context 'fold-continue))
          (merge-label (fresh-shader-id context 'fold-merge))
@@ -1836,6 +1859,12 @@ OpShift* wants as many count components as value components."
             (gethash (lang:arithmetic-counted-fold-state-binding expression)
                      (context-fold-values context))
             state-id)
+      ;; UNTIL may itself contain structured control flow. Keep the loop
+      ;; merge in the header, before entering that condition's blocks.
+      (emit-shader-instruction
+       context expression (list 'loop-merge merge-label continue-label 'none))
+      (emit-shader-instruction context expression (list 'branch condition-label))
+      (begin-shader-basic-block context condition-label)
       (let ((condition-id (fresh-shader-id context 'fold-condition))
             (until (lang:arithmetic-counted-fold-until expression)))
         (emit-shader-instruction
@@ -1855,9 +1884,6 @@ OpShift* wants as many count components as value components."
              (list guarded-id 'logical-and
                    (ensure-bool-type-id context) condition-id continue-id))
             (setf condition-id guarded-id)))
-        (emit-shader-instruction
-         context expression
-         (list 'loop-merge merge-label continue-label 'none))
         (emit-shader-instruction
          context expression
          (list 'branch-conditional condition-id body-label merge-label)))

@@ -1,0 +1,104 @@
+#+title: Value-conditional lowering: correct branch ownership, no runtime win yet
+
+Evidence for #YH5LWK. Apple M5, macOS 27.2, 2026-10-23. Baseline source:
+=4909081ce63d804bcb349dd06b15162ba8f623f7=. Candidate is the compiler change
+accompanying this bundle. Thread:
+https://ampcode.com/threads/T-01a16974-f1f6-7698-9082-658f7825c505
+
+* What changed
+
+The shared binding collector hoisted value-IF arm locals into the entry
+block. Textual backends then emitted a ternary/select after computing both
+alternatives. A small guarded-noise shader and the real material-height
+shader confirmed that this eager work survived Apple's =-O3= AIR output.
+The material probe had fifteen noise lattices before its first material
+predicate. Repeated pure dot-product arguments, by contrast, were already
+combined by Apple's optimizer: source duplication alone was not proof of
+redundant executed instructions.
+
+The collector now visits only the condition. Each backend owns the arms'
+local work and cache scopes. MSL/HLSL/WGSL use structured branches when an
+arm requires statements; inline arms keep their previous expression form.
+SPIR-V uses selection blocks and a phi. Counted folds isolate local cached
+values and allow nested control flow in their count, initial value, UNTIL
+predicate and update. Metal's loop writer now accepts all statement kinds.
+
+After lowering, the guarded-noise AIR branches before the first floor/fract
+call, and the material AIR dispatches before evaluating material fields.
+This is compiler evidence, not final GPU ISA or a frame-time prediction.
+
+The retained branch-placement regression fails in all four backends when
+only the old collector is restored. The final =make test= run passed all
+35 suites with Metal, DXC, SPIR-V validation and Dawn/WebGPU available.
+The nested-fold regression also checks native compilation when a helper
+argument is used inside the fold and again after it; this initially
+exposed escaped local names in MSL/HLSL and invalid SPIR-V dominance.
+
+* Actual rendering and timings
+
+All runs use the settled seed-7 live-alpine camera, native 1920x1080,
+existing merged shadows, no scene batching or scene geometry changes.
+No shading approximation is enabled. The fetched presentation image is
+pixel-identical to the baseline below y=64, excluding the changing HUD;
+the complete frame was also visually inspected for shader corruption.
+
+One =gpudebug profile run --gpu-state high --exec overlapping= reported
+8.4945 ms whole GPU, 3.2065 ms scene vertex and 4.2667 ms scene fragment.
+The preceding control was about 8.58 / 3.20 / 4.38 ms. These are overlapping
+intervals, not additive times. The tool reports inconsistent GPU state.
+Static terrain fragment instructions grew 8,669 -> 8,887, ALU 8,339 ->
+8,510, branches 100 -> 125; temporary registers fell 108 -> 106 and spills
+remained zero. None is a count of instructions executed per pixel.
+
+The follow-up source-line profiling check confirmed that the trace has
+=debugType: Source= and all 5,260 terrain source lines, and that profiling
+mode is =full=. Nevertheless, its per-shader timeline is empty, shader
+cost weights are zero, and heatmap fetch reports =heatmap builder
+unavailable=. This is not evidence of zero shader cost or missing source.
+Apple's [[https://developer.apple.com/documentation/xcode/inspecting-shaders][Shader editor documentation]] describes per-line ALU, memory,
+control-flow and synchronization metrics, but this CLI run did not supply
+them. The collection/analysis limitation remains unresolved.
+
+Ordinary runs have 180 warmup and 300 timed frames each. They were serial,
+without an active GPU replay, in before/after/after/before order:
+
+| Run | Lowering | GPU mean ms | Completion mean ms |
+|-----+----------+-------------+--------------------|
+|   1 | Before   |      13.313 |             16.130 |
+|   2 | After    |      13.580 |             16.782 |
+|   3 | After    |      13.101 |             15.917 |
+|   4 | Before   |      13.256 |             15.998 |
+
+The candidate does not demonstrate a runtime improvement: means are
+13.284 ms before and 13.341 ms after, with substantial within-run and
+between-run variation. These measure serialized completion, not displayed
+FPS. Clocks and scheduling are not controlled. Do not turn the modest
+replay difference into a claimed game speedup or infer its cause.
+
+* Reproduction
+
+The bundled harness replaces only the baseline collector and MSL IF method
+in the isolated process. Baseline emitted source was verified identical
+to the original apart from loop comments. The final loop-cache correction
+leaves the candidate terrain source identical to the measured candidate.
+The =:old= rows in the raw output contain metadata only; the harness skips
+Luvcraft rendering. Ignore them when comparing Luft.
+
+From the repository root, repeat this command with =BASELINE_LOWERING=1
+for controls and unset for candidates. Use distinct output files:
+
+#+begin_src sh
+BENCH_LIBRARY=1 BENCH_MODE=native-1x BENCH_SIZES=1920x1080 \
+  BENCH_SCENES=live-alpine BENCH_REPEATS=1 BENCH_WARMUP=180 BENCH_FRAMES=300 \
+  BENCH_OUTPUT=build/dsl-after.sexp \
+  ./env sbcl --script wiki/measurements/yawl-dsl-4909081/benchmark.lisp
+xcrun metal -std=metal4.0 -O3 -S -emit-llvm \
+  build/dsl-after.sexp.metal -o build/dsl-after.ll
+#+end_src
+
+For GPU captures use the adjacent =yawl-gpudebug-7480638/capture.lisp= and
+its documented export workflow with =SCENE_MERGE=0=. The original replay
+capture is the control in the =yawl-fragment-a31fc0b= investigation.
+Raw runtime outputs, candidate replay statistics and the image comparison
+are retained here; large local captures and emitted sources remain under
+=.amp/in/artifacts/branch-lowering/= and =shader-emission[-after]/=.

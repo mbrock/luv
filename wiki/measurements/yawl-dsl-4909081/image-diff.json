@@ -1,0 +1,7 @@
+{
+  "excluded_top_rows": 64,
+  "mean_absolute_channel_error": 0.0,
+  "max_channel_error": 0,
+  "pixels_with_error_gt_8": 0,
+  "pixels_changed": 0
+}

@@ -1,0 +1,13 @@
+{"children":[{"actions":"go","name":"encoders","values":[{"type":"string","value":"sorted by start time"}]},{"actions":"go","name":"counters","values":[{"type":"string","value":""}]},{"actions":"go","name":"shaders","values":[{"type":"string","value":""}]}],"totalCount":3}
+{
+  "Commands" : "1218",
+  "Consistent state" : "no",
+  "Cores" : "5 sampled \/ 10 total",
+  "Encoders" : "13",
+  "Frame begin" : "0 ns",
+  "Frame duration" : "0.0000 ms",
+  "Frame end" : "0 ns",
+  "GPU time" : "8.4945 ms",
+  "Overlap" : "yes",
+  "Profiled state" : "max"
+}
