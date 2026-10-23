@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; A scene: one authored solid, its sparse cell-material field, torches,
 ;;; and the immutable generation values that justify a finished mesh.  The

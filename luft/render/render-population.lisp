@@ -1,8 +1,9 @@
 (in-package #:luft.render)
 
 ;;; The CPU form of a terrain population: active star sites and their parallel
-;;; packed appearance.  Streaming workers prepare it beside each mesh so the
-;;; owner thread only stages buffers; GPU residency is renderer-residency.lisp.
+;;; packed appearance.  A streaming scene given +RENDER-POPULATION-PREPARER+
+;;; builds it on the worker beside each mesh, so the owner thread only stages
+;;; buffers; GPU residency is renderer-residency.lisp.
 
 (defun pack-terrain-appearance-codes (codes)
   "Pack eight u8 sample codes per star into the GPU's parallel uvec2 lane."
@@ -78,3 +79,20 @@
     (meshes)
   "Prepare the sole terrain ABI: active sites indexing the fixed star atlas."
   (%make-star-render-population meshes))
+
+(defclass render-population-preparer () ()
+  (:documentation "The renderer's realization of streamed meshes."))
+
+(defvar +render-population-preparer+ (make-instance 'render-population-preparer)
+  "Pass as a streaming scene's :MESH-PREPARER to build populations on the worker.")
+
+(defmethod prepare-streamed-mesh
+    ((preparer render-population-preparer) mesh previous)
+  (if previous
+      (%make-prepared-render-mesh mesh (prepared-render-mesh-population previous))
+      (prepare-render-mesh mesh)))
+
+(defmethod streamed-mesh-preparation-signature
+    ((preparer render-population-preparer))
+  (list (symbol-function 'make-render-population)
+        (symbol-function 'pack-terrain-appearance-codes)))

@@ -111,23 +111,27 @@ evaluated in the star fragment stage is a question of measured cost
 :END:
 
 Four systems now stack the way #W9QMPT draws them.  =luft= is the
-topological core.  =luft/terrain= holds the scene and its material
-field, realized light, the world-source protocol and the alpine relief,
-residency, and the streaming owner/worker handoff up to an accepted
-replacement.  =luft/renderer= sits on it with the GPU machinery and
-publishes accepted replacements into mesh slots.  =luft/simulation=
-depends on the terrain alone.  The atelier, =luft/render=, uses both.
+topological core.  =luft/terrain=, in =luft/terrain/= and the
+=luft.terrain= package, holds the scene and its material field, realized
+light, the world-source protocol and the alpine relief, residency, and the
+streaming owner/worker handoff up to an accepted replacement.
+=luft/renderer= sits on it with the GPU machinery and publishes accepted
+replacements into mesh slots.  =luft/simulation= depends on the terrain
+alone.  The atelier, =luft/render=, uses both; =luft.render= uses
+=luft.terrain= and still re-exports the terrain names it always exported.
+
+A streaming scene's consumer may realize each finished mesh on the worker
+through [[lisp:luft.terrain:prepare-streamed-mesh]], with
+[[lisp:luft.terrain:streamed-mesh-preparation-signature]] keeping the mesh
+cache honest across live redefinition.  The renderer's
+=+render-population-preparer+= builds its CPU population there; without a
+preparer a streamed product is simply the mesh.
 
 What still sits on the wrong side of the line:
 
-- The terrain shares the =luft.render= package with the renderer and the
-  atelier, so the boundary is between systems, not yet between names.
 - Torches are terrain vocabulary: the scene carries torch attachments, the
   streaming scene checks them through =scene-edit-torch-conflict-p= and
   torch support keys, and realized light seeds from torch wicks.
-- Streaming workers prepare the renderer's CPU population
-  (=render-population.lisp=) beside each mesh, so the terrain names its
-  consumer's packing instead of offering a hook.
 - The fixed material set lives in the terrain's =materials.lisp=, and the
   sanctuary fixtures in the renderer.
 - =luft/simulation= puts the collision sweep, standing, and walking
@@ -287,9 +291,12 @@ no renderer, no McCLIM, and no undefined callee, and the renderer suite
 passes unchanged on top of it.  The cut split realized light out of the
 sky's =lighting.lisp=, moved publication into the renderer's residency,
 made the scene's attachment-frame snapshot independent of the torch row
-layout, and let =luft/simulation= stand on the terrain.  #TNOILN lists
-what remains; the next pieces are the population hook and the terrain's
-own package.
+layout, and let =luft/simulation= stand on the terrain.  The second cut
+gave the terrain its own directory and package, and replaced its knowledge
+of the renderer's population with a preparation hook; a terrain-only image
+streams a region through a real worker and reuses its cached star
+products.  #TNOILN lists what remains; the next pieces are torches as
+change facts and the material set as a game's palette.
 
 ** TODO Make the isometric wizard a game of its own
 :PROPERTIES:

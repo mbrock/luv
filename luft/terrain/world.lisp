@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; The authored large world: value-noise landscape readings, the
 ;;; deterministic terrain and citadel source, its sparse semantic edits, and

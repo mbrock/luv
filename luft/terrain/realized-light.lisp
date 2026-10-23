@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Realized torch light

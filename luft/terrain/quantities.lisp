@@ -6,7 +6,7 @@
 ;;; keeps Luft's definitions distinct from the keyword vocabulary installed by
 ;;; Luvcraft when the full atelier is loaded in the same image.
 
-(in-package #:luft.render.quantities)
+(in-package #:luft.quantities)
 
 (defconstant spatial-coordinate 'spatial-coordinate)
 (defconstant unit-direction 'unit-direction)

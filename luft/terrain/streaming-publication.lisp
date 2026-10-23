@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; The owner/worker handoff for one regional replacement.
 ;;;

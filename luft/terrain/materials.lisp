@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; Cells retain only authored placement identity and the optical facts needed
 ;;; by voxel lighting.  Terrain appearance is owned by the fixed star shader;

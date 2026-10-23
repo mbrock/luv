@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; Finalize star-mesh appearance and light metadata, then record the exact
 ;;; outputs as a SCENE-MESH-GENERATION. Static compilation also combines the

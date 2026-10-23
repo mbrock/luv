@@ -89,7 +89,7 @@ evidence rather than a restoration source.
 - [[file:../luft/render/shaders.lisp][luft/render/shaders.lisp]] gives terrain fixed top, side, and bottom tones
   under ambient sky/ground, direct sun, shadow-map visibility, and fog.  It
   receives neither terrain material identity nor voxel light.
-- [[file:../luft/render/materials.lisp][luft/render/materials.lisp]] and [[file:../luft/voxel-light.lisp][luft/voxel-light.lisp]] retain useful semantic
+- [[file:../luft/terrain/materials.lisp][luft/terrain/materials.lisp]] and [[file:../luft/voxel-light.lisp][luft/voxel-light.lisp]] retain useful semantic
   material and RGB4 finite-solver evidence.  Current terrain does not consume
   those fields; remaining use by scene and torch paths must not be mistaken
   for a scalable regional design.

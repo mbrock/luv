@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; A streaming scene retains authored/source residency separately from GPU
 ;;; publication. REPLACEMENT is either NIL or one whole-region transaction:
@@ -29,6 +29,9 @@
    (residency-radius :initarg :residency-radius :initform 1
                      :accessor streaming-scene-residency-radius)
    (focus :initform nil :accessor streaming-scene-focus)
+   (mesh-preparer :initarg :mesh-preparer :initform nil
+                  :reader streaming-scene-mesh-preparer
+                  :documentation "The consumer that realizes each finished mesh on the worker, or NIL.")
    (light-generation
     :initarg :light-generation
     :accessor streaming-scene-light-generation)
@@ -53,7 +56,7 @@
   (resident-source-keys nil :type list :read-only t)
   (bevel-width luft:+mesh-bevel-width+ :read-only t)
   ;; Occupancy phase is not topology.  A snapshot therefore captures exactly
-  ;; one mixed-material union; render-population compilation classifies its
+  ;; one mixed-material union; a consumer's preparation classifies its
   ;; finished instances into opaque and translucent passes later.
   (union-neighborhood nil :type hash-table :read-only t)
   (stamp nil :read-only t)
@@ -65,14 +68,32 @@
 
 (defstruct (streaming-star-product
              (:constructor make-streaming-star-product
-                 (key signature descriptors prepared))
+                 (key signature descriptors mesh prepared))
              (:copier nil))
   "Immutable CPU product; GPU residency and light publication are independent.
-#WQCMA3"
+PREPARED is the scene's MESH-PREPARER's realization of MESH.  #WQCMA3"
   (key nil :read-only t)
   (signature nil :read-only t)
   (descriptors nil :read-only t)
+  (mesh nil :read-only t)
   (prepared nil :read-only t))
+
+;;; A consumer of streamed meshes may realize each one on the worker, beside
+;;; the mesh, so the owner thread only installs it.  The renderer's preparer
+;;; builds its CPU population; with no preparer the product is the mesh.
+
+(defgeneric prepare-streamed-mesh (preparer mesh previous)
+  (:documentation
+   "Realize MESH for PREPARER.  PREVIOUS is the realization of an earlier mesh
+with the same star sites and appearance, which may be reused, or NIL.")
+  (:method ((preparer null) mesh previous)
+    (declare (ignore previous))
+    mesh))
+
+(defgeneric streamed-mesh-preparation-signature (preparer)
+  (:documentation
+   "Identity of PREPARER's compiler, so a redefinition misses the mesh cache.")
+  (:method ((preparer null)) nil))
 
 (defclass streaming-mesh-request (production:production-request)
   ((snapshot :initarg :snapshot :reader streaming-mesh-request-snapshot)))

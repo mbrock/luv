@@ -503,5 +503,6 @@ policy; distance geometry awaits an explicit seam-transition representation."
           (build-highland-lookout builder x y base :citadel-p citadel-p))))
     (let ((scene (finish-scene-builder builder)))
       (if streaming-p
-          (make-streaming-scene scene :residency-radius 3)
+          (make-streaming-scene scene :residency-radius 3
+                                :mesh-preparer +render-population-preparer+)
           scene))))

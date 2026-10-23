@@ -213,11 +213,11 @@ departures, request, result, and any worker failure. The scene no longer repeats
 a ticket per owner or a request beside every staged mesh. Reset detaches the
 transaction, so an old result cannot rejoin a new request with identical inputs.
 
-[[file:../luft/render/streaming-publication.lisp][Publication]] reads in execution order: schedule, accept, test readiness,
+[[file:../luft/terrain/streaming-publication.lisp][Publication]] reads in execution order: schedule, accept, test readiness,
 publish, drain. GPU staging must succeed before reusable light, CPU cache, and
 the pending pointer advance. Failed staging retains the complete result for
-retry; departures alone need no worker. [[file:../luft/render/streaming.lisp][Residency]], [[file:../luft/render/streaming-mesh.lisp][CPU compilation]], and
-[[file:../luft/render/streaming-state.lisp][retained versus frozen state]] have separate homes. Tests use a real worker
+retry; departures alone need no worker. [[file:../luft/terrain/streaming.lisp][Residency]], [[file:../luft/terrain/streaming-mesh.lisp][CPU compilation]], and
+[[file:../luft/terrain/streaming-state.lisp][retained versus frozen state]] have separate homes. Tests use a real worker
 and inject a GPU allocation failure at publication.
 
 *** DONE Preserve metadata when combining static scene owners

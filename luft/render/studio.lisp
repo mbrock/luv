@@ -1701,7 +1701,8 @@ A completed pair is spent, so a third quick press starts a new one."
   nil)
 
 (defun start-viewer (&key
-                       (solid (make-authored-world-streaming-scene))
+                       (solid (make-authored-world-streaming-scene
+                               :mesh-preparer +render-population-preparer+))
                        (bevel-width 1)
                        surface-mesh
                        surface-generation

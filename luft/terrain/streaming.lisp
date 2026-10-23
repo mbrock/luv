@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; Streaming chunk scenes
 ;;;
@@ -15,7 +15,7 @@
 
 
 (defun make-streaming-scene
-    (scene &key (frames-per-load 15) (residency-radius 1))
+    (scene &key (frames-per-load 15) (residency-radius 1) mesh-preparer)
   "Wrap SCENE in bounded camera-driven chunk residency.
 
 Every resident owner uses the same uniform width, or participates in one
@@ -46,7 +46,8 @@ a future LoD must bring an explicit transition representation."
                     :torches (scene-torches scene)
                     :player-p (scene-player-p scene)
                     :frames-per-load frames-per-load
-                    :residency-radius residency-radius)))
+                    :residency-radius residency-radius
+                    :mesh-preparer mesh-preparer)))
     (luft:map-fiber-store
      (lambda (key fibers)
        (setf (gethash key (streaming-scene-store streaming)) fibers))
@@ -55,7 +56,8 @@ a future LoD must bring an explicit transition representation."
 
 (defun make-authored-world-streaming-scene
     (&key (horizontal-bits +large-world-horizontal-bits+)
-      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1))
+      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1)
+      mesh-preparer)
   "Make the canonical large demand world without materializing any chunk."
   (let* ((domain (luft:make-world-domain
                   :x-bits horizontal-bits :y-bits horizontal-bits))
@@ -84,7 +86,8 @@ a future LoD must bring an explicit transition representation."
      :torches #()
      :player-p t
      :frames-per-load frames-per-load
-     :residency-radius residency-radius)))
+     :residency-radius residency-radius
+     :mesh-preparer mesh-preparer)))
 
 (defun streaming-store-fibers (scene key &optional default)
   "Return KEY's fibers from either a finite fixture or resident source value."

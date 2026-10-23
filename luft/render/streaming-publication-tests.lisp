@@ -5,7 +5,8 @@
   (let ((builder (render::make-scene-builder)))
     (render::scene-builder-cell builder 10 10 2)
     (let* ((scene (render::make-streaming-scene
-                   (render::finish-scene-builder builder)))
+                   (render::finish-scene-builder builder)
+                   :mesh-preparer render::+render-population-preparer+))
            (system (production:make-single-worker-production-system
                     :name "LUFT publication test")))
       (unwind-protect

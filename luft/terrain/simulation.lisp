@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; Bodies own physics; characters compose bodies with replaceable intentions.
 ;;; One world clock steps every registered body, including unattended bodies.

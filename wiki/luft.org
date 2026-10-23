@@ -330,7 +330,7 @@ ceilings and a floor removed by editing. The perspective presentation omits the 
 view's tilt-shift blur and shows a small central crosshair.
 
 [[lisp:luft.render:world-simulation]] now owns the terrain source, bodies,
-characters, and simulation clock. =luft/render/simulation.lisp= replaces the
+characters, and simulation clock. =luft/terrain/simulation.lisp= replaces the
 player-specific physical model. These are ordinary CLOS objects, not an ECS:
 
 - A =physical-body= owns position, full velocity, its box dimensions, signed

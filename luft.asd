@@ -66,7 +66,7 @@
   :depends-on ("luft" "luv" "luv/production")
   :serial t
   :components ((:module "terrain"
-                :pathname "luft/render"
+                :pathname "luft/terrain"
                 :serial t
                 :components ((:file "package")
                              (:file "quantities")
@@ -74,7 +74,6 @@
                              (:file "realized-light")
                              (:file "scene")
                              (:file "decoration")
-                             (:file "render-population")
                              (:file "world")
                              (:file "streaming-state")
                              (:file "streaming")
@@ -90,7 +89,8 @@
   :components ((:module "render"
                 :pathname "luft/render"
                 :serial t
-                :components ((:file "frame-quantities")
+                :components ((:file "package")
+                             (:file "frame-quantities")
                              (:file "lighting")
                              (:file "shaders")
                              (:file "world-text-shaders")
@@ -113,6 +113,7 @@
                              (:file "image-finishing")
                              (:file "reconstruction")
                              (:file "render")
+                             (:file "render-population")
                              (:file "renderer-residency")
                              (:file "renderer-targets")
                              (:file "renderer-frames")
@@ -125,7 +126,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/terrain")
-  :components ((:file "luft/render/simulation")))
+  :components ((:file "luft/terrain/simulation")))
 
 (defsystem "luft/render"
   :description "The McCLIM LUFT atelier over the packed-site renderer."

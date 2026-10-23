@@ -346,7 +346,7 @@ migration gates on.  The fourteen repeated member lists are now one
 =*scene-uniform-members*= ledger with =scene-uniform-prefix= splices, each
 site verified as an exact prefix, and the refactor reproduced all eighteen
 module hashes exactly.  Before annotation began, the remaining pieces were a
-=luft/render/quantities.lisp= vocabulary home whose definers arrive by
+=luft/terrain/quantities.lisp= vocabulary home whose definers arrive by
 =:import-from= (no =math:= prefixes in source), and the per-lane meaning
 decisions themselves.
 

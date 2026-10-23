@@ -4,8 +4,9 @@
   (:import-from #:luv.arithmetic.lisp.vec3
                 #:make-vec3 #:vec3-x #:vec3-y #:vec3-z)
   (:local-nicknames (#:render #:luft.render)
+                    (#:terrain #:luft.terrain)
                     (#:shaders #:luft.render.shaders)
-                    (#:quantities #:luft.render.quantities)
+                    (#:quantities #:luft.quantities)
                     (#:math #:luv.arithmetic)
                     (#:records #:luv.arithmetic.records)
                     (#:arithmetic #:luv.arithmetic.lisp)
@@ -924,9 +925,9 @@
          (body (make-instance 'render::physical-body :position position))
          (velocity render::*body-vertical-velocity-declaration*)
          (vector-velocity (records:record-slot-declaration
-                           'render::physical-body 'render::velocity))
+                           'render::physical-body 'terrain::velocity))
          (gravity (records:record-slot-declaration
-                   'render::physical-body 'render::gravity))
+                   'render::physical-body 'terrain::gravity))
          (duration render::*walking-duration-declaration*)
          (realization render::*walking-displacement-realization*)
          (result (math:declaration-quantity-specification
@@ -945,7 +946,7 @@
     (true (eq 'quantities:world-z-position
               (math:quantity-specification-name result)))
     (true (null (records:record-slot-declaration
-                 'render::physical-body 'render::grounded-p)))
+                 'render::physical-body 'terrain::grounded-p)))
     (true (compiled-function-p render::*walking-displacement-function*))
     ;; Signed motion and both float representations retain the old equation.
     (dolist (v '(0.0 9.0 -7.0 9d0))
@@ -1028,7 +1029,8 @@
     (dolist (xy '((10 10) (63 10) (64 10) (63 63) (64 64) (200 200)))
       (render::scene-builder-cell builder (first xy) (second xy) 2))
     (let* ((scene (render::make-streaming-scene
-                   (render::finish-scene-builder builder)))
+                   (render::finish-scene-builder builder)
+                   :mesh-preparer render::+render-population-preparer+))
            (domain (render::scene-domain scene))
            (keys (mapcar (lambda (xy) (luft:chunk-key-at (first xy) (second xy)))
                          '((0 0) (64 0) (0 64) (64 64) (192 192)))))

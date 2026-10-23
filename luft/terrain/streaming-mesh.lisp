@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.terrain)
 
 ;;; Compile a dependency-closed region: choose canonical geometry owners,
 ;;; freeze occupancy/material/light inputs, reuse unchanged star products,
@@ -158,8 +158,9 @@ legacy material tables and callable fields deliberately bypass reuse."
             (streaming-mesh-snapshot-bevel-width snapshot)
             (symbol-function 'luft:mesh-star-chunk)
             (symbol-function 'compile-surface-mesh-appearance)
-            (symbol-function 'make-render-population)
-            (symbol-function 'pack-terrain-appearance-codes)
+            (streamed-mesh-preparation-signature
+             (streaming-scene-mesh-preparer
+              (streaming-mesh-snapshot-scene snapshot)))
             (loop for neighbor in
                   (streaming-scene-dependency-guard-keys scene (list key))
                   collect
@@ -206,6 +207,7 @@ products; arbitrary source or compiler changes must still miss the cache."
                                  (list changed-key fibers materials)
                                  input))))
         (streaming-star-product-descriptors product)
+        (streaming-star-product-mesh product)
         (streaming-star-product-prepared product))))
    products))
 
@@ -243,7 +245,7 @@ appearance reads authored cells directly and needs no meshed context owners."
                              (equal signature (streaming-star-product-signature cached))
                              (equalp descriptors (streaming-star-product-descriptors cached))))
                       (prepared (and reusable (streaming-star-product-prepared cached)))
-                      (old-mesh (and prepared (prepared-render-mesh-mesh prepared))))
+                      (old-mesh (and reusable (streaming-star-product-mesh cached))))
                  (unless fibers
                    (error "Chunk ~D was not captured by this regional snapshot."
                           key))
@@ -302,11 +304,10 @@ appearance reads authored cells directly and needs no meshed context owners."
                      for mesh = (cdr (assoc key decorated :test #'eql))
                      collect
                      (make-streaming-star-product
-                      key signature descriptors
-                      (if previous
-                          (%make-prepared-render-mesh
-                           mesh (prepared-render-mesh-population previous))
-                          (prepare-render-mesh mesh))))))))))))
+                      key signature descriptors mesh
+                      (prepare-streamed-mesh
+                       (streaming-scene-mesh-preparer owner-scene)
+                       mesh previous)))))))))))
 
 (defun make-scene-regional-meshes
     (scene bevel-width &key reusable-light-generation)
