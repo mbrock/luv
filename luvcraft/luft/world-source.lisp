@@ -206,8 +206,8 @@ description, and its inhabitants."
 ;;; kind, seed, and sparse edits -- and a resume.  The Luft source's edits are
 ;;; the truth for every cell it can hold; Luvcraft's own edit at such a cell
 ;;; is kept when it is already that block, so a film keeps its reel.  Edits
-;;; Luft could not hold, and everything Luft does not know about, such as
-;;; inhabitants and carried blocks, are written back as they were read.
+;;; Luft could not hold and inhabitants it does not know are kept as read.
+;;; The game supplies its current inventory and carried instances in RESUME.
 
 (defun luvcraft-block-for-placement (placement)
   "Luvcraft's block for PLACEMENT, NIL for air, and whether there is one.
@@ -244,11 +244,12 @@ A film's reel stands for every film and names no block of its own."
     overlay))
 
 (defun luvcraft-save-description
-    (source world &key resume inhabitants position yaw pitch selected)
+    (source world &key resume inhabitants position yaw pitch selected selected-block)
   "Luvcraft's save of WORLD with SOURCE's edits, as Luvcraft writes it.
 
 POSITION is the player's feet in Luft cells, YAW and PITCH the Luft camera's,
-and SELECTED the placement in hand; without POSITION the old RESUME stays."
+and SELECTED the placement in hand. SELECTED-BLOCK may name its exact carried
+instance. Without POSITION the supplied RESUME stays unchanged."
   (let* ((description (luvcraft::world-save-description world))
          (source-description (copy-list (getf (rest description) :source)))
          (overlay (merged-luvcraft-edit-overlay
@@ -267,19 +268,22 @@ and SELECTED the placement in hand; without POSITION the old RESUME stays."
            :resume
            (if position
                (destructuring-bind (x y z) position
-                 (list :player-position
-                       (list (coerce (- x offset) 'double-float)
-                             (coerce z 'double-float)
-                             (coerce (- y offset) 'double-float))
-                       :look (list :yaw (luft-yaw-to-luvcraft yaw)
-                                   :pitch (coerce pitch 'double-float))
-                       :selected-block
-                       (luvcraft::block-save-description
-                        (or (and selected
-                                 (luvcraft:block-kind-named
-                                  (terrain:material-placement-name selected) nil))
-                            luvcraft::*stone-block*))
-                       :carried (getf resume :carried)))
+                 (let ((updated (copy-list resume)))
+                   (setf (getf updated :player-position)
+                         (list (coerce (- x offset) 'double-float)
+                               (coerce z 'double-float)
+                               (coerce (- y offset) 'double-float))
+                         (getf updated :look)
+                         (list :yaw (luft-yaw-to-luvcraft yaw)
+                               :pitch (coerce pitch 'double-float))
+                         (getf updated :selected-block)
+                         (luvcraft::block-save-description
+                          (or selected-block
+                              (and selected
+                                   (luvcraft:block-kind-named
+                                    (terrain:material-placement-name selected) nil))
+                              luvcraft::*stone-block*)))
+                   updated))
                resume))
      (when inhabitants
        (list :inhabitants inhabitants)))))

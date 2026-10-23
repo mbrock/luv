@@ -307,7 +307,10 @@ wall. Corner rays reserve space for the near plane, even at grazing angles."
        domain (+ (luft:site-x cell) dx) (+ (luft:site-y cell) dy)
        (+ (luft:site-z cell) dz) luft:+cell-extent+ 1))))
 
-(defun apply-viewer-world-edit (viewer cell placement)
+(defgeneric apply-viewer-world-edit (viewer cell placement)
+  (:documentation "Apply one world edit; games may account for owned materials."))
+
+(defmethod apply-viewer-world-edit (viewer cell placement)
   "Apply and schedule one edit, returning its record and status."
   (let ((scene (viewer-source viewer))
         (production-system (viewer-production-system viewer)))

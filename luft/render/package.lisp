@@ -216,6 +216,7 @@
            #:viewer-pointer-captured-p
            #:viewer-pick-material
            #:viewer-edit-at-crosshair
+           #:apply-viewer-world-edit
            #:viewer-key-event-tables
            #:viewer-command-viewer
            #:viewer-world-description

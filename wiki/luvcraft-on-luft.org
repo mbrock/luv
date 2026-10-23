@@ -709,7 +709,7 @@ move off the cohort's critical path.  The voxel pool is softer than the
 removed point lights and body light is one RGB value per cell, not a
 directional irradiance field.
 
-** TODO Carry a block, and fill an inventory
+** NEXT Carry a block, and fill an inventory
 :PROPERTIES:
 :ID: 291ELY
 :END:
@@ -720,6 +720,44 @@ placement draw from it.
 
 /Done when./ Place, mine, and pick follow what the player carries, and the
 old inventory code is deleted.
+
+/Evidence./ The =luvcraft/luft/game= host now owns a =block-inventory=,
+reusing Luvcraft's renderer-independent entries and the neutral McCLIM
+palette as both the ten-slot hotbar and a paged inventory.  =I= opens and
+closes the inventory, =N= advances pages, and =1–0= equips an entry onto
+the hotbar.  Each slot shows its key and count; films show their own title.
+Mining adds one and selects what was picked up; placing spends one only
+after the engine accepts the edit.  Picking selects without manufacturing
+stock.  Failed, busy, and body-overlapping edits spend nothing.
+
+Fresh games start with zero finite stock.  =F6= retains creative building:
+ordinary materials place without consuming stock and show infinity, but
+per-instance carried blocks such as films are always finite.  Mining still
+collects in creative mode, and toggling it never rewrites the bag's counts.
+The Luvcraft save's resume holds exact entries and quantities, the selected
+block instance, hotbar order, creative state, and the legacy carried list.
+Old carried-only saves enter finite storage with one of each saved item.
+The game keeps a placed film's identity in Luvcraft's edit overlay rather
+than trying to encode it in Luft's shared visual reel material.
+
+A scripted SDL offscreen session on seed 291 mined a named reel (0 → 1),
+placed it (1 → 0), mined the same reel again (0 → 1), repeated that cycle
+with sand, equipped the reel through the inventory, saved, and reopened.
+The reopened game had the same selected reel and count, sand count, hotbar,
+and finite mode.  A creative control placed bricks from zero without
+changing stock; a body-overlap control returned =:occupied= with the reel
+count still one.  Headless screenshots of the hotbar, last inventory page,
+reopened save, and creative bar were inspected; a clipped page hint was
+shortened and recaptured.  =luvcraft/luft/game/test= checks the save protocol
+and Luvcraft reader, finite counts, selected/carried film identity, hotbar,
+creative state, refreshing a saved pose, and legacy carried-only resumes.
+
+/Remaining./ The player behaviour is in place.  The original game's
+session-bound =mcclim/inventory*.lisp= and =mcclim/hotbar.lisp= still serve
+that game and cannot be deleted while it remains supported (#J3WZZS).
+The new host uses neither overlay; only the neutral inventory model and
+palette are shared.  Retire those old overlays with the old host rather
+than breaking it to mark this figure done.
 
 ** NEXT Grow drawing stages one device at a time
 :PROPERTIES:

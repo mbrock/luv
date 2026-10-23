@@ -229,7 +229,17 @@
   :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
   :serial t
   :components ((:file "luvcraft/luft/game")
-               (:file "luvcraft/luft/animals")))
+               (:file "luvcraft/luft/animals"))
+  :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
+
+(defsystem "luvcraft/luft/game/test"
+  :description "Inventory and carried identities survive Luvcraft saves on Luft."
+  :depends-on ("luvcraft/luft/game" "luv/test-support")
+  :components ((:file "luvcraft/luft/game-tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luvcraft.luft.game.tests)))
 
 (defsystem "luvcraft/luft/test"
   :description "Luvcraft on Luft against Luvcraft's own streaming, cell for cell."
