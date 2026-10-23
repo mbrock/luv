@@ -55,21 +55,19 @@
            (mcluv:command-menu-entries-for-tables
             '(command-menu-test-verbs command-menu-test-more-verbs)
             :owner-frame owner)))
-    (true (equal '("Alpha Command" "Beta Operation")
+    (true (equal '("Alpha Command" "Beta Operation" "Needs Value" "Typed Values")
                  (mapcar #'mcluv:command-menu-entry-label entries)))
     ;; The inherited Alpha command is encountered twice but remains one verb.
     (true (= 1 (count 'com-command-menu-alpha entries
                       :key #'mcluv:command-menu-entry-command-name)))
-    ;; A row which cannot yet prompt for its required argument is not a dead
-    ;; promise in the visible command vocabulary.
-    (true (null (find "Needs Value" entries :test #'string=
-                      :key #'mcluv:command-menu-entry-label)))
+    (true (find "Needs Value" entries :test #'string=
+                :key #'mcluv:command-menu-entry-label))
     (true (equal '("Beta Operation")
                  (mapcar
                   #'mcluv:command-menu-entry-label
                   (mcluv:matching-command-menu-entries entries "operation be"))))
     (setf (clim:command-enabled 'com-command-menu-beta owner) nil)
-    (true (equal '("Alpha Command")
+    (true (equal '("Alpha Command" "Needs Value" "Typed Values")
                  (mapcar
                   #'mcluv:command-menu-entry-label
                   (mcluv:command-menu-entries-for-tables
@@ -112,6 +110,55 @@
          frame (command-menu-test-key :escape))
       (true (eq :dismiss action))
       (true (null command)))))
+
+(clim:define-command (com-command-menu-typed-values
+                      :command-table command-menu-test-verbs
+                      :name "Typed Values")
+    ((kind '(clim:member :stone :wood) :prompt "kind")
+     (value 'integer :prompt "value")
+     (bounded `(integer 0 ,value) :prompt "bounded"))
+  (push (list kind value bounded) *command-menu-test-execution*))
+
+(define-test m-x-accepts-required-presentation-types-before-execution
+  (let ((frame (make-command-menu-test-frame))
+        (*command-menu-test-execution* nil))
+    (labels ((key (name &optional character)
+               (mcluv:handle-command-menu-key-event
+                frame (command-menu-test-key name :character character)))
+             (text (string)
+               (map nil (lambda (character) (key :text character)) string)))
+      (text "Typed Values")
+      (true (eq :continue (key :return)))
+      (text "sto")
+      (key :tab)
+      (true (string-equal "STONE" (mcluv:command-menu-query frame)))
+      (true (eq :continue (key :return)))
+      (text "oops")
+      (true (eq :continue (key :return)))
+      (true (null *command-menu-test-execution*))
+      (dotimes (i 4) (key :backspace))
+      (text "42")
+      (true (eq :continue (key :return)))
+      (text "43")
+      (true (eq :continue (key :return)))
+      (dotimes (i 2) (key :backspace))
+      (text "7")
+      (multiple-value-bind (action command) (key :return)
+        (true (eq :execute action))
+        (true (equal '(com-command-menu-typed-values :stone 42 7) command))
+        (mcluv:execute-command-menu-command frame command))
+      (true (equal '((:stone 42 7)) *command-menu-test-execution*))
+      ;; A cancelled partial command never executes and reopening starts fresh.
+      (mcluv:refresh-command-menu-entries frame)
+      (text "Typed Values")
+      (key :return)
+      (true (eq :dismiss (key :escape)))
+      (mcluv:refresh-command-menu-entries frame)
+      (text "Alpha")
+      (multiple-value-bind (action command) (key :return)
+        (true (eq :execute action))
+        (mcluv:execute-command-menu-command frame command))
+      (true (equal '(:alpha (:stone 42 7)) *command-menu-test-execution*)))))
 
 (define-test static-m-x-prepares-live-shader-revisions
   (let ((frame (make-command-menu-test-frame)))

@@ -694,13 +694,34 @@ with arguments, prompting through =accept= with the presentation types the
 agent already uses, so =place-block-at= is one definition reachable by key,
 M-x, and tool.
 
-/Evidence./ The tool side already reads the command parser table. Both games
-now use =mcclim/command-menu.lisp=, whose
-=command-menu-command-without-required-arguments-p= deliberately excludes
-commands with required arguments. The shared typed prompt in
-=mcclim/prompt.lisp= supplies completion and continuations, but it is not yet
-an =accept=-driven argument reader for M-x. This is an existing limitation in
-old Luvcraft too, not a Luft regression.
+/Current behavior./ Both games use =mcclim/command-menu.lisp= and M-x now
+includes commands with required arguments. Return selects the command, then
+the same minibuffer asks for each required argument in order. McCLIM's
+generated command parser supplies evaluated presentation types and prompt
+options, including types dependent on earlier answers. =accept= reads each
+answer; Tab uses that presentation method's =complete-input= possibilities.
+No separate M-x argument grammar or type-specific parser is involved.
+
+Invalid input remains editable with its parse error; Esc cancels the whole
+command. The owner executes only after every required answer is accepted and
+the modal menu closes. Named keyword options keep the command's defaults.
+The shared public-behavior regression covers member completion, integer
+validation, a dependent integer bound, cancellation, and an argument-free
+control. It fails on the original implementation.
+
+Real portable Meta-x, command-name, Return, argument, Return events through
+the canvas event handler executed =Select Quickbar Slot= in old Luvcraft and
+=Select Hotbar Slot= in Luvcraft on Luft. Both changed the selected block;
+invalid input changed neither. Native 960×640 software-Vulkan captures of
+both prompts and both error states were inspected, with the canvas watchdog's
+fatal timeout disabled during capture.
+
+/Remaining vocabulary boundary./ The original =Place Block At= example is
+still defined only in the old agent's separate command table, not either
+game's player M-x vocabulary. This figure stays NEXT for that specific
+one-definition/key/tool integration; required-argument prompting itself is
+implemented in the shared instrument. The menu does not expose agent-only
+commands requiring an embodied companion just to demonstrate prompting.
 
 Luvcraft on Luft previously omitted inherited =luft-play= commands from its
 explicit M-x table list. Its command-table inheritance also omitted

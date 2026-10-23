@@ -961,8 +961,8 @@ The metabar's settings specialized the atelier =viewer= class instead of =game-h
 leaving Luvcraft without a vocabulary. Both now use the existing shared
 McCLIM instruments with the correct application vocabulary. Return opens the
 metabar even after releasing the pointer; inventory and creative controls
-are window commands too. Parameterized M-x remains open in both games
-(#OL2JZ1); this port does not disguise that limitation as completed work.
+are window commands too. Required-argument prompting now also uses the shared
+M-x instrument in both games (#OL2JZ1); agent-only vocabulary remains separate.
 
 The metabar widget and interaction are shared. Initially the game exposed
 Luft's hand-written geometry, navigation, sky, lens, and atmosphere settings

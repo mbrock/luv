@@ -84,20 +84,13 @@ their semantic layers should remain separately inspectable."))
   (declare (ignore owner-frame))
   nil)
 
-(defun command-menu-command-without-required-arguments-p (name)
-  "Whether NAME is a command M-x can execute without prompting yet."
-  (alexandria:when-let
-      ((parsers (gethash name climi::*command-parser-table*)))
-    (null (climi::required-args parsers))))
-
 (defun command-menu-entries-for-tables
     (tables &key owner-frame (inherited nil))
   "Return cached M-x entries read from TABLES.
 
 Each command appears once even when command-table inheritance exposes it in
 several layers.  OWNER-FRAME, when supplied, excludes commands which that
-application currently disables.  Commands with required arguments remain out
-until M-x has an argument-prompting interaction instead of becoming dead rows."
+application currently disables.  Required arguments are read after selection."
   (let ((entries nil)
         (seen (make-hash-table :test #'eq)))
     (dolist (table tables)
@@ -108,10 +101,8 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
            (alexandria:when-let
                ((label
                   (command-line-name-for-command name table :errorp nil)))
-             (when (and (command-menu-command-without-required-arguments-p
-                         name)
-                        (or (null owner-frame)
-                            (command-enabled name owner-frame)))
+             (when (or (null owner-frame)
+                       (command-enabled name owner-frame))
                (push (make-instance 'command-menu-entry
                                     :label label
                                     :command-name name
@@ -151,6 +142,11 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
    (results :initform nil :accessor command-menu-results)
    (query :initform "" :accessor command-menu-query)
    (selected :initform 0 :accessor command-menu-selected)
+   (pending-command :initform nil :accessor command-menu-pending-command)
+   (argument-values :initform nil :accessor command-menu-argument-values)
+   (argument-type :initform nil :accessor command-menu-argument-type)
+   (argument-options :initform nil :accessor command-menu-argument-options)
+   (argument-error :initform nil :accessor command-menu-argument-error)
    (dirty-p :initform t :accessor command-menu-dirty-p)))
 
 (define-application-frame command-menu
@@ -182,6 +178,10 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
 
 (defun refresh-command-menu-entries (frame)
   "Re-read FRAME's application vocabulary outside its repaint method."
+  (setf (command-menu-pending-command frame) nil
+        (command-menu-argument-values frame) nil
+        (command-menu-argument-error frame) nil
+        (command-menu-query frame) "")
   (setf (command-menu-entries frame)
         (command-menu-entries-for-tables
          (command-menu-command-tables frame)
@@ -212,12 +212,101 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
             start)))
 
 (defun command-menu-selected-command (frame)
-  "Return FRAME's selected argument-free command form, or NIL."
+  "Return FRAME's selected command name as a command form, or NIL."
   (let ((results (command-menu-results frame)))
     (when results
       (list
        (command-menu-entry-command-name
         (nth (mod (command-menu-selected frame) (length results)) results))))))
+
+;; A noninteractive ACCEPT stream lets the presentation method own parsing.
+;; For Tab, ask that same method's COMPLETE-INPUT function for possibilities;
+;; no knowledge of member types, block kinds, pathnames, etc. belongs in M-x.
+(defclass command-menu-accept-stream (climi::string-input-stream)
+  ((completion-p :initarg :completion-p :initform nil :reader menu-completion-p)
+   (text :initarg :string :reader menu-accept-text)))
+
+(defmethod complete-input ((stream command-menu-accept-stream) function
+                           &rest options &key &allow-other-keys)
+  (declare (ignore options))
+  (if (menu-completion-p stream)
+      (multiple-value-bind (text success object count possibilities)
+          (funcall function (menu-accept-text stream) :possibilities)
+        (declare (ignore text success object count))
+        (throw 'command-menu-completions (mapcar #'car possibilities)))
+      (call-next-method)))
+
+(defun accept-command-menu-argument (frame &key completion-p)
+  (let* ((*application-frame* (command-menu-owner-frame frame))
+         (text (command-menu-query frame))
+         (stream (make-instance 'command-menu-accept-stream :string text
+                               :start 0 :end (length text)
+                               :completion-p completion-p)))
+    (apply #'accept (command-menu-argument-type frame) :stream stream
+           :prompt nil
+           (alexandria:remove-from-plist
+            (command-menu-argument-options frame) :prompt :query-identifier))))
+
+(defun advance-command-menu-arguments (frame)
+  "Replay McCLIM's generated parser to the next required ACCEPT.
+Earlier typed values are replayed, not reparsed.  The generated LET* therefore
+also evaluates dependent presentation types in the proper argument scope.
+Named options retain the command's defaults; M-x asks for required arguments."
+  (let ((remaining (copy-list (command-menu-argument-values frame)))
+        (*application-frame* (command-menu-owner-frame frame)))
+    (catch 'command-menu-argument
+      (climi::parse-command
+       (command-menu-pending-command frame)
+       (lambda (stream type &rest options &key &allow-other-keys)
+         (declare (ignore stream))
+         (if remaining
+             (pop remaining)
+             (progn
+               (setf (command-menu-argument-type frame) type
+                     (command-menu-argument-options frame) options
+                     (command-menu-query frame) ""
+                     (command-menu-results frame) nil
+                     (command-menu-argument-error frame) nil)
+               (invalidate-command-menu frame)
+               (throw 'command-menu-argument (values :continue nil)))))
+       (lambda (stream delimiter)
+         (declare (ignore stream))
+         (when (member delimiter '(:opt :end))
+           (throw 'command-menu-argument
+             (values :execute
+                     (cons (command-menu-pending-command frame)
+                           (command-menu-argument-values frame))))))
+       nil)
+      ;; A command without arguments has a parser with no delimiter calls.
+      (values :execute (list (command-menu-pending-command frame))))))
+
+(defun submit-command-menu (frame)
+  (if (command-menu-pending-command frame)
+      (handler-case
+          (let ((value (accept-command-menu-argument frame)))
+            (setf (command-menu-argument-values frame)
+                  (append (command-menu-argument-values frame) (list value)))
+            (advance-command-menu-arguments frame))
+        (parse-error (condition)
+          (setf (command-menu-argument-error frame) (princ-to-string condition))
+          (invalidate-command-menu frame)
+          (values :continue nil)))
+      (alexandria:if-let ((command (command-menu-selected-command frame)))
+        (progn
+          (setf (command-menu-pending-command frame) (car command)
+                (command-menu-argument-values frame) nil)
+          (advance-command-menu-arguments frame))
+        (values :continue nil))))
+
+(defun complete-command-menu-argument (frame)
+  (handler-case
+      (let ((possibilities
+              (catch 'command-menu-completions
+                (accept-command-menu-argument frame :completion-p t)
+                nil)))
+        (when possibilities
+          (edit-command-menu-query frame (first possibilities))))
+    (parse-error () nil)))
 
 (defun draw-command-menu-row (stream entry top selected-p)
   (let ((left +command-menu-margin+)
@@ -276,7 +365,11 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
          medium (+ margin 1) (+ +command-menu-field-top+ 1)
          (- right 1) (- +command-menu-field-bottom+ 1)
          :radius 8 :ink *command-menu-field-ink*)
-        (let* ((prompt "M-x ")
+        (let* ((prompt (if (command-menu-pending-command frame)
+                           (format nil "~A: "
+                                   (getf (command-menu-argument-options frame)
+                                         :prompt))
+                           "M-x "))
                (text (concatenate 'string prompt query))
                (text-x (+ margin 12))
                (text-y (/ (+ +command-menu-field-top+
@@ -299,13 +392,21 @@ until M-x has an argument-prompting interaction instead of becoming dead rows."
                       by +command-menu-row-height+
                 do (draw-command-menu-row pane entry y (= index selected))))
         (when (null results)
-          (draw-text* pane "No matching command" margin
+          (draw-text* pane
+                      (or (command-menu-argument-error frame)
+                          (when (command-menu-pending-command frame)
+                            (format nil "~A  ·  Tab completes"
+                                    (describe-presentation-type
+                                     (command-menu-argument-type frame) nil)))
+                          "No matching command") margin
                       (+ +command-menu-results-top+ 20)
                       :align-y :center :text-size 16
                       :ink *command-menu-muted-ink*))
         (draw-text* pane
-                    (format nil "~D command~:P  ·  ↑↓ choose  ·  RET runs"
-                            (length results))
+                    (if (command-menu-pending-command frame)
+                        "RET accepts  ·  Esc cancels"
+                        (format nil "~D command~:P  ·  ↑↓ choose  ·  RET runs"
+                                (length results)))
                     margin (- +command-menu-height+ 24)
                     :align-y :center :text-size 14
                     :ink *command-menu-muted-ink*)))))
@@ -427,7 +528,9 @@ edge and Slug glyph at twice the samples without a raster upscale."
 
 (defun edit-command-menu-query (frame query)
   (setf (command-menu-query frame) query)
-  (update-command-menu-results frame :reset-selection-p t)
+  (unless (command-menu-pending-command frame)
+    (update-command-menu-results frame :reset-selection-p t))
+  (setf (command-menu-argument-error frame) nil)
   (invalidate-command-menu frame))
 
 (defun handle-command-menu-key-event (frame event)
@@ -444,7 +547,11 @@ its modal surface first and passes COMMAND to EXECUTE-COMMAND-MENU-COMMAND."
     (case key
       (:escape (values :dismiss nil))
       ((:return :keypad-enter)
-       (values :execute (command-menu-selected-command frame)))
+       (submit-command-menu frame))
+      (:tab
+       (when (command-menu-pending-command frame)
+         (complete-command-menu-argument frame))
+       (values :continue nil))
       (:up
        (move-command-menu-selection frame -1)
        (values :continue nil))
@@ -483,7 +590,7 @@ its modal surface first and passes COMMAND to EXECUTE-COMMAND-MENU-COMMAND."
           (setf (command-menu-selected frame) (+ start row))
           (invalidate-command-menu frame)
           (return-from handle-command-menu-pointer-press
-            (values :execute (command-menu-selected-command frame)))))))
+            (submit-command-menu frame))))))
   (values :continue nil))
 
 (defun execute-command-menu-command

@@ -9,7 +9,7 @@
   "The semantic input layers whose directly owned commands M-x offers.")
 
 (defun luvcraft-command-menu-entries ()
-  "Return Luvcraft's currently defined argument-free commands as conses.
+  "Return Luvcraft's currently defined player commands as conses.
 
 This compatibility-shaped query is useful to callers which only inspect the
 vocabulary.  The live menu itself retains MCLUV:COMMAND-MENU-ENTRY objects."

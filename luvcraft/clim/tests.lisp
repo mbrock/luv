@@ -92,9 +92,7 @@
     (true (assoc "Reveal Last Tracy Capture" entries :test #'string=))
     (true (assoc "Export Presentation Timing" entries :test #'string=))
     (true (assoc "Review Source Update" entries :test #'string=))
-    ;; Commands needing arguments will join M-x when it can ask for them;
-    ;; presenting them as executable before then would make a dishonest menu.
-    (true (null (assoc "Select Quickbar Slot" entries :test #'string=)))
+    (true (assoc "Select Quickbar Slot" entries :test #'string=))
     (true (equal '("Toggle Phone")
                  (mapcar #'car
                          (luvcraft.clim::matching-command-menu-entries
