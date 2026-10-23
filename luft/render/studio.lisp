@@ -2677,6 +2677,10 @@ it makes no claim about which earlier render pass caused a discontinuity."
                canvas (lambda (timestamp) (declare (ignore timestamp))))))
           (releasing :event-handler
             (setf (canvas-event-handler canvas) nil))
+          ;; Focus callbacks can still repaint another overlay (a companion's
+          ;; dialogue, for example). Leave while all of those surfaces live,
+          ;; not halfway through reverse-order overlay destruction.
+          (releasing :focus (unfocus-viewer viewer))
           (releasing :overlays
             (dolist (overlay (reverse (viewer-overlays viewer)))
               (remove-viewer-overlay viewer overlay)))

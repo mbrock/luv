@@ -1311,6 +1311,16 @@ ID. A real provider also looked, walked one cell east, read the grass
 underfoot, and replied without editing. The game-save regression checks
 coordinate mapping, the old inhabitant reader, and unknown inhabitants.
 
+/Player-session follow-up./ Stopping while a companion still owned focus
+could destroy its dialogue overlay first, then call the companion's
+focus-left repaint on the dead mirror. The host now leaves focus before
+releasing any overlay, while every dependent surface is still alive. A
+public stop regression checks callback order and repeated-stop idempotence.
+The real scripted conversation above reproduced the release error before
+the change and now completes stop, save, reopen, and a second clean stop,
+with all three companions, exact stock and the response ID retained. Only
+the provider is scripted; gameplay and tool effects use the real game stack.
+
 Still open: detailed SDF bodies and their knobs, world-space transcript
 cassettes and agent walls, construction-box previews, wider perception
 than nearby terrain samples, and resuming in-flight actions across saves.

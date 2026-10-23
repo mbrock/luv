@@ -1,5 +1,36 @@
 (in-package #:luft.render.tests)
 
+(defclass stopped-test-canvas (luv:canvas) ())
+(defmethod luv:canvas-state ((canvas stopped-test-canvas)) :closed)
+
+(defclass teardown-test-overlay ()
+  ((name :initarg :name :reader teardown-test-name)
+   (log :initarg :log :reader teardown-test-log)))
+
+(defmethod render:viewer-focus-left ((focus teardown-test-overlay) viewer)
+  (declare (ignore viewer))
+  (push :left (car (teardown-test-log focus))))
+
+(defmethod render:release-viewer-overlay ((overlay teardown-test-overlay))
+  (push (teardown-test-name overlay) (car (teardown-test-log overlay))))
+
+(define-test stopping-leaves-focus-before-releasing-its-dependent-surfaces
+  (let* ((log (list nil))
+         (viewer (make-instance 'render:game-host
+                                :source (world:make-mountain-sanctuary-scene)
+                                :canvas (make-instance 'stopped-test-canvas)))
+         (focus (make-instance 'teardown-test-overlay :name :focus :log log))
+         (panel (make-instance 'teardown-test-overlay :name :panel :log log)))
+    (render:add-viewer-overlay viewer focus)
+    (render:add-viewer-overlay viewer panel)
+    (render:focus-viewer viewer focus)
+    (render:stop-viewer viewer)
+    (true (equal '(:left :panel :focus) (reverse (car log))))
+    (true (null (render:viewer-modal-focus viewer)))
+    (true (null (render:viewer-overlays viewer)))
+    (render:stop-viewer viewer)
+    (true (= 3 (length (car log))))))
+
 (define-test game-host-shares-player-instruments-not-the-ateliers-camera-modes
   (let* ((scene (world:make-mountain-sanctuary-scene))
          (host (make-instance 'render:game-host :source scene))
