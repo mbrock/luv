@@ -16,6 +16,12 @@ The frame owns the result and releases it before its inputs or DRAWING."))
 (defgeneric encode-scene-drawing (drawing pass binding)
   (:documentation "Draw into the active scene PASS using its frame BINDING."))
 
+(defgeneric encode-scene-drawing-shadow (drawing pass binding)
+  (:documentation "Optionally cast into the sun depth PASS using the same frame inputs.")
+  (:method (drawing pass binding)
+    (declare (ignore drawing pass binding))
+    (values)))
+
 (defgeneric release-scene-drawing (drawing)
   (:documentation
    "Release the program after its frame bindings; retry any failed releases."))

@@ -211,6 +211,9 @@ final pass."
        (renderer-torches renderer) shadow-pass
        (renderer-frame-torch-body-bind-group renderer frame t)
        (renderer-flame-instance-count renderer) :shadow-p t))
+    (encode-scene-drawing-shadow
+     (renderer-player renderer) shadow-pass
+     (renderer-frame-drawing-binding renderer frame (renderer-player renderer)))
     (end-pass shadow-pass))
   (prepare-texture encoder (renderer-shadow-texture renderer)
                    :texture-binding))

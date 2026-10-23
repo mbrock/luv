@@ -294,7 +294,7 @@ the layer of #W9QMPT that owns the feature afterwards.
 | Pathing (Move To) | 0.3k | click-to-walk A* | terrain queries | delete |
 | Place, mine, pick | in =app.lisp= | done, with undo | terrain edits, game rules | carried kind, reach rules |
 | Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | none | game | McCLIM side is neutral; icons follow materials |
-| Physics, balls | 3.7k | none | physics | solver is neutral; terrain through queries |
+| Physics, balls | 3.7k | reused solver, throws, sphere figures (#0JMB9O) | physics, game | Luft occupancy/residency adapter; spring behaviours remain |
 | Critters | 0.7k | none | game | minds neutral; bodies re-hosted on queries |
 | Particles | 0.2k | none | renderer stage | small |
 | First-person hands, held items | 1k | none | game, on a renderer stage | animation neutral |
@@ -958,6 +958,48 @@ Still open: detailed SDF bodies and their knobs, world-space transcript
 cassettes and agent walls, construction-box previews, wider perception
 than nearby terrain samples, and resuming in-flight actions across saves.
 The old session-bound tools and overlays remain for the old game.
+
+** DONE Balls keep their solver, terrain changes underneath
+:PROPERTIES:
+:ID: 0JMB9O
+:END:
+
+Luvcraft on Luft uses the original columnar sphere/contact/constraint/event
+tables and scalar/SIMD kernels. The contact solver still asks integer solid
+cells; its probe can now borrow a terrain predicate. The game's adapter
+turns Y-up solver coordinates into Luft's Z-up streamed occupancy queries,
+with the same boundary policy as walking. It does not build or collide
+with a second, invisible Luvcraft world.
+
+B takes out the original ball hand: left throws, every fifth throw is a
+smiley, and right scatters twelve marbles. Player and turtle boxes enter
+the original kinematic-contact path, and turtle hit events keep their old
+reaction. Successful terrain edits wake nearby resting bodies. Sphere
+figures reuse the original body's radius, palette, quaternion, and paint
+functions; depth-writing sphere triangles and a sun-shadow pass belong to
+the game's extension of Luft's instanced figure stage.
+
+Unloaded collision neighbourhoods suspend individual rows, including their
+swept footprint and neighbouring contact cells. Suspended bodies retain
+velocity, orientation, and lifetime, enter neither the contact grid nor
+the aging pass, and resume when their ground returns. Sleeping is not a
+substitute: it erases velocity and can be interrupted by another body.
+
+The solver is engine machinery, but remains in =luvcraft/core= for this
+reuse: extracting its package, generated column schemas, arithmetic
+imports, and SIMD dispatch is a separate dependency-boundary change, not
+a reason to copy or rewrite it. Both games now use the same engine and
+the old game's cached chunk probe remains intact. Neither game saves
+physics bodies: old Luvcraft's save contains source/edits, player resume,
+and inhabitants, not its transient ball table. This port preserves that
+contract. Fountain and lava-spring block behaviours and first-person
+hand geometry remain separate work.
+
+Regression tests exercise resting/bounce, rolling down voxel stairs,
+wall contact, unload/resume with velocity preserved, and real host B and
+mouse events. Seed-7 meadow captures compare 64 dropped balls after 1,200
+fixed steps on Linux Vulkan; dynamic resolution is disabled for the
+Luft capture. The old game continues to render through its own stage.
 
 ** IDEA Keep block behaviour in a game's table
 :PROPERTIES:

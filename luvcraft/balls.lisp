@@ -608,7 +608,9 @@ build this frame's sphere instance and shadow cube streams."
   (let ((half 0.055d0))
     (funcall function 0d0 half 0d0 half half half +ball-tile+ :stretch-p t)))
 
-(defun throw-luvcraft-ball (session &key (speed *ball-throw-speed*) (kind :ball)
+(defgeneric throw-luvcraft-ball (session &key speed kind aim-right aim-up))
+
+(defmethod throw-luvcraft-ball ((session luvcraft-session) &key (speed *ball-throw-speed*) (kind :ball)
                                          (aim-right 0d0) (aim-up 0d0))
   "Throw a body of KIND from the player's eye along the view, nudged by
 AIM-RIGHT and AIM-UP; return its handle."

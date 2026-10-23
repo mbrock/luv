@@ -198,6 +198,7 @@
          (turn (and provider (luv.application-agent:application-agent-current-turn provider))))
     (cond
       ((viewer-inventory-page viewer) (call-next-method))
+      ((viewer-ball-in-hand-p viewer) (call-next-method))
       ((and inhabitant (inhabitant-approval inhabitant))
        "Proposed edit · Y approve · N decline · T revise")
       ((and inhabitant (inhabitant-opening inhabitant)) "Opening conversation…")

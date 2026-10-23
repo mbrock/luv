@@ -114,6 +114,7 @@ Wide enough that a fast body's contacts exist a step before it lands.")
   "An id-table slot naming no body.")
 (defconstant +physics-set-awake+ 1)
 (defconstant +physics-set-sleeping+ 2)
+(defconstant +physics-set-suspended+ 3)
 
 (defconstant +physics-no-body+ -1
   "The local index that means 'no body': the static side of a contact.")
@@ -472,6 +473,8 @@ that borrow one lane at a time rather than a whole row schema."
           :reader physics-world-awake)
    (sleeping :initform (make-physics-body-columns :capacity 64)
              :reader physics-world-sleeping)
+   (suspended :initform (make-physics-body-columns :capacity 64)
+              :reader physics-world-suspended)
    (boxes :initform (make-physics-box-columns :capacity 16)
           :reader physics-world-boxes)
    (contacts :initform (make-physics-contact-columns :capacity 512)
@@ -535,7 +538,8 @@ that borrow one lane at a time rather than a whole row schema."
 
 (defun physics-world-body-count (world)
   (+ (physics-body-columns-length (physics-world-awake world))
-     (physics-body-columns-length (physics-world-sleeping world))))
+     (physics-body-columns-length (physics-world-sleeping world))
+     (physics-body-columns-length (physics-world-suspended world))))
 
 ;;; ---------------------------------------------------------------------
 ;;; Creating, finding, and destroying bodies.
@@ -592,6 +596,7 @@ that borrow one lane at a time rather than a whole row schema."
   (declare (fixnum set))
   (cond ((= set +physics-set-awake+) (physics-world-awake world))
         ((= set +physics-set-sleeping+) (physics-world-sleeping world))
+        ((= set +physics-set-suspended+) (physics-world-suspended world))
         (t (error "Set ~D holds no bodies." set))))
 
 (defun physics-body-position (world handle)
@@ -718,6 +723,7 @@ address the move disturbs."
   "Remove every body and contact from WORLD."
   (physics-body-columns-reset (physics-world-awake world))
   (physics-body-columns-reset (physics-world-sleeping world))
+  (physics-body-columns-reset (physics-world-suspended world))
   (physics-contact-columns-reset (physics-world-contacts world))
   (clrhash (physics-world-contact-index world))
   (let ((ids (physics-world-ids world)))
@@ -726,7 +732,7 @@ address the move disturbs."
         (physics-id-table-release ids index))))
   world)
 
-(defmacro do-physics-bodies ((handle world &key (sets '(:awake :sleeping)))
+(defmacro do-physics-bodies ((handle world &key (sets '(:awake :sleeping :suspended)))
                              &body body)
   "Run BODY with HANDLE bound to each body's handle in the named SETS.
 BODY must not create or destroy bodies."
@@ -734,6 +740,7 @@ BODY must not create or destroy bodies."
     `(dolist (,columns (list ,@(loop for set in sets
                                      collect (ecase set
                                                (:awake `(physics-world-awake ,world))
+                                               (:suspended `(physics-world-suspended ,world))
                                                (:sleeping `(physics-world-sleeping ,world))))))
        (dotimes (,index (physics-body-columns-length ,columns))
          (let ((,handle (aref (physics-body-columns-handle-lane ,columns) ,index)))
@@ -773,6 +780,7 @@ neighbourhood straddles at most eight chunks.")
 
 (defstruct (terrain-probe (:constructor make-terrain-probe ()))
   (world nil)
+  (cell-query nil :type (or null function))
   (width 16 :type fixnum)
   (height 16 :type fixnum)
   (depth 16 :type fixnum)
@@ -804,15 +812,23 @@ neighbourhood straddles at most eight chunks.")
                                                     :initial-element 0)
    :type (simple-array fixnum (*))))
 
+(defgeneric physics-terrain-cell-query (terrain)
+  (:documentation "Return a Y-up integer solid-cell predicate, or NIL for the native probe."))
+
+(defmethod physics-terrain-cell-query (terrain)
+  (declare (ignore terrain))
+  nil)
+
 (defun reset-terrain-probe (probe world)
   "Point PROBE at WORLD and forget whatever chunks it was holding."
   (setf (terrain-probe-world probe) world
+        (terrain-probe-cell-query probe) (physics-terrain-cell-query world)
         (terrain-probe-current probe) 0
         (terrain-probe-next probe) 0)
   (fill (terrain-probe-chunk-xs probe) most-positive-fixnum)
   (fill (terrain-probe-indices probe) nil)
   (fill (terrain-probe-palettes probe) nil)
-  (when world
+  (when (and world (null (terrain-probe-cell-query probe)))
     (let ((shape (voxel-space-chunk-shape (block-world-space world))))
       (setf (terrain-probe-width probe) (chunk-shape-width shape)
             (terrain-probe-height probe) (chunk-shape-height shape)
@@ -885,6 +901,9 @@ neighbourhood straddles at most eight chunks.")
 (defun terrain-probe-solid-p (probe x y z)
   "Whether the cell at world X,Y,Z is solid, or a boundary standing in."
   (declare (fixnum x y z) (optimize (speed 3) (safety 0)))
+  (when (terrain-probe-cell-query probe)
+    (return-from terrain-probe-solid-p
+      (funcall (terrain-probe-cell-query probe) x y z)))
   (let ((width (terrain-probe-width probe))
         (height (terrain-probe-height probe))
         (depth (terrain-probe-depth probe)))
@@ -2254,6 +2273,38 @@ the substep is, for a kinematic other side's motion."))
             restitution friction rolling-resistance))
     world))
 
+(defgeneric physics-terrain-resident-p (terrain x y z radius vx vy vz seconds)
+  (:documentation "Whether the body's swept neighbourhood has resident collision terrain."))
+
+(defmethod physics-terrain-resident-p (terrain x y z radius vx vy vz seconds)
+  (declare (ignore terrain x y z radius vx vy vz seconds))
+  t)
+
+(defun update-physics-residency (world seconds)
+  ;; Iterate stable ids, not the rows that relocation swap-removes. Suspended
+  ;; rows retain velocity, orientation and lifetime but enter no solver grid.
+  (let ((ids (physics-world-ids world)))
+    (dotimes (index (physics-id-table-next ids))
+      (let ((set (aref (physics-id-table-set ids) index)))
+        (unless (= set +physics-set-free+)
+          (let* ((local (aref (physics-id-table-local ids) index))
+                 (columns (physics-body-columns-for-set world set))
+                 (handle (aref (physics-body-columns-handle-lane columns) local))
+                 (resident
+                   (physics-terrain-resident-p
+                    (physics-world-terrain world)
+                    (aref (physics-body-columns-x-lane columns) local)
+                    (aref (physics-body-columns-y-lane columns) local)
+                    (aref (physics-body-columns-z-lane columns) local)
+                    (aref (physics-body-columns-radius-lane columns) local)
+                    (aref (physics-body-columns-vx-lane columns) local)
+                    (aref (physics-body-columns-vy-lane columns) local)
+                    (aref (physics-body-columns-vz-lane columns) local) seconds)))
+            (cond ((and resident (= set +physics-set-suspended+))
+                   (%relocate-physics-body world handle set +physics-set-awake+))
+                  ((and (not resident) (/= set +physics-set-suspended+))
+                   (%relocate-physics-body world handle set +physics-set-suspended+)))))))))
+
 (defun step-physics-world (world &optional dt)
   "Advance WORLD by DT seconds (its step by default) and return it.
 Events from the step are then readable until the next step begins. #IDVK7G"
@@ -2272,6 +2323,7 @@ Events from the step are then readable until the next step begins. #IDVK7G"
     (physics-event-columns-reset (physics-world-events world))
     (incf (physics-world-step-count world))
     (reset-terrain-probe (physics-world-probe world) (physics-world-terrain world))
+    (update-physics-residency world dt)
     ;; Contacts.
     (rebuild-physics-grid world)
     (generate-physics-body-pairs world)
@@ -2339,7 +2391,8 @@ the claim (#S6T2MV); this is how it is policed."
              (setf hash (logand (+ (* hash 1099511628211)
                                    (sb-kernel:single-float-bits (coerce value 'single-float)))
                                 #x3fffffffffffffff))))
-      (dolist (columns (list (physics-world-awake world) (physics-world-sleeping world)))
+      (dolist (columns (list (physics-world-awake world) (physics-world-sleeping world)
+                            (physics-world-suspended world)))
         (records:with-columnar-buffer-storage
             ((count row (xs x) (ys y) (zs z) (vxs vx) (vys vy) (vzs vz))
              columns physics-body-columns)
@@ -2365,7 +2418,8 @@ where its key says.  Signal on the first inconsistency; return T."
               (unless (= (physics-handle-index handle) index)
                 (error "Body ~D's row ~D in set ~D belongs to ~D."
                        index local set (physics-handle-index handle))))))))
-    (dolist (columns (list (physics-world-awake world) (physics-world-sleeping world)))
+    (dolist (columns (list (physics-world-awake world) (physics-world-sleeping world)
+                          (physics-world-suspended world)))
       (dotimes (local (physics-body-columns-length columns))
         (let ((handle (aref (physics-body-columns-handle-lane columns) local)))
           (unless (physics-body-alive-p world handle)

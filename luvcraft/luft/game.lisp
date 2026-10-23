@@ -35,7 +35,14 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 (clim:define-command-table luvcraft-world-release
   :inherit-from (render:luft-play-release))
 
-(clim:define-application-frame luvcraft-viewer (render:game-host)
+(defclass ball-game-state ()
+  ((physics :initform nil :accessor viewer-physics)
+   (physics-clock :initform 0d0 :accessor viewer-physics-clock)
+   (ball-hand :initform (make-instance 'luvcraft::ball) :reader viewer-ball-hand)
+   (ball-in-hand-p :initform nil :accessor viewer-ball-in-hand-p)
+   (ball-previous-centers :initform (make-hash-table) :reader viewer-ball-previous-centers)))
+
+(clim:define-application-frame luvcraft-viewer (ball-game-state render:game-host)
   ((luvcraft-world :initarg :luvcraft-world :reader luvcraft-viewer-world
                    :documentation "Luvcraft's own world: its source and edits as read.")
    (resume :initarg :resume :initform nil :reader luvcraft-viewer-resume)
@@ -392,6 +399,7 @@ LUFT.RENDER:START-GAME-HOST."
                  :solid (game:make-luvcraft-streaming-scene
                          source :mesh-preparer render:+render-population-preparer+)
                  :title *title*
+                 :figure-factory 'make-ball-figure-drawing
                  :world-pathname (and (or loaded-p pathname-p
                                           (and pathname (null seed)))
                                       pathname)

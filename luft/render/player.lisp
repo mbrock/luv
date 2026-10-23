@@ -47,7 +47,7 @@ There is no population limit. FIGURE-LANES constructs the wizard kind."
    (count :initform 0 :accessor figure-binding-count)
    (inputs :initarg :inputs :reader figure-binding-inputs)))
 
-(defun upload-figure-instances (drawing binding data)
+(defmethod upload-figure-instances ((drawing figure-drawing) (binding figure-binding) data)
   "Update only a fence-safe presentation slot; grow its storage as needed."
   (let ((count (/ (length data) +figure-scalar-count+)))
     (when (> count (figure-binding-capacity binding))

@@ -230,6 +230,8 @@
   :serial t
   :components ((:file "luvcraft/luft/game")
                (:file "luvcraft/luft/animals")
+               (:file "luvcraft/luft/balls")
+               (:file "luvcraft/luft/ball-drawing")
                (:file "luvcraft/luft/agents")
                (:file "luvcraft/luft/agent-tools")
                (:file "luvcraft/luft/presentation"))
@@ -238,7 +240,9 @@
 (defsystem "luvcraft/luft/game/test"
   :description "Inventory and carried identities survive Luvcraft saves on Luft."
   :depends-on ("luvcraft/luft/game" "luv/test-support")
-  :components ((:file "luvcraft/luft/game-tests"))
+  :serial t
+  :components ((:file "luvcraft/luft/game-tests")
+               (:file "luvcraft/luft/ball-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package
