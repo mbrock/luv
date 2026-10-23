@@ -23,7 +23,7 @@
     (luv.workbench:close-workbench-source-update workbench)))
 
 (clim:define-command (com-review-source-update
-                      :command-table luft-atelier
+                      :command-table luft-play
                       :name "Review Source Update")
     ()
   (open-viewer-source-update (viewer-command-viewer)))

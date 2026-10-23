@@ -20,5 +20,10 @@ terrain's worker, so the old program stays the oracle until it is deleted.")
            #:luvcraft-world-source-offset
            #:luvcraft-cell-site
            #:make-luvcraft-world-source
+           #:luvcraft-world-source-little-class
+           #:site-luvcraft-cell
+           #:luvcraft-world-luft-source
            #:luvcraft-save-world-source
+           #:luvcraft-save-description
+           #:luvcraft-resume-luft-pose
            #:make-luvcraft-streaming-scene))

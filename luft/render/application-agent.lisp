@@ -39,7 +39,7 @@
                  :inspection (viewer-inspection viewer)))
 
 (clim:define-command (com-describe-viewer
-                      :command-table luft-atelier
+                      :command-table luft-play
                       :name "Describe Viewer")
     ()
   "Report LUFT's current camera and construction presentation state."

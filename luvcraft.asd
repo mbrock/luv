@@ -221,18 +221,19 @@
                              (:file "world-source"))))
   :in-order-to ((test-op (test-op "luvcraft/luft/test"))))
 
-(defsystem "luvcraft/luft/atelier"
-  :description "Luvcraft on Luft, hosted for now by the Luft atelier."
+(defsystem "luvcraft/luft/game"
+  :description "Luvcraft on Luft as a game: its own viewer, keys, hotbar, and saves."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/luft" "luft/render" "alexandria")
-  :components ((:file "luvcraft/luft/atelier")))
+  ;; The birthday meadow's save kind lives with the party; its saves play too.
+  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
+  :components ((:file "luvcraft/luft/game")))
 
 (defsystem "luvcraft/luft/test"
   :description "Luvcraft on Luft against Luvcraft's own streaming, cell for cell."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/luft" "luv/test-support")
+  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luv/test-support")
   :components ((:file "luvcraft/luft/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

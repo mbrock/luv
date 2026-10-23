@@ -25,7 +25,7 @@
        (error "~S has no attached workbench." viewer))))
 
 (clim:define-command (com-execute-command
-                      :command-table luft-atelier
+                      :command-table luft-play
                       :name "Execute Command"
                       :keystroke (#\x :meta))
     ()

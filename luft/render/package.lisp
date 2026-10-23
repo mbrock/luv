@@ -187,6 +187,26 @@
            #:site-inspection-stock
            #:raycast-site
            #:reset-viewer-camera
+           ;; What a game hosted in a viewer specializes and calls.
+           #:viewer-source
+           #:viewer-edit-material
+           #:viewer-last-edit-status
+           #:viewer-hotbar
+           #:select-viewer-material
+           #:viewer-pointer-captured-p
+           #:viewer-pick-material
+           #:viewer-edit-at-crosshair
+           #:viewer-key-event-tables
+           #:viewer-command-viewer
+           #:viewer-world-description
+           #:write-viewer-world-description
+           #:save-viewer-world
+           #:first-person-mode
+           #:luft-window
+           #:luft-window-release
+           #:luft-play
+           #:luft-play-release
+           #:+render-population-preparer+
            #:start-viewer
            #:stop-viewer
            #:refresh-viewer-renderer

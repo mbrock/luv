@@ -1315,7 +1315,11 @@ host is still present, Swash remains the only authority allowed to stop it."
              (when canvas
                (funcall (find-symbol \"CANVAS-HEALTH\" :luv)
                         canvas)))))
-     (princ (cond (session :luvcraft) (viewer :luft) (luvland :luvland) (t :idle)))
+     (princ (cond (session :luvcraft)
+                  ((and viewer (string= (class-name (class-of viewer))
+                                        \"LUVCRAFT-VIEWER\"))
+                   :luvcraft-on-luft)
+                  (viewer :luft) (luvland :luvland) (t :idle)))
      (when health (format t \" ~S\" health)))"
   "Read out of the image: which interactive target is playing and its health.
 
@@ -1376,6 +1380,8 @@ shows them.~%" failure-count))))))
               stream *game-status-form* "CL-USER")))))
     (format t "~A~%"
             (cond ((null answer) "Game state unknown (image busy or not loaded).")
+                  ((search "LUVCRAFT-ON-LUFT" (string-upcase (princ-to-string answer)))
+                   "Luvcraft on Luft is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
                   ((search "LUVCRAFT" (string-upcase (princ-to-string answer)))
                    "Luvcraft is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
                   ((search "LUFT" (string-upcase (princ-to-string answer)))
@@ -2037,10 +2043,10 @@ shows them.~%" failure-count))))))
        (evaluate
         (format nil
                 "(progn
-                   (asdf:load-system :luvcraft/luft/atelier)
+                   (asdf:load-system :luvcraft/luft/game)
                    (when (or luvcraft:*session* luft.render:*viewer*)
                      (error \"Another game is playing; call STOP-PLAYING first.\"))
-                   (uiop:symbol-call :luvcraft.luft :play-in-atelier~:[~; :fullscreen-p t~]))"
+                   (uiop:symbol-call :luvcraft.luft.game :play~:[~; :fullscreen-p t~]))"
                 fullscreen-p)
         "CL-USER"))
       (:luvland
