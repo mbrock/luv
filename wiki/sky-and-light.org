@@ -31,6 +31,47 @@ of the renderer can find (#RSGLTL).  Each phase below has a visible result and
 an evidence gate, so it can be revised from measurements without undoing the
 preceding phases.
 
+** DONE The crossing keeps the atmosphere, not a second approximation
+:PROPERTIES:
+:ID: S84HR6
+:END:
+
+Luvcraft on Luft now owns the original =sky-clock= and
+=make-default-sky-profile=. It starts at 06:30 with a twenty-minute day;
+the engine knob protocol exposes hour, day length, freeze time, and sun orbit
+tilt on that particular game's clock. Deterministic captures can still pin
+the original clock. The companion environment reads the same clock and
+profile. Neither the old Luvcraft save format nor this crossing persists sky
+time: the old clock was session state, not saved world state.
+
+The original atmospheric shader is now a shared =sky-radiance= function,
+called by both renderers: directional scattering, rotated-octave cumulus,
+cirrus, cloud self-shadow, distant-ground relief, profile-sized sun disc,
+limb darkening and corona (#8X33G2, #RSGLTL). The ground's matching
+=cloud-deck-visibility= is shared too; the game selects it while building
+Luft's terrain shader, without making the renderer depend on Luvcraft.
+The adapter changes Y-up to Z-up and subtracts the source world's horizontal
+translation /before/ sampling clouds, so sky and terrain find the same deck.
+
+Luft contributes its rotating stars and galaxy, detailed moon disc and
+maria, moonlit terrain and moon shadows. Its aerial-perspective function
+colours /both/ distant terrain and sky ground: this keeps the residency edge
+from drawing a horizon seam. The original profile supplies sun, ambient,
+fog and cloudiness; the lower ambient lobe is 0.4 times the upper lobe.
+The atelier and wizard retain their own profile and clock. The common shadow
+basis uses the orbit axis rather than world-up, including at zero-tilt noon.
+
+Evidence: Linux software-Vulkan captures of the actual old and new games at
+960 by 640 native pixels, seed 7, matching 70-degree FOV, exposure 0.45,
+translated camera position and five matching orientations. Hours 00:00,
+06:00, 06:42, 12:00, 17:18 and 18:00 cover night, horizons, solar discs,
+clouds, terrain and the moon. A six-second, 72-frame film spans a full day.
+The captures show matching solar/cloud forms, a continuous fog join and
+more readable moonlit terrain; the night constellation and moon treatment
+are deliberately Luft's rather than a pixel match. Atelier and wizard also
+rendered successfully in isolated smoke captures. The software-Vulkan probe
+disables the canvas watchdog's fatal timeout, not its health reporting.
+
 * What the critique changed
 :PROPERTIES:
 :ID: SKCRIT

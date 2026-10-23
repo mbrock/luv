@@ -228,6 +228,7 @@
   :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
   :serial t
   :components ((:file "luvcraft/luft/game")
+               (:file "luvcraft/luft/sky")
                (:file "luvcraft/luft/instruments")
                (:file "luvcraft/luft/animals")
                (:file "luvcraft/luft/balls")

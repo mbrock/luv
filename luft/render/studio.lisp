@@ -544,7 +544,7 @@ before the operation boundary, or it would encode through resources which the
                      (viewer-player viewer))))
     (when player (list (character-render-lanes player)))))
 
-(defun encode-viewer-frame
+(defmethod encode-viewer-frame
     (viewer encoder surface-texture extent
      &key (inspector-p (viewer-inspector-p viewer)))
   (let* ((*fixed-render-scale*
@@ -942,6 +942,12 @@ before the operation boundary, or it would encode through resources which the
 (defmethod advance-viewer-game ((viewer t) seconds)
   (declare (ignore seconds)))
 
+(defgeneric advance-viewer-sky (viewer seconds)
+  (:documentation "Advance the host's environment clock, independently of its inhabitants.")
+  (:method (viewer seconds)
+    (declare (ignore viewer))
+    (advance-sky-clock seconds)))
+
 (defun advance-viewer-world (viewer timestamp)
   "Submit local input, then advance the whole world, even without a player."
   (let* ((last (viewer-last-timestamp viewer))
@@ -949,7 +955,7 @@ before the operation boundary, or it would encode through resources which the
          (camera (viewer-camera viewer)))
     (setf (viewer-last-timestamp viewer) timestamp)
     (advance-camera-response camera dt)
-    (advance-sky-clock dt)
+    (advance-viewer-sky viewer dt)
     (when-let ((player (and (not (typep (viewer-mode viewer) 'free-camera-mode))
                             (viewer-player viewer))))
       (when (typep (character-controller player) 'movement-intent)

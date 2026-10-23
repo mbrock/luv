@@ -835,6 +835,16 @@ the figure stays clear and only its far reaches recede."
 ;;; conservative raster bound; every visible contour below comes from this
 ;;; analytic field.  LUFT is Z-up, unlike luvcraft's first-person figures.
 
+(defvar *terrain-cloud-visibility-function* nil
+  "Shader function selected while building a game's terrain specification.
+Arguments are raw Z-up point, sun, elapsed seconds, cloudiness, source origin.
+NIL leaves the atelier's direct light unchanged.")
+
+(define-shader-abstraction terrain-cloud-visibility (point sun elapsed cloudiness origin)
+  (if *terrain-cloud-visibility-function*
+      `(,*terrain-cloud-visibility-function* ,point ,sun ,elapsed ,cloudiness ,origin)
+      1.0))
+
 (define-live-shader star-fragment-specification
     (:stage :fragment
      :inputs ((world-position :vec3 :location 0
@@ -871,10 +881,14 @@ the figure stays clear and only its far reaches recede."
          (sun (representation (swizzle sun-vector :xyz)))
          (sun-color (representation (swizzle sun-color-vector :xyz)))
          (visibility
-           (soft-shadow-visibility
-            shadow-map shadow-sampler shadow-sample normal sun
-            (representation shadow-control)
-            shadow-row-x shadow-row-y shadow-row-z))
+           (* (soft-shadow-visibility
+               shadow-map shadow-sampler shadow-sample normal sun
+               (representation shadow-control)
+               shadow-row-x shadow-row-y shadow-row-z)
+              (terrain-cloud-visibility
+               world sun (swizzle atmosphere-parameters :x)
+               (swizzle (representation horizon-color-vector) :w)
+               (swizzle (representation sun-color-vector) :w))))
          (relief (swizzle (representation material-surface) :x))
          (strength (swizzle (representation material-surface) :y))
          (roughness (swizzle (representation material-surface) :z))

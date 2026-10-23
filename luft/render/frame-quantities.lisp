@@ -62,9 +62,12 @@
        ((:xyz :quantity quantities:world-position
          :unit quantities:cell)
         (:w :quantity quantities:gait-phase :unit :radian)))
+      ;; Direction XYZ; W is the solar profile's angular width in radians.
       (sun-vector :vec4
        :components
        ((:xyz :quantity quantities:world-direction :unit :one)))
+      ;; Key radiance XYZ; W translates horizontal renderer cells back to
+      ;; source coordinates for a game-owned atmosphere (zero by default).
       (sun-color-vector :vec4
        :components
        ((:xyz :quantity quantities:scene-radiance :unit :one)))

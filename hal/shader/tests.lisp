@@ -1587,8 +1587,15 @@
          (fragment-module (shaders:block-world-sky-fragment-module))
          (ray (binding-named 'ray vertex))
          (direction (binding-named 'direction fragment))
-         (cloud-density (binding-named 'cloud-density fragment))
-         (disc (binding-named 'disc fragment)))
+         ;; The atmosphere is shared with the Luft adapter. Inspect its source
+         ;; locals here, rather than depending on inlining's generated names.
+         (atmosphere-bindings
+           (second (first (shader:shader-function-body
+                           (shader:shader-function-definition-for
+                            'shaders::sky-radiance)))))
+         (cloud-density (assoc 'shaders::cloud-density atmosphere-bindings))
+         (shadow-density (assoc 'shaders::shadow-density atmosphere-bindings))
+         (disc (assoc 'shaders::disc atmosphere-bindings)))
     (true (eq (shader:shader-specification-stage vertex) :vertex))
     (true (eq (shader:shader-specification-stage fragment) :fragment))
     (true (shader:shader-type=
@@ -1603,8 +1610,7 @@
     ;; A deck is a coverage threshold over one noise field, and the width of
     ;; that threshold is the only thing that softens toward the horizon.
     (true (equal (form-names
-                  (shader:shader-expression-form
-                   (shader:shader-binding-expression cloud-density)))
+                  (second cloud-density))
                  '("*" "deck-mask"
                    ("smoothstep" "coverage"
                     ("+" "coverage" "softness") "cloud-field"))))
@@ -1612,14 +1618,11 @@
     ;; the sun, against the same threshold: a lit face and a dark underside
     ;; from one extra tap.
     (true (equal (form-names
-                  (shader:shader-expression-form
-                   (shader:shader-binding-expression
-                    (binding-named 'shadow-density fragment))))
+                  (second shadow-density))
                  '("smoothstep" "coverage" ("+" "coverage" "softness")
                    "shadow-field")))
     (true (equal (form-names
-                  (shader:shader-expression-form
-                   (shader:shader-binding-expression disc)))
+                  (second disc))
                  '("smoothstep" ("-" 1.0 "disc-limb")
                    ("-" 1.0 ("*" 0.56 "disc-limb")) "alignment")))
     ;; All the fragment's extended mathematics shares one import.

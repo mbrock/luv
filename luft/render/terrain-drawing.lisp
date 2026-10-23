@@ -172,7 +172,8 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
               (simple shadow-indices '(unsigned-byte 32))
               ranges))))
 
-(defun make-terrain-drawing (device target-formats sample-count)
+(defun make-terrain-drawing (device target-formats sample-count
+                             &key (fragment (shaders:star-fragment-specification)))
   (let ((drawing (make-instance 'terrain-drawing)))
     (with-gpu-construction (drawing)
       (multiple-value-bind (scene-words normals scene-indices shadow-words
@@ -203,7 +204,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
              (make-drawing-program
               device :label "luft site streams"
               :vertex (shaders:terrain-vertex-specification)
-              :fragment (shaders:star-fragment-specification)
+              :fragment fragment
               :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
               :sample-count sample-count
               :depth-stencil '(:format :depth32-float :depth-write-enabled t

@@ -55,6 +55,12 @@ quickbar begins: things to build a house with, colours, and a lamp.")
   ((luvcraft-world :initarg :luvcraft-world :reader luvcraft-viewer-world
                    :documentation "Luvcraft's own world: its source and edits as read.")
    (resume :initarg :resume :initform nil :reader luvcraft-viewer-resume)
+   (sky-clock :initform (make-instance 'luvcraft::sky-clock) :reader viewer-sky-clock)
+   (sky-profile :initform (luvcraft::make-default-sky-profile) :reader viewer-sky-profile)
+   (sky-elapsed :initform 0.0 :accessor viewer-sky-elapsed)
+   (sky-origin-offset :initarg :sky-origin-offset :initform 0.0 :reader viewer-sky-origin-offset)
+   (sun-orbit-tilt :initform 0.44 :accessor viewer-sun-orbit-tilt)
+   (sky-light :initform (make-luvcraft-light) :reader viewer-sky-light)
    (inhabitants :initarg :inhabitants :initform nil
                 :reader luvcraft-viewer-inhabitants)
    (animals :initform nil :accessor viewer-animals)
@@ -385,6 +391,8 @@ LUFT.RENDER:START-GAME-HOST."
                  :solid (game:make-luvcraft-streaming-scene
                          source :mesh-preparer render:+render-population-preparer+)
                  :title *title*
+                 :sky-factory 'make-luvcraft-sky-drawing
+                 :terrain-factory 'make-luvcraft-terrain-drawing
                  :figure-factory 'make-ball-figure-drawing
                  :world-pathname (and (or loaded-p pathname-p
                                           (and pathname (null seed)))
@@ -394,6 +402,7 @@ LUFT.RENDER:START-GAME-HOST."
                  :frame-class 'luvcraft-viewer
                  :frame-initargs
                  (list :luvcraft-world world :resume resume
+                       :sky-origin-offset (game:luvcraft-world-source-offset source)
                        :inhabitants inhabitants
                        :hotbar (mapcar (lambda (name)
                                          (game:block-placement

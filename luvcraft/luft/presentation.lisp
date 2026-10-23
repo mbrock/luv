@@ -32,7 +32,9 @@
                  :label "original companion scene uniforms"
                  :entries '((:binding 2 :type :uniform-buffer)))))
              (environment (make-instance 'luvcraft:luvcraft-session
-                                         :camera (make-instance 'presentation-camera))))
+                                         :camera (make-instance 'presentation-camera)
+                                         :sky-clock (viewer-sky-clock viewer)
+                                         :sky-profile (viewer-sky-profile viewer))))
         (render:add-viewer-overlay
          viewer (make-instance 'companion-presentation :layout layout
                                                       :environment environment)))))

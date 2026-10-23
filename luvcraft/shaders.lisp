@@ -1575,24 +1575,12 @@ negative inside.  RADIUS is the corner radius in world cells."
          ;; from being one flat sheet of light.  The threshold is wider than
          ;; the sky's, because a shadow thrown from that far off is blurred
          ;; by the sun's own angular width long before it lands.  #RSGLTL
-         (elapsed (representation (swizzle fog-vector :z)))
-         (cloudiness (representation (swizzle fog-vector :w)))
-         (sun-climb (max 0.15 (representation (swizzle sun-direction :y))))
-         (deck-reach
-           (/ (max 8.0 (- cloud-altitude (swizzle surface-point :y)))
-              sun-climb))
-         (deck-meeting
-           (+ (+ surface-point (* (representation sun-direction) deck-reach))
-              (vec3 (* elapsed 2.2) 0.0 (* elapsed 1.2))))
-         (deck-cover (cloud-fractal-noise (* deck-meeting 0.0044)))
-         (deck-coverage
-           (mix 0.82 0.46 (clamp (* cloudiness cloud-coverage) 0.0 1.0)))
          (cloud-shadow
            (assume-quantity
-            (- 1.0
-               (* cloud-shadow-depth
-                  (smoothstep deck-coverage (+ deck-coverage 0.20)
-                              deck-cover)))
+            (cloud-deck-visibility
+             surface-point (representation sun-direction)
+             (representation (swizzle fog-vector :z))
+             (representation (swizzle fog-vector :w)))
             :quantity :cloud-shadow :unit :one))
          ;; Occlusion bites harder than the raw mesh reading: the corner where
          ;; three blocks meet is what tells the eye these are solid volumes.
@@ -1941,6 +1929,17 @@ with three."
                (vec4 rotated total)))))
     (* (swizzle accumulated :w) 1.067)))
 
+(define-shader-function cloud-deck-visibility (point sun elapsed cloudiness)
+  "The sky deck's soft sunlight shadow at a Y-up world point. #RSGLTL"
+  (let* ((sun-climb (max 0.15 (swizzle sun :y)))
+         (reach (/ (max 8.0 (- cloud-altitude (swizzle point :y))) sun-climb))
+         (meeting (+ (+ point (* sun reach))
+                     (vec3 (* elapsed 2.2) 0.0 (* elapsed 1.2))))
+         (cover (cloud-fractal-noise (* meeting 0.0044)))
+         (coverage (mix 0.82 0.46 (clamp (* cloudiness cloud-coverage) 0.0 1.0))))
+    (- 1.0 (* cloud-shadow-depth
+              (smoothstep coverage (+ coverage 0.20) cover)))))
+
 (define-shader-function henyey-greenstein (cosine asymmetry)
   "The Henyey-Greenstein phase function: how much light a haze sends on at
 COSINE off its original direction, for a medium of the given ASYMMETRY.
@@ -2028,29 +2027,67 @@ distribution overhead."
 ;;; wants a sky with something genuinely bright in it, and #8X33G2 what each
 ;;; of these terms replaced.
 
-(define-shader-method shader-specification-for
-    block-world-sky-fragment-specification
-    ((role (eql :sky)) (stage (eql :fragment)))
-    (:stage :fragment
-     :inputs ((ray-input :vec3 :location 0
-                         :quantity :world-direction :unit :one))
-     :outputs ((color-output :vec4 :location 0))
-     :resources
-     ((frame-state :uniform-block :set 0 :binding 2
-                   :members #.*frame-uniform-members*)))
-  (let* ((direction (normalize (representation ray-input)))
+(define-shader-function legacy-night-radiance
+    (direction elapsed sun-direction day-factor sun-width)
+  "The original fixed star field and full moon, before cloud occlusion."
+  (let* ((elevation (swizzle direction :y))
+         (night (- 1.0 (smoothstep 0.0 0.28 day-factor)))
+         (galaxy-axis (vec3 0.42 0.55 -0.72))
+         (galaxy-distance (dot direction galaxy-axis))
+         (galaxy-band (exp (* -20.0 (* galaxy-distance galaxy-distance))))
+         (galaxy-structure
+           (+ (* (lattice-noise (* direction 15.0)) 0.58)
+              (* (lattice-noise (* direction 44.0)) 0.42)))
+         (galaxy
+           (* galaxy-band
+              (* (+ 0.10 (* 1.25 galaxy-structure))
+                 (- 1.0 (* 0.55 (smoothstep 0.42 0.66
+                                            (lattice-noise
+                                             (* direction 7.0))))))))
+         (star-visibility (* night (smoothstep -0.02 0.14 elevation)))
+         (stars
+           (* (star-light direction elapsed)
+              (* star-brightness (* star-visibility (+ 1.0 (* 1.6 galaxy-band))))))
+         (starred
+           (+ (* (vec3 0.60 0.66 0.94) (* galaxy (* star-visibility 0.17)))
+              (* (vec3 0.92 0.94 1.0) stars)))
+         (moon-direction (* sun-direction -1.0))
+         (moon-alignment (dot direction moon-direction))
+         (moon-radius (* sun-width 1.7))
+         (moon-limb (* 0.5 (* moon-radius moon-radius)))
+         (moon-disc
+           (smoothstep (- 1.0 moon-limb) (- 1.0 (* 0.80 moon-limb))
+                       moon-alignment))
+         (moon-face
+           (/ (- direction (* moon-direction moon-alignment))
+              (max 0.0001 moon-radius)))
+         (moon-maria (lattice-noise (+ (* moon-face 1.8) (vec3 13.0 5.0 9.0))))
+         (moon-shape
+           (* (+ 0.70 (* 0.50 moon-maria))
+              (- 1.0 (* 0.40 (clamp (dot moon-face moon-face) 0.0 1.0)))))
+         (moon-glow (* (expt (max 0.0 moon-alignment) 220.0) 0.30))
+         (lunar
+           (* (vec3 0.94 0.95 1.0)
+              (* night (+ (* moon-disc (* moon-radiance moon-shape))
+                          moon-glow)))))
+    (+ starred lunar)))
+
+(define-shader-function sky-radiance
+    (ray-input camera-vector sun-vector sun-color-vector zenith-vector
+     horizon-vector fog-vector night-radiance aerial)
+  "Luvcraft's atmosphere in Y-up coordinates, shared by both renderers."
+  (let* ((direction (normalize ray-input))
          (elevation (swizzle direction :y))
          (above (max elevation 0.0))
-         (eye (representation (swizzle camera-vector :xyz)))
-         (sun-direction (representation (swizzle sun-vector :xyz)))
-         (day-factor (representation (swizzle sun-vector :w)))
-         (sun-color (representation (swizzle sun-color-vector :xyz)))
-         (sun-width (representation (swizzle sun-color-vector :w)))
-         (zenith (representation (swizzle zenith-vector :xyz)))
-         (horizon (representation (swizzle horizon-vector :xyz)))
-         (fog-color (representation (swizzle fog-color-vector :xyz)))
-         (elapsed (representation (swizzle fog-vector :z)))
-         (cloudiness (representation (swizzle fog-vector :w)))
+         (eye (swizzle camera-vector :xyz))
+         (sun-direction (swizzle sun-vector :xyz))
+         (day-factor (swizzle sun-vector :w))
+         (sun-color (swizzle sun-color-vector :xyz))
+         (sun-width (swizzle sun-color-vector :w))
+         (zenith (swizzle zenith-vector :xyz))
+         (horizon (swizzle horizon-vector :xyz))
+         (elapsed (swizzle fog-vector :z))
+         (cloudiness (swizzle fog-vector :w))
          ;; One number decides how much of the sky is sunrise: a sun near the
          ;; horizon warms the haze, the scatter, and the cloud faces together.
          (sun-elevation (swizzle sun-direction :y))
@@ -2095,56 +2132,7 @@ distribution overhead."
               (* day-factor (* halo-depth sky-scatter-gain))))
          (scattered (+ hazed (* halo-tint halo)))
          ;; --- night ------------------------------------------------------
-         (night (- 1.0 (smoothstep 0.0 0.28 day-factor)))
-         ;; The galaxy is a great circle of the sky, so one fixed axis and the
-         ;; ray's distance from its plane is the whole band.
-         (galaxy-axis (vec3 0.42 0.55 -0.72))
-         (galaxy-distance (dot direction galaxy-axis))
-         (galaxy-band (exp (* -20.0 (* galaxy-distance galaxy-distance))))
-         (galaxy-structure
-           (+ (* (lattice-noise (* direction 15.0)) 0.58)
-              (* (lattice-noise (* direction 44.0)) 0.42)))
-         (galaxy
-           (* galaxy-band
-              (* (+ 0.10 (* 1.25 galaxy-structure))
-                 ;; A dust lane is the band's own darkness, not an absence of
-                 ;; stars, so it multiplies rather than subtracts.
-                 (- 1.0 (* 0.55 (smoothstep 0.42 0.66
-                                            (lattice-noise
-                                             (* direction 7.0))))))))
-         (star-visibility
-           (* night (smoothstep -0.02 0.14 elevation)))
-         (stars
-           (* (star-light direction elapsed)
-              (* star-brightness (* star-visibility (+ 1.0 (* 1.6 galaxy-band))))))
-         (starred
-           (+ (* (vec3 0.60 0.66 0.94) (* galaxy (* star-visibility 0.17)))
-              (* (vec3 0.92 0.94 1.0) stars)))
-         ;; The moon rides opposite the sun, which puts it up for exactly the
-         ;; hours the sun is not, and always full: the simple sky this world
-         ;; wants, and the one that lights its nights.
-         (moon-direction (* sun-direction -1.0))
-         (moon-alignment (dot direction moon-direction))
-         (moon-radius (* sun-width 1.7))
-         (moon-limb (* 0.5 (* moon-radius moon-radius)))
-         (moon-disc
-           (smoothstep (- 1.0 moon-limb) (- 1.0 (* 0.80 moon-limb))
-                       moon-alignment))
-         ;; The component of the ray across the moon's own direction, in units
-         ;; of its radius: the disc's face, which the maria are painted on.
-         (moon-face
-           (/ (- direction (* moon-direction moon-alignment))
-              (max 0.0001 moon-radius)))
-         (moon-maria (lattice-noise (+ (* moon-face 1.8) (vec3 13.0 5.0 9.0))))
-         (moon-shape
-           (* (+ 0.70 (* 0.50 moon-maria))
-              (- 1.0 (* 0.40 (clamp (dot moon-face moon-face) 0.0 1.0)))))
-         (moon-glow (* (expt (max 0.0 moon-alignment) 220.0) 0.30))
-         (lunar
-           (* (vec3 0.94 0.95 1.0)
-              (* night (+ (* moon-disc (* moon-radiance moon-shape))
-                          moon-glow))))
-         (nightly (+ scattered (+ starred lunar)))
+         (nightly (+ scattered night-radiance))
          ;; --- the cloud decks --------------------------------------------
          (cirrus-point
            (+ (* direction (/ 2400.0 (max elevation 0.02)))
@@ -2223,9 +2211,6 @@ distribution overhead."
          ;; wide, weak relief over it keeps the lower half from being one flat
          ;; wall of fog.  The relief fades out at the horizon, where the plane
          ;; runs away faster than a pixel can resolve it.
-         (aerial
-           (aerial-perspective-color fog-color direction sun-direction
-                                     low-sun day-factor))
          (descent (max 0.004 (- elevation)))
          (ground-point
            (+ eye (* direction (/ (max 1.0 (swizzle eye :y)) descent))))
@@ -2261,7 +2246,38 @@ distribution overhead."
                  (+ (* disc (* sun-disc-radiance (* occlusion limb-darkening)))
                     (* corona (* 2.0 occlusion))))))
          (rgb (+ grounded solar)))
-    (set-output color-output (vec4 rgb 1.0))))
+    rgb))
+
+(define-shader-method shader-specification-for
+    block-world-sky-fragment-specification
+    ((role (eql :sky)) (stage (eql :fragment)))
+    (:stage :fragment
+     :inputs ((ray-input :vec3 :location 0
+                         :quantity :world-direction :unit :one))
+     :outputs ((color-output :vec4 :location 0))
+     :resources
+     ((frame-state :uniform-block :set 0 :binding 2
+                   :members #.*frame-uniform-members*)))
+  (let* ((direction (normalize (representation ray-input)))
+         (sun (representation (swizzle sun-vector :xyz)))
+         (day-factor (representation (swizzle sun-vector :w)))
+         (low-sun (* day-factor (- 1.0 (smoothstep 0.02 0.45 (swizzle sun :y)))))
+         (aerial (aerial-perspective-color
+                  (representation (swizzle fog-color-vector :xyz))
+                  direction sun low-sun day-factor)))
+    (set-output color-output
+                (vec4 (sky-radiance (representation ray-input)
+                                 (representation camera-vector) (representation sun-vector)
+                                 (representation sun-color-vector) (representation zenith-vector)
+                                 (representation horizon-vector)
+                                 (representation fog-vector)
+                                 (legacy-night-radiance
+                                  direction
+                                  (representation (swizzle fog-vector :z))
+                                  sun day-factor
+                                  (representation (swizzle sun-color-vector :w)))
+                                 aerial)
+                      1.0))))
 
 (defun block-world-sky-fragment-specification ()
   (shader-specification-for :sky :fragment))

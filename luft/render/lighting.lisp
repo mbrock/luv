@@ -11,6 +11,9 @@
   ((name :initarg :name :reader light-name)
    (sun-direction :initarg :sun-direction :accessor light-sun-direction)
    (sun-color :initarg :sun-color :accessor light-sun-color)
+   (sun-angular-width :initform 0.006 :accessor light-sun-angular-width)
+   (sky-origin-offset :initform 0.0 :accessor light-sky-origin-offset
+                      :documentation "Horizontal source-to-renderer translation, in cells.")
    (sky-color :initarg :sky-color :accessor light-sky-color
               :documentation "Ambient radiance arriving from the upper hemisphere.")
    (ground-color :initarg :ground-color :accessor light-ground-color
@@ -77,6 +80,10 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
 (defparameter *sky-minutes-per-day* nil
   "Real minutes per full day while the clock runs, or NIL for a still sky.")
 
+(defvar *sky-paused-p* nil)
+(defvar *sky-light-evaluator* nil
+  "Host-selected frame evaluator; NIL uses Luft's own profile.")
+
 (defparameter *sky-sun-orbit-tilt* 0.44
   "How far the solar orbit leans out of the vertical plane.")
 
@@ -89,7 +96,8 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
 (defun advance-sky-clock (seconds)
   "Advance *SKY-HOUR* by SECONDS of real time while the clock runs."
   (setf *sky-elapsed* (mod (+ *sky-elapsed* seconds) 3600.0))
-  (when (and *sky-minutes-per-day* (plusp *sky-minutes-per-day*))
+  (when (and (not *sky-paused-p*) *sky-minutes-per-day*
+             (plusp *sky-minutes-per-day*))
     (setf *sky-hour*
           (mod (+ *sky-hour* (/ (* 24.0 seconds)
                                 (* 60.0 *sky-minutes-per-day*)))
@@ -190,7 +198,7 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
 
 (defun current-light ()
   "Return *LIGHT* evaluated at the current sky hour."
-  (update-light-from-sky *light* *sky-hour*))
+  (funcall (or *sky-light-evaluator* #'update-light-from-sky) *light* *sky-hour*))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The night
@@ -218,7 +226,7 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
 (defparameter *moon-angular-radius* 0.026
   "The drawn moon's angular radius in radians: a few times the true one.")
 
-(defparameter *galaxy-strength* 0.35
+(defparameter *galaxy-strength* 1.0
   "Strength of the galaxy band behind the stars.")
 
 (defparameter *moonlight-color* #(0.085 0.105 0.165)
@@ -246,7 +254,7 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
   "The key light's radiance, faded out at the horizon handover."
   (flet ((scaled (colour amount)
            (vector (* (aref colour 0) amount) (* (aref colour 1) amount)
-                   (* (aref colour 2) amount) 1.0)))
+                   (* (aref colour 2) amount) (light-sky-origin-offset light))))
     (if (light-key-sun-p light)
         (scaled (light-sun-color light)
                 (coerce (%sky-smoothstep
@@ -268,8 +276,9 @@ plane so camera translation cannot slide a shadow edge by a fraction of a
 texel."
   (let* ((sun (light-key-direction light))
          (forward (vec3-scale sun -1.0))
-         (world-up (make-vec3 0.0 0.0 1.0))
-         (right (vec3-normalize (vec3-cross world-up forward)))
+         ;; The orbit axis stays transverse even at noon with zero tilt.
+         (orbit-axis (sky-celestial-pole))
+         (right (vec3-normalize (vec3-cross orbit-axis forward)))
          (up (vec3-cross forward right))
          (extent (light-shadow-half-extent light))
          (depth-radius (light-shadow-depth-radius light))
@@ -301,7 +310,7 @@ The sun lanes carry the key light: the sun by day and the moon by night."
            (list (vec3-x value) (vec3-y value)
                  (vec3-z value) fourth)))
     (append
-     (vec3-lane (light-key-direction light) 0.0)
+     (vec3-lane (light-key-direction light) (light-sun-angular-width light))
      (coerce (light-key-color light) 'list)
      (list (aref (light-sky-color light) 0)
            (aref (light-sky-color light) 1)
@@ -343,6 +352,8 @@ The sun lanes carry the key light: the sun by day and the moon by night."
 ;;; Knobs belong to the values packed below, not to a UI vocabulary.
 (math:define-unit 'sky-hour :reference :second :magnitude 3600
                           :quantity-kind :duration)
+(math:define-unit 'sky-minute :reference :second :magnitude 60
+                            :quantity-kind :duration)
 (math:define-quantity-kind 'inverse-spatial-coordinate
   :dimension nil :parent :dimensionless)
 (math:define-quantity 'haze-extinction :kind 'inverse-spatial-coordinate
@@ -350,12 +361,48 @@ The sun lanes carry the key light: the sun by day and the moon by night."
 (math:define-quantity 'haze-height-falloff :kind 'inverse-spatial-coordinate
   :non-negative-p t)
 (defmethod knobs:unit-abbreviation ((unit (eql 'sky-hour))) "h")
+(defmethod knobs:unit-abbreviation ((unit (eql 'sky-minute))) "min")
 (defmethod knobs:unit-abbreviation ((unit (eql quantities:cell))) "cell")
+
+(defgeneric host-sky-hour (host)
+  (:method (host) (declare (ignore host)) *sky-hour*))
+(defgeneric host-light (host)
+  (:method (host) (declare (ignore host)) *light*))
+(defgeneric (setf host-sky-hour) (value host)
+  (:method (value host) (declare (ignore host)) (setf *sky-hour* value)))
+(defgeneric host-day-length (host)
+  (:method (host) (declare (ignore host)) (or *sky-minutes-per-day* 20.0)))
+(defgeneric (setf host-day-length) (value host)
+  (:method (value host) (declare (ignore host)) (setf *sky-minutes-per-day* value)))
+(defgeneric host-freeze-time (host)
+  (:method (host) (declare (ignore host))
+    (or *sky-paused-p* (null *sky-minutes-per-day*))))
+(defgeneric (setf host-freeze-time) (value host)
+  (:method (value host)
+    (declare (ignore host))
+    (setf *sky-paused-p* value)
+    (unless (or value *sky-minutes-per-day*) (setf *sky-minutes-per-day* 20.0))
+    value))
+(defgeneric host-sun-orbit-tilt (host)
+  (:method (host) (declare (ignore host)) *sky-sun-orbit-tilt*))
+(defgeneric (setf host-sun-orbit-tilt) (value host)
+  (:method (value host) (declare (ignore host)) (setf *sky-sun-orbit-tilt* value)))
 
 (knobs:define-knob time-of-day
     (:group :sky :quantity (:quantity :duration :unit sky-hour)
-     :minimum 0.0 :maximum 24.0 :step 0.25)
-  *sky-hour*)
+     :minimum 0.0 :maximum 23.75 :step 0.25)
+  (host-sky-hour session))
+(knobs:define-knob day-length
+    (:group :sky :quantity (:quantity :duration :unit sky-minute)
+     :minimum 0.5 :maximum 60.0 :step 0.5)
+  (host-day-length session))
+(knobs:define-knob freeze-time
+    (:group :sky :class 'knobs:switch-knob :label "freeze the clock")
+  (host-freeze-time session))
+(knobs:define-knob sun-orbit-tilt
+    (:group :sky :quantity (:quantity :proportion :unit :one)
+     :minimum 0.0 :maximum 1.0 :step 0.02)
+  (host-sun-orbit-tilt session))
 (knobs:define-knob star-brightness
     (:group :sky :quantity (:quantity quantities:scene-radiance :unit :one)
      :minimum 0.0 :maximum 6.0 :step 0.1)
@@ -406,12 +453,12 @@ The sun lanes carry the key light: the sun by day and the moon by night."
 (knobs:define-knob shadow-base-bias
     (:group :shadows :quantity (:quantity quantities:shadow-bias :unit :one)
      :minimum 0.0 :maximum 0.005 :step 0.0001)
-  (light-shadow-base-bias *light*))
+  (light-shadow-base-bias (host-light session)))
 (knobs:define-knob shadow-filter-radius
     (:group :shadows
      :quantity (:quantity quantities:shadow-filter-radius :unit :one)
      :unit-label " texels" :minimum 0.0 :maximum 5.0 :step 0.25)
-  (light-shadow-filter-radius *light*))
+  (light-shadow-filter-radius (host-light session)))
 
 (defun atmosphere-uniform-data
     (light &optional (elapsed 0.0) (hour *sky-hour*))

@@ -2,6 +2,51 @@
 
 (defvar *realized-knobs* nil)
 
+(define-test sky-knobs-control-a-private-clock-and-the-original-day-profile
+  (let* ((viewer (make-instance 'host:luvcraft-viewer
+                                :source (ball-test-scene)
+                                :hotbar (list (game:block-placement luvcraft::*stone-block*))))
+         (other (make-instance 'host:luvcraft-viewer
+                               :source (ball-test-scene)
+                               :hotbar (list (game:block-placement luvcraft::*stone-block*))))
+         (render::*sky-hour* 15.5)
+         (light (host::viewer-sky-light viewer)))
+    (flet ((set-knob (name value)
+             (luv.knobs:set-knob-value (luv.knobs:find-knob name) value viewer)))
+      (set-knob 'render::day-length 2.0)
+      (set-knob 'render::time-of-day 23.0)
+      (render::advance-viewer-sky viewer 10.0)
+      (true (< (abs (- 1.0 (render::host-sky-hour viewer))) 0.0001))
+      (set-knob 'render::freeze-time t)
+      (render::advance-viewer-sky viewer 50.0)
+      (true (< (abs (- 1.0 (render::host-sky-hour viewer))) 0.0001))
+      (is = 15.5 render::*sky-hour*)
+      (is = 6.5 (render::host-sky-hour other))
+      (set-knob 'render::sun-orbit-tilt 0.7)
+      (dolist (hour '(0.0 5.0 6.7 12.0 17.3 19.0 23.99))
+        (set-knob 'render::time-of-day hour)
+        (host::update-luvcraft-light viewer light)
+        (let* ((luvcraft::*sky-sun-orbit-tilt* 0.7)
+               (expected (luvcraft::sky-frame-parameters
+                          (host::viewer-sky-clock viewer)
+                          (luvcraft::make-default-sky-profile))))
+          (is equalp (luvcraft::sky-frame-parameters-fog-color expected)
+              (subseq (render::light-fog-color light) 0 3))
+          (is = (luvcraft::sky-frame-parameters-day-factor expected)
+              (render::light-day-factor light))
+          (true (< (abs (- (luv.arithmetic.lisp.vec3:vec3-y
+                           (luvcraft::sky-frame-parameters-sun-direction expected))
+                          (luv.arithmetic.lisp.vec3:vec3-z
+                           (render::light-sun-direction light)))) 0.000001))))
+      ;; Zero tilt puts the sun exactly overhead. The orbit axis must still
+      ;; give the shadow pass a nondegenerate plane.
+      (set-knob 'render::sun-orbit-tilt 0.0)
+      (set-knob 'render::time-of-day 12.0)
+      (host::update-luvcraft-light viewer light)
+      (let ((rows (render::light-shadow-rows
+                   light (luv.arithmetic.lisp.vec3:make-vec3 0 0 0))))
+        (true (> (reduce #'+ (subseq rows 0 3) :key #'abs) 0.001))))))
+
 (defun make-knob-test-viewer (scene &optional player)
   (make-instance 'host:luvcraft-viewer :source scene :player player
                  :hotbar (list (game:block-placement luvcraft::*stone-block*))))
@@ -98,9 +143,12 @@
       (let* ((knob (luv.knobs:find-knob name))
              (saved (luv.knobs:knob-value knob viewer)))
         (flet ((inputs ()
-                 (append (render::atmosphere-uniform-data render::*light*)
-                         (render::light-uniform-data
-                          render::*light* (luv.arithmetic.lisp.vec3:make-vec3 0 0 0)))))
+                 (let ((light (host::update-luvcraft-light
+                               viewer (render::host-light viewer))))
+                   (append (render::atmosphere-uniform-data
+                            light 0.0 (render::host-sky-hour viewer))
+                           (render::light-uniform-data
+                            light (luv.arithmetic.lisp.vec3:make-vec3 0 0 0))))))
           (let ((before (inputs)))
             (unwind-protect
                  (progn
