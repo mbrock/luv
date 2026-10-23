@@ -636,6 +636,52 @@ readable wood.  Voxel-only light loses the small directional point-light
 hotspot but keeps the yard lit without shining through walls; it is not
 clearly worse, so the point-light fallback is gone (#BQMYNU).
 
+*** DONE Let an old house keep its material choices
+:PROPERTIES:
+:ID: 5AYVR9
+:END:
+
+A player-built meadow save exposed a different test of #Q3KI72: the same
+house, rather than a newly composed material scene. Its 4,737 surviving
+placed edits use 31 kinds, led by 2,178 stone bricks, 434 planks, 365 red
+wool, 328 red bricks, 251 wood, 217 blue wool, 189 crystal, and 155 marble.
+The black wall panels are black in the original renderer too. The cyan
+cast on the white pillars was a port error.
+
+Luvcraft's scalar blocklight is warm regardless of an emitter's display
+colour: the original vertex stage sends the scalar times the square roots
+of =(1.0, 0.82, 0.58)=, and its fragment stage squares the result. The port
+instead derived RGB4 emission from display colour. Crystal consequently
+painted the room cyan. The palette now carries the scalar equally in RGB4
+and a game-selected shader response restores that warm radiance. The shared
+light-gain knob still scales it; the atelier retains its RGB response.
+
+Unpatterned surfaces also lost their surface-emission lane when their
+pattern packed as zero. The descriptor now retains that lane, and the
+fragment stage adds the surface's own albedo times emission. Crystal uses
+a new faceted surface code with the original per-cell diagonal cross and
+bright rim; it does not enter the conductor branch.
+
+Stone and polished stone keep their original atlas hues rather than a
+warm-grey replacement. Red and stone bricks use the original element and
+mortar colours separately, three courses instead of four/two, and quieter
+variation. Planks have broader boards; bookcases have seven book slots per
+row rather than fourteen; marble uses the original painter's face-local
+warped vein, with a softer grey, and marble tiles alternate pale and grey.
+Black wool again takes its atlas tone. Relief and edge brightening on the
+building materials are shallower. The other wool colours already retain
+their original atlas means.
+
+=scripts/capture-luvcraft-save-materials.lisp SAVE OUTPUT-DIRECTORY= reads
+a save without a checkpoint writer, and captures both renderers at the
+saved eye pose, the same lens and pinned noon. It never installs the save's
+inhabitants or writes the input. Native Metal house comparisons were
+inspected, and the material changes were loaded into the existing player
+session. The terrain, palette bridge, renderer, and game-host suites pass
+36,498 checks together. This restores the house's main material cues;
+Luft's bevel geometry and smooth fields still differ from the old pixel
+atlas. The original #Q3KI72 performance work remains open.
+
 ** DONE Give the crossing its original photographic finish
 :PROPERTIES:
 :ID: 0TU71R
@@ -1485,6 +1531,15 @@ watchdog is disabled. SDL's offscreen driver cannot enter native relative
 pointer mode, so the harness establishes that flag before dispatching action
 events; it does not bypass the editing handlers. The permanent regression
 test exercises the same raycast and mouse-edit boundary without a GPU.
+
+/Native Metal follow-up./ A loaded player save exposed a missing binding
+in the target rim: its reserved uniform layout row had no bind group.
+The first aimed block could therefore park the canvas with
+=:BIND-GROUP-MISSING=. The marker now owns a reserved uniform and group,
+binds it before drawing, and releases it with its other resources. The
+parked native session resumed with a visible rim and no further failure;
+all 447 game-host checks passed. The old save remains the intended input
+to this host; this was a draw-state error rather than a save conversion.
 
 ** DONE Compare and restore the small game affordances
 :PROPERTIES:

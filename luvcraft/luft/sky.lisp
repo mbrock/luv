@@ -74,6 +74,10 @@
 
 (in-package #:luft.render.shaders)
 
+(define-shader-function luvcraft-blocklight (light gain)
+  "The original scalar light's warm radiance, with the shared gain knob."
+  (* (* light light) (vec3 1.0 0.82 0.58) (/ gain 0.7)))
+
 (define-shader-function luvcraft-presentation-grade (color)
   (assume-quantity
    (luvcraft.shaders::photographic-grade
@@ -196,7 +200,9 @@
   (render:make-fixed-exposure luvcraft::*luvcraft-exposure*))
 
 (defun make-luvcraft-terrain-drawing (device target-formats sample-count)
-  (let ((luft.render.shaders::*terrain-cloud-visibility-function*
+  (let ((luft.render.shaders::*terrain-blocklight-function*
+          'luft.render.shaders::luvcraft-blocklight)
+        (luft.render.shaders::*terrain-cloud-visibility-function*
           'luft.render.shaders::luvcraft-cloud-visibility)
         (luft.render.shaders::*surface-atmosphere-function*
           'luft.render.shaders::luvcraft-atmospheric-surface))

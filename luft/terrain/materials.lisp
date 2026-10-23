@@ -9,7 +9,7 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter +material-reliefs+
     '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss :cloth
-      :straw :cactus :metal)
+      :straw :cactus :metal :faceted)
     "The relief fields the star shader knows, in the order of their codes.")
   (defparameter +material-patterns+
     '(:none :bond :grid :shingle :checker :shelf :window :timbered :panel
@@ -146,7 +146,8 @@ in half rows, 12-19 the mortar width, and 20-27 the variance.  The accent
 word is the accent tone's RGB8 in bits 0-23 and, in bits 24-31, the kind's
 surface emission over 4, which face-aware shapes glow by."
   (if (null (material-kind-pattern kind))
-      (values 0 0 0)
+      ;; Unpatterned luminous surfaces still emit their own albedo.
+      (values 0 0 (ash (round (* 255 (min 1.0 (/ (material-kind-surface-emission kind) 4)))) 24))
       (destructuring-bind (shape &key (courses 4) (aspect 2) (mortar-width 0.12)
                                    (mortar-tone '(0.4 0.4 0.4)) (variance 0.15)
                                    (accent-tone '(0.0 0.0 0.0)))

@@ -134,6 +134,29 @@
     (true (plusp (reduce #'max (terrain::material-kind-light-emission (kind :crystal)))))
     (is equal '(0 0 0) (terrain::material-kind-light-emission (kind :stone)))))
 
+(define-test old-buildings-keep-their-pigments-and-scalar-lights
+  (dolist (block luvcraft::*block-kinds*)
+    (let* ((kind (terrain:material-placement-kind (game:block-placement block)))
+           (level (luvcraft::block-kind-light-emission block)))
+      ;; Hue belongs to the old shader's warm response, not to the emitter's
+      ;; display colour. Cyan crystal must illuminate white wool warmly.
+      (is equal (make-list 3 :initial-element level) (terrain::material-kind-light-emission kind))))
+  (dolist (name '(:polished-stone :white-wool :black-wool :wood))
+    (let ((block (luvcraft:block-kind-named name)))
+      (is equalp (game::atlas-face-tone block :side) (game::block-face-tone block :side))))
+  (let* ((block luvcraft::*bricks-block*)
+         (kind (terrain:material-placement-kind (game:block-placement block)))
+         (pattern (terrain:material-kind-pattern kind)))
+    ;; Mortar used to be brighter than the brick, reversing the old painting.
+    (loop for actual in (getf (rest pattern) :mortar-tone)
+          for byte in '(83 69 61)
+          do (true (< (abs (- actual (game::srgb-byte-to-linear byte))) 0.001)))
+    (is = 3 (getf (rest pattern) :courses)))
+  (let ((crystal (terrain:material-placement-kind (game:block-placement luvcraft::*crystal-block*))))
+    (is eq :faceted (terrain::material-kind-relief crystal))
+    (is = 13 (ldb (byte 4 0) (terrain:pack-terrain-surface crystal)))
+    (true (plusp (ldb (byte 8 24) (nth-value 2 (terrain:pack-terrain-pattern crystal)))))))
+
 (define-test the-spawn-stands-on-luvcraft-ground
   (let ((source (game:make-luvcraft-world-source :seed 5 :relief :alpine)))
     (multiple-value-bind (x y z) (terrain:world-source-spawn source)

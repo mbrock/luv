@@ -96,6 +96,7 @@ Cancel interior triangle edges, retaining concave joins as well as bevels."
 
 (defclass target-marker (render::gpu-resource-owner)
   ((pipeline :accessor marker-pipeline)
+   (bind-group :accessor marker-bind-group)
    (buffers :initform (make-hash-table :test #'eq) :reader marker-buffers)))
 
 (defmethod render:viewer-overlay-stage ((marker target-marker)) :hud)
@@ -113,6 +114,18 @@ Cancel interior triangle edges, retaining concave joins as well as bevels."
                      ;; crosshair this shader does not read the reserved row.
                      (luv:make-bind-group-layout-descriptor
                       :entries '((:binding 0 :type :uniform-buffer))))))
+        ;; The reserved layout row still requires a binding on Metal, even
+        ;; though the crosshair shaders do not read it.
+        (let ((uniform (render::own-gpu-resource
+                        marker device
+                        (luv:make-buffer-descriptor
+                         :label "target rim reserved uniform" :size 16
+                         :usage '(:uniform)))))
+          (setf (marker-bind-group marker)
+                (render::own-gpu-resource
+                 marker device
+                 (luv:make-bind-group-descriptor
+                  :layout layout :entries `((:binding 0 :resource ,uniform))))))
         (setf (marker-pipeline marker)
               (luv:make-live-shader-pipeline
                :device device :layout layout :role :block-crosshair :vertex-role :block-crosshair
@@ -160,6 +173,7 @@ Cancel interior triangle edges, retaining concave joins as well as bevels."
               (when (plusp (length vertices))
                 (luv:write-buffer buffer vertices)
                 (luv:set-pipeline pass (luv:live-shader-pipeline-native-pipeline (marker-pipeline marker)))
+                (luv:set-bind-group pass 0 (marker-bind-group marker))
                 (luv:set-vertex-buffer pass 0 buffer)
                 (luv:draw pass (/ (length vertices) 7))))))))))
 

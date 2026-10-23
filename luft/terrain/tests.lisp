@@ -134,6 +134,14 @@
     (is = (logior 0 (ash 8 4) (ash 217 8) (ash 128 16))
         (aref words (+ 3 (* 8 1))))))
 
+(define-test an-unpatterned-surface-keeps-its-own-emission
+  (let ((kind (make-instance 'terrain:material-kind :name :glow
+                             :base-tone '(0.2 0.4 0.8) :surface-emission 1.2)))
+    (multiple-value-bind (pattern mortar accent) (terrain:pack-terrain-pattern kind)
+      (is = 0 pattern)
+      (is = 0 mortar)
+      (is = (round (* 255 (/ 1.2 4))) (ldb (byte 8 24) accent)))))
+
 (define-test an-attachment-keeps-its-support-and-clearance
   (let ((builder (make-builder)))
     (terrain:scene-builder-cell builder 3 3 0)

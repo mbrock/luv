@@ -6,8 +6,9 @@
 ;;; at the sides as it is in Luvcraft.  Light opacity, emission, and surface
 ;;; glow carry across; Luvcraft's single blocklight level becomes an RGB4
 ;;; emission tinted by the kind's display colour.  Relief and normals are
-;;; not carried; *BLOCK-SURFACES* chooses a shader relief field per kind,
-;;; and *BLOCK-TONE-ADJUSTMENTS* warms the stone family.
+;;; not carried; *BLOCK-SURFACES* chooses a shader relief field per kind.
+;;; Keep the original hues: existing buildings are authored in this palette.
+;;; Saved-house comparison: #5AYVR9.
 
 (defun srgb-byte-to-linear (byte)
   (let ((c (/ byte 255.0)))
@@ -26,36 +27,19 @@
     (let ((count (* size size)))
       (list (/ red count) (/ green count) (/ blue count)))))
 
-(defparameter *block-tone-adjustments*
-  ;; (warmth gain . names)
-  '((1.0 1.3 :stone :cobblestone :stone-bricks :cracked-stone-bricks
-     :chiseled-stone)
-    (0.9 1.0 :polished-stone :concrete))
-  "How far toward a warm grey of its own luminance, and how much brighter,
-each kind's atlas tone is moved.  Luvcraft paints its stone a cold lavender
-grey, which under Luft's blue sky fill reads as blue; Luft's own rock is a
-warmer, lighter grey (#HYBFRT).  Unnamed kinds keep their atlas tone.")
-
-(defparameter +warm-grey+ '(1.10 1.0 0.80)
-  "The hue of a warm grey of unit luminance: Luft's rock, a little warmer.")
-
-(defun adjusted-tone (name tone)
-  "TONE, moved by NAME's entry in *BLOCK-TONE-ADJUSTMENTS*."
-  (destructuring-bind (&optional (warmth 0) (gain 1) &rest names)
-      (find name *block-tone-adjustments* :key #'cddr :test #'member)
-    (declare (ignore names))
-    (let ((luminance (+ (* 0.2126 (first tone)) (* 0.7152 (second tone))
-                        (* 0.0722 (third tone)))))
-      (mapcar (lambda (c warm)
-                (* gain (+ (* (- 1 warmth) c) (* warmth luminance warm))))
-              tone +warm-grey+))))
+(defparameter *block-element-srgb-tones*
+  '((:stone-bricks 139 142 135) (:bricks 166 72 49) (:planks 170 116 58)
+    (:crystal 72 176 235) (:marble-tiles 228 226 220))
+  "Unmixed element colours from the original atlas painters.
+Do not average mortar or bright crystal facets into the element and then lay
+those features over that average a second time.")
 
 (defparameter *block-tone-overrides*
   '((:hay-bale 0.55 0.36 0.085) (:thatch 0.42 0.27 0.07)
     (:iron-plate 0.30 0.31 0.32)
     (:blue-tiles 0.025 0.07 0.38) (:mosaic 0.55 0.42 0.12)
     (:slate 0.085 0.105 0.13) (:basalt 0.055 0.045 0.035)
-    (:obsidian 0.025 0.018 0.035) (:black-wool 0.018 0.018 0.018))
+    (:obsidian 0.025 0.018 0.035))
   "Scene-linear substance colours, not atlas paintings averaged together.
 Iron is neutral, not warmed; the dark family separates by hue and finish.")
 
@@ -64,7 +48,8 @@ Iron is neutral, not warmed; the dark family separates by hue and finish.")
   (or (and (eq (luvcraft:block-kind-name kind) :flowers) (eq face :top)
            '(0.10 0.32 0.025))
       (cdr (assoc (luvcraft:block-kind-name kind) *block-tone-overrides*))
-      (adjusted-tone (luvcraft:block-kind-name kind) (atlas-face-tone kind face))))
+      (let ((element (cdr (assoc (luvcraft:block-kind-name kind) *block-element-srgb-tones*))))
+        (if element (mapcar #'srgb-byte-to-linear element) (atlas-face-tone kind face)))))
 
 (defun atlas-face-tone (kind face)
   "The atlas tone of KIND's FACE, one of :TOP, :SIDE, or :BOTTOM."
@@ -79,13 +64,10 @@ Iron is neutral, not warmed; the dark family separates by hue and finish.")
                 (luvcraft::block-kind-display-color kind)))))
 
 (defun block-light-emission-rgb (kind)
-  "Luvcraft's blocklight level of KIND as an RGB4 emission in its colour."
-  (let ((level (luvcraft::block-kind-light-emission kind))
-        (colour (luvcraft::block-kind-display-color kind)))
-    (if (zerop level)
-        '(0 0 0)
-        (let ((brightest (reduce #'max colour)))
-          (mapcar (lambda (c) (round (* level (/ c brightest)))) colour)))))
+  "Carry the original scalar blocklight equally in all three RGB4 lanes.
+The game's shader applies the original warm response after squaring light;
+a crystal's blue surface must not turn white wool cyan."
+  (make-list 3 :initial-element (luvcraft::block-kind-light-emission kind)))
 
 (defparameter *block-surfaces*
   ;; (relief strength roughness edge-wear . names); unnamed kinds are stone.
@@ -96,15 +78,15 @@ Iron is neutral, not warmed; the dark family separates by hue and finish.")
     (:grain 0.35 0.95 0.3 :dirt :mud)
     (:grain 0.12 0.95 0.3 :sand :clay :sandstone)
     (:grain 0.05 0.9 0.5 :plaster :concrete)
-    (:stone 0.8 0.8 0.7 :stone :cobblestone :granite :limestone
+    (:stone 0.25 0.8 0.15 :stone :cobblestone :granite :limestone
      :mossy-stone-bricks :cracked-stone-bricks :stone-bricks :bricks
      :roof-tiles :slate-shingles :terracotta :chiseled-stone)
     (:planks 0.3 0.75 0.4 :slate)
     (:grain 0.55 0.98 0.3 :basalt)
     (:gloss 0.3 0.12 0.8 :obsidian)
-    (:wood 0.9 0.85 0.6 :wood :timber :half-timber :barrel :bookshelf)
+    (:wood 0.4 0.85 0.15 :wood :timber :half-timber :barrel :bookshelf)
     (:leaves 0.6 0.9 0.2 :leaves)
-    (:planks 0.7 0.7 0.6 :planks :dark-planks :birch-planks :parquet :wainscot
+    (:planks 0.25 0.7 0.15 :planks :dark-planks :birch-planks :parquet :wainscot
      :crate)
     (:snow 0.5 0.6 0.4 :snow)
     (:cloth 0.12 0.97 0.25 :red-wool :orange-wool :yellow-wool :lime-wool
@@ -112,7 +94,8 @@ Iron is neutral, not warmed; the dark family separates by hue and finish.")
      :black-wool :tapestry)
     (:metal 0.15 0.28 0.9 :copper :gold :iron-plate :tape :film)
     (:grain 0.35 0.85 0.8 :verdigris)
-    (:gloss 0.15 0.15 0.8 :crystal :marble :marble-tiles :polished-stone
+    (:faceted 0.1 0.3 0.0 :crystal)
+    (:gloss 0.05 0.3 0.15 :marble :marble-tiles :polished-stone
      :blue-tiles :mosaic :checker-floor
      :lantern :lit-window :terminal :urbit :orb-mote :fountain :lava-spring))
   "Which Luft relief, of what strength, roughness, and edge wear, cuts each
@@ -121,11 +104,11 @@ these choose the closest of the shader's world-space fields.")
 
 (defparameter *block-patterns*
   ;; (pattern-arguments . names): laid in world space by the star shader.
-  '(((:bond :courses 4 :aspect 2 :mortar-width 0.14
-      :mortar-tone (0.42 0.40 0.36) :variance 0.22)
+  '(((:bond :courses 3 :aspect 1.5 :mortar-width 0.16
+      :mortar-tone (0.0865 0.0595 0.0467) :variance 0.06)
      :bricks)
-    ((:bond :courses 2 :aspect 2 :mortar-width 0.10
-      :mortar-tone (0.20 0.20 0.21) :variance 0.12)
+    ((:bond :courses 3 :aspect 1.5 :mortar-width 0.16
+      :mortar-tone (0.0742 0.0782 0.0723) :variance 0.03)
      :stone-bricks)
     ((:bond :courses 2 :aspect 2 :mortar-width 0.10
       :mortar-tone (0.10 0.14 0.045) :variance 0.25
@@ -138,7 +121,7 @@ these choose the closest of the shader's world-space fields.")
     ((:figured :courses 2 :mortar-tone (0.12 0.12 0.11)
       :accent-tone (0.055 0.05 0.045))
      :chiseled-stone)
-    ((:vein :courses 3 :accent-tone (0.11 0.13 0.12)) :marble)
+    ((:vein :courses 3 :accent-tone (0.28 0.27 0.25)) :marble)
     ((:fleck :courses 4 :accent-tone (0.025 0.02 0.02)) :granite)
     ((:fleck :courses 1 :accent-tone (0.85 0.45 0.75)) :flowers)
     ((:shingle :courses 4 :aspect 1 :mortar-width 0.08
@@ -149,7 +132,10 @@ these choose the closest of the shader's world-space fields.")
      :slate-shingles)
     ((:grid :courses 2 :aspect 1 :mortar-width 0.06
       :mortar-tone (0.55 0.55 0.52) :variance 0.06)
-     :marble-tiles :blue-tiles)
+     :blue-tiles)
+    ((:checker :courses 2 :mortar-width 0.06
+      :mortar-tone (0.434 0.445 0.456) :variance 0.015)
+     :marble-tiles)
     ((:grid :courses 6 :aspect 1 :mortar-width 0.10
       :mortar-tone (0.45 0.43 0.40) :variance 0.30
       :accent-tone (0.55 0.025 0.06))
@@ -157,10 +143,10 @@ these choose the closest of the shader's world-space fields.")
     ((:checker :courses 2 :aspect 1 :mortar-width 0.02
       :mortar-tone (0.05 0.05 0.05) :variance 0.03)
      :checker-floor)
-    ((:bond :courses 4 :aspect 4 :mortar-width 0.05
+    ((:bond :courses 3 :aspect 7.5 :mortar-width 0.05
       :mortar-tone (0.12 0.08 0.05) :variance 0.15)
      :planks :dark-planks :birch-planks)
-    ((:shelf :courses 2 :aspect 7 :mortar-width 0.14
+    ((:shelf :courses 2 :aspect 3.5 :mortar-width 0.125
       :mortar-tone (0.30 0.14 0.05) :variance 0.30
       :accent-tone (0.19 0.022 0.016))
      :bookshelf)
