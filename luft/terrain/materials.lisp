@@ -8,7 +8,7 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter +material-reliefs+
-    '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss)
+    '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss :cloth)
     "The relief fields the star shader knows, in the order of their codes.")
   (defparameter +material-patterns+ '(:none :bond :grid :shingle :checker)
     "The laid patterns the star shader knows, in the order of their codes."))

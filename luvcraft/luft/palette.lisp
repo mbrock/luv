@@ -6,7 +6,8 @@
 ;;; at the sides as it is in Luvcraft.  Light opacity, emission, and surface
 ;;; glow carry across; Luvcraft's single blocklight level becomes an RGB4
 ;;; emission tinted by the kind's display colour.  Relief and normals are
-;;; not carried yet: that is the material protocol's next step (#Q3KI72).
+;;; not carried; *BLOCK-SURFACES* chooses a shader relief field per kind,
+;;; and *BLOCK-TONE-ADJUSTMENTS* warms the stone family.
 
 (defun srgb-byte-to-linear (byte)
   (let ((c (/ byte 255.0)))
@@ -25,8 +26,37 @@
     (let ((count (* size size)))
       (list (/ red count) (/ green count) (/ blue count)))))
 
+(defparameter *block-tone-adjustments*
+  ;; (warmth gain . names)
+  '((1.0 1.3 :stone :cobblestone :stone-bricks :cracked-stone-bricks
+     :chiseled-stone)
+    (0.9 1.0 :polished-stone :concrete)
+    (1.0 1.15 :iron-plate))
+  "How far toward a warm grey of its own luminance, and how much brighter,
+each kind's atlas tone is moved.  Luvcraft paints its stone a cold lavender
+grey, which under Luft's blue sky fill reads as blue; Luft's own rock is a
+warmer, lighter grey (#HYBFRT).  Unnamed kinds keep their atlas tone.")
+
+(defparameter +warm-grey+ '(1.10 1.0 0.80)
+  "The hue of a warm grey of unit luminance: Luft's rock, a little warmer.")
+
+(defun adjusted-tone (name tone)
+  "TONE, moved by NAME's entry in *BLOCK-TONE-ADJUSTMENTS*."
+  (destructuring-bind (&optional (warmth 0) (gain 1) &rest names)
+      (find name *block-tone-adjustments* :key #'cddr :test #'member)
+    (declare (ignore names))
+    (let ((luminance (+ (* 0.2126 (first tone)) (* 0.7152 (second tone))
+                        (* 0.0722 (third tone)))))
+      (mapcar (lambda (c warm)
+                (* gain (+ (* (- 1 warmth) c) (* warmth luminance warm))))
+              tone +warm-grey+))))
+
 (defun block-face-tone (kind face)
-  "The tone of KIND's FACE, one of :TOP, :SIDE, or :BOTTOM."
+  "The tone of KIND's FACE, one of :TOP, :SIDE, or :BOTTOM, adjusted."
+  (adjusted-tone (luvcraft:block-kind-name kind) (atlas-face-tone kind face)))
+
+(defun atlas-face-tone (kind face)
+  "The atlas tone of KIND's FACE, one of :TOP, :SIDE, or :BOTTOM."
   (let* ((tiles (luvcraft::block-kind-face-tiles kind))
          (tile (or (getf tiles face)
                    (and (eq face :side)
@@ -50,6 +80,7 @@
   ;; (relief strength roughness edge-wear . names); unnamed kinds are stone.
   '((:grass 0.8 0.9 0.5 :grass :moss :flowers :hay-bale :thatch)
     (:grain 0.6 0.95 0.3 :dirt :sand :gravel :clay :mud :sandstone :cactus)
+    (:grain 0.25 0.9 0.5 :plaster :concrete)
     (:stone 0.8 0.8 0.7 :stone :cobblestone :slate :granite :basalt :limestone
      :obsidian :mossy-stone-bricks :cracked-stone-bricks :stone-bricks :bricks
      :roof-tiles :slate-shingles :terracotta :chiseled-stone)
@@ -57,11 +88,14 @@
     (:leaves 0.6 0.9 0.2 :leaves)
     (:planks 0.7 0.7 0.6 :planks :dark-planks :birch-planks :parquet :wainscot
      :crate :tape :film)
-    (:snow 0.5 0.6 0.4 :snow :plaster :concrete :red-wool :orange-wool
-     :yellow-wool :lime-wool :light-blue-wool :blue-wool :purple-wool
-     :pink-wool :white-wool :black-wool :tapestry)
+    (:snow 0.5 0.6 0.4 :snow)
+    (:cloth 0.35 0.97 0.25 :red-wool :orange-wool :yellow-wool :lime-wool
+     :light-blue-wool :blue-wool :purple-wool :pink-wool :white-wool
+     :black-wool :tapestry)
+    (:gloss 0.25 0.35 0.9 :copper :gold :iron-plate)
+    (:grain 0.35 0.85 0.8 :verdigris)
     (:gloss 0.15 0.15 0.8 :crystal :marble :marble-tiles :polished-stone
-     :blue-tiles :mosaic :checker-floor :copper :verdigris :gold :iron-plate
+     :blue-tiles :mosaic :checker-floor
      :lantern :lit-window :terminal :urbit :orb-mote :fountain :lava-spring))
   "Which Luft relief, of what strength, roughness, and edge wear, cuts each
 block kind (#HYBFRT).  The atlas tiles' painted relief is not carried over;

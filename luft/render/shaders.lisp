@@ -163,11 +163,41 @@ convex edge or corner fewer occupied, and a concave one more."
        (- 1.0 (smoothstep 0.9 1.0 u))
        (+ 0.75 (* 0.25 (paper-noise (* point (vec3 1.0 1.0 9.0))))))))
 
+(define-shader-function thread-bump (offset)
+  "A thread's rounded cross-section across OFFSET in [0, 1]."
+  (sin (* 3.14159265 offset)))
+
+(define-shader-function cloth-thread (across-a across-b along over)
+  "A thread's height: round across ACROSS-A and ACROSS-B, lifted ALONG its
+length where it rides over a crossing, by how far OVER it rides."
+  (* (thread-bump across-a) (thread-bump across-b)
+     (+ 0.55 (* 0.45 (thread-bump along)))
+     (+ 0.7 (* 0.3 over))))
+
+(define-shader-function cloth-height (point)
+  "A woven cloth: eight threads a cell each way, over and under.
+
+Threads run along all three axes; the lattice is offset half a thread so a
+face's own axis sits at a crossing's crown, where its threads are lower than
+the face's two, and drop out of the maximum.  Each crossing's over-thread is
+chosen by hash, and a broad felting varies the nap."
+  (let* ((q (+ (* point 8.0) (vec3 0.5 0.5 0.5)))
+         (cell (floor q))
+         (offset (fract q))
+         (x (swizzle offset :x))
+         (y (swizzle offset :y))
+         (z (swizzle offset :z))
+         (along-x (cloth-thread y z x (paper-hash cell)))
+         (along-y (cloth-thread x z y (paper-hash (+ cell (vec3 17.0 0.0 0.0)))))
+         (along-z (cloth-thread x y z (paper-hash (+ cell (vec3 0.0 29.0 0.0))))))
+    (+ (* 0.8 (max along-x (max along-y along-z)))
+       (* 0.2 (paper-noise (* point 1.7))))))
+
 (define-shader-function material-relief-height (code point)
   "The height, in [0, 1], of relief field CODE at world POINT.
 
 The codes follow +MATERIAL-RELIEFS+: none, grass, stone, grain, wood,
-leaves, planks, snow, gloss."
+leaves, planks, snow, gloss, cloth."
   (if (< code 0.5) 0.5
       (if (< code 1.5)
           ;; Tufts: two scales of soft bumps, the finer one blade-sized.
@@ -196,8 +226,11 @@ leaves, planks, snow, gloss."
                                   ;; Snow: soft drifts.
                                   (+ (* 0.7 (paper-noise (* point 1.3)))
                                      (* 0.3 (paper-noise (* point 4.0))))
-                                  ;; Gloss: nearly smooth.
-                                  (paper-noise (* point 2.0)))))))))))
+                                  (if (< code 8.5)
+                                      ;; Gloss: nearly smooth.
+                                      (paper-noise (* point 2.0))
+                                      ;; Cloth: a woven nap.
+                                      (cloth-height point)))))))))))
 
 (define-shader-function cross-product (a b)
   (- (* (swizzle a :yzx) (swizzle b :zxy))
