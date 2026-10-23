@@ -8,10 +8,12 @@
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter +material-reliefs+
-    '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss :cloth)
+    '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss :cloth
+      :straw :cactus :metal)
     "The relief fields the star shader knows, in the order of their codes.")
   (defparameter +material-patterns+
-    '(:none :bond :grid :shingle :checker :shelf :window :timbered :panel)
+    '(:none :bond :grid :shingle :checker :shelf :window :timbered :panel
+      :screen :reel :figured :bound :basin)
     "The laid patterns the star shader knows, in the order of their codes.
 From :SHELF on they are face-aware: a side face is laid differently from a
 top or bottom one.")
@@ -65,7 +67,10 @@ on top; :WINDOW glazes COURSES by COURSES panes of ACCENT-TONE behind a
 grooved MORTAR-TONE frame, glowing by the kind's surface emission;
 :TIMBERED braces ACCENT-TONE infill with MORTAR-TONE posts; :PANEL raises a
 field inside a MORTAR-TONE stile-and-rail frame.  Their MORTAR-WIDTH is the
-frame's share of a cell.")
+frame's share of a cell.  :SCREEN insets ACCENT-TONE phosphor marks;
+:REEL cuts a hub and spokes; :FIGURED weaves an ACCENT-TONE diamond;
+:BOUND ties straw with MORTAR-TONE bands; :BASIN sets ACCENT-TONE liquid
+inside a MORTAR-TONE rim.  These motifs repeat per cell, not per course.")
    (body :initarg :body :initform :none :type #.`(member ,@+material-bodies+)
          :reader material-kind-body
          :documentation

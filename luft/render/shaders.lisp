@@ -272,17 +272,62 @@ The variation is the pane's lamplight, brighter toward its lower edge."
   (let* ((shape (swizzle pattern :x))
          (face (face-coordinates normal world))
          (top (> (abs (swizzle normal :z)) 0.7)))
-    (if top
-        (if (< shape 5.5)
-            (board-face face)
-            (if (< shape 7.5) (vec4 1.0 0.5 1.0 0.0) (vec4 0.8 0.5 0.0 0.0)))
-        (if (< shape 5.5)
-            (shelf-face pattern face)
-            (if (< shape 6.5)
-                (window-face pattern face)
-                (if (< shape 7.5)
-                    (timbered-face pattern face)
-                    (panel-face pattern face)))))))
+    (if (> shape 8.5)
+        (motif-face shape face top)
+        (if top
+            (if (< shape 5.5)
+                (board-face face)
+                (if (< shape 7.5) (vec4 1.0 0.5 1.0 0.0) (vec4 0.8 0.5 0.0 0.0)))
+            (if (< shape 5.5)
+                (shelf-face pattern face)
+                (if (< shape 6.5)
+                    (window-face pattern face)
+                    (if (< shape 7.5)
+                        (timbered-face pattern face)
+                        (panel-face pattern face))))))))
+
+(define-shader-function motif-face (shape face top)
+  "Cell-sized motifs: height, accent mask, frame mask, and recess mask.
+Only arithmetic; no extra noise or texture samples in these laid shapes."
+  (let* ((uv (fract (swizzle face :xy)))
+         (q (- uv (vec2 0.5 0.5)))
+         (x (swizzle q :x)) (y (swizzle q :y))
+         (edge (max (abs x) (abs y)))
+         (frame (smoothstep 0.34 0.40 edge))
+         (r2 (dot q q)))
+    (if (< shape 9.5)
+        ;; A recessed glass screen, broken rows of phosphor, and a bezel.
+        (let* ((row (floor (* (swizzle uv :y) 12.0)))
+               (ink (* (- 1.0 frame)
+                       (if top 0.0 1.0)
+                       (step 0.35 (fract (* (swizzle uv :y) 12.0)))
+                       (step 0.3 (fract (+ (* (swizzle uv :x) 9.0)
+                                          (* row 0.37)))))))
+          (vec4 (+ 0.4 (* 0.5 frame)) ink frame 0.0))
+        (if (< shape 10.5)
+            ;; A metal flange: central hub, dark annulus, and four spokes.
+            (let* ((hub (- 1.0 (smoothstep 0.012 0.025 r2)))
+                   (rim (smoothstep 0.14 0.18 r2))
+                   (spoke (- 1.0 (smoothstep 0.035 0.065
+                                                  (min (abs x) (abs y)))))
+                   (metal (* (- 1.0 (smoothstep 0.18 0.20 r2))
+                             (max hub (max rim spoke)))))
+              (vec4 (+ 0.35 (* 0.55 metal)) metal 0.0 0.0))
+            (if (< shape 11.5)
+                ;; A large woven lozenge survives after the nap filters out.
+                (let* ((diamond (+ (abs x) (abs y)))
+                       (ink (* (smoothstep 0.18 0.23 diamond)
+                               (- 1.0 (smoothstep 0.34 0.39 diamond)))))
+                  (vec4 0.85 ink (smoothstep 0.43 0.47 (abs x)) 0.0))
+                (if (< shape 12.5)
+                    ;; Two broad bindings across a bale, on every face.
+                    (let* ((band (- 1.0 (smoothstep
+                                        0.035 0.065 (abs (- (abs x) 0.25))))))
+                      (vec4 (- 0.9 (* band 0.25)) 0.0 band 0.0))
+                    ;; A stone basin: water/lava only inside its upper rim.
+                    (vec4 (+ 0.35 (* 0.6 frame))
+                          (if top (- 1.0 frame) 0.0)
+                          (if top frame 1.0) 0.0)))))))
 
 (define-shader-function book-tone (accent base hash)
   "A binding: ACCENT's hue turned by HASH, or BASE's leather."
@@ -298,17 +343,19 @@ The variation is the pane's lamplight, brighter toward its lower edge."
   "The tone of a face-aware pattern's element: book, glass, infill, or field."
   (let* ((own (fract variation))
          (jitter (+ 1.0 (* 2.0 variance (- own 0.5)))))
-    (if top
-        (* tone jitter)
-        (if (< shape 5.5)
-            (mix (* (mix (book-tone accent tone own) tone 0.3)
-                    (+ 1.0 (* 2.0 variance (- (fract (* own 7.31)) 0.5))))
-                 (vec3 0.55 0.38 0.12)
-                 (* 0.7 (floor variation)))
-            (if (< shape 6.5)
-                ;; Glass is dark by day; its lamplight is emitted instead.
-                (* accent 0.3)
-                (if (< shape 7.5) accent (* tone jitter)))))))
+    (if (> shape 8.5)
+        (mix tone accent (clamp variation 0.0 1.0))
+        (if top
+            (* tone jitter)
+            (if (< shape 5.5)
+                (mix (* (mix (book-tone accent tone own) tone 0.3)
+                        (+ 1.0 (* 2.0 variance (- (fract (* own 7.31)) 0.5))))
+                     (vec3 0.55 0.38 0.12)
+                     (* 0.7 (floor variation)))
+                (if (< shape 6.5)
+                    ;; Glass is dark by day; its lamplight is emitted instead.
+                    (* accent 0.3)
+                    (if (< shape 7.5) accent (* tone jitter))))))))
 
 (define-shader-function face-pattern-tone (pattern laid normal tone mortar accent)
   "The tone of a face-aware pattern: element, recess, and frame."
@@ -323,11 +370,14 @@ The variation is the pane's lamplight, brighter toward its lower edge."
 (define-shader-function face-pattern-glow (pattern laid normal accent fade)
   "A window's lamplight through its panes; a far one glows on average."
   (let* ((shape (swizzle pattern :x))
-         (lit (if (> shape 5.5)
-                  (if (< shape 6.5)
-                      (if (< (abs (swizzle normal :z)) 0.7) 1.0 0.0)
-                      0.0)
-                  0.0)))
+         (lit (if (> shape 8.5)
+                  (if (< shape 9.5) (swizzle laid :y)
+                      (if (> shape 12.5) (swizzle laid :y) 0.0))
+                  (if (> shape 5.5)
+                      (if (< shape 6.5)
+                          (if (< (abs (swizzle normal :z)) 0.7) 1.0 0.0)
+                          0.0)
+                      0.0))))
     (* (swizzle accent :xyz)
        (* lit (swizzle accent :w)
           (mix 0.5 (* (- 1.0 (swizzle laid :z)) (+ 0.15 (* 1.1 (swizzle laid :y))))
@@ -342,10 +392,13 @@ The variation is the pane's lamplight, brighter toward its lower edge."
             (swizzle pattern :y))
         (swizzle pattern :y))))
 
-(define-shader-function surface-height (code pattern normal point fade)
+(define-shader-function surface-height (code pattern point fade nap-fade laid)
   "The relief CODE at POINT, cut by PATTERN's elements, faded by FADE."
-  (let* ((relief (material-relief-height code point))
-         (laid (laid-pattern pattern normal point))
+  (let* ((raw (material-relief-height code point))
+         ;; Filter the woven nap and fine straw along with the laid joints.
+         (relief (if (> code 8.5)
+                     (if (< code 10.5) (mix 0.5 raw nap-fade) raw)
+                     raw))
          (cut (* (swizzle laid :x)
                  (if (> (swizzle pattern :x) 4.5) 1.0 (swizzle laid :z))
                  (+ 0.75 (* 0.25 relief)))))
@@ -365,7 +418,7 @@ The variation is the pane's lamplight, brighter toward its lower edge."
 
 (define-shader-function thread-bump (offset)
   "A thread's rounded cross-section across OFFSET in [0, 1]."
-  (sin (* 3.14159265 offset)))
+  (* 4.0 offset (- 1.0 offset)))
 
 (define-shader-function cloth-thread (across-a across-b along over)
   "A thread's height: round across ACROSS-A and ACROSS-B, lifted ALONG its
@@ -379,25 +432,39 @@ length where it rides over a crossing, by how far OVER it rides."
 
 Threads run along all three axes; the lattice is offset half a thread so a
 face's own axis sits at a crossing's crown, where its threads are lower than
-the face's two, and drop out of the maximum.  Each crossing's over-thread is
-chosen by hash, and a broad felting varies the nap."
+the face's two, and drop out of the maximum.  Alternating crossings lift the
+warp then the weft; broad felting varies the nap."
   (let* ((q (+ (* point 8.0) (vec3 0.5 0.5 0.5)))
          (cell (floor q))
          (offset (fract q))
          (x (swizzle offset :x))
          (y (swizzle offset :y))
          (z (swizzle offset :z))
-         (along-x (cloth-thread y z x (paper-hash cell)))
-         (along-y (cloth-thread x z y (paper-hash (+ cell (vec3 17.0 0.0 0.0)))))
-         (along-z (cloth-thread x y z (paper-hash (+ cell (vec3 0.0 29.0 0.0))))))
+         (over (* 2.0 (fract (* 0.5 (+ (swizzle cell :x) (swizzle cell :y)
+                                     (swizzle cell :z))))))
+         (along-x (cloth-thread y z x over))
+         (along-y (cloth-thread x z y (- 1.0 over)))
+         (along-z (cloth-thread x y z over)))
     (+ (* 0.8 (max along-x (max along-y along-z)))
        (* 0.2 (paper-noise (* point 1.7))))))
+
+(define-shader-function fiber-height (code point)
+  "Straw's broken stems, cactus ribs, or brushed metal; one noise at most."
+  (let* ((u (+ (swizzle point :x) (swizzle point :y)))
+         (z (swizzle point :z)))
+    (if (< code 10.5)
+        (+ (* 0.7 (thread-bump (fract (+ (* u 17.0) (* z 1.3)))))
+           (* 0.3 (paper-noise (* point (vec3 19.0 19.0 3.0)))))
+        (if (< code 11.5)
+            (+ (* 0.8 (thread-bump (fract (* u 5.0))))
+               (* 0.2 (step 0.85 (fract (+ (* u 13.0) (* z 7.0))))))
+            (+ 0.45 (* 0.1 (thread-bump (fract (* z 24.0)))))))))
 
 (define-shader-function material-relief-height (code point)
   "The height, in [0, 1], of relief field CODE at world POINT.
 
 The codes follow +MATERIAL-RELIEFS+: none, grass, stone, grain, wood,
-leaves, planks, snow, gloss, cloth."
+leaves, planks, snow, gloss, cloth, straw, cactus, metal."
   (if (< code 0.5) 0.5
       (if (< code 1.5)
           ;; Tufts: two scales of soft bumps, the finer one blade-sized.
@@ -429,14 +496,15 @@ leaves, planks, snow, gloss, cloth."
                                   (if (< code 8.5)
                                       ;; Gloss: nearly smooth.
                                       (paper-noise (* point 2.0))
-                                      ;; Cloth: a woven nap.
-                                      (cloth-height point)))))))))))
+                                      (if (< code 9.5)
+                                          (cloth-height point)
+                                          (fiber-height code point))))))))))))
 
 (define-shader-function cross-product (a b)
   (- (* (swizzle a :yzx) (swizzle b :zxy))
      (* (swizzle a :zxy) (swizzle b :yzx))))
 
-(define-shader-function relief-normal (normal world code strength pattern fade)
+(define-shader-function relief-normal (normal world code strength pattern fade nap-fade here)
   "Bend NORMAL by the relief CODE and laid PATTERN at WORLD, by STRENGTH."
   (let* ((helper (if (< (abs (swizzle normal :z)) 0.9)
                      (vec3 0.0 0.0 1.0) (vec3 1.0 0.0 0.0)))
@@ -444,11 +512,13 @@ leaves, planks, snow, gloss, cloth."
          (bitangent (cross-product normal tangent))
          ;; Fine enough to resolve a mortar joint's bevel.
          (step 0.015)
-         (here (surface-height code pattern normal world fade))
-         (along (surface-height code pattern normal
-                                (+ world (* tangent step)) fade))
-         (across (surface-height code pattern normal
-                                 (+ world (* bitangent step)) fade))
+         ;; HERE is the fragment's height: do not evaluate that field twice.
+         (along-point (+ world (* tangent step)))
+         (across-point (+ world (* bitangent step)))
+         (along (surface-height code pattern along-point fade nap-fade
+                                (laid-pattern pattern normal along-point)))
+         (across (surface-height code pattern across-point fade nap-fade
+                                 (laid-pattern pattern normal across-point)))
          (slope (* strength 0.09)))
     (normalize (- normal (* (+ (* tangent (- along here))
                                (* bitangent (- across here)))
@@ -793,12 +863,14 @@ the figure stays clear and only its far reaches recede."
          (distance (mix 20.0 (sqrt (dot to-eye to-eye)) divisor))
          (fade (- 1.0 (smoothstep 40.0 120.0
                                   (* distance
-                                     (/ (pattern-fineness material-pattern)
-                                        4.0)))))
+                                     (/ (pattern-fineness material-pattern) 4.0)))))
+         ;; Fine nap filters independently: a tapestry's large figure and a
+         ;; bale's bindings must survive after individual fibers disappear.
+         (nap-fade (- 1.0 (smoothstep 12.0 40.0 distance)))
          (laid (laid-pattern material-pattern normal world))
-         (height (surface-height relief material-pattern normal world fade))
+         (height (surface-height relief material-pattern world fade nap-fade laid))
          (bent (relief-normal normal world relief strength
-                              material-pattern fade))
+                              material-pattern fade nap-fade height))
          (mortar-tone (swizzle material-mortar :xyz))
          (element-tone
            (* (if (> (swizzle laid :w) 0.5)
@@ -826,12 +898,22 @@ the figure stays clear and only its far reaches recede."
                   (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear))))
          (view (normalize (mix (- forward) (- (swizzle eye :xyz) world)
                                divisor)))
+         ;; Conductors put their colour in the reflection, not a blue-lit
+         ;; diffuse coat.  A hemispherical environment approximation keeps
+         ;; this in the same pass, without reflection rays or texture reads.
+         (metal (if (> relief 11.5) 1.0 0.0))
+         (sky (representation (swizzle sky-color-vector :xyz)))
+         (ground (representation (swizzle ground-color-vector :xyz)))
+         (reflected-z (- (* 2.0 (dot bent view) (swizzle bent :z))
+                         (swizzle view :z)))
+         (environment (mix ground sky (smoothstep -0.2 0.4 reflected-z)))
          (radiance
            (+ (paper-surface-radiance
-               tone bent world visibility sun sun-color
-               (representation (swizzle sky-color-vector :xyz))
-               (representation (swizzle ground-color-vector :xyz)))
+               (* tone (- 1.0 (* metal 0.9))) bent world visibility sun sun-color
+               sky ground)
+              (* metal tone (* 1.8 environment))
               (* sun-color
+                 (mix (vec3 1.0 1.0 1.0) (+ (vec3 0.2 0.2 0.2) (* tone 5.0)) metal)
                  (* visibility (material-specular bent view sun roughness)))
               (face-pattern-glow material-pattern laid normal material-accent
                                  fade)

@@ -30,8 +30,7 @@
   ;; (warmth gain . names)
   '((1.0 1.3 :stone :cobblestone :stone-bricks :cracked-stone-bricks
      :chiseled-stone)
-    (0.9 1.0 :polished-stone :concrete)
-    (1.0 1.15 :iron-plate))
+    (0.9 1.0 :polished-stone :concrete))
   "How far toward a warm grey of its own luminance, and how much brighter,
 each kind's atlas tone is moved.  Luvcraft paints its stone a cold lavender
 grey, which under Luft's blue sky fill reads as blue; Luft's own rock is a
@@ -51,9 +50,18 @@ warmer, lighter grey (#HYBFRT).  Unnamed kinds keep their atlas tone.")
                 (* gain (+ (* (- 1 warmth) c) (* warmth luminance warm))))
               tone +warm-grey+))))
 
+(defparameter *block-tone-overrides*
+  '((:hay-bale 0.55 0.36 0.085) (:thatch 0.42 0.27 0.07)
+    (:iron-plate 0.30 0.31 0.32)
+    (:slate 0.085 0.105 0.13) (:basalt 0.055 0.045 0.035)
+    (:obsidian 0.025 0.018 0.035) (:black-wool 0.018 0.018 0.018))
+  "Scene-linear substance colours, not atlas paintings averaged together.
+Iron is neutral, not warmed; the dark family separates by hue and finish.")
+
 (defun block-face-tone (kind face)
   "The tone of KIND's FACE, one of :TOP, :SIDE, or :BOTTOM, adjusted."
-  (adjusted-tone (luvcraft:block-kind-name kind) (atlas-face-tone kind face)))
+  (or (cdr (assoc (luvcraft:block-kind-name kind) *block-tone-overrides*))
+      (adjusted-tone (luvcraft:block-kind-name kind) (atlas-face-tone kind face))))
 
 (defun atlas-face-tone (kind face)
   "The atlas tone of KIND's FACE, one of :TOP, :SIDE, or :BOTTOM."
@@ -78,21 +86,26 @@ warmer, lighter grey (#HYBFRT).  Unnamed kinds keep their atlas tone.")
 
 (defparameter *block-surfaces*
   ;; (relief strength roughness edge-wear . names); unnamed kinds are stone.
-  '((:grass 0.8 0.9 0.5 :grass :moss :flowers :hay-bale :thatch)
-    (:grain 0.6 0.95 0.3 :dirt :sand :gravel :clay :mud :sandstone :cactus)
+  '((:grass 0.8 0.9 0.5 :grass :moss :flowers)
+    (:straw 0.7 0.95 0.3 :hay-bale :thatch)
+    (:cactus 0.9 0.8 0.2 :cactus)
+    (:grain 0.6 0.95 0.3 :dirt :sand :gravel :clay :mud :sandstone)
     (:grain 0.25 0.9 0.5 :plaster :concrete)
-    (:stone 0.8 0.8 0.7 :stone :cobblestone :slate :granite :basalt :limestone
-     :obsidian :mossy-stone-bricks :cracked-stone-bricks :stone-bricks :bricks
+    (:stone 0.8 0.8 0.7 :stone :cobblestone :granite :limestone
+     :mossy-stone-bricks :cracked-stone-bricks :stone-bricks :bricks
      :roof-tiles :slate-shingles :terracotta :chiseled-stone)
+    (:planks 0.3 0.75 0.4 :slate)
+    (:grain 0.55 0.98 0.3 :basalt)
+    (:gloss 0.3 0.12 0.8 :obsidian)
     (:wood 0.9 0.85 0.6 :wood :timber :half-timber :barrel :bookshelf)
     (:leaves 0.6 0.9 0.2 :leaves)
     (:planks 0.7 0.7 0.6 :planks :dark-planks :birch-planks :parquet :wainscot
-     :crate :tape :film)
+     :crate)
     (:snow 0.5 0.6 0.4 :snow)
     (:cloth 0.35 0.97 0.25 :red-wool :orange-wool :yellow-wool :lime-wool
      :light-blue-wool :blue-wool :purple-wool :pink-wool :white-wool
      :black-wool :tapestry)
-    (:gloss 0.25 0.35 0.9 :copper :gold :iron-plate)
+    (:metal 0.15 0.28 0.9 :copper :gold :iron-plate :tape :film)
     (:grain 0.35 0.85 0.8 :verdigris)
     (:gloss 0.15 0.15 0.8 :crystal :marble :marble-tiles :polished-stone
      :blue-tiles :mosaic :checker-floor
@@ -142,6 +155,29 @@ these choose the closest of the shader's world-space fields.")
     ((:panel :mortar-width 0.14
       :mortar-tone (0.12 0.045 0.015) :variance 0.08)
      :wainscot)
+    ((:panel :courses 1 :mortar-width 0.04
+      :mortar-tone (0.075 0.08 0.085) :variance 0.0)
+     :iron-plate)
+    ((:screen :courses 12 :mortar-tone (0.035 0.04 0.035)
+      :accent-tone (0.16 0.85 0.26))
+     :terminal)
+    ((:screen :courses 12 :mortar-tone (0.045 0.035 0.055)
+      :accent-tone (0.65 0.40 0.9))
+     :urbit)
+    ((:reel :courses 2 :mortar-tone (0.03 0.025 0.02)
+      :accent-tone (0.65 0.58 0.42))
+     :tape :film)
+    ((:figured :courses 2 :mortar-tone (0.48 0.27 0.055)
+      :accent-tone (0.65 0.30 0.07))
+     :tapestry)
+    ((:bound :courses 2 :mortar-tone (0.12 0.065 0.02))
+     :hay-bale)
+    ((:basin :courses 2 :mortar-tone (0.23 0.24 0.22)
+      :accent-tone (0.025 0.30 0.55))
+     :fountain)
+    ((:basin :courses 2 :mortar-tone (0.085 0.065 0.055)
+      :accent-tone (1.0 0.18 0.015))
+     :lava-spring)
     ((:grid :courses 4 :aspect 1 :mortar-width 0.05
       :mortar-tone (0.10 0.07 0.04) :variance 0.15)
      :parquet))
@@ -169,7 +205,9 @@ The kind's tone is the elements'; mortar has its own.")
    :bottom-tone (block-face-tone kind :bottom)
    :light-opacity (luvcraft::block-kind-light-opacity kind)
    :light-emission (block-light-emission-rgb kind)
-   :surface-emission (luvcraft::block-kind-surface-emission kind)
+   :surface-emission (case (luvcraft:block-kind-name kind)
+                       ((:terminal :urbit) 0.8)
+                       (otherwise (luvcraft::block-kind-surface-emission kind)))
    ;; A lantern is drawn as a lantern standing on, or hanging from, its
    ;; neighbour rather than as a cube.
    :attachment-form (and (eq (luvcraft:block-kind-name kind) :lantern) :lantern)

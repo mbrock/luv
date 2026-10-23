@@ -9,6 +9,24 @@
 
 (in-package #:luvcraft.luft.tests)
 
+(define-test distinctive-materials-reach-the-renderer-descriptors
+  (let* ((palette game:*luvcraft-palette*)
+         (vocabulary (game:luvcraft-palette-vocabulary palette))
+         (words (terrain:compile-terrain-material-descriptors vocabulary)))
+    ;; These are the wire codes consumed by the fixed star shader, not just
+    ;; palette annotations.  All fit the existing two descriptor rows.
+    (loop for (name relief pattern) in
+            '((:hay-bale 10 12) (:thatch 10 0) (:cactus 11 0)
+              (:iron-plate 12 8) (:terminal 8 9) (:urbit 8 9)
+              (:tape 12 10) (:film 12 10) (:tapestry 9 11)
+              (:fountain 8 13) (:lava-spring 8 13))
+          for placement = (find name (luv.domains:identity-vocabulary-members vocabulary)
+                                :key #'terrain:material-placement-name)
+          for row = (* 8 (1+ (luv.domains:identity-vocabulary-offset
+                             vocabulary placement)))
+          do (is = relief (ldb (byte 4 0) (aref words (+ row 3))))
+             (is = pattern (ldb (byte 4 0) (aref words (+ row 4)))))))
+
 (defun luvcraft-oracle-world (little height edits chunk-keys)
   "A Luvcraft world over LITTLE whose CHUNK-KEYS were loaded as Luvcraft streams them."
   (let ((world (luvcraft::make-block-world :chunk-height height :source little)))

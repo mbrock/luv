@@ -489,7 +489,7 @@ descriptor row's fourth word by
 the edge's convexity from the record's occupied and empty cell masks; the
 fragment stage cuts the relief in world space, bends the normal by it,
 darkens its hollows, lightens convex edges and darkens concave ones, and
-adds a rough sun highlight.  The shader knows eight fields: grass, stone,
+adds a rough sun highlight.  The first eight fields were grass, stone,
 grain, wood, leaves, planks, snow, and gloss.  Luvcraft's 72 kinds each
 choose one; the atelier's palette chooses too, and its earth is still one
 kind for grass tops and dirt sides, so it is grass all over.  Evaluated
@@ -501,10 +501,18 @@ terrace edges catch the light.  Wool and tapestry have a ninth field,
 cloth: rounded threads crossing over and under.  Luvcraft's stone family is
 moved toward a warm grey of the same brightness by
 [[lisp:luvcraft.luft::*block-tone-adjustments*]], so its rock sits beside
-Luft's.  Still to judge: grass hanging over the top of its sides, iron
-plate, which still reads blue-grey under the sky's fill, the dark kinds
-that separate only by relief, and the kinds that want a body or a pattern
-of their own -- terminals, fountains, hay, thatch, cactus.
+Luft's.  Straw, cactus, and brushed metal now bring the relief vocabulary
+to twelve fields. Straw has broken lengthwise stems rather than grass
+clumps, hay has bindings, and cactus has vertical ribs. Cloth's rounded
+threads use polynomial crowns and alternating crossings instead of nine
+sines and three hashes. Its nap fades independently of the larger laid
+pattern, so a tapestry's gold lozenges and a bale's bindings remain when
+their fibers disappear. Slate, basalt, obsidian, and black wool separate
+by cool, warm, violet, and neutral tones as well as cleavage, grain, gloss,
+and nap. Iron, copper, and gold put colour into a stronger sun reflection
+and a view-dependent sky/ground reflection, with only a small diffuse coat;
+iron's old warm-grey adjustment is gone. Iron still looks rather blue under
+this sky: the cheap two-hemisphere reflection is not a metal environment map.
 
 A material may also be laid: [[lisp:luft.terrain:material-kind-pattern]]
 names a bond, grid, shingle, or checker, its rows per cell, element length,
@@ -520,6 +528,39 @@ laid shapes depend on the face: a shelf of book spines on the sides and
 boards on top, a lit window of glowing panes in a grooved frame, half-timber
 posts and braces, and a wainscot's raised panel.  The second row's sixth
 word carries their accent tone and their glow.
+
+Five further cell-sized motifs use the same descriptor rows: phosphor
+screens for terminal and urbit, hub/spoke flanges for tape and film,
+figured weaving, bale bindings, and stone-rimmed water or lava basins.
+They are arithmetic, not new texture reads or drawing passes. The screen
+marks are static, not terminal contents; the reels remain cubes with reel
+faces; the basins have no flowing water or lava volume.
+
+=scripts/material-sampler.lisp= captures all 72 kinds plus the film
+stand-in, twelve small block groups per page, and real seed-7 alpine and
+meadow 32 by 32 regions raised through Luvcraft's generator. Lanterns sit
+as attachments on stone supports. Run it with =./env sbcl
+--dynamic-space-size 8192 --script scripts/material-sampler.lisp DIR=;
+an optional second directory loads baseline =materials.lisp=,
+=shaders.lisp=, and =palette.lisp= saved with =git show=. The compared
+1440 by 900 daylight captures hold exposure at 1.0 and were inspected
+before and after on offscreen software Vulkan. At eight measured frames
+after two warmups, median synchronous render/readback time was 108 to 94 ms
+for alpine and 100 to 94 ms for meadow. These are wall times without PNG
+encoding, not GPU timestamps; the software backend's coarse timing and
+run-to-run variation cannot establish a hardware-GPU speedup. The star
+fragment module shrank from 80,245 to 63,832 SPIR-V words: the fragment now
+shares its center height and laid motif with the normal calculation rather
+than evaluating them again. There are three height evaluations, not four.
+The full build and 32 available test suites pass with two workers (Ghostty
+and terminal suites unavailable), including both =luft/render/test= shards;
+the build/test process tree's maximum RSS was about 1.03 GiB, with no heap
+exhaustion. This orb's system =foot= needs its inherited Nix library path
+cleared for the Wayland test, as well as =XDG_RUNTIME_DIR= set.
+
+Still open: grass overhang, moving-camera judgement of distant wool,
+iron's overly blue cast, and actual terminal, reel, and fountain bodies
+and behaviour. The sampler improves recognition, not that whole promise.
 
 Objects rather than surfaces are drawn as bodies.  A lantern cell becomes a
 surface attachment standing on the cell below it or hanging from the one
