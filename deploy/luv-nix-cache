@@ -39,8 +39,11 @@ public_key_tmp=$cache_directory/.luv-cache.pub.tmp
 install -m 0644 "$public_key" "$public_key_tmp"
 mv -f "$public_key_tmp" "$cache_directory/luv-cache.pub"
 
-roots=$("$nix" build -L --no-link --print-out-paths \
-    --no-write-lock-file \
+# The slot is mbrock's Git worktree, which Nix refuses to read as root.
+# Build as its owner, as the deployment does; root only signs and copies.
+roots=$(runuser -u mbrock -- env HOME=/home/mbrock \
+    "$nix" build -L --no-link --print-out-paths \
+    --accept-flake-config --no-write-lock-file \
     "$project_root#environment" \
     "$project_root#slim-environment")
 
