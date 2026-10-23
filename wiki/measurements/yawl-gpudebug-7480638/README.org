@@ -1,0 +1,172 @@
+#+title: Headless Metal replay explains the terrain compression result
+
+Evidence for #FIW26N, collected on yawl on 2026-10-23: Apple M5, 10 GPU
+cores, macOS 27.2, =gpudebug= 1.0. Source revision
+=7480638fb00d6ebf4b69bdbc665f3b30ffb9fbd9=; benchmark blob
+=e7a4c9b783f3efe601566e922efe0a942f577704=.
+Thread: https://ampcode.com/threads/T-01a16974-f1f6-7698-9082-658f7825c505
+
+* Observations, not a claim of production frame rate
+
+Four captures use the same stationary live-alpine camera, settled seed-7
+world, 1920x1080 native rendering, and existing merged shadows. Each holds
+one full frame after 120 warmup frames and one uncaptured measurement
+frame. Capture-time benchmark timings are not used here. Scene batching
+and coplanar merging reuse the previous bundle's experimental code.
+
+Each capture was replay-profiled twice with
+=profile run --gpu-state high --exec overlapping=. These are sequential
+profiles of the same captured frame, not independent world runs. The tool
+reports =Profiled state: max= but also =Consistent state: no=; do not claim
+perfectly locked frequencies. Counters are per-encoder isolated
+measurements; the overlapping timeline preserves concurrent execution.
+Vertex and fragment durations must not be added into an exclusive budget.
+
+| Scene variant | Whole GPU replay ms | Scene vertex ms | Scene fragment ms | VS invocations | VS device reads |
+|---------------+---------------------+-----------------+-------------------+----------------+-----------------|
+| Original      | 8.677 / 8.558       |           3.200 |             4.377 |        2890813 | 6.00 MiB        |
+| Batch only    | 8.603 / 8.664       |           3.322 |             4.368 |        2905759 | 48.98 MiB       |
+| Coplanar merge| 7.846 / 7.840       |           2.525 |             4.414 |        2151995 | 34.41 MiB       |
+| 16-cell cull  | 7.756 / 7.747       |           2.430 |             4.377 |        1862048 | 4.07 MiB        |
+
+The last row compacts visible scene sites once during warmup, retaining
+the original indexed, instanced representation. It leaves shadows alone.
+It excludes moving-camera visibility computation and upload cost, so is
+an opportunity probe, not a production culling implementation.
+
+The scene encoder includes the sky. It submits 1,925,591 primitives in
+original/batch, 1,123,275 in merged, and 1,243,979 in culled: one more than
+terrain-only counts. In the original, 61.32% of post-clip primitives are
+culled. The actual native encoder uses =Cull mode: None=; backface culling
+is not enabled. The cull and clip unit limiters are 30.60% and 25.82% of
+their respective peak processing rates. These are *not percentages of
+frame time*, and neither proves that one unit alone limits the frame.
+
+Original fragment invocations are 2,235,840 plus 1,298,224 helper
+invocations. Merged has 2,286,688 plus 1,188,512. Therefore 41.7% fewer
+triangles remove only 25.6% of actual vertex invocations and 1.7% of total
+fragment invocations including helpers. Helper inefficiency changes only
+36.73% -> 34.20%. The fragment interval does not improve. The reduced
+vertex interval and roughly 9% replay improvement are useful, but are not
+a large whole-frame win. The previous unprofiled 13.6 ms cohort did not
+resolve this gain; these new replay times cannot replace runtime timings.
+
+Batching alone preserves triangles and eliminates most draws, yet increases
+vertex device reads about eightfold. Its additional per-vertex reference
+and expanded index streams sacrifice much of the original shared-atlas
+reuse. Merging saves geometry but still reads 5.7 times the original
+vertex bytes. This is measured traffic, not just allocated buffer size.
+It explains why draw-count or triangle-count reductions are insufficient
+performance predictions; it does not isolate a bandwidth bottleneck.
+
+* Shader statistics and remaining missing measurements
+
+The original vertex compiler statistics report 474 instructions, 389 ALU,
+23 device loads, 59 temporary registers and 60 uniform registers. The
+fragment reports 8,669 instructions, 8,339 ALU, 100 branches, 108 temporary
+registers, 100 uniform registers, and zero spilled bytes. These are static
+compiled-program counts, not instructions actually executed per pixel.
+
+This CLI returned zero shader-cost weights and no shader timeline entries;
+heatmap fetch returned =heatmap builder unavailable=. Do not treat those
+zeros as zero execution cost. Its shader-list =Invocations= column counts
+draw uses (1,163 for terrain), unlike the actual =VS Invocations= hardware
+counter above. Occupancy and source-line cost remain unmeasured.
+
+* Consequences for the next experiment
+
+- Reject invisible geometry before vertex processing, with small spatial
+  units, while retaining shared-atlas reuse. The culling probe saves about
+  1.03 million vertex invocations and about 10% replay time with no image
+  change. Measure its moving-camera overhead before shipping anything.
+- Improve the derived representation before making coplanar merging the
+  default. Do not assume a reference indirection plus a large index stream
+  is cheap merely because it uses fewer draw calls.
+- Distance detail must retire *shading work* as well as triangles. The
+  fragment interval is about 4.4 ms in all four variants; geometry-only
+  simplification leaves almost all actual fragment work. Preserve the
+  coarse material response and near silhouettes. This is the next test,
+  not evidence that any particular noise function is the bottleneck.
+
+* Capture and image checks
+
+Native replay succeeded and final presentation textures were fetched as
+1920x1080 PNGs. Below y=64, excluding changing HUD text, batch and cull are
+pixel-identical to original. The apparent dark terrace seam in the batch
+image therefore pre-exists. Merged is not identical: mean absolute RGB
+channel difference 0.640/255, maximum 64; 41 pixels differ by more than
+8/255. All four replay images were visually inspected;
+there is no new gross corruption. This single view is not a seam or
+camera-motion proof for the experimental compressor.
+
+* Headless workflow and tool pitfalls
+
+=gpudebug= and =gpucapture= are native macOS 27 command-line tools. No
+desktop control, private replay API or additional Metal Toolchain was
+needed. Initially all debugger clients hung: raw Instruments stackshots
+showed =gputoolsserviced= blocked in =task_read_for_pid= while =authd=
+waited for debugger authentication. With the user's approval and local
+administrator authentication, =DevToolsSecurity -enable= cleared that
+blockage. This changes debugger authorization policy; it is not a step
+to perform automatically or a reason to disable SIP.
+
+The old finite-alpine temporal/MetalFX capture hit GPU timeouts during
+replay. Its session termination left an orphan replayer holding profiling
+resources; that specific process had to be stopped. All successful
+measurements here use fresh native captures, not that failed capture.
+
+=profile run= can finish before analysis installs its info handlers.
+=export.py= retries read-only queries and retains failed responses. Wait
+briefly after profiling. =go /= followed by a relative path reliably
+returns to the root; a leading slash alone sometimes resolves a local
+child named =commands=. Use explicit session termination afterwards.
+=profile embed= failed with a file-access error; no permissions were
+changed to work around it. Raw CLI responses are retained instead.
+
+From the checkout root, after the ordinary build:
+
+#+begin_src sh
+/usr/bin/clang -dynamiclib -fobjc-arc -framework Foundation -framework Metal \
+  wiki/measurements/yawl-metal-2d6b886/probe.m -o build/gpu-capture-probe.dylib
+
+MTL_CAPTURE_ENABLED=1 BENCH_LIBRARY=1 BENCH_MODE=native-1x \
+BENCH_SIZES=1920x1080 BENCH_SCENES=live-alpine BENCH_REPEATS=1 \
+BENCH_WARMUP=120 BENCH_FRAMES=1 SCENE_MERGE=0 \
+TERRAIN_CAPTURE="$PWD/build/live-original.gputrace" \
+BENCH_OUTPUT="$PWD/build/capture-only.sexp" \
+./env sbcl --script wiki/measurements/yawl-gpudebug-7480638/capture.lisp
+
+gpudebug -t "$PWD/build/live-original.gputrace" -c status
+# Substitute the returned session ID below.
+gpudebug -s SESSION -c 'profile run --gpu-state high --exec overlapping'
+sleep 2
+python3 wiki/measurements/yawl-gpudebug-7480638/export.py SESSION build/profile
+gpudebug -s SESSION -c 'go /' -c 'go commands/cb0/re12' \
+  -c "fetch color0 --out $PWD/build/replay.png"
+gpudebug --terminate SESSION
+#+end_src
+
+Choose =SCENE_MERGE=batch= or =1= for the two derived-geometry variants.
+For culling use =SCENE_MERGE=0 TERRAIN_CULL=1 PROBE_CLUSTER_SIZE=16=.
+Use a different output capture path each time. Never load these probes
+into a user's durable image. The exporter assumes this harness's scene
+encoder =re1= and shadow encoder =re0=.
+
+=summary.json= retains selected values for all eight profiles.
+=raw.json.gz= retains the actual final CLI JSON response from each query,
+including all counter groups, shader compiler statistics, metadata and
+missing values. =image-diff.json= retains image comparison results.
+Full captures, PNGs, capture logs and navigation responses remain under
+=.amp/in/artifacts/gpudebug/= in the source thread. No production renderer
+behavior changes in this bundle.
+
+The final checked-in capture script was exercised with the culling variant
+and rebuilt helper, producing another native capture successfully. Both
+Lisp scripts pass strict Parinfer; the exporter passes Python syntax
+validation. Selected summary metrics were checked against all eight raw
+profiles. The wiki dangling-reference check reports two preexisting code
+citations, =TR4VLR= and =H1GHLD=, unrelated to this bundle.
+
+Apple references: [[https://developer.apple.com/documentation/xcode/debugging-with-interactive-command-line-tools][interactive command-line tools]],
+[[https://developer.apple.com/documentation/xcode/optimizing-gpu-performance][GPU profiling semantics]], and the installed
+=gpudebug(1)=, =gpucapture(1)= and =DevToolsSecurity(8)= manuals.

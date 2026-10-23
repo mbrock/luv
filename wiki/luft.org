@@ -1507,12 +1507,42 @@ new holes but are not pixel-identical. The exact method, limitations,
 controls and runnable probes live in
 [[file:measurements/yawl-scene-compression-876e5d3/README.org][the scene-compression measurement bundle]].
 
+******* DONE Explain the geometry experiments with native Metal counters
+:PROPERTIES:
+:ID: FIW26N
+:END:
+
+Apple's headless =gpudebug= can replay and profile our native captures once
+debugger authorization is enabled. Four stationary native-1080 live-alpine
+captures, each profiled twice at requested high GPU state, separate the
+effects hidden in #7B19HJ's runtime measurements. Original whole-GPU replay
+is 8.56--8.68 ms, batching 8.60--8.66, coplanar merging 7.84--7.85, and
+16-cell scene visibility compaction 7.75--7.76. These are replay timings,
+not production frame rates; the tool reports inconsistent GPU state.
+
+Merging removes 41.7% of triangles but only 25.6% of actual vertex shader
+invocations and 1.7% of fragment invocations including helpers. Scene
+fragment time remains about 4.4 ms in every variant. Batching increases
+measured vertex device reads from 6 to 48.98 MiB; merging still reads
+34.41 MiB. Draw reduction trades away shared-atlas reuse, so a compact
+derived representation matters as much as fewer primitive submissions.
+
+The visibility probe retains instancing, saves 1.03 million vertex
+invocations and preserves the captured terrain pixels exactly. It freezes
+selection during warmup: moving-camera selection and upload costs remain
+unmeasured. Shader compiler statistics expose a large fragment program,
+but source-line cost and occupancy remain unavailable; static instruction
+counts do not establish which procedural field dominates execution.
+Raw counters, reproducible probes and limitations live in
+[[file:measurements/yawl-gpudebug-7480638/README.org][the headless Metal measurement bundle]].
+
 ******* NEXT Make distant detail retire its shading work too
 :PROPERTIES:
 :ID: IE3WMY
 :END:
 
-#7B19HJ rules out treating triangle count alone as a frame-time proxy.
+#7B19HJ and #FIW26N rule out treating triangle count alone as a frame-time
+proxy: geometry compression leaves almost all fragment work intact.
 Flattening and compressing the entire live-alpine scene reached 157,694
 triangles and 11.43--11.81 ms GPU, but changed near geometry and the shadow
 path: it is an approximate control, not a shipped distance policy.

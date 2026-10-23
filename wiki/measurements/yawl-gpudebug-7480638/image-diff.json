@@ -1,0 +1,32 @@
+[
+  {
+    "variant": "batch",
+    "width": 1920,
+    "height": 1080,
+    "excluded_top_rows": 64,
+    "mean_abs_channel_difference": 0.0,
+    "max_channel_difference": 0,
+    "pixels_changed": 0,
+    "pixels_over_8": 0
+  },
+  {
+    "variant": "merged",
+    "width": 1920,
+    "height": 1080,
+    "excluded_top_rows": 64,
+    "mean_abs_channel_difference": 0.6400424800415573,
+    "max_channel_difference": 64,
+    "pixels_changed": 1144614,
+    "pixels_over_8": 41
+  },
+  {
+    "variant": "culled",
+    "width": 1920,
+    "height": 1080,
+    "excluded_top_rows": 64,
+    "mean_abs_channel_difference": 0.0,
+    "max_channel_difference": 0,
+    "pixels_changed": 0,
+    "pixels_over_8": 0
+  }
+]
