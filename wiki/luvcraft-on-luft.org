@@ -1486,6 +1486,15 @@ pointer mode, so the harness establishes that flag before dispatching action
 events; it does not bypass the editing handlers. The permanent regression
 test exercises the same raycast and mouse-edit boundary without a GPU.
 
+/Native Metal follow-up./ A loaded player save exposed a missing binding
+in the target rim: its reserved uniform layout row had no bind group.
+The first aimed block could therefore park the canvas with
+=:BIND-GROUP-MISSING=. The marker now owns a reserved uniform and group,
+binds it before drawing, and releases it with its other resources. The
+parked native session resumed with a visible rim and no further failure;
+all 447 game-host checks passed. The old save remains the intended input
+to this host; this was a draw-state error rather than a save conversion.
+
 ** DONE Compare and restore the small game affordances
 :PROPERTIES:
 :ID: PXUPMA
