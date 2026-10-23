@@ -92,12 +92,28 @@ these choose the closest of the shader's world-space fields.")
      :checker-floor)
     ((:bond :courses 4 :aspect 4 :mortar-width 0.05
       :mortar-tone (0.12 0.08 0.05) :variance 0.15)
-     :planks :dark-planks :birch-planks :wainscot)
+     :planks :dark-planks :birch-planks)
+    ((:shelf :courses 2 :aspect 7 :mortar-width 0.14
+      :mortar-tone (0.30 0.14 0.05) :variance 0.30
+      :accent-tone (0.19 0.022 0.016))
+     :bookshelf)
+    ((:window :courses 2 :mortar-width 0.08
+      :mortar-tone (0.16 0.08 0.03) :variance 0.0
+      :accent-tone (0.72 0.32 0.07))
+     :lit-window)
+    ((:timbered :mortar-width 0.16
+      :mortar-tone (0.06 0.025 0.01) :variance 0.0
+      :accent-tone (0.78 0.70 0.52))
+     :half-timber)
+    ((:panel :mortar-width 0.14
+      :mortar-tone (0.12 0.045 0.015) :variance 0.08)
+     :wainscot)
     ((:grid :courses 4 :aspect 1 :mortar-width 0.05
       :mortar-tone (0.10 0.07 0.04) :variance 0.15)
      :parquet))
   "Which block kinds are laid in a pattern of bricks, tiles, shingles, or
-boards, and how.  The kind's tone is the elements'; mortar has its own.")
+boards, or a face-aware one of books, panes, timbers, or panels, and how.
+The kind's tone is the elements'; mortar has its own.")
 
 (defun block-pattern (name)
   (first (find name *block-patterns* :key #'rest :test #'member)))

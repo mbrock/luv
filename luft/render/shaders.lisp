@@ -101,7 +101,8 @@ convex edge or corner fewer occupied, and a concave one more."
 ;;; own world coordinates: along a wall and up it, or across a floor.  Rows
 ;;; therefore run the whole length of a wall and meet at its corners, and
 ;;; every element has its own identity to vary its tone by.  The shapes
-;;; follow +MATERIAL-PATTERNS+: none, bond, grid, shingle, checker.
+;;; follow +MATERIAL-PATTERNS+: none, bond, grid, shingle, checker, and the
+;;; face-aware shelf, window, timbered, and panel (FACE-LAID-PATTERN).
 
 (define-shader-function laid-pattern (pattern normal world)
   "Return the element mask, the element's hash, its height ramp, and parity."
@@ -141,13 +142,210 @@ convex edge or corner fewer occupied, and a concave one more."
          (checked (* 2.0 (fract (* (+ row col) 0.5)))))
     (if (< shape 0.5)
         (vec4 1.0 0.5 1.0 0.0)
-        (vec4 mask hash ramp checked))))
+        (if (> shape 4.5)
+            (face-laid-pattern pattern normal world)
+            (vec4 mask hash ramp checked)))))
+
+;;; Face-aware patterns lay a block's side faces as its front -- books on
+;;; shelves, panes in a frame, posts and braces, a raised panel -- and its
+;;; top and bottom as the plain wood they would be.  Each is laid per cell,
+;;; like the block it draws, and returns its height, the element's own
+;;; variation, the frame's weight, and the recess's.
+
+(define-shader-function face-coordinates (normal world)
+  "A face's along, up, and depth coordinates, as LAID-PATTERN lays them."
+  (let* ((an (abs normal))
+         (top (> (swizzle an :z) 0.7))
+         (x-facing (> (swizzle an :x) (swizzle an :y))))
+    (vec3 (if top (swizzle world :x)
+              (if x-facing (swizzle world :y) (swizzle world :x)))
+          (if top (swizzle world :y) (swizzle world :z))
+          (if top (swizzle world :z)
+              (if x-facing (swizzle world :x) (swizzle world :y))))))
+
+(define-shader-function face-band (distance width soft)
+  "One within WIDTH of an edge DISTANCE away, fading to zero over SOFT."
+  (- 1.0 (smoothstep width (+ width soft) distance)))
+
+(define-shader-function cell-edge-distance (face)
+  "How far FACE's point is from the nearest edge of its cell's face."
+  (let* ((fu (fract (swizzle face :x)))
+         (fv (fract (swizzle face :y))))
+    (min (min fu (- 1.0 fu)) (min fv (- 1.0 fv)))))
+
+(define-shader-function board-face (face)
+  "Boards four to a cell, with a groove between each."
+  (let* ((rowf (* (swizzle face :y) 4.0))
+         (fv (fract rowf))
+         (groove (face-band (min fv (- 1.0 fv)) 0.03 0.03)))
+    (vec4 (- 1.0 (* 0.7 groove))
+          (paper-hash (vec3 (floor rowf) (floor (+ (swizzle face :z) 0.5)) 3.0))
+          0.0 (* 0.6 groove))))
+
+(define-shader-function shelf-face (pattern face)
+  "A bookcase side: COURSES shelves of books, ASPECT to a row's height.
+
+The variation is the book's hash, plus one where a gilt band crosses it."
+  (let* ((rows (max 1.0 (swizzle pattern :y)))
+         (books (* rows (max 0.5 (swizzle pattern :z))))
+         (board (swizzle pattern :w))
+         (u (swizzle face :x))
+         (depth (floor (+ (swizzle face :z) 0.5)))
+         (rowf (* (swizzle face :y) rows))
+         (row (floor rowf))
+         (fv (fract rowf))
+         (cell-u (fract u))
+         (upright (face-band (min cell-u (- 1.0 cell-u)) 0.03 0.015))
+         (shelf (max (face-band fv board 0.04)
+                     (face-band (- 1.0 fv) (* 0.4 board) 0.04)))
+         (frame (max upright shelf))
+         ;; A slot holds one book, or two thin ones.
+         (slotf (* u books))
+         (slot (floor slotf))
+         (fs (fract slotf))
+         (pair (if (< (paper-hash (vec3 slot row (+ depth 17.0))) 0.35) 2.0 1.0))
+         (sub (floor (* fs pair)))
+         (fb (fract (* fs pair)))
+         (id (paper-hash (vec3 (+ (* slot 2.0) sub) row depth)))
+         (clear (/ (- fv board) (- 1.0 (* 1.4 board))))
+         (crown (+ 0.55 (* 0.4 (fract (* id 13.7)))))
+         (above (smoothstep (- crown 0.02) (+ crown 0.02) clear))
+         (seam (face-band (/ (min fb (- 1.0 fb)) (* books pair)) 0.004 0.004))
+         (recess (* (- 1.0 frame) (max above seam)))
+         (across (- (* 2.0 fb) 1.0))
+         (spine (+ 0.55 (* 0.2 (- 1.0 (* across across)))))
+         (gilt (if (< (abs (- clear (* 0.82 crown))) 0.025)
+                   (if (> (fract (* id 5.3)) 0.4) 1.0 0.0)
+                   0.0)))
+    (vec4 (mix (mix spine 0.05 recess) 1.0 frame) (+ id gilt) frame recess)))
+
+(define-shader-function window-face (pattern face)
+  "COURSES by COURSES panes behind mullions in a grooved frame.
+
+The variation is the pane's lamplight, brighter toward its lower edge."
+  (let* ((panes (max 1.0 (swizzle pattern :y)))
+         (width (swizzle pattern :w))
+         (edge (cell-edge-distance face))
+         (frame (face-band edge width 0.012))
+         (groove (* frame (face-band (abs (- edge (* 0.5 width))) 0.01 0.008)))
+         (pu (fract (* (swizzle face :x) panes)))
+         (pv (fract (* (swizzle face :y) panes)))
+         (mullion (face-band (/ (min (min pu (- 1.0 pu)) (min pv (- 1.0 pv)))
+                                panes)
+                             0.02 0.01))
+         (bar (max frame mullion))
+         (lamp (paper-hash (vec3 (floor (* (swizzle face :x) panes))
+                                 (floor (* (swizzle face :y) panes))
+                                 (+ (floor (+ (swizzle face :z) 0.5)) 5.0))))
+         (light (clamp (+ 0.3 (* 0.5 (- 1.0 pv)) (* 0.4 (- lamp 0.5))) 0.0 1.0)))
+    (vec4 (mix 0.2 (mix (mix 0.85 1.0 frame) 0.45 groove) bar) light bar groove)))
+
+(define-shader-function timbered-face (pattern face)
+  "Infill between posts at the cell's edges and a brace across it."
+  (let* ((width (* 0.5 (swizzle pattern :w)))
+         (fu (fract (swizzle face :x)))
+         (fv (fract (swizzle face :y)))
+         (post (face-band (cell-edge-distance face) width 0.015))
+         (parity (fract (* 0.5 (+ (floor (swizzle face :x))
+                                  (floor (swizzle face :y))))))
+         (diagonal (if (> parity 0.25) (abs (- fu fv)) (abs (- (+ fu fv) 1.0))))
+         (brace (face-band (* 0.7071 diagonal) width 0.015))
+         (frame (max post brace)))
+    (vec4 (mix (+ 0.35 (* 0.2 (paper-noise (* face 7.0)))) 0.95 frame)
+          0.5 frame 0.0)))
+
+(define-shader-function panel-face (pattern face)
+  "A raised field inside a stile-and-rail frame, one to a cell."
+  (let* ((width (swizzle pattern :w))
+         (edge (cell-edge-distance face))
+         (frame (face-band edge width 0.03))
+         (bevel (smoothstep width (+ width 0.12) edge)))
+    (vec4 (mix (mix 0.55 0.85 bevel) 0.95 frame)
+          (paper-hash (vec3 (floor (swizzle face :x)) (floor (swizzle face :y))
+                            (floor (+ (swizzle face :z) 0.5))))
+          frame 0.0)))
+
+(define-shader-function face-laid-pattern (pattern normal world)
+  "Return a face-aware pattern's height, variation, frame, and recess."
+  (let* ((shape (swizzle pattern :x))
+         (face (face-coordinates normal world))
+         (top (> (abs (swizzle normal :z)) 0.7)))
+    (if top
+        (if (< shape 5.5)
+            (board-face face)
+            (if (< shape 7.5) (vec4 1.0 0.5 1.0 0.0) (vec4 0.8 0.5 0.0 0.0)))
+        (if (< shape 5.5)
+            (shelf-face pattern face)
+            (if (< shape 6.5)
+                (window-face pattern face)
+                (if (< shape 7.5)
+                    (timbered-face pattern face)
+                    (panel-face pattern face)))))))
+
+(define-shader-function book-tone (accent base hash)
+  "A binding: ACCENT's hue turned by HASH, or BASE's leather."
+  (let* ((k (floor (* hash 6.0))))
+    (if (< k 0.5) accent
+        (if (< k 1.5) (swizzle accent :yxz)
+            (if (< k 2.5) (swizzle accent :zyx)
+                (if (< k 3.5) (* (+ accent (swizzle accent :yxz)) 0.6)
+                    (if (< k 4.5) (* (+ accent (swizzle accent :zyx)) 0.6)
+                        (* base 0.55))))))))
+
+(define-shader-function face-element-tone (shape top variation tone accent variance)
+  "The tone of a face-aware pattern's element: book, glass, infill, or field."
+  (let* ((own (fract variation))
+         (jitter (+ 1.0 (* 2.0 variance (- own 0.5)))))
+    (if top
+        (* tone jitter)
+        (if (< shape 5.5)
+            (mix (* (mix (book-tone accent tone own) tone 0.3)
+                    (+ 1.0 (* 2.0 variance (- (fract (* own 7.31)) 0.5))))
+                 (vec3 0.55 0.38 0.12)
+                 (* 0.7 (floor variation)))
+            (if (< shape 6.5)
+                ;; Glass is dark by day; its lamplight is emitted instead.
+                (* accent 0.3)
+                (if (< shape 7.5) accent (* tone jitter)))))))
+
+(define-shader-function face-pattern-tone (pattern laid normal tone mortar accent)
+  "The tone of a face-aware pattern: element, recess, and frame."
+  (let* ((element (face-element-tone (swizzle pattern :x)
+                                     (> (abs (swizzle normal :z)) 0.7)
+                                     (swizzle laid :y) tone
+                                     (swizzle accent :xyz) (swizzle mortar :w)))
+         (frame-tone (swizzle mortar :xyz)))
+    (mix (mix element (* frame-tone 0.2) (swizzle laid :w))
+         frame-tone (swizzle laid :z))))
+
+(define-shader-function face-pattern-glow (pattern laid normal accent fade)
+  "A window's lamplight through its panes; a far one glows on average."
+  (let* ((shape (swizzle pattern :x))
+         (lit (if (> shape 5.5)
+                  (if (< shape 6.5)
+                      (if (< (abs (swizzle normal :z)) 0.7) 1.0 0.0)
+                      0.0)
+                  0.0)))
+    (* (swizzle accent :xyz)
+       (* lit (swizzle accent :w)
+          (mix 0.5 (* (- 1.0 (swizzle laid :z)) (+ 0.15 (* 1.1 (swizzle laid :y))))
+               fade)))))
+
+(define-shader-function pattern-fineness (pattern)
+  "Rows per cell, or for shelves books per cell over two, to fade it by."
+  (let* ((shape (swizzle pattern :x)))
+    (if (> shape 4.5)
+        (if (< shape 5.5)
+            (* 0.5 (swizzle pattern :y) (swizzle pattern :z))
+            (swizzle pattern :y))
+        (swizzle pattern :y))))
 
 (define-shader-function surface-height (code pattern normal point fade)
   "The relief CODE at POINT, cut by PATTERN's elements, faded by FADE."
   (let* ((relief (material-relief-height code point))
          (laid (laid-pattern pattern normal point))
-         (cut (* (swizzle laid :x) (swizzle laid :z)
+         (cut (* (swizzle laid :x)
+                 (if (> (swizzle pattern :x) 4.5) 1.0 (swizzle laid :z))
                  (+ 0.75 (* 0.25 relief)))))
     (if (< (swizzle pattern :x) 0.5)
         relief
@@ -528,7 +726,8 @@ the figure stays clear and only its far reaches recede."
               (material-tone :vec3 :location 5 :interpolation :flat)
               (material-surface :vec4 :location 6 :interpolation :flat)
               (material-pattern :vec4 :location 7 :interpolation :flat)
-              (material-mortar :vec4 :location 8 :interpolation :flat))
+              (material-mortar :vec4 :location 8 :interpolation :flat)
+              (material-accent :vec4 :location 9 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -556,8 +755,9 @@ the figure stays clear and only its far reaches recede."
          (to-eye (- (swizzle eye :xyz) world))
          (distance (mix 20.0 (sqrt (dot to-eye to-eye)) divisor))
          (fade (- 1.0 (smoothstep 40.0 120.0
-                                  (* distance (/ (swizzle material-pattern :y)
-                                                 4.0)))))
+                                  (* distance
+                                     (/ (pattern-fineness material-pattern)
+                                        4.0)))))
          (laid (laid-pattern material-pattern normal world))
          (height (surface-height relief material-pattern normal world fade))
          (bent (relief-normal normal world relief strength
@@ -573,11 +773,16 @@ the figure stays clear and only its far reaches recede."
          (joint-tone (if (> (swizzle material-pattern :x) 3.5)
                          (* mortar-tone 0.6) mortar-tone))
          (laid-tone (mix joint-tone element-tone (swizzle laid :x)))
+         (face-tone (face-pattern-tone material-pattern laid normal
+                                       material-tone material-mortar
+                                       material-accent))
          (base-tone (if (< (swizzle material-pattern :x) 0.5)
                         material-tone
-                        (mix (mix material-tone mortar-tone
-                                  (swizzle material-pattern :w))
-                             laid-tone fade)))
+                        (if (> (swizzle material-pattern :x) 4.5)
+                            (mix material-tone face-tone fade)
+                            (mix (mix material-tone mortar-tone
+                                      (swizzle material-pattern :w))
+                                 laid-tone fade))))
          ;; Hollows of the relief hold shade and dirt; convex edges are
          ;; worn lighter and concave ones gather darker (#HYBFRT).
          (tone (* base-tone
@@ -590,7 +795,9 @@ the figure stays clear and only its far reaches recede."
                (representation (swizzle sky-color-vector :xyz))
                (representation (swizzle ground-color-vector :xyz)))
               (* sun-color
-                 (* visibility (material-specular bent view sun roughness)))))
+                 (* visibility (material-specular bent view sun roughness)))
+              (face-pattern-glow material-pattern laid normal material-accent
+                                 fade)))
          (final
            (atmospheric-surface
             radiance world
@@ -639,7 +846,8 @@ the figure stays clear and only its far reaches recede."
                (material-tone-output :vec3 :location 5 :interpolation :flat)
                (material-surface-output :vec4 :location 6 :interpolation :flat)
                (material-pattern-output :vec4 :location 7 :interpolation :flat)
-               (material-mortar-output :vec4 :location 8 :interpolation :flat))
+               (material-mortar-output :vec4 :location 8 :interpolation :flat)
+               (material-accent-output :vec4 :location 9 :interpolation :flat))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (terrain-appearances :storage-buffer :binding 3 :element :uvec2)
@@ -722,6 +930,10 @@ the figure stays clear and only its far reaches recede."
          (material-mortar
            (vec4 (unpack-terrain-tone (swizzle pattern-row :y))
                  (/ (float (ldb (byte 8 20) (swizzle pattern-row :x))) 255.0)))
+         ;; The accent tone, and the surface emission it glows by over 4.
+         (material-accent
+           (vec4 (unpack-terrain-tone (swizzle pattern-row :z))
+                 (/ (float (ldb (byte 8 24) (swizzle pattern-row :z))) 63.75)))
          (divisor (swizzle (representation render-parameters) :z))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection divisor))
@@ -749,7 +961,8 @@ the figure stays clear and only its far reaches recede."
     (set-output material-tone-output material-tone)
     (set-output material-surface-output material-surface)
     (set-output material-pattern-output material-pattern)
-    (set-output material-mortar-output material-mortar)))
+    (set-output material-mortar-output material-mortar)
+    (set-output material-accent-output material-accent)))
 
 (define-live-shader terrain-shadow-vertex-specification
     (:stage :vertex

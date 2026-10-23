@@ -10,8 +10,11 @@
   (defparameter +material-reliefs+
     '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss)
     "The relief fields the star shader knows, in the order of their codes.")
-  (defparameter +material-patterns+ '(:none :bond :grid :shingle :checker)
-    "The laid patterns the star shader knows, in the order of their codes."))
+  (defparameter +material-patterns+
+    '(:none :bond :grid :shingle :checker :shelf :window :timbered :panel)
+    "The laid patterns the star shader knows, in the order of their codes.
+From :SHELF on they are face-aware: a side face is laid differently from a
+top or bottom one."))
 
 (defclass material-kind ()
   ((name :initarg :name :reader material-kind-name)
@@ -39,11 +42,21 @@
    (pattern :initarg :pattern :initform nil :reader material-kind-pattern
             :documentation
             "NIL, or a laid pattern (SHAPE &key COURSES ASPECT MORTAR-WIDTH
-MORTAR-TONE VARIANCE): bricks, tiles, or shingles cut into the surface in
-world space.  SHAPE is one of +MATERIAL-PATTERNS+ but :NONE.  COURSES rows
-fill a cell; each element is ASPECT rows long; MORTAR-WIDTH is the joint's
-share of a row, MORTAR-TONE its colour, and VARIANCE how far each element's
-tone strays.  The kind's tones are the elements' own, not mortar and all."))
+MORTAR-TONE VARIANCE ACCENT-TONE): bricks, tiles, or shingles cut into the
+surface in world space.  SHAPE is one of +MATERIAL-PATTERNS+ but :NONE.
+COURSES rows fill a cell; each element is ASPECT rows long; MORTAR-WIDTH is
+the joint's share of a row, MORTAR-TONE its colour, and VARIANCE how far each
+element's tone strays.  The kind's tones are the elements' own, not mortar
+and all.
+
+The face-aware shapes read the same keys as parts of a block's face:
+:SHELF stands books ASPECT to a row's height on COURSES shelves of
+MORTAR-TONE boards, bound in hues turned from ACCENT-TONE, over plain boards
+on top; :WINDOW glazes COURSES by COURSES panes of ACCENT-TONE behind a
+grooved MORTAR-TONE frame, glowing by the kind's surface emission;
+:TIMBERED braces ACCENT-TONE infill with MORTAR-TONE posts; :PANEL raises a
+field inside a MORTAR-TONE stile-and-rail frame.  Their MORTAR-WIDTH is the
+frame's share of a cell."))
   (:documentation
    "An authored cell substance: its tones, the relief and edge response the
 star shader cuts it with (#HYBFRT), and the facts needed by voxel light."))
@@ -87,14 +100,18 @@ edge wear; the star shader unpacks the same layout."
             (ash (unit (material-kind-edge-wear kind) 8) 16))))
 
 (defun pack-terrain-pattern (kind)
-  "Pack KIND's laid pattern into a word, and return its mortar tone word too.
+  "Pack KIND's laid pattern into a word, and return its mortar tone word and
+its accent word too.
 
 Bits 0-3 are the pattern code, 4-7 the rows per cell, 8-11 the element length
-in half rows, 12-19 the mortar width, and 20-27 the variance."
+in half rows, 12-19 the mortar width, and 20-27 the variance.  The accent
+word is the accent tone's RGB8 in bits 0-23 and, in bits 24-31, the kind's
+surface emission over 4, which face-aware shapes glow by."
   (if (null (material-kind-pattern kind))
-      (values 0 0)
+      (values 0 0 0)
       (destructuring-bind (shape &key (courses 4) (aspect 2) (mortar-width 0.12)
-                                   (mortar-tone '(0.4 0.4 0.4)) (variance 0.15))
+                                   (mortar-tone '(0.4 0.4 0.4)) (variance 0.15)
+                                   (accent-tone '(0.0 0.0 0.0)))
           (material-kind-pattern kind)
         (flet ((field (value limit) (max 1 (min limit (round value))))
                (unit (value) (round (* 255 (max 0.0 (min 1.0 value))))))
@@ -104,13 +121,16 @@ in half rows, 12-19 the mortar width, and 20-27 the variance."
                           (ash (field (* 2 aspect) 15) 8)
                           (ash (unit mortar-width) 12)
                           (ash (unit variance) 20))
-                  (pack-terrain-tone mortar-tone))))))
+                  (pack-terrain-tone mortar-tone)
+                  (logior (pack-terrain-tone accent-tone)
+                          (ash (unit (/ (material-kind-surface-emission kind) 4))
+                               24)))))))
 
 (defun compile-terrain-material-descriptors (placement-vocabulary)
   "Compile AIR plus the scene's u8 placements to two descriptor rows each:
 top, side, and bottom RGB8 tones and the packed surface
-(PACK-TERRAIN-SURFACE), then the packed pattern and its mortar tone
-(PACK-TERRAIN-PATTERN)."
+(PACK-TERRAIN-SURFACE), then the packed pattern, its mortar tone, and its
+accent (PACK-TERRAIN-PATTERN)."
   (let* ((placements
            (domains:identity-vocabulary-members placement-vocabulary))
          (words
@@ -127,9 +147,11 @@ top, side, and bottom RGB8 tones and the packed surface
                        (aref words (+ row 1)) (pack-terrain-tone side)
                        (aref words (+ row 2)) (pack-terrain-tone bottom)
                        (aref words (+ row 3)) (pack-terrain-surface kind))
-                 (multiple-value-bind (pattern mortar) (pack-terrain-pattern kind)
+                 (multiple-value-bind (pattern mortar accent)
+                     (pack-terrain-pattern kind)
                    (setf (aref words (+ row 4)) pattern
-                         (aref words (+ row 5)) mortar)))))
+                         (aref words (+ row 5)) mortar
+                         (aref words (+ row 6)) accent)))))
     words))
 
 ;;; Published material fields share immutable per-chunk tables. Construction
