@@ -117,7 +117,8 @@ scale. Sixteen stationary frames cover a jitter cycle, not assured convergence.
 The contact sheet contains unscaled 960×540 source crops at (480,180),
 then reduced to 640×360 for display. Control is left, cache right. Rows are
 grass near, grass grazing, stone near, stone grazing. Individual full-size
-comparison crops are retained beside this file.
+comparison crops are retained beside this file. Labels overlay the top
+32 display pixels of each contact-sheet panel; the source crops are unlabelled.
 
 [[file:material-comparisons.png]]
 

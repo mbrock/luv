@@ -1,0 +1,35 @@
+Name         Summary           Actions
+───────────  ────────────────  ────────
+commands     1 command buffer        go
+performance                    go, info
+api_calls    2957 API calls          go
+resources    338 objects             go
+(4 items)
+Name                                   Summary     Actions
+─────────────────────────────────────  ──────────  ───────
+fs_invocations                         2 235 968      info
+fs_invocation_utilization              0,09%          info
+average_pixel_overdraw                                info
+fs_invocations_per_primitive           1              info
+fs_helper_invocations                  1 298 096      info
+fs_helper_invocations_inefficiency     36,73%         info
+fs_tiles_processed                     2 040          info
+samples_shaded_per_tile                1 096          info
+primitives_per_tile                    472            info
+sampler_calls/fs_invocation            13             info
+fragment_generator_pixel_processing    0,37%          info
+fs_texture_cache_miss_rate             0,57%          info
+fs_bytes_read_from_device_memory       26,15 MiB      info
+fs_bytes_written_to_device_memory      7,65 MiB       info
+fs_buffer_device_memory_bytes_read     221,06 KiB     info
+fs_buffer_device_memory_bytes_written  121,94 KiB     info
+fs_device_atomic_bytes_read                           info
+fs_device_atomic_bytes_written                        info
+fs_device_memory_bandwidth             7,74           info
+fs_last_level_cache_bytes_read         193,51 MiB     info
+(showing 20 of 22 — use list N-M or list --all for more)
+Name   FS Helper Invocations Inefficiency
+Value  36,73% Percentage of total FS Invocations
+Scope  encoder
+Description
+Percentage of fragment shader helper threads invoked out of total fragment shader threads including helper and valid fragment shader threads. Fragments are processed in 2x2 quads to allow the GPU to compute derivatives for texturing. However if only a fraction of the quad is covered by primitive edge, rest of pixels will need helper threads. Helper threads indicate inefficiency for quads. Higher values indicate greater inefficiency

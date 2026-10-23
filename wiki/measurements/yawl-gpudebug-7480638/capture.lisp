@@ -15,6 +15,8 @@
 (when (uiop:getenv "TERRAIN_CULL")
   (assert (equal (uiop:getenv "SCENE_MERGE") "0"))
   (load (merge-pathnames "scene-cull.lisp" *load-truename*)))
+(when (uiop:getenv "TERRAIN_SETUP")
+  (load (uiop:getenv "TERRAIN_SETUP")))
 
 (cffi:load-foreign-library (namestring (truename "build/gpu-capture-probe.dylib")))
 (cffi:defcfun ("startCapture" start-capture) :int (device :pointer) (path :string))
