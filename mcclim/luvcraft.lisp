@@ -51,7 +51,7 @@ drawable during replay."))
   (if surface-texture
       (luv:gpu-texture-format surface-texture)
       (luv:canvas-format
-       (luvcraft::luvcraft-session-context session))))
+       (instrument-context session))))
 
 (defgeneric luvcraft-widget-render-target
     (overlay session surface-texture)
@@ -389,7 +389,7 @@ shared semantic McCLIM compositor used by LUFT and other applications."
       ;; hit-testing a point against a quad projected into pixels misses by
       ;; exactly the display's scale factor -- which is why no widget overlay
       ;; could be clicked at all on a Retina Mac.
-      (let* ((canvas (luvcraft::luvcraft-session-canvas
+      (let* ((canvas (instrument-canvas
                       (widget-overlay-session overlay)))
              (width (luv:canvas-width canvas))
              (height (luv:canvas-height canvas)))
@@ -451,7 +451,7 @@ shared semantic McCLIM compositor used by LUFT and other applications."
            (y (* (second uv) (second size))))
       (when (and (typep event 'luv:canvas-pointer-button-press-event)
                  (eq :left (luv:canvas-pointer-event-button event)))
-        (luvcraft:focus-luvcraft-session session overlay))
+        (focus-instrument session overlay))
       (luv:handle-canvas-event
        (widget-overlay-mirror overlay) canvas
        (translated-widget-pointer-event event x y))
@@ -473,7 +473,7 @@ shared semantic McCLIM compositor used by LUFT and other applications."
     ((overlay luvcraft-widget-overlay) session)
   (declare (ignore session))
   (let* ((canvas
-           (luvcraft::luvcraft-session-canvas
+           (instrument-canvas
             (widget-overlay-session overlay)))
          (width (luv:canvas-width canvas))
          (height (luv:canvas-height canvas)))

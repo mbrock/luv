@@ -657,9 +657,25 @@ with arguments, prompting through =accept= with the presentation types the
 agent already uses, so =place-block-at= is one definition reachable by key,
 M-x, and tool.
 
-/Evidence./ The tool side already reads the command parser table.  The M-x gap
-is =command-menu-command-without-arguments-p= in
-=luvcraft/clim/command-menu.lisp=.
+/Evidence./ The tool side already reads the command parser table. Both games
+now use =mcclim/command-menu.lisp=, whose
+=command-menu-command-without-required-arguments-p= deliberately excludes
+commands with required arguments. The shared typed prompt in
+=mcclim/prompt.lisp= supplies completion and continuations, but it is not yet
+an =accept=-driven argument reader for M-x. This is an existing limitation in
+old Luvcraft too, not a Luft regression.
+
+Luvcraft on Luft previously omitted inherited =luft-play= commands from its
+explicit M-x table list. Its command-table inheritance also omitted
+=:inherit-menu t=, so actual Meta-x and Return keystrokes found no command
+even when the command appeared in a vocabulary inspection. Its metabar
+vocabulary specialized the atelier
+=viewer= rather than the =game-host= superclass, so the game got no controls.
+The game now lists its semantic layers explicitly, and the renderer's live
+settings implement the shared metabar protocol on the host (#291ELY). Real
+Meta-x typing and Return executed Creative Mode; the shared metabar's
+navigation control changed the running player's speed by keyboard after
+opening the group by pointer. Matching old/new Vulkan captures were inspected.
 
 /Done when./ M-x "Place Block At" prompts for a kind and three integers and
 places the block.

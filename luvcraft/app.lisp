@@ -1119,18 +1119,33 @@ A failed restoration is reported and its description kept, never dropped."
                         (format nil "1–~D" (length blocks)))))))
   session)
 
+(defmethod player-inventory ((session luvcraft-session))
+  (luvcraft-session-inventory session))
+
+(defmethod player-selected-block ((session luvcraft-session))
+  (luvcraft-session-selected-block session))
+
+(defmethod (setf player-selected-block) (block (session luvcraft-session))
+  (setf (luvcraft-session-selected-block session) block))
+
+(defmethod player-creative-p ((session luvcraft-session))
+  (luvcraft-session-creative-p session))
+
+(defmethod update-player-instruments ((session luvcraft-session))
+  (update-luvcraft-session-title session))
+
 (defun select-luvcraft-block (session number)
   "Select the one-based numbered placeable material and update the title."
   (check-type number (integer 1))
   (let ((block
           (nth (1- number)
-               (let ((inventory (luvcraft-session-inventory session)))
+               (let ((inventory (player-inventory session)))
                  (if (block-inventory-simple-p inventory)
                      (block-inventory-quickbar-blocks inventory)
                      (block-inventory-blocks inventory))))))
     (when block
-      (setf (luvcraft-session-selected-block session) block)
-      (update-luvcraft-session-title session))
+      (setf (player-selected-block session) block)
+      (update-player-instruments session))
     block))
 
 (defun cycle-luvcraft-block (session steps)
@@ -1138,9 +1153,9 @@ A failed restoration is reported and its description kept, never dropped."
 
 The wheel's verb: a material off the bar steps onto its first slot."
   (let* ((blocks (block-inventory-quickbar-blocks
-                  (luvcraft-session-inventory session)))
+                  (player-inventory session)))
          (count (length blocks))
-         (current (position (luvcraft-session-selected-block session)
+         (current (position (player-selected-block session)
                             blocks :test #'eq)))
     (when (plusp count)
       (select-luvcraft-block
@@ -1153,21 +1168,21 @@ The wheel's verb: a material off the bar steps onto its first slot."
 Choosing a material in the inventory is how a player says they want it at
 hand, so it takes the place of whatever the selected slot held, which moves
 to where BLOCK was.  Every other number key keeps its material."
-  (when (block-inventory-simple-p (luvcraft-session-inventory session))
-    (let* ((inventory (luvcraft-session-inventory session))
-           (current (or (position (luvcraft-session-selected-block session)
+  (when (block-inventory-simple-p (player-inventory session))
+    (let* ((inventory (player-inventory session))
+           (current (or (position (player-selected-block session)
                                   (block-inventory-kit inventory)) 0)))
       (multiple-value-bind (slot status)
           (add-building-kit-block inventory block current)
         (declare (ignore status))
         (return-from put-luvcraft-block-on-quickbar
           (select-luvcraft-block session (1+ slot))))))
-  (let* ((inventory (luvcraft-session-inventory session))
+  (let* ((inventory (player-inventory session))
          (entries (block-inventory-entries inventory))
          (quickbar (block-inventory-quickbar-blocks inventory))
          (index (position block entries
                           :key #'block-inventory-entry-block :test #'eq))
-         (slot (or (position (luvcraft-session-selected-block session)
+         (slot (or (position (player-selected-block session)
                              quickbar :test #'eq)
                    0)))
     (when index
@@ -1185,7 +1200,7 @@ Whatever SLOT held trades places with BLOCK, so nothing leaves the inventory
 and every other number key keeps its material.  Returns BLOCK, or NIL when
 BLOCK is not in the inventory or SLOT is past the end of the bar."
   (check-type slot (integer 1))
-  (let* ((inventory (luvcraft-session-inventory session))
+  (let* ((inventory (player-inventory session))
          (entries (block-inventory-entries inventory))
          (index (position block entries
                           :key #'block-inventory-entry-block :test #'eq))
@@ -1205,7 +1220,7 @@ house with, some colours, a lamp, and the wall terminal.")
 (defun arrange-luvcraft-quickbar (session &optional
                                             (names *luvcraft-starting-quickbar*))
   "Move the materials NAMES to the front of SESSION's inventory, in order."
-  (let* ((inventory (luvcraft-session-inventory session))
+  (let* ((inventory (player-inventory session))
          (entries (block-inventory-entries inventory))
          (front (loop for name in names
                       for entry = (find name entries
@@ -1218,7 +1233,7 @@ house with, some colours, a lamp, and the wall terminal.")
           (append front
                   (remove-if (lambda (entry) (member entry front))
                              entries)))
-    (update-luvcraft-session-title session)))
+    (update-player-instruments session)))
 
 (defun refresh-luvcraft-inventory (session)
   "Give SESSION any newly defined placeable materials, in number-key order.

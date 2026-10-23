@@ -1,0 +1,37 @@
+;;; Engine boundary for the existing inventory and hotbar, not a second UI.
+(in-package #:mcluv)
+
+;; Stock and selection live in LUVCRAFT/CORE so its quickbar algorithms can
+;; use the same protocol without depending on McCLIM. These operations own
+;; only the native embedding and modal focus.
+(defgeneric instrument-canvas (player))
+(defgeneric instrument-context (player))
+(defgeneric instrument-device (player))
+(defgeneric instrument-overlays (player))
+(defgeneric instrument-focus (player))
+(defgeneric focus-instrument (player overlay))
+(defgeneric unfocus-instrument (player))
+(defgeneric add-instrument (player overlay))
+(defgeneric remove-instrument (player overlay))
+(defgeneric toggle-instrument-creative-mode (player))
+
+(defmethod instrument-canvas ((player luvcraft:luvcraft-session))
+  (luvcraft:luvcraft-session-canvas player))
+(defmethod instrument-context ((player luvcraft:luvcraft-session))
+  (luvcraft:luvcraft-session-context player))
+(defmethod instrument-device ((player luvcraft:luvcraft-session))
+  (luvcraft:luvcraft-session-device player))
+(defmethod instrument-overlays ((player luvcraft:luvcraft-session))
+  (luvcraft:luvcraft-session-overlays player))
+(defmethod instrument-focus ((player luvcraft:luvcraft-session))
+  (luvcraft:luvcraft-session-modal-focus player))
+(defmethod focus-instrument ((player luvcraft:luvcraft-session) overlay)
+  (luvcraft:focus-luvcraft-session player overlay))
+(defmethod unfocus-instrument ((player luvcraft:luvcraft-session))
+  (luvcraft:unfocus-luvcraft-session player))
+(defmethod add-instrument ((player luvcraft:luvcraft-session) overlay)
+  (luvcraft:add-luvcraft-overlay player overlay))
+(defmethod remove-instrument ((player luvcraft:luvcraft-session) overlay)
+  (luvcraft:remove-luvcraft-overlay player overlay))
+(defmethod toggle-instrument-creative-mode ((player luvcraft:luvcraft-session))
+  (luvcraft:toggle-luvcraft-creative-mode player))

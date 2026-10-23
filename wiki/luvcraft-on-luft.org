@@ -293,7 +293,7 @@ the layer of #W9QMPT that owns the feature afterwards.
 | Player, walking, step-up | 0.6k | done (#8E110Y) | terrain queries, game character | delete |
 | Pathing (Move To) | 0.3k | click-to-walk A* | terrain queries | delete |
 | Place, mine, pick | in =app.lisp= | done, with undo | terrain edits, game rules | carried kind, reach rules |
-| Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | none | game | McCLIM side is neutral; icons follow materials |
+| Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | shared old instruments (#291ELY) | game | host protocol; both inventory modes and profiles |
 | Physics, balls | 3.7k | reused solver, throws, sphere figures (#0JMB9O) | physics, game | Luft occupancy/residency adapter; spring behaviours remain |
 | Critters | 0.7k | none | game | minds neutral; bodies re-hosted on queries |
 | Particles | 0.2k | none | renderer stage | small |
@@ -821,7 +821,7 @@ language is complete; replacing Luvcraft's incremental reconciler requires
 preserving those boundary and residency contracts against its existing oracle.
 The tested old production path therefore remains, using the shared language.
 
-** NEXT Carry a block, and fill an inventory
+** DONE Carry a block, and fill an inventory
 :PROPERTIES:
 :ID: 291ELY
 :END:
@@ -831,23 +831,44 @@ quickbar, reusing the neutral McCLIM inventory and hotbar, and make
 placement draw from it.
 
 /Done when./ Place, mine, and pick follow what the player carries, and the
-old inventory code is deleted.
+games use the same inventory, hotbar, icons, and interaction code. Delete the
+custom paged-palette replacement, not the supported old game's instruments.
 
-/Evidence./ The =luvcraft/luft/game= host now owns a =block-inventory=,
-reusing Luvcraft's renderer-independent entries and the neutral McCLIM
-palette as both the ten-slot hotbar and a paged inventory.  =I= opens and
-closes the inventory, =N= advances pages, and =1–0= equips an entry onto
-the hotbar.  Each slot shows its key and count; films show their own title.
+/Evidence./ The first host reused =block-inventory= but displayed it through
+a custom ten-entry paged workbench palette. That was not inventory parity.
+The replacement is gone: =mcclim/inventory.lisp=,
+=mcclim/inventory-simple.lisp=, =mcclim/hotbar.lisp=, and
+=mcclim/block-icon.lisp= are now the same instruments in both games.
+=I= opens the modal inventory; =F3= switches between the six-card,
+picture-first browser with a six-block kit and the expanded forty-material
+library with categories, inspector, and ten-slot quickbar. =F2= switches the
+two independently remembered player profiles. Keyboard navigation, kit-full
+replacement with cancel, pointer selection, wheel pagination, hover-number
+assignment, and the old preferences writer stay in the shared files.
+
+The core's =player-inventory=, =player-selected-block=, =player-creative-p=,
+and =update-player-instruments= protocol lets the old quickbar algorithms
+operate on either host without a McCLIM dependency. McCLIM's
+=instrument-canvas/context/device/overlays/focus= and attachment operations
+provide the embedding boundary. Luft's host owns focus and final-pass overlay
+lifetime; no pretend old session or second inventory implementation is used.
+The workbench's generic palette is disabled only for this game.
+
 Mining adds one and selects what was picked up; placing spends one only
-after the engine accepts the edit.  Picking selects without manufacturing
-stock.  Failed, busy, and body-overlapping edits spend nothing.
+after the engine accepts the edit. Picking selects without manufacturing
+stock. Failed, busy, and body-overlapping edits spend nothing. The hotbar
+observes finite counts as well as selection and displays infinity for
+creative materials without changing the stored quantities. Number keys and
+the wheel select actual block identities, not just their visual placements.
 
 Fresh games start with zero finite stock.  =F6= retains creative building:
 ordinary materials place without consuming stock and show infinity, but
 per-instance carried blocks such as films are always finite.  Mining still
 collects in creative mode, and toggling it never rewrites the bag's counts.
 The Luvcraft save's resume holds exact entries and quantities, the selected
-block instance, hotbar order, creative state, and the legacy carried list.
+block instance, hotbar order, simple/full mode, building kit, creative state,
+and the legacy carried list. A saved world's selection and kit take
+precedence over defaults applied when the shared inventory is realized.
 Old carried-only saves enter finite storage with one of each saved item.
 The game keeps a placed film's identity in Luvcraft's edit overlay rather
 than trying to encode it in Luft's shared visual reel material.
@@ -864,12 +885,40 @@ shortened and recaptured.  =luvcraft/luft/game/test= checks the save protocol
 and Luvcraft reader, finite counts, selected/carried film identity, hotbar,
 creative state, refreshing a saved pose, and legacy carried-only resumes.
 
-/Remaining./ The player behaviour is in place.  The original game's
-session-bound =mcclim/inventory*.lisp= and =mcclim/hotbar.lisp= still serve
-that game and cannot be deleted while it remains supported (#J3WZZS).
-The new host uses neither overlay; only the neutral inventory model and
-palette are shared.  Retire those old overlays with the old host rather
-than breaking it to mark this figure done.
+/Parity defects./ The game command tables inherited commands but not their
+keystrokes: McCLIM also needs =:inherit-menu t=. Real Meta-x and Return events
+therefore returned no command. M-x also omitted commands inherited from
+=luft-play= because its explicit table list is intentionally nonrecursive.
+The metabar's settings specialized the atelier =viewer= class instead of =game-host=,
+leaving Luvcraft without a vocabulary. Both now use the existing shared
+McCLIM instruments with the correct application vocabulary. Return opens the
+metabar even after releasing the pointer; inventory and creative controls
+are window commands too. Parameterized M-x remains open in both games
+(#OL2JZ1); this port does not disguise that limitation as completed work.
+
+The metabar widget and interaction are shared, not the renderer-specific
+catalogue: old Luvcraft has grading, streaming, entities, and other knobs
+whose old session fields do not drive Luft. The game exposes Luft's geometry,
+navigation, sky, lens, and atmosphere settings rather than fake old knobs.
+Contextual game hints now occupy an early field in the shared top HUD, so
+removing the generic palette does not lose =B= ball, =G= summon, stock errors,
+or the ball's throw/marbles/put-away hint. Modal focus suppresses that field
+so it cannot compete with inventory or dialogue.
+
+Matching 1100 × 760 headless Vulkan captures of old and new were inspected:
+hotbar, six-card inventory, full Natural library, M-x with query =s= and
+completions, and the open metabar. Additional new-game captures cover the
+All category's second page, Player 2, a full kit awaiting replacement, and
+navigation controls. Real canvas key events exercised =I=, =Tab=, =F3=,
+=F2=, Escape cancellation before dismissal, M-x completion and execution of
+Creative Mode, and Return opening the drawer. Opening navigation by pointer
+and pressing Down/Right changed movement speed from 7.0 to 7.5 cells/s.
+The wheel selected Planks without spending its three units; resume retained
+those units and the six-block kit. SDL's offscreen driver cannot capture a
+relative pointer, so only that capture flag was supplied for the wheel
+check. Dynamic resolution was disabled for the captures. The live stock,
+profiles, kit, and settings assertions passed; captures alone do not stand
+in for those checks.
 
 ** NEXT Grow drawing stages one device at a time
 :PROPERTIES:

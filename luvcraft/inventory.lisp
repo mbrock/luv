@@ -2,6 +2,14 @@
 
 (in-package #:luvcraft)
 
+(defgeneric player-inventory (player)
+  (:documentation "The player's block stock and ordered building kits, independent of engine."))
+(defgeneric player-selected-block (player))
+(defgeneric (setf player-selected-block) (block player))
+(defgeneric player-creative-p (player))
+(defgeneric update-player-instruments (player)
+  (:documentation "Publish a changed selection or kit to the engine's controls."))
+
 (defclass block-inventory-entry ()
   ((block :initarg :block :reader block-inventory-entry-block)
    (quantity :initarg :quantity :initform nil

@@ -197,7 +197,7 @@
          (provider (and inhabitant (inhabitant-provider inhabitant)))
          (turn (and provider (luv.application-agent:application-agent-current-turn provider))))
     (cond
-      ((viewer-inventory-page viewer) (call-next-method))
+      ((render:viewer-modal-focus viewer) nil)
       ((viewer-ball-in-hand-p viewer) (call-next-method))
       ((and inhabitant (inhabitant-approval inhabitant))
        "Proposed edit · Y approve · N decline · T revise")
@@ -207,9 +207,11 @@
                (inhabitant-kind inhabitant)
                (let ((call (first (luv.application-agent:turn-calls turn))))
                  (if call (luv.application-agent:tool-call-name call) "thinking…"))))
-      ((eq :empty (render:viewer-last-edit-status viewer)) (call-next-method))
+      ((eq :empty (render:viewer-last-edit-status viewer)) "No blocks left · mine to collect")
       (inhabitant (format nil "~(~A~) · T talk · F7 next · I inventory" (inhabitant-kind inhabitant)))
-      (t "G summon gnome · T talk · I inventory · F6 creative"))))
+      (t (if (render:viewer-pointer-captured-p viewer)
+             "B ball · G gnome · T talk · F1 keys"
+             "Click to play · B ball · G gnome · F1 keys")))))
 
 (clim:define-command (com-summon-companion :command-table luvcraft-world
                                          :name "Summon Companion" :keystroke (:g)) ()

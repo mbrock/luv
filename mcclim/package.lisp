@@ -20,6 +20,17 @@
                     (#:spv #:luv.spir-v)
                     (#:vec #:luv.arithmetic.lisp.vec3))
   (:export #:luv-port
+           #:instrument-canvas
+           #:instrument-context
+           #:instrument-device
+           #:instrument-overlays
+           #:instrument-focus
+           #:focus-instrument
+           #:unfocus-instrument
+           #:add-instrument
+           #:remove-instrument
+           #:toggle-instrument-creative-mode
+           #:toggle-player-inventory
            #:luv-raster-port
            #:luv-gpu-port
            #:luv-frame-manager

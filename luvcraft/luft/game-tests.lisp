@@ -7,6 +7,56 @@
 
 (in-package #:luvcraft.luft.game.tests)
 
+(define-test player-instruments-share-the-old-quickbar-without-spending-stock
+  (let* ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
+         (inventory (host::restore-inventory nil))
+         (block luvcraft::*bricks-block*))
+    (setf (slot-value viewer 'host::inventory) inventory
+          (slot-value viewer 'host::held-block) nil
+          (slot-value viewer 'render::edit-material)
+          (game:block-placement luvcraft::*grass-block*))
+    (luvcraft:add-block-to-inventory inventory block 7)
+    (luvcraft:assign-luvcraft-quickbar-slot viewer block 3)
+    (is eq block (luvcraft:player-selected-block viewer))
+    (is eq (game:block-placement block) (third (render:viewer-hotbar viewer)))
+    (is = 7 (luvcraft:block-inventory-entry-quantity
+             (luvcraft:block-inventory-entry-for inventory block)))
+    ;; Simple mode is the same six-block kit the old inventory edits, not
+    ;; another palette. Selection through the old public operation reaches
+    ;; the engine while retaining the very same finite entry.
+    (setf (luvcraft::block-inventory-simple-p inventory) t
+          (luvcraft::block-inventory-kit inventory) (list block))
+    (luvcraft:put-luvcraft-block-on-quickbar viewer luvcraft::*planks-block*)
+    (is eq luvcraft::*planks-block* (luvcraft:player-selected-block viewer))
+    (is = 2 (length (render:viewer-hotbar viewer)))
+    (is = 7 (luvcraft:block-inventory-entry-quantity
+             (luvcraft:block-inventory-entry-for inventory block)))))
+
+(define-test game-host-m-x-and-metabar-have-their-executable-vocabulary
+  (let* ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
+         (labels (mapcar #'mcluv:command-menu-entry-label
+                         (mcluv:command-menu-entries-for-tables
+                          (mcluv:command-menu-tables-for viewer)))))
+    (dolist (label '("Execute Command" "Toggle Metabar" "Inventory" "Creative Mode"))
+      (true (member label labels :test #'string=)))
+    (true (member :navigation (mcluv:metabar-groups-for viewer)))
+    (true (member :movement-speed (mcluv:metabar-controls-for viewer :navigation)))
+    (is eq :scalar (mcluv:metabar-control-kind :movement-speed viewer))
+    (is eq :scalar (mcluv:metabar-control-kind :time-of-day viewer))
+    ;; The vocabulary alone is insufficient: McCLIM needs inherited menus
+    ;; enabled for inherited keystrokes, even though the commands are present.
+    (setf (render:viewer-pointer-captured-p viewer) nil
+          (slot-value viewer 'clim:command-table)
+          (clim:find-command-table 'host:luvcraft-viewer)
+          (slot-value viewer 'clim-internals::disabled-commands) nil
+          (render:viewer-mode viewer) (make-instance 'render:first-person-mode))
+    (dolist (event (list (make-instance 'luv:canvas-key-press-event
+                                      :timestamp 0 :key-name :x
+                                      :unshifted-character #\x :modifiers '(:meta))
+                        (make-instance 'luv:canvas-key-press-event
+                                       :timestamp 0 :key-name :return)))
+      (true (render::viewer-key-command viewer event)))))
+
 (define-test inventory-and-carried-identities-round-trip-through-the-game-save
   (let* ((world (luvcraft:make-empty-little-block-world :seed 291 :chunk-height 16))
          (source (game:luvcraft-world-luft-source world))

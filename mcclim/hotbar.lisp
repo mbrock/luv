@@ -34,10 +34,13 @@
   (let ((session (hotbar-session frame)))
     ;; The bar's own materials belong to its state: choosing a block in the
     ;; inventory can swap a new one onto it without changing the selection.
-    (list (luvcraft:luvcraft-session-selected-block session)
-          (luvcraft:luvcraft-session-creative-p session)
+    (list (luvcraft:player-selected-block session)
+          (luvcraft:player-creative-p session)
           (luvcraft:block-inventory-quickbar-blocks
-           (luvcraft:luvcraft-session-inventory session)))))
+           (luvcraft:player-inventory session))
+          (mapcar #'luvcraft:block-inventory-entry-quantity
+                  (luvcraft:block-inventory-quickbar-entries
+                   (luvcraft:player-inventory session))))))
 
 ;;;; Geometry
 ;;;;
@@ -133,7 +136,7 @@ two filled distance fields keep both edges of the rim smooth at any scale."
        (<= 70 (* v +hotbar-height+) 92)))
 
 (defun draw-hotbar-creative-button (pane medium session)
-  (let ((active (luvcraft:luvcraft-session-creative-p session)))
+  (let ((active (luvcraft:player-creative-p session)))
     (draw-analytic-rounded-rectangle*
      medium 12 70 146 92 :radius 5
      :ink (if active (make-rgb-color 0.025 0.045 0.035)
@@ -147,10 +150,10 @@ two filled distance fields keep both edges of the rim smooth at any scale."
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
          (session (hotbar-session frame))
-         (selected (luvcraft:luvcraft-session-selected-block session))
+         (selected (luvcraft:player-selected-block session))
          (blocks
            (luvcraft:block-inventory-quickbar-blocks
-            (luvcraft:luvcraft-session-inventory session))))
+            (luvcraft:player-inventory session))))
     (with-sheet-medium (medium pane)
       (draw-hotbar-shell pane medium)
       (draw-line* pane 12 68 (- +hotbar-width+ 12) 68
@@ -173,6 +176,19 @@ two filled distance fields keep both edges of the rim smooth at any scale."
                                     (- (/ (+ left right) 2.0) 20)
                                     (- (/ (+ top bottom) 2.0) 20)
                                     40)
+                   (let ((quantity
+                           (luvcraft:block-inventory-entry-quantity
+                            (luvcraft:block-inventory-entry-for
+                             (luvcraft:player-inventory session) block))))
+                     (when quantity
+                       (draw-text*
+                        pane
+                        (if (and (luvcraft:player-creative-p session)
+                                 (not (luvcraft:block-kind-carried-p block)))
+                            "∞" (format nil "~D" quantity))
+                        (- right 5) (- bottom 4)
+                        :align-x :right :align-y :bottom :text-size 10
+                        :ink (make-rgb-color 0.70 0.72 0.70))))
                    ;; The tenth slot's key is 0, at the end of the number row.
                    (draw-text* pane (format nil "~D" (mod (1+ index) 10))
                                (+ left 7) (+ top 10)
@@ -219,7 +235,7 @@ two filled distance fields keep both edges of the rim smooth at any scale."
          (viewport-size
            (multiple-value-list
             (luv:canvas-logical-size
-             (luvcraft:luvcraft-session-canvas
+             (instrument-canvas
               (widget-overlay-session overlay)))))
          (source-width (first source-size))
          (source-height (second source-size))
@@ -267,12 +283,12 @@ two filled distance fields keep both edges of the rim smooth at any scale."
                (eq :left (luv:canvas-pointer-event-button event)))
       (let* ((frame (widget-overlay-frame overlay))
              (count (length (luvcraft:block-inventory-quickbar-blocks
-                             (luvcraft:luvcraft-session-inventory session)))))
+                             (luvcraft:player-inventory session)))))
         ;; HOTBAR-SLOT-AT reads the same geometry the painter does, so a click
         ;; in the gap between two slots chooses neither rather than guessing.
         (cond
           ((hotbar-creative-button-at-p (first uv) (second uv))
-           (luvcraft:toggle-luvcraft-creative-mode session))
+           (toggle-instrument-creative-mode session))
           ((<= +hotbar-slot-top+ (* (second uv) +hotbar-height+)
                (+ +hotbar-slot-top+ +hotbar-slot-height+))
            (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
@@ -293,7 +309,7 @@ two filled distance fields keep both edges of the rim smooth at any scale."
            (second
             (multiple-value-list
              (luv:canvas-logical-size
-              (luvcraft:luvcraft-session-canvas
+              (instrument-canvas
                (widget-overlay-session overlay))))))
          (center-y (aref state 1))
          (half-height (abs (aref state 9)))
@@ -308,11 +324,11 @@ two filled distance fields keep both edges of the rim smooth at any scale."
                       (make-instance 'luv-frame-manager :port port)))
          (frame
            (let ((*embedded-mirror-target*
-                   (luvcraft:luvcraft-session-canvas session))
+                   (instrument-canvas session))
                  (*embedded-mirror-context*
-                   (luvcraft::luvcraft-session-context session))
+                   (instrument-context session))
                  (*embedded-mirror-device*
-                   (luvcraft::luvcraft-session-device session)))
+                   (instrument-device session)))
              (make-application-frame
               'luvcraft-hotbar :frame-manager manager :enable t
               :session session))))
@@ -324,7 +340,7 @@ two filled distance fields keep both edges of the rim smooth at any scale."
              (make-instance 'luvcraft-hotbar-overlay
                             :session session :frame frame :mirror mirror)))
       (setf (mirror-compositor mirror) overlay)
-      (luvcraft:add-luvcraft-overlay session overlay)
+      (add-instrument session overlay)
       (when (typep mirror 'luv-gpu-mirror)
         (repaint-gpu-mirror mirror))
       overlay)))
@@ -332,7 +348,7 @@ two filled distance fields keep both edges of the rim smooth at any scale."
 (defun close-luvcraft-hotbar (overlay)
   "Remove and release an OPEN-LUVCRAFT-HOTBAR overlay."
   (check-type overlay luvcraft-hotbar-overlay)
-  (luvcraft:remove-luvcraft-overlay
+  (remove-instrument
    (widget-overlay-session overlay) overlay)
   nil)
 

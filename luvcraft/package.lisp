@@ -511,6 +511,10 @@
            #:sample-light-at
            #:select-luvcraft-block
            #:cycle-luvcraft-block
+           #:player-inventory
+           #:player-selected-block
+           #:player-creative-p
+           #:update-player-instruments
            #:put-luvcraft-block-on-quickbar
            #:assign-luvcraft-quickbar-slot
            #:arrange-luvcraft-quickbar

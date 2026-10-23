@@ -54,7 +54,7 @@
       (default-inventory-preferences)))
 
 (defun inventory-data (frame)
-  (luvcraft:luvcraft-session-inventory (inventory-session frame)))
+  (luvcraft:player-inventory (inventory-session frame)))
 
 (defun inventory-simple-p (frame)
   (luvcraft::block-inventory-simple-p (inventory-data frame)))
@@ -102,7 +102,7 @@
       (luvcraft::arrange-luvcraft-quickbar session (getf profile :bar)))
     (when (and (inventory-simple-p frame)
                (luvcraft::block-inventory-kit inventory))
-      (setf (luvcraft:luvcraft-session-selected-block session)
+      (setf (luvcraft:player-selected-block session)
             (first (luvcraft::block-inventory-kit inventory))))
     (setf (inventory-category frame) :natural
           (inventory-page frame) 0
@@ -111,7 +111,7 @@
           (inventory-pending-block frame) nil
           (inventory-added-time frame) nil
           (inventory-hovered-block frame) nil)
-    (luvcraft::update-luvcraft-session-title session)))
+    (luvcraft:update-player-instruments session)))
 
 (defun initialize-inventory-preferences (frame)
   (unless (inventory-preferences frame)
@@ -142,11 +142,11 @@
   (unless (assoc (inventory-category frame) *simple-inventory-categories*)
     (setf (inventory-category frame) :all))
   (when (and (inventory-simple-p frame)
-             (not (member (luvcraft:luvcraft-session-selected-block (inventory-session frame))
+             (not (member (luvcraft:player-selected-block (inventory-session frame))
                           (luvcraft::block-inventory-kit (inventory-data frame)))))
-    (setf (luvcraft:luvcraft-session-selected-block (inventory-session frame))
+    (setf (luvcraft:player-selected-block (inventory-session frame))
           (first (luvcraft::block-inventory-kit (inventory-data frame)))))
-  (luvcraft::update-luvcraft-session-title (inventory-session frame))
+  (luvcraft:update-player-instruments (inventory-session frame))
   (remember-inventory-profile frame)
   (repaint-inventory frame))
 
@@ -211,13 +211,13 @@
               (inventory-simple-focus frame) :kit
               (inventory-simple-cursor frame) 0)
         (progn
-          (setf (luvcraft:luvcraft-session-selected-block (inventory-session frame)) block
+          (setf (luvcraft:player-selected-block (inventory-session frame)) block
                 (inventory-pending-block frame) nil
                 (inventory-added-block frame) block
                 (inventory-added-slot frame) slot
                 (inventory-added-time frame) (get-internal-real-time)
                 (inventory-simple-focus frame) :blocks)
-          (luvcraft::update-luvcraft-session-title (inventory-session frame))
+          (luvcraft:update-player-instruments (inventory-session frame))
           (remember-inventory-profile frame))))
   (repaint-inventory frame))
 
@@ -251,7 +251,7 @@
   (case zone
     (:profile (switch-inventory-player frame))
     (:mode (toggle-full-inventory frame))
-    (:play (luvcraft:unfocus-luvcraft-session (inventory-session frame)))
+    (:play (unfocus-instrument (inventory-session frame)))
     (:categories (simple-inventory-category frame index)
                  (setf (inventory-simple-focus frame) :blocks))
     (:previous (simple-inventory-page frame -1))
@@ -265,9 +265,9 @@
        (cond ((inventory-pending-block frame)
               (choose-simple-inventory-block frame (inventory-pending-block frame) index))
              ((nth index kit)
-              (setf (luvcraft:luvcraft-session-selected-block (inventory-session frame))
+              (setf (luvcraft:player-selected-block (inventory-session frame))
                     (nth index kit))
-              (luvcraft::update-luvcraft-session-title (inventory-session frame)))
+              (luvcraft:update-player-instruments (inventory-session frame)))
              (t (setf (inventory-simple-focus frame) :blocks
                       (inventory-simple-cursor frame) 0)))))))
 
@@ -291,7 +291,7 @@
            (setf (inventory-pending-block frame) nil
                  (inventory-simple-focus frame) :blocks
                  (inventory-simple-cursor frame) 0)
-           (luvcraft:unfocus-luvcraft-session (inventory-session frame))))
+           (unfocus-instrument (inventory-session frame))))
       (:return (simple-inventory-activate frame zone
                  (if (eq zone :categories) category cursor)))
       (:tab
@@ -335,9 +335,9 @@
              (setf (luvcraft::block-inventory-kit inventory)
                    (loop for block in (luvcraft::block-inventory-kit inventory)
                          for i from 0 unless (= i cursor) collect block))
-             (setf (luvcraft:luvcraft-session-selected-block (inventory-session frame))
+             (setf (luvcraft:player-selected-block (inventory-session frame))
                    (first (luvcraft::block-inventory-kit inventory)))
-             (luvcraft::update-luvcraft-session-title (inventory-session frame))
+             (luvcraft:update-player-instruments (inventory-session frame))
              (remember-inventory-profile frame)))))))
     (repaint-inventory frame))
 
@@ -352,7 +352,7 @@
                (toggle-full-inventory frame)) t)
           ((inventory-simple-p frame)
            (if (eq key :i)
-               (luvcraft:unfocus-luvcraft-session session)
+               (unfocus-instrument session)
                (simple-inventory-key frame event)) t)
           (t (call-next-method)))))
 
@@ -478,7 +478,7 @@
       (multiple-value-bind (x y width height) (simple-inventory-slot i)
         (simple-panel pane x y width height :dark t
                       :selected (or (and (eq zone :kit) (= cursor i))
-                                    (eq block (luvcraft:luvcraft-session-selected-block
+                                    (eq block (luvcraft:player-selected-block
                                                (inventory-session frame)))))
         (if block
             (draw-block-icon pane block (+ x 41) (+ y 7) 46)

@@ -13,74 +13,74 @@
 ;;; ---------------------------------------------------------------------
 ;;; The viewer's existing authored settings as an open metabar vocabulary.
 
-(defmethod mcluv:metabar-groups-for ((viewer viewer))
+(defmethod mcluv:metabar-groups-for ((viewer game-host))
   (declare (ignore viewer))
   '(:geometry :navigation :sky :lens :atmosphere))
 
-(defmethod mcluv:metabar-controls-for ((viewer viewer) (group (eql :geometry)))
+(defmethod mcluv:metabar-controls-for ((viewer game-host) (group (eql :geometry)))
   (declare (ignore viewer group))
   '(:bevel-width :construction-lines))
 
 (defmethod mcluv:metabar-controls-for
-    ((viewer viewer) (group (eql :navigation)))
+    ((viewer game-host) (group (eql :navigation)))
   (declare (ignore viewer group))
   '(:movement-speed :mouse-sensitivity :field-of-view))
 
-(defmethod mcluv:metabar-controls-for ((viewer viewer) (group (eql :sky)))
+(defmethod mcluv:metabar-controls-for ((viewer game-host) (group (eql :sky)))
   (declare (ignore viewer group))
   '(:time-of-day :star-brightness :galaxy-strength :moon-radiance))
 
-(defmethod mcluv:metabar-controls-for ((viewer viewer) (group (eql :lens)))
+(defmethod mcluv:metabar-controls-for ((viewer game-host) (group (eql :lens)))
   (declare (ignore viewer group))
   '(:bloom-gain :bloom-threshold :shaft-gain :shaft-decay
     :vignette :paper-grain))
 
 (defmethod mcluv:metabar-controls-for
-    ((viewer viewer) (group (eql :atmosphere)))
+    ((viewer game-host) (group (eql :atmosphere)))
   (declare (ignore viewer group))
   '(:haze-density :haze-height))
 
-(defmethod mcluv:metabar-actions-for ((viewer viewer))
+(defmethod mcluv:metabar-actions-for ((viewer game-host))
   (declare (ignore viewer))
   '(:reset-view :quit))
 
 (defmethod mcluv:metabar-control-kind
-    ((control (eql :bevel-width)) (viewer viewer))
+    ((control (eql :bevel-width)) (viewer game-host))
   (declare (ignore control viewer))
   :scalar)
 
 (defmethod mcluv:metabar-control-kind
-    ((control (eql :construction-lines)) (viewer viewer))
+    ((control (eql :construction-lines)) (viewer game-host))
   (declare (ignore control viewer))
   :switch)
 
 (defmethod mcluv:metabar-control-kind
-    ((control (eql :movement-speed)) (viewer viewer))
+    ((control (eql :movement-speed)) (viewer game-host))
   (declare (ignore control viewer))
   :scalar)
 
 (defmethod mcluv:metabar-control-kind
-    ((control (eql :mouse-sensitivity)) (viewer viewer))
+    ((control (eql :mouse-sensitivity)) (viewer game-host))
   (declare (ignore control viewer))
   :scalar)
 
 (defmethod mcluv:metabar-control-label
-    ((control (eql :bevel-width)) (viewer viewer))
+    ((control (eql :bevel-width)) (viewer game-host))
   (declare (ignore control viewer))
   "bevel width")
 
 (defmethod mcluv:metabar-control-label
-    ((control (eql :construction-lines)) (viewer viewer))
+    ((control (eql :construction-lines)) (viewer game-host))
   (declare (ignore control viewer))
   "construction lines")
 
 (defmethod mcluv:metabar-control-label
-    ((control (eql :movement-speed)) (viewer viewer))
+    ((control (eql :movement-speed)) (viewer game-host))
   (declare (ignore control viewer))
   "movement speed")
 
 (defmethod mcluv:metabar-control-label
-    ((control (eql :mouse-sensitivity)) (viewer viewer))
+    ((control (eql :mouse-sensitivity)) (viewer game-host))
   (declare (ignore control viewer))
   "mouse sensitivity")
 
@@ -90,77 +90,77 @@
       (viewer-speed viewer)))
 
 (defmethod mcluv:metabar-control-value
-    ((control (eql :bevel-width)) (viewer viewer))
+    ((control (eql :bevel-width)) (viewer game-host))
   (declare (ignore control))
   (viewer-bevel-width viewer))
 
 (defmethod mcluv:metabar-control-value
-    ((control (eql :construction-lines)) (viewer viewer))
+    ((control (eql :construction-lines)) (viewer game-host))
   (declare (ignore control viewer))
   (plusp *wireframe*))
 
 (defmethod mcluv:metabar-control-value
-    ((control (eql :movement-speed)) (viewer viewer))
+    ((control (eql :movement-speed)) (viewer game-host))
   (declare (ignore control))
   (viewer-metabar-movement-speed viewer))
 
 (defmethod mcluv:metabar-control-value
-    ((control (eql :mouse-sensitivity)) (viewer viewer))
+    ((control (eql :mouse-sensitivity)) (viewer game-host))
   (declare (ignore control))
   (viewer-sensitivity viewer))
 
 (defmethod mcluv:metabar-control-value-label
-    ((control (eql :bevel-width)) (viewer viewer) value)
+    ((control (eql :bevel-width)) (viewer game-host) value)
   (declare (ignore control viewer))
   (bevel-width-label value))
 
 (defmethod mcluv:metabar-control-value-label
-    ((control (eql :construction-lines)) (viewer viewer) value)
+    ((control (eql :construction-lines)) (viewer game-host) value)
   (declare (ignore control viewer))
   (if value "on" "off"))
 
 (defmethod mcluv:metabar-control-value-label
-    ((control (eql :movement-speed)) (viewer viewer) value)
+    ((control (eql :movement-speed)) (viewer game-host) value)
   (declare (ignore control viewer))
   (format nil "~,1F cells/s" value))
 
 (defmethod mcluv:metabar-control-value-label
-    ((control (eql :mouse-sensitivity)) (viewer viewer) value)
+    ((control (eql :mouse-sensitivity)) (viewer game-host) value)
   (declare (ignore control viewer))
   (format nil "~,4F rad/px" value))
 
 (defmethod mcluv:metabar-control-fraction
-    ((control (eql :bevel-width)) (viewer viewer) value)
+    ((control (eql :bevel-width)) (viewer game-host) value)
   (declare (ignore control viewer))
   (/ (or (position value +viewer-metabar-bevel-widths+) 0)
      (1- (length +viewer-metabar-bevel-widths+))))
 
 (defmethod mcluv:metabar-control-fraction
-    ((control (eql :construction-lines)) (viewer viewer) value)
+    ((control (eql :construction-lines)) (viewer game-host) value)
   (declare (ignore control viewer))
   (if value 1.0 0.0))
 
 (defmethod mcluv:metabar-control-fraction
-    ((control (eql :movement-speed)) (viewer viewer) value)
+    ((control (eql :movement-speed)) (viewer game-host) value)
   (declare (ignore control viewer))
   (/ (- value +viewer-metabar-minimum-speed+)
      (- +viewer-metabar-maximum-speed+
         +viewer-metabar-minimum-speed+)))
 
 (defmethod mcluv:metabar-control-fraction
-    ((control (eql :mouse-sensitivity)) (viewer viewer) value)
+    ((control (eql :mouse-sensitivity)) (viewer game-host) value)
   (declare (ignore control viewer))
   (/ (- value +viewer-metabar-minimum-sensitivity+)
      (- +viewer-metabar-maximum-sensitivity+
         +viewer-metabar-minimum-sensitivity+)))
 
 (defmethod mcluv:metabar-control-change-kind
-    ((control (eql :bevel-width)) (viewer viewer))
+    ((control (eql :bevel-width)) (viewer game-host))
   (declare (ignore control viewer))
   :rebuild)
 
 (defmethod mcluv:metabar-control-update-policy
-    ((control (eql :bevel-width)) (viewer viewer))
+    ((control (eql :bevel-width)) (viewer game-host))
   (declare (ignore control viewer))
   :commit-on-release)
 
@@ -199,7 +199,7 @@
     (setf (viewer-sensitivity viewer) quantized)))
 
 (defmethod mcluv:perform-metabar-control-step
-    ((control (eql :bevel-width)) (viewer viewer) direction multiplier)
+    ((control (eql :bevel-width)) (viewer game-host) direction multiplier)
   (declare (ignore control))
   (let* ((widths +viewer-metabar-bevel-widths+)
          (index (or (position (viewer-bevel-width viewer) widths) 0))
@@ -209,20 +209,20 @@
     (set-viewer-metabar-bevel-width viewer target)))
 
 (defmethod mcluv:perform-metabar-control-step
-    ((control (eql :construction-lines)) (viewer viewer)
+    ((control (eql :construction-lines)) (viewer game-host)
      direction multiplier)
   (declare (ignore control multiplier))
   (set-viewer-construction-lines viewer (plusp direction)))
 
 (defmethod mcluv:perform-metabar-control-step
-    ((control (eql :movement-speed)) (viewer viewer) direction multiplier)
+    ((control (eql :movement-speed)) (viewer game-host) direction multiplier)
   (declare (ignore control))
   (set-viewer-metabar-movement-speed
    viewer (+ (viewer-metabar-movement-speed viewer)
              (* direction multiplier +viewer-metabar-speed-step+))))
 
 (defmethod mcluv:perform-metabar-control-step
-    ((control (eql :mouse-sensitivity)) (viewer viewer)
+    ((control (eql :mouse-sensitivity)) (viewer game-host)
      direction multiplier)
   (declare (ignore control))
   (set-viewer-metabar-sensitivity
@@ -230,14 +230,14 @@
              (* direction multiplier +viewer-metabar-sensitivity-step+))))
 
 (defmethod mcluv:perform-metabar-control-set-fraction
-    ((control (eql :bevel-width)) (viewer viewer) fraction)
+    ((control (eql :bevel-width)) (viewer game-host) fraction)
   (declare (ignore control))
   (let* ((widths +viewer-metabar-bevel-widths+)
          (index (round (* fraction (1- (length widths))))))
     (set-viewer-metabar-bevel-width viewer (aref widths index))))
 
 (defmethod mcluv:perform-metabar-control-set-fraction
-    ((control (eql :movement-speed)) (viewer viewer) fraction)
+    ((control (eql :movement-speed)) (viewer game-host) fraction)
   (declare (ignore control))
   (set-viewer-metabar-movement-speed
    viewer (+ +viewer-metabar-minimum-speed+
@@ -245,7 +245,7 @@
                             +viewer-metabar-minimum-speed+)))))
 
 (defmethod mcluv:perform-metabar-control-set-fraction
-    ((control (eql :mouse-sensitivity)) (viewer viewer) fraction)
+    ((control (eql :mouse-sensitivity)) (viewer game-host) fraction)
   (declare (ignore control))
   (set-viewer-metabar-sensitivity
    viewer (+ +viewer-metabar-minimum-sensitivity+
@@ -253,27 +253,27 @@
                             +viewer-metabar-minimum-sensitivity+)))))
 
 (defmethod mcluv:perform-metabar-control-toggle
-    ((control (eql :construction-lines)) (viewer viewer))
+    ((control (eql :construction-lines)) (viewer game-host))
   (declare (ignore control))
   (set-viewer-construction-lines viewer (not (plusp *wireframe*))))
 
 (defmethod mcluv:metabar-action-label
-    ((action (eql :reset-view)) (viewer viewer))
+    ((action (eql :reset-view)) (viewer game-host))
   (declare (ignore action viewer))
   "reset view")
 
 (defmethod mcluv:metabar-action-label
-    ((action (eql :quit)) (viewer viewer))
-  (declare (ignore action viewer))
-  "quit LUFT")
+    ((action (eql :quit)) (viewer game-host))
+  (declare (ignore action))
+  (format nil "quit ~A" (luv.workbench:workbench-application-name viewer)))
 
 (defmethod mcluv:perform-metabar-action
-    ((action (eql :reset-view)) (viewer viewer))
+    ((action (eql :reset-view)) (viewer game-host))
   (declare (ignore action))
   (reset-viewer-camera viewer))
 
 (defmethod mcluv:perform-metabar-action
-    ((action (eql :quit)) (viewer viewer))
+    ((action (eql :quit)) (viewer game-host))
   (declare (ignore action))
   (request-viewer-quit viewer))
 
@@ -294,7 +294,7 @@
        (error "~S has no attached workbench." viewer))))
 
 (clim:define-command (com-toggle-metabar
-                      :command-table luft-play
+                      :command-table luft-window
                       :name "Toggle Metabar"
                       :keystroke (:return))
     ()
@@ -315,35 +315,35 @@ DISPLAY is a function of the value returning its text."
   (let ((quantize (gensym "QUANTIZE")))
     `(progn
        (defmethod mcluv:metabar-control-kind
-           ((control (eql ,name)) (viewer viewer))
+           ((control (eql ,name)) (viewer game-host))
          (declare (ignore control viewer))
          :scalar)
        (defmethod mcluv:metabar-control-label
-           ((control (eql ,name)) (viewer viewer))
+           ((control (eql ,name)) (viewer game-host))
          (declare (ignore control viewer))
          ,label)
        (defmethod mcluv:metabar-control-value
-           ((control (eql ,name)) (viewer viewer))
+           ((control (eql ,name)) (viewer game-host))
          (declare (ignore control) (ignorable viewer))
          ,place)
        (defmethod mcluv:metabar-control-value-label
-           ((control (eql ,name)) (viewer viewer) value)
+           ((control (eql ,name)) (viewer game-host) value)
          (declare (ignore control viewer))
          (funcall ,display value))
        (defmethod mcluv:metabar-control-fraction
-           ((control (eql ,name)) (viewer viewer) value)
+           ((control (eql ,name)) (viewer game-host) value)
          (declare (ignore control viewer))
          (/ (- value ,minimum) (- ,maximum ,minimum)))
        (flet ((,quantize (value)
                 (* ,step (round (max ,minimum (min ,maximum value)) ,step))))
          (defmethod mcluv:perform-metabar-control-step
-             ((control (eql ,name)) (viewer viewer) direction multiplier)
+             ((control (eql ,name)) (viewer game-host) direction multiplier)
            (declare (ignore control) (ignorable viewer))
            (setf ,place
                  (coerce (,quantize (+ ,place (* direction multiplier ,step)))
                          'single-float)))
          (defmethod mcluv:perform-metabar-control-set-fraction
-             ((control (eql ,name)) (viewer viewer) fraction)
+             ((control (eql ,name)) (viewer game-host) fraction)
            (declare (ignore control) (ignorable viewer))
            (setf ,place
                  (coerce (,quantize (+ ,minimum

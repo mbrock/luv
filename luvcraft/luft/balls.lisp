@@ -107,7 +107,7 @@
     (setf (viewer-ball-in-hand-p viewer) (not (viewer-ball-in-hand-p viewer)))))
 
 (defmethod mcluv:palette-hint :around ((viewer ball-game-state))
-  (if (and (viewer-ball-in-hand-p viewer) (not (viewer-inventory-page viewer)))
+  (if (viewer-ball-in-hand-p viewer)
       "Ball · left throw · right marbles · B put away"
       (call-next-method)))
 

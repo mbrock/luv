@@ -87,6 +87,11 @@
     (luv:handle-canvas-event viewer nil key)
     (true (host::viewer-ball-in-hand-p viewer))
     (true (search "right marbles" (mcluv:palette-hint viewer)))
+    (true (search "right marbles"
+                  (mcluv:status-bar-channel-value :player-hint viewer nil)))
+    (setf (render:viewer-modal-focus viewer) t)
+    (true (null (mcluv:status-bar-channel-value :player-hint viewer nil)))
+    (setf (render:viewer-modal-focus viewer) nil)
     (setf (render:camera-position (render:viewer-camera viewer))
           (luv.arithmetic.lisp.vec3:make-vec3 1032.5 1032.5 5.0)
           (render:camera-yaw (render:viewer-camera viewer)) 0.0

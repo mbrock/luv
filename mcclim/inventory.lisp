@@ -119,7 +119,7 @@ every cell makes the word louder than the block it is about."
       (inventory-category frame)
       (luvcraft:block-inventory-entry-block entry)))
    (luvcraft:block-inventory-entries
-    (luvcraft:luvcraft-session-inventory (inventory-session frame)))))
+    (luvcraft:player-inventory (inventory-session frame)))))
 
 (defun inventory-page-count (frame)
   (max 1 (ceiling (length (inventory-filtered-entries frame))
@@ -140,10 +140,10 @@ every cell makes the word louder than the block it is about."
      (inventory-category frame)
      (inventory-page frame)
      (inventory-hovered-block frame)
-     (luvcraft:luvcraft-session-selected-block session)
+     (luvcraft:player-selected-block session)
      (loop for entry in
              (luvcraft:block-inventory-entries
-              (luvcraft:luvcraft-session-inventory session))
+              (luvcraft:player-inventory session))
            collect (list entry
                          (luvcraft:block-inventory-entry-quantity entry))))))
 
@@ -168,7 +168,7 @@ every cell makes the word louder than the block it is about."
                            (inventory-category-block-p
                             category (luvcraft:block-inventory-entry-block entry)))
                          (luvcraft:block-inventory-entries
-                          (luvcraft:luvcraft-session-inventory
+                          (luvcraft:player-inventory
                            (inventory-session frame)))))
                 140 (+ top 14) :align-x :right :align-y :center
                 :text-size 10 :ink *inventory-muted-ink*)))
@@ -200,7 +200,7 @@ on the bar wears the number key that selects it."
   (let* ((block (luvcraft:block-inventory-entry-block entry))
          (selected-p
            (eq block
-               (luvcraft:luvcraft-session-selected-block
+               (luvcraft:player-selected-block
                 (inventory-session frame))))
          (hovered-p (eq block (inventory-hovered-block frame))))
     (with-sheet-medium (medium pane)
@@ -237,7 +237,7 @@ on the bar wears the number key that selects it."
           for left = (+ +inventory-quickbar-left+ (* index slot-width))
           for selected-p =
             (eq block
-                (luvcraft:luvcraft-session-selected-block
+                (luvcraft:player-selected-block
                  (inventory-session frame)))
           do (with-sheet-medium (medium pane)
                (draw-hotbar-slot
@@ -303,11 +303,11 @@ on the bar wears the number key that selects it."
   (declare (ignore region))
   (let* ((frame (pane-frame pane))
          (session (inventory-session frame))
-         (inventory (luvcraft:luvcraft-session-inventory session))
+         (inventory (luvcraft:player-inventory session))
          (entries (inventory-visible-entries frame))
          (all-entries (luvcraft:block-inventory-entries inventory))
          (quickbar-entries (luvcraft:block-inventory-quickbar-entries inventory))
-         (selected (luvcraft:luvcraft-session-selected-block session))
+         (selected (luvcraft:player-selected-block session))
          (selected-entry (luvcraft:block-inventory-entry-for inventory selected))
          (inspected (or (inventory-hovered-block frame) selected))
          (inspected-entry
@@ -373,7 +373,7 @@ on the bar wears the number key that selects it."
 (defmethod luvcraft:encode-luvcraft-overlay :around
     ((hotbar luvcraft-hotbar-overlay) session pass surface-texture)
   "Hide the redundant HUD bar while the full inventory owns modal focus."
-  (if (typep (luvcraft:luvcraft-session-modal-focus session)
+  (if (typep (instrument-focus session)
              'luvcraft-inventory-overlay)
       hotbar
       (call-next-method)))
@@ -388,7 +388,7 @@ on the bar wears the number key that selects it."
          (viewport-size
            (multiple-value-list
             (luv:canvas-logical-size
-             (luvcraft:luvcraft-session-canvas
+             (instrument-canvas
               (widget-overlay-session overlay)))))
          (source-width (first source-size))
          (source-height (second source-size))
@@ -475,7 +475,7 @@ on the bar wears the number key that selects it."
 
 (defun inventory-block-at (frame u v)
   "The block in the grid cell or quickbar slot at texture U,V, or NIL."
-  (let* ((inventory (luvcraft:luvcraft-session-inventory
+  (let* ((inventory (luvcraft:player-inventory
                      (inventory-session frame)))
          (visible (inventory-visible-entries frame))
          (quickbar (luvcraft:block-inventory-quickbar-entries inventory))
@@ -560,13 +560,13 @@ on the bar wears the number key that selects it."
       ((or (eq :escape (luv:canvas-key-event-key-name event))
            (and (eq :i (luv:canvas-key-event-key-name event))
                 (not (luv:canvas-key-event-repeat-p event))))
-       (luvcraft:unfocus-luvcraft-session session)
+       (unfocus-instrument session)
        t)
       (slot
        (alexandria:if-let ((block (inventory-hovered-block frame)))
          (luvcraft:assign-luvcraft-quickbar-slot session block slot)
          (when (<= slot (length (luvcraft:block-inventory-quickbar-entries
-                                 (luvcraft:luvcraft-session-inventory
+                                 (luvcraft:player-inventory
                                   session))))
            (luvcraft:select-luvcraft-block session slot)))
        (repaint-inventory frame)
@@ -591,21 +591,21 @@ on the bar wears the number key that selects it."
       ((overlay
          (find-if (lambda (candidate)
                     (typep candidate 'luvcraft-inventory-overlay))
-                  (luvcraft:luvcraft-session-overlays session))))
+                  (instrument-overlays session))))
     (progn
       (setf (inventory-overlay-visible-p overlay) t)
-      (luvcraft:focus-luvcraft-session session overlay)
+      (focus-instrument session overlay)
       overlay)
     (let* ((port (find-port :server-path '(:luv-gpu)))
            (manager (or (first (climi::frame-managers port))
                         (make-instance 'luv-frame-manager :port port)))
            (frame
              (let ((*embedded-mirror-target*
-                     (luvcraft:luvcraft-session-canvas session))
+                     (instrument-canvas session))
                    (*embedded-mirror-context*
-                     (luvcraft::luvcraft-session-context session))
+                     (instrument-context session))
                    (*embedded-mirror-device*
-                     (luvcraft::luvcraft-session-device session)))
+                     (instrument-device session)))
                (make-application-frame
                 'luvcraft-inventory :frame-manager manager :enable t
                 :session session))))
@@ -617,10 +617,10 @@ on the bar wears the number key that selects it."
                (make-instance 'luvcraft-inventory-overlay
                               :session session :frame frame :mirror mirror)))
         (setf (mirror-compositor mirror) overlay)
-        (luvcraft:add-luvcraft-overlay session overlay)
+        (add-instrument session overlay)
         (when (typep mirror 'luv-gpu-mirror)
           (repaint-gpu-mirror mirror))
-        (luvcraft:focus-luvcraft-session session overlay)
+        (focus-instrument session overlay)
         overlay))))
 
 (defun close-luvcraft-inventory (overlay)
@@ -628,21 +628,24 @@ on the bar wears the number key that selects it."
   (check-type overlay luvcraft-inventory-overlay)
   (let ((session (widget-overlay-session overlay)))
     (setf (inventory-overlay-visible-p overlay) nil)
-    (when (eq overlay (luvcraft:luvcraft-session-modal-focus session))
-      (luvcraft:unfocus-luvcraft-session session)))
+    (when (eq overlay (instrument-focus session))
+      (unfocus-instrument session)))
   nil)
 
-(defmethod luvcraft:toggle-luvcraft-inventory
-    ((session luvcraft:luvcraft-session))
+(defun toggle-player-inventory (session)
   (alexandria:if-let
       ((overlay
          (find-if (lambda (candidate)
                     (typep candidate 'luvcraft-inventory-overlay))
-                  (luvcraft:luvcraft-session-overlays session))))
+                  (instrument-overlays session))))
     (if (inventory-overlay-visible-p overlay)
         (progn (close-luvcraft-inventory overlay) t)
         (progn (open-luvcraft-inventory session) t))
     (progn (open-luvcraft-inventory session) t)))
+
+(defmethod luvcraft:toggle-luvcraft-inventory
+    ((session luvcraft:luvcraft-session))
+  (toggle-player-inventory session))
 
 (defmethod luvcraft:attach-luvcraft-hud :around
     ((session luvcraft:luvcraft-session))

@@ -31,9 +31,12 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 ;;; atelier's own instruments (Tab terminal, B bevel, C construction lines,
 ;;; R reset, edit mode) are not part of the game.
 
-(clim:define-command-table luvcraft-world :inherit-from (render:luft-play))
+(clim:define-command-table luvcraft-world
+  :inherit-from (render:luft-play) :inherit-menu t)
+(clim:define-command-table luvcraft-window
+  :inherit-from (render:luft-window) :inherit-menu t)
 (clim:define-command-table luvcraft-world-release
-  :inherit-from (render:luft-play-release))
+  :inherit-from (render:luft-play-release) :inherit-menu t)
 
 (defclass ball-game-state ()
   ((physics :initform nil :accessor viewer-physics)
@@ -58,10 +61,9 @@ quickbar begins: things to build a house with, colours, and a lamp.")
    (hotbar :initarg :hotbar :accessor luvcraft-viewer-hotbar)
    (inventory :accessor viewer-inventory)
    (creative-p :initform nil :accessor viewer-creative-p)
-   (inventory-page :initform nil :accessor viewer-inventory-page)
    (held-block :initform nil :accessor viewer-held-block))
   (:command-table (luvcraft-viewer
-                   :inherit-from (render:luft-window render:luft-window-release
+                   :inherit-from (luvcraft-window render:luft-window-release
                                   luvcraft-world luvcraft-world-release)
                    :inherit-menu t))
   (:menu-bar nil))
@@ -77,20 +79,28 @@ quickbar begins: things to build a house with, colours, and a lamp.")
           (and selected
                (find selected (luvcraft:block-inventory-blocks inventory)
                      :key #'luvcraft::block-save-description :test #'equal)))
-    (when (getf resume :quickbar)
-      (setf (luvcraft-viewer-hotbar viewer)
-            (mapcar (lambda (name)
-                      (game:block-placement
-                       (find name (luvcraft:block-inventory-blocks inventory)
-                             :key #'luvcraft:block-kind-name)))
-                    (getf resume :quickbar))))
     (setf (render:viewer-edit-material viewer)
           (or (and selected
                    (ignore-errors
                     (game:block-placement
                      (luvcraft::restore-block-value selected))))
               (first (luvcraft-viewer-hotbar viewer))))
-    (put-on-hotbar viewer (render:viewer-edit-material viewer))))
+    (put-on-hotbar viewer (render:viewer-edit-material viewer))
+    (when (render:viewer-canvas viewer)
+      (attach-player-instruments viewer))
+    ;; Preferences choose a new player's kit; an actual world resume keeps
+    ;; its own bar, mode, stock, and selected per-instance block.
+    (when (getf resume :quickbar)
+      (luvcraft:arrange-luvcraft-quickbar viewer (getf resume :quickbar)))
+    (when (member :simple-inventory-p resume)
+      (setf (luvcraft::block-inventory-simple-p inventory)
+            (getf resume :simple-inventory-p)
+            (luvcraft::block-inventory-kit inventory)
+            (mapcar #'luvcraft::restore-block-value (getf resume :building-kit))))
+    (when selected
+      (setf (luvcraft:player-selected-block viewer)
+            (luvcraft::restore-block-value selected)))
+    (luvcraft:update-player-instruments viewer)))
 
 (defun restore-inventory (resume)
   (let ((inventory (luvcraft:make-block-inventory
@@ -122,6 +132,11 @@ quickbar begins: things to build a house with, colours, and a lamp.")
           (mapcar #'luvcraft::block-save-description
                   (luvcraft:block-inventory-carried-blocks (viewer-inventory viewer)))
           (getf resume :creative-p) (viewer-creative-p viewer)
+          (getf resume :simple-inventory-p)
+          (luvcraft::block-inventory-simple-p (viewer-inventory viewer))
+          (getf resume :building-kit)
+          (mapcar #'luvcraft::block-save-description
+                  (luvcraft::block-inventory-kit (viewer-inventory viewer)))
           (getf resume :selected-block)
           (luvcraft::block-save-description
            (selected-block viewer (render:viewer-edit-material viewer)))
@@ -176,15 +191,41 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 (defun put-on-hotbar (viewer placement)
   "Select PLACEMENT, replacing the selected slot when it is not on the bar."
   (let ((block (selected-block viewer placement)))
-    (when block (luvcraft:add-block-to-inventory (viewer-inventory viewer) block 0)))
-  (let* ((hotbar (luvcraft-viewer-hotbar viewer))
-         (selected (position (render:viewer-edit-material viewer) hotbar)))
-    (unless (member placement hotbar)
-      (setf (nth (or selected 0) hotbar) placement)))
-  (setf (render:viewer-edit-material viewer) placement))
+    (when block
+      (luvcraft:add-block-to-inventory (viewer-inventory viewer) block 0)
+      (luvcraft:put-luvcraft-block-on-quickbar viewer block))))
+
+(defmethod luvcraft:player-inventory ((viewer luvcraft-viewer))
+  (viewer-inventory viewer))
+
+(defmethod luvcraft:player-selected-block ((viewer luvcraft-viewer))
+  (selected-block viewer (render:viewer-edit-material viewer)))
+
+(defmethod (setf luvcraft:player-selected-block) (block (viewer luvcraft-viewer))
+  (setf (viewer-held-block viewer) block
+        (render:viewer-edit-material viewer) (game:block-placement block))
+  block)
+
+(defmethod luvcraft:player-creative-p ((viewer luvcraft-viewer))
+  (viewer-creative-p viewer))
+
+(defmethod luvcraft:update-player-instruments ((viewer luvcraft-viewer))
+  (setf (luvcraft-viewer-hotbar viewer)
+        (mapcar #'game:block-placement
+                (luvcraft:block-inventory-quickbar-blocks (viewer-inventory viewer)))))
 
 (defmethod render:viewer-hotbar ((viewer luvcraft-viewer))
   (luvcraft-viewer-hotbar viewer))
+
+(defmethod luv:handle-canvas-event
+    ((viewer luvcraft-viewer) canvas (event luv:canvas-pointer-wheel-event))
+  (declare (ignore canvas))
+  ;; Placement is a visual identity: several carried films share it. Cycle
+  ;; the real blocks, as the old game does, rather than losing reel identity.
+  (when (render::viewer-pointer-captured-p viewer)
+    (luvcraft:cycle-luvcraft-block
+     viewer (- (signum (round (luv:canvas-pointer-event-scroll-y event))))))
+  nil)
 
 (defmethod render:viewer-pick-material ((viewer luvcraft-viewer) placement)
   (let* ((inspection (render::viewer-inspection viewer))
@@ -201,7 +242,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 
 (defmethod render:viewer-key-event-tables
     ((viewer luvcraft-viewer) (event luv:canvas-key-press-event))
-  (values 'render:luft-window 'luvcraft-world))
+  (values 'luvcraft-window 'luvcraft-world))
 
 (defmethod render:viewer-key-event-tables
     ((viewer luvcraft-viewer) (event luv:canvas-key-release-event))
@@ -225,82 +266,20 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 (clim:define-command (com-select-hotbar-slot :command-table luvcraft-world
                                              :name "Select Hotbar Slot")
     ((slot 'integer))
-  (let* ((viewer (render:viewer-command-viewer))
-         (page (viewer-inventory-page viewer)))
-    (if page
-        (let ((entry (nth (+ (* page 10) slot)
-                          (luvcraft:block-inventory-entries (viewer-inventory viewer)))))
-          (when entry
-            (setf (viewer-held-block viewer) (luvcraft:block-inventory-entry-block entry)
-                  (viewer-inventory-page viewer) nil)
-            (put-on-hotbar viewer (game:block-placement (viewer-held-block viewer)))))
-        (progn
-          (setf (viewer-held-block viewer) nil)
-          (render:select-viewer-material viewer slot)))))
+  (luvcraft:select-luvcraft-block (render:viewer-command-viewer) (1+ slot)))
 
-(clim:define-command (com-inventory :command-table luvcraft-world
+(clim:define-command (com-inventory :command-table luvcraft-window
                                    :name "Inventory" :keystroke (:i)) ()
-  (let ((viewer (render:viewer-command-viewer)))
-    (setf (viewer-inventory-page viewer)
-          (if (viewer-inventory-page viewer) nil 0))))
+  (mcluv:toggle-player-inventory (render:viewer-command-viewer)))
 
-(clim:define-command (com-next-inventory-page :command-table luvcraft-world
-                                             :name "Next Inventory Page"
-                                             :keystroke (:n)) ()
-  (let ((viewer (render:viewer-command-viewer)))
-    (setf (viewer-inventory-page viewer)
-          (mod (1+ (or (viewer-inventory-page viewer) -1))
-               (max 1 (ceiling (length (luvcraft:block-inventory-entries
-                                       (viewer-inventory viewer))) 10))))))
-
-(clim:define-command (com-creative :command-table luvcraft-world
+(clim:define-command (com-creative :command-table luvcraft-window
                                  :name "Creative Mode" :keystroke (:f6)) ()
   (let ((viewer (render:viewer-command-viewer)))
     (setf (viewer-creative-p viewer) (not (viewer-creative-p viewer)))))
 
-(defmethod mcluv:palette-items-for ((viewer luvcraft-viewer))
-  (if (viewer-inventory-page viewer)
-      (nthcdr (* 10 (viewer-inventory-page viewer))
-              (luvcraft:block-inventory-entries (viewer-inventory viewer)))
-      (render:viewer-hotbar viewer)))
-
-(defmethod mcluv:palette-selected-item ((viewer luvcraft-viewer))
-  (if (viewer-inventory-page viewer)
-      (luvcraft:block-inventory-entry-for (viewer-inventory viewer)
-                                         (selected-block viewer (render:viewer-edit-material viewer)))
-      (render:viewer-edit-material viewer)))
-
-(defmethod mcluv:palette-item-label
-    ((viewer luvcraft-viewer) (placement terrain:material-placement))
-  (let ((block (selected-block viewer placement)))
-    (if (typep block 'luvcraft::film-block-kind) (luvcraft::film-label block)
-        (call-next-method))))
-
-(defmethod mcluv:palette-item-label
-    ((viewer luvcraft-viewer) (entry luvcraft:block-inventory-entry))
-  (let ((block (luvcraft:block-inventory-entry-block entry)))
-    (if (typep block 'luvcraft::film-block-kind) (luvcraft::film-label block)
-        (mcluv:palette-item-label viewer (game:block-placement block)))))
-
-(defmethod mcluv:palette-item-tones
-    ((viewer luvcraft-viewer) (entry luvcraft:block-inventory-entry))
-  (mcluv:palette-item-tones viewer
-                          (game:block-placement (luvcraft:block-inventory-entry-block entry))))
-
-(defmethod mcluv:palette-item-luminous-p
-    ((viewer luvcraft-viewer) (entry luvcraft:block-inventory-entry))
-  (mcluv:palette-item-luminous-p viewer
-                               (game:block-placement (luvcraft:block-inventory-entry-block entry))))
-
-(defmethod mcluv:palette-item-key ((viewer luvcraft-viewer) item index)
-  (let* ((block (if (typep item 'luvcraft:block-inventory-entry)
-                    (luvcraft:block-inventory-entry-block item)
-                    (selected-block viewer item)))
-         (entry (luvcraft:block-inventory-entry-for (viewer-inventory viewer) block)))
-    (format nil "~D · ~A" (mod (1+ index) 10)
-            (if (and (viewer-creative-p viewer)
-                     (not (luvcraft:block-kind-carried-p block))) "∞"
-                (if entry (luvcraft:block-inventory-entry-quantity entry) 0)))))
+(defmethod mcluv:palette-visible-p ((viewer luvcraft-viewer))
+  (declare (ignore viewer))
+  nil)
 
 (loop for key in '(:1 :2 :3 :4 :5 :6 :7 :8 :9 :0) for slot from 0
       do (let ((slot slot))
@@ -320,7 +299,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
   "Luvcraft")
 
 (defmethod mcluv:command-menu-tables-for ((viewer luvcraft-viewer))
-  '(render:luft-window luvcraft-world))
+  '(render:luft-window luvcraft-window render:luft-play luvcraft-world))
 
 (defmethod mcluv:keymap-legend-sections-for ((viewer luvcraft-viewer))
   `(("Building" . luvcraft-world)
@@ -330,20 +309,12 @@ quickbar begins: things to build a house with, colours, and a lamp.")
                   ("place against it" "Right click")
                   ("pick its block" "Middle click")
                   ("choose a block" "Wheel")))
-    ("Any time" . render:luft-window)))
+    ("Any time" . luvcraft-window)))
 
 (defmethod mcluv:keymap-legend-command-label
     ((viewer luvcraft-viewer) (name (eql 'com-select-hotbar-slot)) arguments table)
   (declare (ignore arguments table))
   "choose a block")
-
-(defmethod mcluv:palette-hint ((viewer luvcraft-viewer))
-  (cond ((viewer-inventory-page viewer)
-         (format nil "Inventory ~D · N next"
-                 (1+ (viewer-inventory-page viewer))))
-        ((eq (render:viewer-last-edit-status viewer) :empty) "No blocks left · mine to collect")
-        (t (format nil "~A · I inventory · F6 creative"
-                   (if (viewer-creative-p viewer) "Creative" "Survival")))))
 
 ;;; Saves: Luvcraft's own format, so Luvcraft reads what this game wrote.
 

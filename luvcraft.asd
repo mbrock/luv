@@ -162,7 +162,8 @@
   :author "Mikael Brockman"
   :depends-on ("luv/mcclim" "luvcraft/core")
   :serial t
-  :components ((:file "mcclim/surveyor")
+  :components ((:file "mcclim/player-instruments")
+               (:file "mcclim/surveyor")
                (:file "mcclim/luvcraft")
                (:file "mcclim/luvcraft-source-update")
                (:file "mcclim/block-icon")
@@ -229,6 +230,7 @@
   :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
   :serial t
   :components ((:file "luvcraft/luft/game")
+               (:file "luvcraft/luft/instruments")
                (:file "luvcraft/luft/animals")
                (:file "luvcraft/luft/balls")
                (:file "luvcraft/luft/ball-drawing")
