@@ -68,6 +68,13 @@
         (terrain:pack-terrain-pattern
          (make-instance 'terrain:material-kind :name :brick :base-tone '(0.5 0.2 0.1)
                                                :pattern '(:bond))))
+    ;; A window's accent word: red pane tone, then surface emission 1.0 / 4.
+    (is = #x400000FF
+        (nth-value 2 (terrain:pack-terrain-pattern
+                      (make-instance 'terrain:material-kind
+                                     :name :pane :base-tone '(0.5 0.5 0.5)
+                                     :surface-emission 1.0
+                                     :pattern '(:window :accent-tone (1 0 0))))))
     ;; A default kind has no relief, mid strength, and rough, half-worn edges.
     (is = (logior 0 (ash 8 4) (ash 217 8) (ash 128 16))
         (aref words (+ 3 (* 8 1))))))
