@@ -110,6 +110,7 @@ this package draws; the renderer and the ateliers use it.")
            #:body-previous-position
            #:body-radius
            #:body-standable-cell-p
+           #:body-support-height
            #:body-velocity
            #:cancel-character-route
            #:capture-world-source-chunk-edits
@@ -233,6 +234,7 @@ this package draws; the renderer and the ateliers use it.")
            #:scene-voxel-light-propagation-p
            #:schedule-streaming-scene-cohort
            #:schedule-streaming-scene-edit
+           #:search-walking-path
            #:set-character-flying
            #:set-character-movement
            #:set-character-vertical-urge

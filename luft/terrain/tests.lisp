@@ -72,6 +72,37 @@
         (is eq :edited
             (nth-value 1 (terrain:edit-streaming-scene-cell scene (cell 4 0) nil)))))))
 
+(define-test a-body-walks-around-a-wall-it-cannot-climb
+  (let ((builder (make-builder)))
+    ;; An 8 x 8 floor, and a wall two cells high across x = 3 for y < 6.
+    (dotimes (x 8)
+      (dotimes (y 8)
+        (terrain:scene-builder-cell builder x y 0)
+        (when (and (= x 3) (< y 6))
+          (terrain:scene-builder-cell builder x y 1)
+          (terrain:scene-builder-cell builder x y 2))))
+    (let* ((scene (terrain:finish-scene-builder builder))
+           (domain (terrain:scene-domain scene))
+           (body (make-instance 'terrain:physical-body)))
+      (flet ((cell (x y z) (luft:make-site domain x y z luft:+cell-extent+ 1)))
+        (multiple-value-bind (cells status)
+            (terrain:search-walking-path body scene (cell 1 1 1) (cell 5 1 1))
+          (is eq :running status)
+          (is = (cell 5 1 1) (car (last cells)))
+          ;; It goes round the end of the wall, one neighbouring cell at a time.
+          (true (notany (lambda (c) (and (= 3 (luft:site-x c)) (< (luft:site-y c) 6)))
+                        cells))
+          (true (every (lambda (a b)
+                         (= 1 (max (abs (- (luft:site-x a) (luft:site-x b)))
+                                   (abs (- (luft:site-y a) (luft:site-y b))))))
+                       (cons (cell 1 1 1) cells) cells)))
+        ;; The wall's top is standable but two cells up, out of a step's reach.
+        (true (terrain:body-standable-cell-p body scene 3 2 3))
+        (is eq :failed
+            (nth-value 1 (terrain:search-walking-path
+                          body scene (cell 1 1 1) (cell 3 2 3))))
+        (is = 1.0 (terrain:body-support-height body scene 2.5 1.5 1.0))))))
+
 (defclass flat-source (terrain:world-source) ()
   (:documentation "Two layers of stone under the whole domain."))
 

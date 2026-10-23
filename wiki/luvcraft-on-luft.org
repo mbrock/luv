@@ -156,12 +156,19 @@ cache honest across live redefinition.  The renderer's
 =+render-population-preparer+= builds its CPU population there; without a
 preparer a streamed product is simply the mesh.
 
+A body is a terrain query.  =luft/terrain= owns the
+[[lisp:luft.terrain:physical-body]] box and asks of the solid where it
+collides, where it can stand
+([[lisp:luft.terrain:body-support-height]]), and which cells it can walk
+between ([[lisp:luft.terrain:search-walking-path]]); a game's character
+composes a body with its intentions and turns a path into its own route.
+
 What still sits on the wrong side of the line:
 
-- The scene still carries a =player-p= flag, and =luft/simulation= puts
-  the collision sweep, standing, and walking routes, which are terrain
-  queries, beside a walking character and the world clock, which are a
-  game's.  The follow camera lives in the atelier's studio.
+- The scene still carries a =player-p= flag.  The walking character, its
+  controllers, and the world clock sit in =luft/simulation=, generic enough
+  for now that a game can use them as they are, and the follow camera
+  lives in the atelier's studio.
 - The atelier shares =luft.render= with the renderer, which is why it
   attaches =luft.world= at load rather than in a package definition.
 
@@ -328,7 +335,9 @@ mountain sanctuary, and the compiled palette are identical cell for cell to
 the code before it, and =luft/terrain/test= plays a second game on the
 terrain alone.  #TNOILN lists what remains; the fourth cut made
 torches one kind of surface attachment, so the terrain no longer names
-them.  The next pieces are the player flag and the walking queries.
+them.  The fifth moved collision, standing, and path search into the
+terrain, where =luft/terrain/test= routes a body around a wall it cannot
+climb.  The player flag is the piece left.
 
 ** TODO Make the isometric wizard a game of its own
 :PROPERTIES:

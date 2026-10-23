@@ -59,7 +59,7 @@
              (uiop:symbol-call '#:luft '#:run-luft-tests)))
 
 (defsystem "luft/terrain"
-  :description "LUFT terrain: scenes, materials, realized light, streaming, and world sources."
+  :description "LUFT terrain: scenes, materials, realized light, bodies, streaming, and world sources."
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; Nothing here draws.  The renderer and the ateliers sit on this layer.
@@ -74,6 +74,7 @@
                              (:file "realized-light")
                              (:file "scene")
                              (:file "decoration")
+                             (:file "bodies")
                              (:file "world-source")
                              (:file "streaming-state")
                              (:file "streaming")
@@ -147,7 +148,7 @@
                              (:file "fixtures")))))
 
 (defsystem "luft/simulation"
-  :description "Bodies, character controllers, and the LUFT world clock without an atelier."
+  :description "Characters, their controllers, and the LUFT world clock over terrain bodies."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/terrain")
