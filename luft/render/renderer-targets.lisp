@@ -267,12 +267,15 @@ starts over."
           (image :motion :rg16-float render-extent
                  (usage (if shader-p '(:render-attachment :texture-binding) '(:render-attachment))
                         (and scaler (gpu-temporal-scaler-motion-usage scaler))))
+          ;; RESOLVED and HISTORY trade roles each frame, and history is
+          ;; cleared before its first use, a transfer on Vulkan.
           (image :resolved :rgba16-float extent
-                 (usage (if shader-p '(:render-attachment :texture-binding) '(:texture-binding))
+                 (usage (if shader-p
+                            '(:render-attachment :texture-binding :copy-dst)
+                            '(:texture-binding))
                         (and scaler (gpu-temporal-scaler-output-usage scaler))))
           (when shader-p
             (image :history :rgba16-float extent
-                   ;; Cleared before its first use, a transfer on Vulkan.
                    '(:render-attachment :texture-binding :copy-dst))
             (image :bounds-low :rgba16-float render-extent '(:render-attachment :texture-binding))
             (image :bounds-high :rgba16-float render-extent '(:render-attachment :texture-binding))))

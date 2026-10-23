@@ -176,6 +176,7 @@
            #:isometric-walk-mode
            #:world-edit-mode
            #:orbit-mode
+           #:free-camera-mode
            #:viewer-inspection
            #:site-inspection
            #:site-inspection-site

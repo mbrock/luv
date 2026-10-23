@@ -25,22 +25,22 @@
 (setf *earth-material*
       (ensure-semantic-instance
        *earth-material* 'material-kind
-       :name :earth :base-tone '(0.42 0.32 0.21)
+       :name :earth :base-tone '(0.42 0.32 0.21) :relief :grass :relief-strength 0.8 :edge-wear 0.5
        :top-tone '(0.18 0.31 0.105)
        :side-tone '(0.42 0.32 0.21)
        :bottom-tone '(0.24 0.18 0.13))
       *limestone-material*
       (ensure-semantic-instance
        *limestone-material* 'material-kind
-       :name :limestone :base-tone '(0.53 0.49 0.39))
+       :name :limestone :base-tone '(0.53 0.49 0.39) :relief :stone :relief-strength 0.6 :edge-wear 0.7)
       *highland-rock-material*
       (ensure-semantic-instance
        *highland-rock-material* 'material-kind
-       :name :highland-rock :base-tone '(0.29 0.30 0.27))
+       :name :highland-rock :base-tone '(0.29 0.30 0.27) :relief :stone :relief-strength 0.9 :edge-wear 0.7)
       *crystal-material*
       (ensure-semantic-instance
        *crystal-material* 'material-kind
-       :name :aether-crystal :base-tone '(0.16 0.68 0.94)
+       :name :aether-crystal :base-tone '(0.16 0.68 0.94) :relief :gloss :relief-strength 0.15 :roughness 0.15
        :light-opacity 1 :light-emission '(3 11 15)
        :surface-emission 0.30)
       *terrain-material-placement*
@@ -68,17 +68,17 @@
       *snow-material*
       (ensure-semantic-instance
        *snow-material* 'material-kind
-       :name :snow :base-tone '(0.80 0.83 0.86)
+       :name :snow :base-tone '(0.80 0.83 0.86) :relief :snow
        :top-tone '(0.86 0.89 0.92)
        :side-tone '(0.62 0.65 0.68))
       *slate-material*
       (ensure-semantic-instance
        *slate-material* 'material-kind
-       :name :slate :base-tone '(0.17 0.19 0.21))
+       :name :slate :base-tone '(0.17 0.19 0.21) :relief :stone :edge-wear 0.7)
       *sand-material*
       (ensure-semantic-instance
        *sand-material* 'material-kind
-       :name :sand :base-tone '(0.66 0.57 0.36))
+       :name :sand :base-tone '(0.66 0.57 0.36) :relief :grain)
       *snow-material-placement*
       (ensure-semantic-instance
        *snow-material-placement* 'material-placement
@@ -96,7 +96,7 @@
       *terminal-material*
       (ensure-semantic-instance
        *terminal-material* 'material-kind
-       :name :terminal :base-tone '(0.045 0.055 0.06))
+       :name :terminal :base-tone '(0.045 0.055 0.06) :relief :gloss :roughness 0.3)
       *terminal-material-placement*
       (ensure-semantic-instance
        *terminal-material-placement* 'material-placement

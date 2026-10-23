@@ -610,6 +610,7 @@
           (slot-value viewer 'render::controls) (make-hash-table :test #'eq)
           (slot-value viewer 'render::camera) (render:make-fly-camera :yaw 0.0)
           (slot-value viewer 'render::speed) 7.0
+          (slot-value viewer 'render::mode) (make-instance 'render::orbit-mode)
           (slot-value viewer 'render::last-timestamp) nil)
     (setf (render:viewer-player viewer) a)
     (render::set-viewer-control viewer :forward t)

@@ -95,4 +95,7 @@
                 (material-placement-name (viewer-edit-material viewer))))
               (string-downcase
                (symbol-name (or (viewer-last-edit-status viewer) :ready))))
-      (if (typep (viewer-mode viewer) 'orbit-mode) "orbit" "play")))
+      (typecase (viewer-mode viewer)
+        (free-camera-mode "free")
+        (orbit-mode "orbit")
+        (t "play"))))

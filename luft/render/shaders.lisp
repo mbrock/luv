@@ -30,6 +30,41 @@
             (vec4 0.0 0.0 0.0 0.0))
         (vec4 0.0 0.0 0.0 0.0))))
 
+;;; Material surfaces (#HYBFRT).  A descriptor's fourth word names a relief
+;;; field, its strength, a roughness, and how strongly the material answers
+;;; the stars' edges.  The vertex stage picks the word of the first material
+;;; it samples and reads the edge's convexity from the record's occupied and
+;;; empty cell masks; the fragment stage cuts the relief in world space, so it
+;;; runs across cell boundaries instead of repeating on every face.
+
+(define-shader-function terrain-surface-pick (current code selected descriptor)
+  "Keep CURRENT once chosen, else DESCRIPTOR's surface word when sampled."
+  (if (> current (uint 0.0))
+      current
+      (if (> selected (uint 0.0))
+          (if (> code (uint 0.0)) (swizzle descriptor :w) (uint 0.0))
+          (uint 0.0))))
+
+(define-shader-function cell-mask-count (mask)
+  "The number of cells named by an eight-bit sample MASK."
+  (float (+ (ldb (byte 1 0) mask) (ldb (byte 1 1) mask)
+            (ldb (byte 1 2) mask) (ldb (byte 1 3) mask)
+            (ldb (byte 1 4) mask) (ldb (byte 1 5) mask)
+            (ldb (byte 1 6) mask) (ldb (byte 1 7) mask))))
+
+(define-shader-function terrain-surface-vector (word occupied empty)
+  "Unpack surface WORD: relief code, strength, roughness, and signed wear.
+
+The wear's sign is the edge's: a face has as many occupied as empty cells, a
+convex edge or corner fewer occupied, and a concave one more."
+  (let* ((occupied-count (cell-mask-count occupied))
+         (incident (max 1.0 (+ occupied-count (cell-mask-count empty))))
+         (convexity (clamp (* 4.0 (- 0.5 (/ occupied-count incident))) -1.0 1.0)))
+    (vec4 (float (ldb (byte 4 0) word))
+          (/ (float (ldb (byte 4 4) word)) 15.0)
+          (/ (float (ldb (byte 8 8) word)) 255.0)
+          (* convexity (/ (float (ldb (byte 8 16) word)) 255.0)))))
+
 (define-shader-function paper-hash (site)
   (let* ((scattered (fract (* site 0.1031)))
          (shift (dot scattered
@@ -56,6 +91,81 @@
          (far-high (mix (paper-hash (+ lattice (vec3 0.0 1.0 1.0)))
                         (paper-hash (+ lattice (vec3 1.0 1.0 1.0))) u)))
     (mix (mix near-low near-high v) (mix far-low far-high v) w)))
+
+(define-shader-function ridged-noise (point)
+  (- 1.0 (abs (- (* (paper-noise point) 2.0) 1.0))))
+
+(define-shader-function plank-height (point)
+  "Board grooves every quarter cell, with a grain running along each board."
+  (let* ((u (fract (* (+ (swizzle point :x) (swizzle point :y)) 4.0))))
+    (* (smoothstep 0.0 0.1 u)
+       (- 1.0 (smoothstep 0.9 1.0 u))
+       (+ 0.75 (* 0.25 (paper-noise (* point (vec3 1.0 1.0 9.0))))))))
+
+(define-shader-function material-relief-height (code point)
+  "The height, in [0, 1], of relief field CODE at world POINT.
+
+The codes follow +MATERIAL-RELIEFS+: none, grass, stone, grain, wood,
+leaves, planks, snow, gloss."
+  (if (< code 0.5) 0.5
+      (if (< code 1.5)
+          ;; Tufts: two scales of soft bumps, the finer one blade-sized.
+          (+ (* 0.6 (paper-noise (* point 4.7)))
+             (* 0.4 (paper-noise (* point 13.0))))
+          (if (< code 2.5)
+              ;; Fractured rock: ridged cracks over broad slabs.
+              (+ (* 0.55 (ridged-noise (* point 1.9)))
+                 (* 0.3 (paper-noise (* point 0.7)))
+                 (* 0.15 (paper-noise (* point 7.0))))
+              (if (< code 3.5)
+                  ;; Grain: sand, dirt, gravel.
+                  (+ (* 0.7 (paper-noise (* point 9.0)))
+                     (* 0.3 (paper-noise (* point 2.3))))
+                  (if (< code 4.5)
+                      ;; Bark: ridges running up the trunk.
+                      (ridged-noise (* point (vec3 5.5 5.5 0.6)))
+                      (if (< code 5.5)
+                          ;; Leaves: clumps with dark gaps between them.
+                          (+ (* 0.65 (smoothstep 0.3 0.7 (paper-noise (* point 5.0))))
+                             (* 0.35 (paper-noise (* point 14.0))))
+                          (if (< code 6.5)
+                              ;; Planks: board grooves every quarter cell.
+                              (plank-height point)
+                              (if (< code 7.5)
+                                  ;; Snow: soft drifts.
+                                  (+ (* 0.7 (paper-noise (* point 1.3)))
+                                     (* 0.3 (paper-noise (* point 4.0))))
+                                  ;; Gloss: nearly smooth.
+                                  (paper-noise (* point 2.0)))))))))))
+
+(define-shader-function cross-product (a b)
+  (- (* (swizzle a :yzx) (swizzle b :zxy))
+     (* (swizzle a :zxy) (swizzle b :yzx))))
+
+(define-shader-function relief-normal (normal world code strength)
+  "Bend NORMAL by the relief field CODE at WORLD, by STRENGTH."
+  (let* ((helper (if (< (abs (swizzle normal :z)) 0.9)
+                     (vec3 0.0 0.0 1.0) (vec3 1.0 0.0 0.0)))
+         (tangent (normalize (cross-product normal helper)))
+         (bitangent (cross-product normal tangent))
+         (step 0.04)
+         (here (material-relief-height code world))
+         (along (material-relief-height code (+ world (* tangent step))))
+         (across (material-relief-height code (+ world (* bitangent step))))
+         (slope (* strength 0.09)))
+    (normalize (- normal (* (+ (* tangent (- along here))
+                               (* bitangent (- across here)))
+                            (/ slope step))))))
+
+(define-shader-function material-specular (normal view sun roughness)
+  "A rough dielectric's sun highlight, sharper as ROUGHNESS falls."
+  (let* ((halfway (normalize (+ view sun)))
+         (x (max 0.0 (dot normal halfway)))
+         (x2 (* x x)) (x4 (* x2 x2)) (x8 (* x4 x4))
+         (x16 (* x8 x8)) (x64 (* (* x16 x16) (* x16 x16)))
+         (smooth (- 1.0 roughness)))
+    (* (* smooth smooth) 0.5 (mix x8 x64 smooth)
+       (max 0.0 (dot normal sun)))))
 
 (define-shader-function scene-relative-luminance (radiance)
   "Reduce checked linear RGB radiance to its named relative luminance."
@@ -351,7 +461,8 @@ the figure stays clear and only its far reaches recede."
               (previous-clip :vec4 :location 3)
               (shadow-sample :vec3 :location 4
                              :quantity quantities:shadow-coordinate :unit :one)
-              (material-tone :vec3 :location 5 :interpolation :flat))
+              (material-tone :vec3 :location 5 :interpolation :flat)
+              (material-surface :vec4 :location 6 :interpolation :flat))
      :outputs ((color-output :vec4 :location 0)
                (motion-output :vec2 :location 1))
      :resources ((camera-state :uniform-block :binding 2
@@ -359,21 +470,39 @@ the figure stays clear and only its far reaches recede."
                  (shadow-map :depth-texture-2d :binding 4)
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
+         (world (representation world-position))
          (sun (representation (swizzle sun-vector :xyz)))
+         (sun-color (representation (swizzle sun-color-vector :xyz)))
          (visibility
            (soft-shadow-visibility
             shadow-map shadow-sampler shadow-sample normal sun
             (representation shadow-control)
             shadow-row-x shadow-row-y shadow-row-z))
+         (relief (swizzle material-surface :x))
+         (strength (swizzle material-surface :y))
+         (roughness (swizzle material-surface :z))
+         (wear (swizzle material-surface :w))
+         (height (material-relief-height relief world))
+         (bent (relief-normal normal world relief strength))
+         ;; Hollows of the relief hold shade and dirt; convex edges are
+         ;; worn lighter and concave ones gather darker (#HYBFRT).
+         (tone (* material-tone
+                  (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear))))
+         (eye (representation camera-position))
+         (forward (representation (swizzle camera-forward :xyz)))
+         (divisor (swizzle (representation render-parameters) :z))
+         (view (normalize (mix (- forward) (- (swizzle eye :xyz) world)
+                               divisor)))
          (radiance
-           (paper-surface-radiance
-            material-tone normal (representation world-position) visibility
-            sun (representation (swizzle sun-color-vector :xyz))
-            (representation (swizzle sky-color-vector :xyz))
-            (representation (swizzle ground-color-vector :xyz))))
+           (+ (paper-surface-radiance
+               tone bent world visibility sun sun-color
+               (representation (swizzle sky-color-vector :xyz))
+               (representation (swizzle ground-color-vector :xyz)))
+              (* sun-color
+                 (* visibility (material-specular bent view sun roughness)))))
          (final
            (atmospheric-surface
-            radiance (representation world-position)
+            radiance world
             (representation camera-position)
             (swizzle (representation render-parameters) :z)
             (representation character-parameters)
@@ -416,7 +545,8 @@ the figure stays clear and only its far reaches recede."
                (previous-clip-output :vec4 :location 3)
                (shadow-sample-output :vec3 :location 4
                                      :quantity quantities:shadow-coordinate :unit :one)
-               (material-tone-output :vec3 :location 5 :interpolation :flat))
+               (material-tone-output :vec3 :location 5 :interpolation :flat)
+               (material-surface-output :vec4 :location 6 :interpolation :flat))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (terrain-appearances :storage-buffer :binding 3 :element :uvec2)
@@ -471,6 +601,33 @@ the figure stays clear and only its far reaches recede."
                (buffer-element material-descriptors code-7) normal)))
          (material-tone
            (/ (swizzle tone-total :xyz) (max (swizzle tone-total :w) 1.0)))
+         (surface-0 (terrain-surface-pick
+                      (uint 0.0) code-0 (ldb (byte 1 0) sample-mask)
+                      (buffer-element material-descriptors code-0)))
+         (surface-1 (terrain-surface-pick
+                      surface-0 code-1 (ldb (byte 1 1) sample-mask)
+                      (buffer-element material-descriptors code-1)))
+         (surface-2 (terrain-surface-pick
+                      surface-1 code-2 (ldb (byte 1 2) sample-mask)
+                      (buffer-element material-descriptors code-2)))
+         (surface-3 (terrain-surface-pick
+                      surface-2 code-3 (ldb (byte 1 3) sample-mask)
+                      (buffer-element material-descriptors code-3)))
+         (surface-4 (terrain-surface-pick
+                      surface-3 code-4 (ldb (byte 1 4) sample-mask)
+                      (buffer-element material-descriptors code-4)))
+         (surface-5 (terrain-surface-pick
+                      surface-4 code-5 (ldb (byte 1 5) sample-mask)
+                      (buffer-element material-descriptors code-5)))
+         (surface-6 (terrain-surface-pick
+                      surface-5 code-6 (ldb (byte 1 6) sample-mask)
+                      (buffer-element material-descriptors code-6)))
+         (surface-7 (terrain-surface-pick
+                      surface-6 code-7 (ldb (byte 1 7) sample-mask)
+                      (buffer-element material-descriptors code-7)))
+         (material-surface
+           (terrain-surface-vector surface-7 sample-mask
+                                   (ldb (byte 8 8) (swizzle record :w))))
          (divisor (swizzle (representation render-parameters) :z))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection divisor))
@@ -495,7 +652,8 @@ the figure stays clear and only its far reaches recede."
                        (+ (* (swizzle light :y) 0.5) 0.5)
                        (swizzle light :z))
                  :quantity quantities:shadow-coordinate :unit :one))
-    (set-output material-tone-output material-tone)))
+    (set-output material-tone-output material-tone)
+    (set-output material-surface-output material-surface)))
 
 (define-live-shader terrain-shadow-vertex-specification
     (:stage :vertex

@@ -50,6 +50,23 @@
       ;; Both glowing cells, and only they, seed authored light.
       (is = 2 (length (terrain:scene-authored-light-sources scene))))))
 
+(define-test a-material-surface-packs-the-layout-the-star-shader-reads
+  (let* ((kind (make-instance 'terrain:material-kind
+                              :name :worn :base-tone '(0.5 0.5 0.5)
+                              :relief :stone :relief-strength 1.0
+                              :roughness 0.0 :edge-wear 1.0))
+         (palette (domains:make-identity-vocabulary-domain
+                   :members (list *stone*
+                                  (make-instance 'terrain:material-placement
+                                                 :name :worn :kind kind))
+                   :limit #xff))
+         (words (terrain:compile-terrain-material-descriptors palette)))
+    ;; Relief code 2 (stone), strength 15, roughness 0, wear 255.
+    (is = #x00FF00F2 (aref words (+ 3 (* 4 2))))
+    ;; A default kind has no relief, mid strength, and rough, half-worn edges.
+    (is = (logior 0 (ash 8 4) (ash 217 8) (ash 128 16))
+        (aref words (+ 3 (* 4 1))))))
+
 (define-test an-attachment-keeps-its-support-and-clearance
   (let ((builder (make-builder)))
     (terrain:scene-builder-cell builder 3 3 0)

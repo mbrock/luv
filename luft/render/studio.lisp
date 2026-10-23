@@ -154,6 +154,11 @@ remain cuts; camera behaviors use targets when motion should be visible."
   (:documentation
    "The original relative-pointer atelier orbit and direct keyboard mode."))
 
+(defclass free-camera-mode (orbit-mode) ()
+  (:documentation
+   "A detached camera: mouse look, WASD and Space/Shift fly it, the character
+waits where it stands, and streaming follows the camera."))
+
 (defgeneric viewer-mode-inspection-p (mode)
   (:documentation "Whether MODE continuously points into LUFT terrain."))
 
@@ -1123,7 +1128,8 @@ before the operation boundary, or it would encode through resources which the
     (setf (viewer-last-timestamp viewer) timestamp)
     (advance-camera-response camera dt)
     (advance-sky-clock dt)
-    (when-let ((player (viewer-player viewer)))
+    (when-let ((player (and (not (typep (viewer-mode viewer) 'free-camera-mode))
+                            (viewer-player viewer))))
       (when (typep (character-controller player) 'movement-intent)
         (let ((forward (- (if (viewer-control-active-p viewer :forward) 1 0)
                           (if (viewer-control-active-p viewer :backward) 1 0)))
@@ -1136,14 +1142,30 @@ before the operation boundary, or it would encode through resources which the
             (set-character-vertical-urge
              player (- (if (viewer-control-active-p viewer :up) 1.0 0.0)
                        (if (viewer-control-active-p viewer :down) 1.0 0.0)))))))
-    (advance-world-simulation (viewer-simulation viewer) dt)
+    ;; A free camera leaves the character waiting, and no character moves
+    ;; until the ground under it is resident again.
+    (unless (or (typep (viewer-mode viewer) 'free-camera-mode)
+                (not (viewer-player-ground-resident-p viewer)))
+      (advance-world-simulation (viewer-simulation viewer) dt))
     (values dt (null last))))
+
+(defun viewer-player-ground-resident-p (viewer)
+  "Whether VIEWER's player, if any, stands in a resident streamed chunk."
+  (let ((player (viewer-player viewer))
+        (source (viewer-source viewer)))
+    (or (null player)
+        (not (typep source 'streaming-scene))
+        (let ((position (body-position (character-body player))))
+          (nth-value 1 (gethash (luft:chunk-key-at (floor (vec3-x position))
+                                                   (floor (vec3-y position)))
+                                (streaming-scene-store source)))))))
 
 (defun advance-viewer-camera (viewer dt first-frame-p)
   "Observe the simulated character, or move a free inspection camera."
   (let ((camera (viewer-camera viewer))
         (step (* dt (viewer-speed viewer))))
-    (if (viewer-player viewer)
+    (if (and (viewer-player viewer)
+             (not (typep (viewer-mode viewer) 'free-camera-mode)))
         (if (typep (viewer-mode viewer) 'first-person-mode)
             (place-viewer-at-player-eyes viewer)
             (progn
@@ -1183,7 +1205,8 @@ before the operation boundary, or it would encode through resources which the
           ;; on the other side. Collision residency belongs to the player; the
           ;; authored world's radius-one window also contains the camera view.
           (let ((position
-                  (if (viewer-player viewer)
+                  (if (and (viewer-player viewer)
+                           (not (typep (viewer-mode viewer) 'free-camera-mode)))
                       (body-position (character-body (viewer-player viewer)))
                       (camera-position (viewer-camera viewer)))))
             (retarget-streaming-scene
@@ -1431,7 +1454,8 @@ A completed pair is spent, so a third quick press starts a new one."
         (setf (camera-pitch (viewer-camera viewer)) -0.12
               (camera-field-of-view (viewer-camera viewer)) 1.2217305)
         (place-viewer-at-player-eyes viewer))
-      (when (viewer-player viewer)
+      (when (and (viewer-player viewer)
+                 (not (typep mode 'free-camera-mode)))
         (setf (camera-pitch (viewer-camera viewer)) -0.5165006)
         (follow-character (viewer-camera viewer) (viewer-player viewer))))
   (when (viewer-renderer viewer)
@@ -1446,7 +1470,8 @@ A completed pair is spent, so a third quick press starts a new one."
      viewer (make-instance
              (typecase (viewer-mode viewer)
                (first-person-mode 'orbit-mode)
-               (orbit-mode 'isometric-walk-mode)
+               (free-camera-mode 'isometric-walk-mode)
+               (orbit-mode 'free-camera-mode)
                (t 'first-person-mode))))))
 
 (defun select-viewer-material (viewer index)

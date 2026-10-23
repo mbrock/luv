@@ -46,6 +46,31 @@
         (let ((brightest (reduce #'max colour)))
           (mapcar (lambda (c) (round (* level (/ c brightest)))) colour)))))
 
+(defparameter *block-surfaces*
+  ;; (relief strength roughness edge-wear . names); unnamed kinds are stone.
+  '((:grass 0.8 0.9 0.5 :grass :moss :flowers :hay-bale :thatch)
+    (:grain 0.6 0.95 0.3 :dirt :sand :gravel :clay :mud :sandstone :cactus)
+    (:stone 0.8 0.8 0.7 :stone :cobblestone :slate :granite :basalt :limestone
+     :obsidian :mossy-stone-bricks :cracked-stone-bricks :stone-bricks :bricks
+     :roof-tiles :slate-shingles :terracotta :chiseled-stone)
+    (:wood 0.9 0.85 0.6 :wood :timber :half-timber :barrel :bookshelf)
+    (:leaves 0.6 0.9 0.2 :leaves)
+    (:planks 0.7 0.7 0.6 :planks :dark-planks :birch-planks :parquet :wainscot
+     :crate :tape :film)
+    (:snow 0.5 0.6 0.4 :snow :plaster :concrete :red-wool :orange-wool
+     :yellow-wool :lime-wool :light-blue-wool :blue-wool :purple-wool
+     :pink-wool :white-wool :black-wool :tapestry)
+    (:gloss 0.15 0.15 0.8 :crystal :marble :marble-tiles :polished-stone
+     :blue-tiles :mosaic :checker-floor :copper :verdigris :gold :iron-plate
+     :lantern :lit-window :terminal :urbit :orb-mote :fountain :lava-spring))
+  "Which Luft relief, of what strength, roughness, and edge wear, cuts each
+block kind (#HYBFRT).  The atlas tiles' painted relief is not carried over;
+these choose the closest of the shader's world-space fields.")
+
+(defun block-surface (name)
+  (or (find name *block-surfaces* :key #'cddddr :test #'member)
+      (first (member :stone *block-surfaces* :key #'first))))
+
 (defun block-material-kind (kind)
   (make-instance
    'terrain:material-kind
@@ -56,7 +81,11 @@
    :bottom-tone (block-face-tone kind :bottom)
    :light-opacity (luvcraft::block-kind-light-opacity kind)
    :light-emission (block-light-emission-rgb kind)
-   :surface-emission (luvcraft::block-kind-surface-emission kind)))
+   :surface-emission (luvcraft::block-kind-surface-emission kind)
+   :relief (first (block-surface (luvcraft:block-kind-name kind)))
+   :relief-strength (second (block-surface (luvcraft:block-kind-name kind)))
+   :roughness (third (block-surface (luvcraft:block-kind-name kind)))
+   :edge-wear (fourth (block-surface (luvcraft:block-kind-name kind)))))
 
 (defclass luvcraft-palette ()
   ((vocabulary :initarg :vocabulary :reader luvcraft-palette-vocabulary)

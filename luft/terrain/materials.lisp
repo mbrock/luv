@@ -6,6 +6,11 @@
 ;;; Terrain appearance is owned by the fixed star shader; there is
 ;;; deliberately no per-face material vocabulary.
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter +material-reliefs+
+    '(:none :grass :stone :grain :wood :leaves :planks :snow :gloss)
+    "The relief fields the star shader knows, in the order of their codes."))
+
 (defclass material-kind ()
   ((name :initarg :name :reader material-kind-name)
    (base-tone :initarg :base-tone :reader material-kind-base-tone)
@@ -18,9 +23,20 @@
    (light-emission :initarg :light-emission :initform '(0 0 0)
                    :reader material-kind-light-emission)
    (surface-emission :initarg :surface-emission :initform 0.0
-                     :reader material-kind-surface-emission))
+                     :reader material-kind-surface-emission)
+   (relief :initarg :relief :initform :none :type #.`(member ,@+material-reliefs+)
+           :reader material-kind-relief
+           :documentation "The world-space height field the surface is cut from.")
+   (relief-strength :initarg :relief-strength :initform 0.5
+                    :reader material-kind-relief-strength)
+   (roughness :initarg :roughness :initform 0.85
+              :reader material-kind-roughness)
+   (edge-wear :initarg :edge-wear :initform 0.5
+              :reader material-kind-edge-wear
+              :documentation "How much convex edges lighten and hollows darken."))
   (:documentation
-   "An authored cell substance with the facts needed by voxel light."))
+   "An authored cell substance: its tones, the relief and edge response the
+star shader cuts it with (#HYBFRT), and the facts needed by voxel light."))
 
 (defclass material-placement ()
   ((name :initarg :name :reader material-placement-name)
@@ -48,8 +64,21 @@
              (round (* 255 (max 0.0 (min 1.0 value))))))
       (logior (lane red) (ash (lane green) 8) (ash (lane blue) 16)))))
 
+(defun pack-terrain-surface (kind)
+  "Pack KIND's relief, its strength, roughness, and edge wear.
+
+Bits 0-3 are the relief code, 4-7 its strength, 8-15 roughness, and 16-23
+edge wear; the star shader unpacks the same layout."
+  (flet ((unit (value bits)
+           (round (* (1- (ash 1 bits)) (max 0.0 (min 1.0 value))))))
+    (logior (position (material-kind-relief kind) +material-reliefs+)
+            (ash (unit (material-kind-relief-strength kind) 4) 4)
+            (ash (unit (material-kind-roughness kind) 8) 8)
+            (ash (unit (material-kind-edge-wear kind) 8) 16))))
+
 (defun compile-terrain-material-descriptors (placement-vocabulary)
-  "Compile AIR plus the scene's u8 placements to top/side/bottom RGB8 rows."
+  "Compile AIR plus the scene's u8 placements to descriptor rows: top, side,
+and bottom RGB8 tones, then the packed surface (PACK-TERRAIN-SURFACE)."
   (let* ((placements
            (domains:identity-vocabulary-members placement-vocabulary))
          (words
@@ -64,7 +93,8 @@
                (let ((row (* code 4)))
                  (setf (aref words row) (pack-terrain-tone top)
                        (aref words (+ row 1)) (pack-terrain-tone side)
-                       (aref words (+ row 2)) (pack-terrain-tone bottom)))))
+                       (aref words (+ row 2)) (pack-terrain-tone bottom)
+                       (aref words (+ row 3)) (pack-terrain-surface kind)))))
     words))
 
 ;;; Published material fields share immutable per-chunk tables. Construction

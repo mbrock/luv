@@ -352,7 +352,7 @@ the protocol for is a line in the wrong place.
 /Done when./ The wizard plays from its own system, and the engine changes
 it forced are protocol rather than special cases.
 
-** TODO Give materials tones, relief, and edge response
+** NEXT Give materials tones, relief, and edge response
 :PROPERTIES:
 :ID: Q3KI72
 :END:
@@ -365,6 +365,26 @@ exported Luvcraft world (#PWX5RT) before choosing.
 /Done when./ The exported world renders with Luvcraft's palette, every
 kind recognizably itself and its grass at least as good, at a measured
 cost.
+
+/Evidence./ A [[lisp:luft.terrain:material-kind]] now names a relief field,
+its strength, a roughness, and an edge wear, packed into the
+descriptor row's fourth word by
+[[lisp:luft.terrain:pack-terrain-surface]].  The star vertex stage reads
+the edge's convexity from the record's occupied and empty cell masks; the
+fragment stage cuts the relief in world space, bends the normal by it,
+darkens its hollows, lightens convex edges and darkens concave ones, and
+adds a rough sun highlight.  The shader knows eight fields: grass, stone,
+grain, wood, leaves, planks, snow, and gloss.  Luvcraft's 72 kinds each
+choose one; the atelier's palette chooses too, and its earth is still one
+kind for grass tops and dirt sides, so it is grass all over.  Evaluated
+relief costs nothing measurable: a 1920 by 1080 frame of the alpine world
+on chapel's Vulkan takes 4.1 to 4.3 ms of GPU with every relief on or every
+relief off, at the queue's whole-millisecond resolution, so nothing is
+baked.  Grass and sand now have grain, bark ridges, leaves clump, and
+terrace edges catch the light.  Still to judge: whether each of the 72 kinds
+is recognizably itself, grass hanging over the top of its sides, and
+Luvcraft's stone,
+whose atlas mean is a cold lavender grey beside Luft's warmer rock.
 
 ** NEXT Start Luvcraft as a game on the engine
 :PROPERTIES:

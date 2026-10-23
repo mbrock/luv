@@ -9,21 +9,21 @@
 (defun play-in-atelier (&rest viewer-arguments
                         &key (pathname (luvcraft::default-luvcraft-world-pathname))
                           seed (relief :alpine)
-                          (height luvcraft::*little-world-height*)
+                          (world-height luvcraft::*little-world-height*)
                         &allow-other-keys)
   "Open a Luvcraft world in the Luft atelier and return its viewer.
 
-The world is the Luvcraft save at PATHNAME when it exists, else a fresh
-little world of SEED, RELIEF, and HEIGHT.  Edits made in the atelier are not
-yet saved back.  Other keys go to LUFT.RENDER:START-VIEWER."
+The world is the Luvcraft save at PATHNAME when it exists and no SEED is
+given, else a fresh little world of SEED, RELIEF, and WORLD-HEIGHT.  Edits
+made in the atelier are not yet saved back.  Other keys go to LUFT.RENDER:START-VIEWER."
   (let ((source (if (and pathname (null seed) (probe-file pathname))
                     (luvcraft-save-world-source pathname)
                     (make-luvcraft-world-source
-                     :seed (or seed 1) :relief relief :height height))))
+                     :seed (or seed 1) :relief relief :height world-height))))
     (apply #'luft.render:start-viewer
            :solid (make-luvcraft-streaming-scene
                    source :mesh-preparer luft.render::+render-population-preparer+)
            :world-pathname nil
            :title "Luvcraft on LUFT — click to play · WASD move · Space jump, twice to fly · L/R edit · Esc release"
            (alexandria:remove-from-plist viewer-arguments
-                                         :pathname :seed :relief :height))))
+                                         :pathname :seed :relief :world-height))))
