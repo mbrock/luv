@@ -73,6 +73,54 @@
   (incf (renderer-frame-index renderer))
   renderer)
 
+(defun encode-renderer-view
+    (renderer context encoder surface-texture surface-view extent camera
+     &key (projection *projection*) figure (pointer '(0.5 0.5))
+       (ink-strength 0.0) (bevel-width luft:+mesh-bevel-width+)
+       fixed-exposure first-person-p construction-p overlay-encoder
+       (effect-time
+         (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
+  "Encode one frame of RENDERER seen through CAMERA into SURFACE-VIEW.
+
+This is a game's whole frame: the camera's view under PROJECTION, temporal
+jitter and history continuity, exposure, and the scene uniforms, then every
+pass.  SURFACE-TEXTURE is the presentation slot from CONTEXT that
+SURFACE-VIEW views, and EXTENT its size in pixels.  FIGURE, from
+FIGURE-LANES, draws the robed figure.  POINTER, as fractions of the screen,
+and INK-STRENGTH fill the inspection lanes.  FIXED-EXPOSURE replaces
+measured exposure.  OVERLAY-ENCODER receives the
+final pass."
+  (let* ((*projection* projection)
+         (frame (renderer-frame-state-for renderer context surface-texture))
+         (render-extent (renderer-render-scale-extent renderer extent))
+         (width (first render-extent))
+         (height (second render-extent))
+         (jitter (if (renderer-temporal-p renderer)
+                     (temporal-jitter (renderer-frame-index renderer)
+                                      width height)
+                     #(0.0 0.0)))
+         (view (capture-frame-view camera width height jitter))
+         (previous (or (renderer-previous-view renderer) view))
+         (exposure
+           (or fixed-exposure
+               (advance-exposure (renderer-exposure-control renderer)))))
+    (unless (frame-views-continuous-p (renderer-previous-view renderer) view)
+      (setf (renderer-history-valid-p renderer) nil))
+    (encode-renderer-frame
+     renderer frame encoder surface-view extent
+     (camera-uniform-data
+      view previous
+      (vector (coerce (first pointer) 'single-float)
+              (coerce (second pointer) 'single-float)
+              (coerce (/ width) 'single-float)
+              (coerce (/ height) 'single-float))
+      ink-strength figure bevel-width exposure first-person-p)
+     :jitter jitter :view view
+     :player-p (and figure t)
+     :effect-time effect-time
+     :construction-p construction-p
+     :overlay-encoder overlay-encoder)))
+
 (defun encode-renderer-passes
     (renderer frame encoder surface-texture jitter view player-p construction-p
      overlay-encoder)

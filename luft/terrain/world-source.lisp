@@ -58,7 +58,7 @@ materializes and the descriptors the scene compiles name the same palette."
                    :material-vocabulary vocabulary))
          ;; Its light is regional (#BQMYNU): no whole-world field exists.
          (empty (finish-scene-builder
-                 builder :player-p t :voxel-light-propagation-p nil)))
+                 builder :voxel-light-propagation-p nil)))
     (unless (= (luft:world-domain-x-bits domain) (luft:world-domain-y-bits domain))
       (error "A streamed world source needs a square domain, not ~S." domain))
     (make-instance
@@ -78,7 +78,6 @@ materializes and the descriptors the scene compiles name the same palette."
      :light-generation (scene-authored-light-generation empty)
      :light-tiles (make-hash-table :test #'eql)
      :attachments #()
-     :player-p t
      :frames-per-load frames-per-load
      :residency-radius residency-radius
      :mesh-preparer mesh-preparer)))

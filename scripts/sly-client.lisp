@@ -1300,8 +1300,16 @@ host is still present, Swash remains the only authority allowed to stop it."
           (luvland (and luvland-symbol
                         (boundp luvland-symbol)
                         (symbol-value luvland-symbol)))
+          (wizard-symbol
+            (and (find-package :luft.wizard)
+                 (find-symbol \"*WIZARD*\" :luft.wizard)))
+          (wizard (and wizard-symbol
+                       (boundp wizard-symbol)
+                       (symbol-value wizard-symbol)))
           (canvas
             (cond
+              (wizard
+               (funcall (find-symbol \"WIZARD-CANVAS\" :luft.wizard) wizard))
               (luvland
                (funcall (find-symbol \"LUVLAND-CANVAS\" :luvland) luvland))
               (session
@@ -1319,7 +1327,8 @@ host is still present, Swash remains the only authority allowed to stop it."
                   ((and viewer (string= (class-name (class-of viewer))
                                         \"LUVCRAFT-VIEWER\"))
                    :luvcraft-on-luft)
-                  (viewer :luft) (luvland :luvland) (t :idle)))
+                  (viewer :luft) (wizard :wizard)
+                  (luvland :luvland) (t :idle)))
      (when health (format t \" ~S\" health)))"
   "Read out of the image: which interactive target is playing and its health.
 
@@ -1386,9 +1395,11 @@ shows them.~%" failure-count))))))
                    "Luvcraft is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
                   ((search "LUFT" (string-upcase (princ-to-string answer)))
                    "LUFT is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
+                  ((search "WIZARD" (string-upcase (princ-to-string answer)))
+                   "The wizard is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
                   ((search "LUVLAND" (string-upcase (princ-to-string answer)))
                    "Luvland is serving Wayland clients: ./sly stop-playing closes it.")
-                  (t "Nothing is playing: ./sly play [luvcraft|luft|luvcraft-on-luft|luvland] starts it.")))
+                  (t "Nothing is playing: ./sly play [luvcraft|luft|luvcraft-on-luft|wizard|luvland] starts it.")))
     (when answer
       (print-canvas-health (princ-to-string answer)))))
 
@@ -1688,7 +1699,7 @@ shows them.~%" failure-count))))))
   (format stream "is intentionally required. RESTART creates a new Swash incarnation.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
-  (format stream "Usage: ./sly play [luvcraft|luft|luvcraft-on-luft|luvland] [--fullscreen]|stop-playing|status|restart~%")
+  (format stream "Usage: ./sly play [luvcraft|luft|luvcraft-on-luft|wizard|luvland] [--fullscreen]|stop-playing|status|restart~%")
   (format stream "       ./sly list [--all]|start [--name NAME]|stop|log~%")
   (format stream "       ./sly systems [--all]|system NAME|stale~%")
   (format stream "       ./sly screenshot PNG~%")
@@ -1971,6 +1982,15 @@ shows them.~%" failure-count))))))
                            (list (namestring (truename ~S))
                                  (first extent) (second extent)
                                  (luv:canvas-format context))))
+                        ((let* ((package (find-package \"LUFT.WIZARD\"))
+                                (symbol (and package (find-symbol \"*WIZARD*\" package))))
+                           (and symbol (boundp symbol) (symbol-value symbol)))
+                         (multiple-value-bind
+                               (pathname pixels width height format)
+                             (uiop:symbol-call :luft.wizard :capture-wizard-frame ~S)
+                           (declare (ignore pixels))
+                           (list (namestring (truename pathname))
+                                 width height format)))
                         ((let* ((package (find-package \"LUVLAND\"))
                                 (symbol (and package (find-symbol \"*LUVLAND*\" package))))
                            (and symbol (boundp symbol) (symbol-value symbol)))
@@ -1981,8 +2001,8 @@ shows them.~%" failure-count))))))
                            (list (namestring (truename pathname))
                                  width height format)))
                         (t
-                         (error \"No luvcraft game, LUFT viewer, or Luvland is open.\"))))"
-                   pathname pathname pathname pathname)))
+                         (error \"No luvcraft game, LUFT viewer, wizard, or Luvland is open.\"))))"
+                   pathname pathname pathname pathname pathname)))
     (evaluate code "LUVCRAFT")))
 
 (defun parse-play-arguments (arguments)
@@ -1993,7 +2013,8 @@ shows them.~%" failure-count))))))
       (cond
         ((string= argument "--fullscreen")
          (setf fullscreen-p t))
-        ((member argument '("luvcraft" "luft" "luvland" "luvcraft-on-luft") :test #'string-equal)
+        ((member argument '("luvcraft" "luft" "luvland" "luvcraft-on-luft" "wizard")
+                 :test #'string-equal)
          (when target-specified-p
            (error "play accepts one target, not both ~A and ~A" target argument))
          (setf target (intern (string-upcase argument) :keyword)
@@ -2002,7 +2023,7 @@ shows them.~%" failure-count))))))
               (string= argument "--" :end1 2))
          (error "Unknown play option: ~A" argument))
         (t
-         (error "Unknown play target: ~A (expected luvcraft, luft, luvcraft-on-luft, or luvland)"
+         (error "Unknown play target: ~A (expected luvcraft, luft, luvcraft-on-luft, wizard, or luvland)"
                 argument))))
     (values target fullscreen-p)))
 
@@ -2049,6 +2070,16 @@ shows them.~%" failure-count))))))
                    (uiop:symbol-call :luvcraft.luft.game :play~:[~; :fullscreen-p t~]))"
                 fullscreen-p)
         "CL-USER"))
+      (:wizard
+       (evaluate
+        (format nil
+                "(progn
+                   (asdf:load-system :luft/wizard)
+                   (when (or luvcraft:*session* luft.render:*viewer*)
+                     (error \"Another game is playing; call STOP-PLAYING first.\"))
+                   (uiop:symbol-call :luft.wizard :start-wizard~:[~; :fullscreen-p t~]))"
+                fullscreen-p)
+        "CL-USER"))
       (:luvland
        (evaluate
         (format nil
@@ -2071,6 +2102,9 @@ shows them.~%" failure-count))))))
   (evaluate "(cond
                (luvcraft:*session* (luvcraft:stop-playing))
                (luft.render:*viewer* (luft.render:stop-viewer))
+               ((and (find-package :luft.wizard)
+                     (symbol-value (find-symbol \"*WIZARD*\" :luft.wizard)))
+                (uiop:symbol-call :luft.wizard :stop-wizard))
                ((and (find-package :luvland)
                      (symbol-value (find-symbol \"*LUVLAND*\" :luvland)))
                 (uiop:symbol-call :luvland :stop-luvland))

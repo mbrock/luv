@@ -26,6 +26,7 @@
            (setf viewer
                  (luft.render:start-viewer
                   :solid (luft.world:make-miter-study-scene)
+                  :player-p nil
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
@@ -69,12 +70,9 @@
            (setf viewer
                  (luft.render:start-viewer
                   :solid
-                  ;; A supplied immutable scene is authoritative.  Only the
-                  ;; default sanctuary constructor authors the requested
-                  ;; presence or absence of its separate SDF player pass.
-                  (or solid
-                      (luft.world:make-mountain-sanctuary-scene
-                       :player-p player-p))
+                  (or solid (luft.world:make-mountain-sanctuary-scene))
+                  ;; The atelier, not the scene, decides on the traveler.
+                  :player-p player-p
                   :bevel-width bevel-width
                   :surface-mesh surface-mesh
                   :surface-generation surface-generation
@@ -356,6 +354,7 @@
            (setf viewer
                  (luft.render:start-viewer
                   :solid (make-luft-gemstone-gallery-scene)
+                  :player-p nil
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
@@ -452,6 +451,7 @@
                  7.0 ,(format nil "LUFT uniform width ~D - contact" width)
                  :solid (luft.world:make-mountain-sanctuary-scene
                          :stair-boundary :open)
+                 :player-p t
                  :bevel-width ,width))))
   (define-uniform-contact-capture luft-bevel-width-one-contact 1)
   (define-uniform-contact-capture luft-bevel-width-two-contact 2)
@@ -464,6 +464,7 @@
    (luv.arithmetic.lisp.vec3:make-vec3 112.0 50.0 42.0)
    10.0 title :yaw 2.2455373 :pitch -0.5165006
    :solid (luft.world:make-mountain-sanctuary-scene)
+   :player-p t
    :bevel-width bevel-width))
 
 (luv:define-capture luft-sanctuary-tower-bevel-one
@@ -586,6 +587,7 @@
            (setf viewer
                  (luft.render:start-viewer
                   :solid (luft.world:make-miter-study-scene)
+                  :player-p nil
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
@@ -869,6 +871,7 @@
                  (luft.render:start-viewer
                   :solid (luft.world:make-highland-sanctuary-scene
                           :mesh-preparer luft.render::+render-population-preparer+)
+                  :player-p nil
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
@@ -934,6 +937,7 @@
                    (luft.render:start-viewer
                     :solid (luft.world:make-highland-sanctuary-scene
                           :mesh-preparer luft.render::+render-population-preparer+)
+                  :player-p nil
                     :bevel-width luft:+mesh-bevel-width+
                     :camera camera :title "LUFT highland streaming flight"
                     :width 1280 :height 720))
@@ -1300,6 +1304,7 @@
            (setf viewer
                  (luft.render:start-viewer
                   :solid (make-luft-torch-frame-evidence-scene)
+                  :player-p nil
                   :bevel-width 2
                   :camera
                   (luft.render:make-fly-camera

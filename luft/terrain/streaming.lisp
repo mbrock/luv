@@ -50,7 +50,6 @@ propagates light; otherwise every cohort shares SCENE's one field."
                          (scene-voxel-light-propagation-p scene)
                          (make-hash-table :test #'eql))
                     :attachments (scene-attachments scene)
-                    :player-p (scene-player-p scene)
                     :frames-per-load frames-per-load
                     :residency-radius residency-radius
                     :mesh-preparer mesh-preparer)))
@@ -119,8 +118,7 @@ propagates light; otherwise every cohort shares SCENE's one field."
      :authored-light-generation (scene-authored-light-generation scene)
      :content-revision (scene-content-revision scene)
      :voxel-light-propagation-p (scene-voxel-light-propagation-p scene)
-     :attachments (scene-attachments scene)
-     :player-p (scene-player-p scene))))
+     :attachments (scene-attachments scene))))
 
 (defstruct (scene-edit
              (:constructor %make-scene-edit

@@ -29,8 +29,7 @@
     :initform t
     :reader scene-voxel-light-propagation-p
     :type boolean)
-   (attachments :initarg :attachments :initform #() :reader scene-attachments)
-   (player-p :initarg :player-p :initform nil :reader scene-player-p))
+   (attachments :initarg :attachments :initform #() :reader scene-attachments))
   (:documentation
    "One authored solid and its cell-material field.
 
@@ -484,7 +483,7 @@ stair topology. #WSEK3C"
    :limit #xff))
 
 (defun finish-scene-builder
-    (builder &key player-p (voxel-light-propagation-p t))
+    (builder &key (voxel-light-propagation-p t))
   (check-type voxel-light-propagation-p boolean)
   (let* ((cells (scene-builder-cells builder))
          ;; FINISH is an ownership boundary, not builder consumption.  A
@@ -537,7 +536,6 @@ stair topology. #WSEK3C"
         (make-instance
          'scene
          :solid solid
-         :player-p player-p
          :material-vocabulary material-vocabulary
          :material-cells (material-store-from-table material-cells)
          :attachments attachments

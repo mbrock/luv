@@ -179,6 +179,8 @@ this package draws; the renderer and the ateliers use it.")
            #:physical-body
            #:prepare-streamed-mesh
            #:ready-streaming-scene-meshes
+           #:raycast-face
+           #:raycast-standing-cell
            #:realized-light-generation
            #:realized-light-generation-field
            #:rebuild-authored-world-resident-values
@@ -231,7 +233,6 @@ this package draws; the renderer and the ateliers use it.")
            #:scene-mesh-output-manifest-entry-key
            #:scene-mesh-output-manifest-entry-keyed-p
            #:scene-mesh-output-manifest-entry-tree
-           #:scene-player-p
            #:scene-solid
            #:scene-voxel-light
            #:scene-voxel-light-propagation-p
