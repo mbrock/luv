@@ -8,6 +8,7 @@
 ;;;; live-alpine,live-meadow,atelier). BENCH_CAPTURE_DIR optionally saves PNGs.
 ;;;; BENCH_REPEATS (1) repeats the matrix; BENCH_SKY_OFF / BENCH_TERRAIN_OFF
 ;;;; opt into controlled ablations (do not compare them to full-frame FPS).
+;;;; BENCH_MSAA (4) controls Luft's non-temporal samples; old Luvcraft uses1.
 ;;;; Native 720p and 1080p, TAA and dynamic resolution OFF on both renderers.
 ;;;; No swapchain/readback in the timed loop: serialized completion throughput,
 ;;;; NOT monitor presentation FPS. CPU encode and GPU execution are separate.
@@ -132,6 +133,20 @@
                         (* 1000 (- (now) (second entry)))) *pass-records*)
             (remhash pass *pass-starts*)))
         (call-next-method))))
+
+#+darwin
+(progn
+  (defmethod luv:begin-render-pass :around
+      ((encoder luv::metal-gpu-command-encoder) (descriptor luv::render-pass-descriptor))
+    (let* ((start (now)) (pass (call-next-method)))
+      (setf (gethash pass *pass-starts*)
+            (list nil start (or (luv::gpu-descriptor-label descriptor) "unlabelled")))
+      pass))
+  (defmethod luv:end-pass :around ((pass luv::metal-render-pass-encoder))
+    (let ((entry (gethash pass *pass-starts*)))
+      (multiple-value-prog1 (call-next-method)
+        (push (list (third entry) nil nil (* 1000 (- (now) (second entry)))) *pass-records*)
+        (remhash pass *pass-starts*)))))
 
 #+linux
 (defun timestamp-valid-bits (device)
@@ -370,8 +385,7 @@ The old renderer relights the same occupied cells with its own light solver."
                                 (push (duration 0 (1- *query-index*)) gpu)
                                 (dolist (pass *pass-records*)
                                   (push (duration (second pass) (third pass))
-                                        (gethash (first pass) passes))
-                                  (push (fourth pass) (gethash (first pass) cpu-passes)))))
+                                        (gethash (first pass) passes)))))
                             #-linux
                             (progn
                               (assert reader () "Backend has no GPU timestamp reader")
@@ -382,7 +396,9 @@ The old renderer relights the same occupied cells with its own light solver."
                                     when seconds do (push (* 1000 seconds) gpu) (return)
                                     do (when (> (now) deadline)
                                          (error "GPU feedback missing for submission ~D" submission))
-                                       (sleep 0.001))))))
+                                       (sleep 0.001)))
+                            (dolist (pass *pass-records*)
+                              (push (fourth pass) (gethash (first pass) cpu-passes))))))
                    (when commands (luv:destroy commands))
                    (luv:destroy encoder)))))
       (unwind-protect
@@ -400,6 +416,8 @@ The old renderer relights the same occupied cells with its own light solver."
                                   (r::renderer-render-extent (r:viewer-renderer host)))))
                   (assert (equalp actual (list width height)) () "Render extent ~S != requested ~S" actual (list width height)))
                 (list :device description :extent (list width height) :taa nil :dynamic-resolution nil
+                      :scene-samples (if old-p 1 (r::renderer-scene-sample-count (r:viewer-renderer host)))
+                      :exposure (cond (old-p :host-default) ((eq kind :atelier) :automatic) (t 0.45))
                       :sky (null (uiop:getenv "BENCH_SKY_OFF")) :terrain (null (uiop:getenv "BENCH_TERRAIN_OFF"))
                       :cpu-encode-ms (summary cpu) :completion-ms (summary wall)
                       :cpu-frame-ms (summary cpu-frame)
@@ -539,6 +557,7 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
         old::*luvcraft-temporal-p* nil
         old::*luvcraft-benchmark-terrain-p* (null (uiop:getenv "BENCH_TERRAIN_OFF"))
         r::*benchmark-terrain-p* (null (uiop:getenv "BENCH_TERRAIN_OFF"))
+        r::*scene-sample-count* (env-integer "BENCH_MSAA" 4)
         r::*temporal-upscaling-p* nil
         r::*dynamic-resolution-frame-rate* nil)
   (let ((output (or (uiop:getenv "BENCH_OUTPUT") "build/gpu-fps.sexp"))
@@ -548,6 +567,9 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
                                           :separator ",")))
         (scenes (mapcar (lambda (s) (intern (string-upcase s) :keyword))
                         (uiop:split-string (or (uiop:getenv "BENCH_SCENES") "alpine,meadow,cave,balls,turtle,terminal,companion,live-alpine,live-meadow,atelier") :separator ","))))
+    (assert (plusp (env-integer "BENCH_FRAMES" 300)))
+    (assert (not (minusp (env-integer "BENCH_WARMUP" 60))))
+    (assert (plusp (env-integer "BENCH_REPEATS" 1)))
     (ensure-directories-exist output)
     (with-open-file (stream output :direction :output :if-exists :supersede)
       (format stream ";; Fixed-target serialized completion; milliseconds; nearest-rank percentiles.~%")
