@@ -383,8 +383,12 @@ Its test compares that cell for cell against Luvcraft's real load request
 on alpine and meadow chunks, edits included, and finds no difference.  The
 real =default.sexp= save imports with all 174 edits in place.  The birthday
 saves use a =:birthday-meadow= source the import does not yet know.  A
-source now names its own spawn, and the studio walks a character onto it,
-so the next piece is opening such a scene in the atelier.
+source names its own spawn, and a Luft character dropped there falls onto
+Luvcraft's ground and stands.  =./sly play luvcraft-on-luft= opens the
+player's save, or a fresh seed, in the atelier through
+=luvcraft/luft/atelier=, the atelier standing in as host until Luvcraft has
+its own; the viewer edits with the scene's own palette.  Edits made there
+are not yet saved back, and no one has yet looked at the frame.
 
 ** TODO Stream voxel light in the terrain engine
 :PROPERTIES:

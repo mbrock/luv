@@ -1382,7 +1382,7 @@ shows them.~%" failure-count))))))
                    "LUFT is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
                   ((search "LUVLAND" (string-upcase (princ-to-string answer)))
                    "Luvland is serving Wayland clients: ./sly stop-playing closes it.")
-                  (t "Nothing is playing: ./sly play [luvcraft|luft|luvland] starts it.")))
+                  (t "Nothing is playing: ./sly play [luvcraft|luft|luvcraft-on-luft|luvland] starts it.")))
     (when answer
       (print-canvas-health (princ-to-string answer)))))
 
@@ -1682,7 +1682,7 @@ shows them.~%" failure-count))))))
   (format stream "is intentionally required. RESTART creates a new Swash incarnation.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
-  (format stream "Usage: ./sly play [luvcraft|luft] [--fullscreen]|stop-playing|status|restart~%")
+  (format stream "Usage: ./sly play [luvcraft|luft|luvcraft-on-luft|luvland] [--fullscreen]|stop-playing|status|restart~%")
   (format stream "       ./sly list [--all]|start [--name NAME]|stop|log~%")
   (format stream "       ./sly systems [--all]|system NAME|stale~%")
   (format stream "       ./sly screenshot PNG~%")
@@ -1987,7 +1987,7 @@ shows them.~%" failure-count))))))
       (cond
         ((string= argument "--fullscreen")
          (setf fullscreen-p t))
-        ((member argument '("luvcraft" "luft" "luvland") :test #'string-equal)
+        ((member argument '("luvcraft" "luft" "luvland" "luvcraft-on-luft") :test #'string-equal)
          (when target-specified-p
            (error "play accepts one target, not both ~A and ~A" target argument))
          (setf target (intern (string-upcase argument) :keyword)
@@ -1996,7 +1996,7 @@ shows them.~%" failure-count))))))
               (string= argument "--" :end1 2))
          (error "Unknown play option: ~A" argument))
         (t
-         (error "Unknown play target: ~A (expected luvcraft, luft, or luvland)"
+         (error "Unknown play target: ~A (expected luvcraft, luft, luvcraft-on-luft, or luvland)"
                 argument))))
     (values target fullscreen-p)))
 
@@ -2031,6 +2031,16 @@ shows them.~%" failure-count))))))
                    (when luft.render:*viewer*
                      (error \"LUFT is already playing; call STOP-PLAYING first.\"))
                    (luft.render:start-viewer~:[~; :fullscreen-p t~]))"
+                fullscreen-p)
+        "CL-USER"))
+      (:luvcraft-on-luft
+       (evaluate
+        (format nil
+                "(progn
+                   (asdf:load-system :luvcraft/luft/atelier)
+                   (when (or luvcraft:*session* luft.render:*viewer*)
+                     (error \"Another game is playing; call STOP-PLAYING first.\"))
+                   (uiop:symbol-call :luvcraft.luft :play-in-atelier~:[~; :fullscreen-p t~]))"
                 fullscreen-p)
         "CL-USER"))
       (:luvland

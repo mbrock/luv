@@ -221,6 +221,13 @@
                              (:file "world-source"))))
   :in-order-to ((test-op (test-op "luvcraft/luft/test"))))
 
+(defsystem "luvcraft/luft/atelier"
+  :description "Luvcraft on Luft, hosted for now by the Luft atelier."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luvcraft/luft" "luft/render" "alexandria")
+  :components ((:file "luvcraft/luft/atelier")))
+
 (defsystem "luvcraft/luft/test"
   :description "Luvcraft on Luft against Luvcraft's own streaming, cell for cell."
   :version "0.0.1"

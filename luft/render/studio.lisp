@@ -1027,6 +1027,16 @@ before the operation boundary, or it would encode through resources which the
   (unless (slot-boundp viewer 'simulation)
     (setf (viewer-simulation viewer)
           (make-world-simulation (or source (make-mountain-sanctuary-scene)))))
+  ;; Another game's scene has its own palette; edit with one of its members
+  ;; rather than interning the atelier's stone into it.
+  (let* ((source (viewer-source viewer))
+         (vocabulary (and (typep source 'scene)
+                          (scene-material-vocabulary source))))
+    (when (and vocabulary
+               (null (domains:identity-vocabulary-offset
+                      vocabulary (viewer-edit-material viewer) nil)))
+      (setf (viewer-edit-material viewer)
+            (aref (domains:identity-vocabulary-members vocabulary) 0))))
   (when (viewer-player viewer)
     (add-simulation-character (viewer-simulation viewer) (viewer-player viewer))))
 
