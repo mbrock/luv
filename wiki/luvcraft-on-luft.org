@@ -110,15 +110,29 @@ evaluated in the star fragment stage is a question of measured cost
 :ID: TNOILN
 :END:
 
-Four systems now stack the way #W9QMPT draws them.  =luft= is the
+Five systems now stack the way #W9QMPT draws them.  =luft= is the
 topological core.  =luft/terrain=, in =luft/terrain/= and the
 =luft.terrain= package, holds the scene and its material field, realized
 light, the world-source protocol and the alpine relief, residency, and the
 streaming owner/worker handoff up to an accepted replacement.
 =luft/renderer= sits on it with the GPU machinery and publishes accepted
 replacements into mesh slots.  =luft/simulation= depends on the terrain
-alone.  The atelier, =luft/render=, uses both; =luft.render= uses
-=luft.terrain= and still re-exports the terrain names it always exported.
+alone.  =luft/world=, in the =luft.world= package, is the atelier's world
+as terrain content: its palette, the landscapes and alpine large world, and
+the fixture scenes.  The atelier, =luft/render=, uses all of them;
+=luft.render= uses =luft.terrain= and re-exports the terrain names it always
+exported, and the atelier attaches =luft.world= when it loads, so the
+renderer's own package never names the world.
+
+A game's palette reaches the terrain in two places.  A scene builder takes
+a material vocabulary and the placements a cell gets by default, and a
+[[lisp:luft.terrain:world-source]] carries the vocabulary its chunks are
+painted in; the game answers
+[[lisp:luft.terrain:generate-world-source-chunk]] with the cells a chunk
+generates, and the terrain materializes, replays edits, and assembles fibers.
+=luft/terrain/test= is a second game in miniature -- two materials, a flat
+world, and its own mesh preparer -- that runs with neither the renderer nor
+the Luft world loaded.
 
 A streaming scene's consumer may realize each finished mesh on the worker
 through [[lisp:luft.terrain:prepare-streamed-mesh]], with
@@ -132,8 +146,8 @@ What still sits on the wrong side of the line:
 - Torches are terrain vocabulary: the scene carries torch attachments, the
   streaming scene checks them through =scene-edit-torch-conflict-p= and
   torch support keys, and realized light seeds from torch wicks.
-- The fixed material set lives in the terrain's =materials.lisp=, and the
-  sanctuary fixtures in the renderer.
+- The atelier shares =luft.render= with the renderer, which is why it
+  attaches =luft.world= at load rather than in a package definition.
 - =luft/simulation= puts the collision sweep, standing, and walking
   routes, which are terrain queries, beside a walking character and the
   world clock, which are a game's.  The follow camera lives in the
@@ -295,8 +309,13 @@ layout, and let =luft/simulation= stand on the terrain.  The second cut
 gave the terrain its own directory and package, and replaced its knowledge
 of the renderer's population with a preparation hook; a terrain-only image
 streams a region through a real worker and reuses its cached star
-products.  #TNOILN lists what remains; the next pieces are torches as
-change facts and the material set as a game's palette.
+products.  The third cut
+moved the palette, the landscapes, and the fixtures into =luft/world= and
+gave the terrain a world-source protocol; streamed alpine chunks, the
+mountain sanctuary, and the compiled palette are identical cell for cell to
+the code before it, and =luft/terrain/test= plays a second game on the
+terrain alone.  #TNOILN lists what remains; the next piece is torches as
+change facts.
 
 ** TODO Make the isometric wizard a game of its own
 :PROPERTIES:

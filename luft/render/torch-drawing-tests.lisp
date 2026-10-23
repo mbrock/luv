@@ -98,7 +98,7 @@
       (render:destroy-renderer renderer))))
 
 (define-test authored-torch-requests-are-retained-without-fabricating-star-surface-frames
-  (let ((builder (render::make-scene-builder)))
+  (let ((builder (render::make-world-scene-builder)))
     (render::scene-builder-cell builder 10 10 0)
     (render::scene-builder-torch builder 10 10 0 :z :high)
     (let ((scene (render::finish-scene-builder builder)))

@@ -1,7 +1,7 @@
 (in-package #:luft.render.tests)
 
 (define-test authored-world-spawns-in-view-of-a-summit-away-from-the-corner
-  (let* ((scene (render:make-authored-world-streaming-scene))
+  (let* ((scene (world:make-authored-world-streaming-scene))
          (source (render::streaming-scene-source scene)))
     (multiple-value-bind (x y yaw) (render::large-world-scenic-spawn source)
       (true (>= x 192) "the spawn is well inside the corner")
@@ -12,7 +12,7 @@
             "a snow-line summit is in plain sight from there"))))
 
 (define-test flying-characters-rise-hover-and-fall-when-they-land
-  (let* ((scene (render:make-authored-world-streaming-scene))
+  (let* ((scene (world:make-authored-world-streaming-scene))
          (source (render::streaming-scene-source scene))
          (player (render::make-scene-walking-character scene))
          (simulation (render::make-world-simulation scene))
@@ -20,7 +20,7 @@
          (position (render::body-position body))
          (key (luft:chunk-key-at (floor (vec3-x position)) (floor (vec3-y position)))))
     (setf (gethash key (render::streaming-scene-store scene))
-          (render::materialize-authored-world-chunk source key 1))
+          (render::materialize-world-source-chunk source key 1))
     (render::rebuild-authored-world-resident-values scene (list key))
     (render::add-simulation-character simulation player)
     (let ((ground (vec3-z position)))
@@ -50,24 +50,24 @@
            (render::write-luft-world-description description pathname)
            (true (equalp description
                          (render::read-luft-world-description pathname)))
-           (let* ((scene (render:make-authored-world-streaming-scene))
+           (let* ((scene (world:make-authored-world-streaming-scene))
                   (source (render::streaming-scene-source scene))
-                  (domain (render::authored-world-source-domain source)))
+                  (domain (render::world-source-domain source)))
              (true (render::load-luft-world-description scene pathname))
              (multiple-value-bind (placement present-p)
-                 (render::authored-world-edit-at
+                 (render::world-source-edit-at
                   source (luft:make-site domain 300 140 20 luft:+cell-extent+ 1))
                (true present-p)
                (true (eq render::*terminal-material-placement* placement)))
              (multiple-value-bind (placement present-p)
-                 (render::authored-world-edit-at
+                 (render::world-source-edit-at
                   source (luft:make-site domain 301 140 20 luft:+cell-extent+ 1))
                (true present-p "a removal is an edit too")
                (true (null placement))))
            ;; Another seed's save is not applied to this landscape.
            (render::write-luft-world-description
             (list* :luft-world 1 :seed 7 (cddddr description)) pathname)
-           (let ((scene (render:make-authored-world-streaming-scene)))
+           (let ((scene (world:make-authored-world-streaming-scene)))
              (true (null (handler-bind ((warning #'muffle-warning))
                            (render::load-luft-world-description
                             scene pathname))))))

@@ -2,7 +2,7 @@
 
 (defun call-with-streaming-test-result (function)
   "Compile a real one-cell region on the production worker; leave it unaccepted."
-  (let ((builder (render::make-scene-builder)))
+  (let ((builder (render::make-world-scene-builder)))
     (render::scene-builder-cell builder 10 10 2)
     (let* ((scene (render::make-streaming-scene
                    (render::finish-scene-builder builder)

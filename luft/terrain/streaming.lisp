@@ -54,41 +54,6 @@ a future LoD must bring an explicit transition representation."
      (scene-solid scene))
     streaming))
 
-(defun make-authored-world-streaming-scene
-    (&key (horizontal-bits +large-world-horizontal-bits+)
-      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1)
-      mesh-preparer)
-  "Make the canonical large demand world without materializing any chunk."
-  (let* ((domain (luft:make-world-domain
-                  :x-bits horizontal-bits :y-bits horizontal-bits))
-         (source (make-instance 'authored-world-source
-                                :domain domain :seed seed))
-         (builder (make-scene-builder :horizontal-bits horizontal-bits))
-         ;; Regional voxel light is deliberately not begun by this stage.
-         (empty (finish-scene-builder
-                 builder :player-p t :voxel-light-propagation-p nil)))
-    (make-instance
-     'streaming-scene
-     :source source
-     :solid (luft:make-fiber-store domain)
-     :material-vocabulary (scene-material-vocabulary empty)
-     :material-cells (make-material-store)
-     :authored-light-sources #()
-     :authored-light-opacity-table
-     (scene-authored-light-opacity-table empty)
-     :authored-light-revision 0
-     :authored-light-provenance (scene-authored-light-provenance empty)
-     :authored-light-generation (scene-authored-light-generation empty)
-     :content-revision 0
-     :torch-light-emission (scene-torch-light-emission empty)
-     :voxel-light-propagation-p nil
-     :light-generation (scene-authored-light-generation empty)
-     :torches #()
-     :player-p t
-     :frames-per-load frames-per-load
-     :residency-radius residency-radius
-     :mesh-preparer mesh-preparer)))
-
 (defun streaming-store-fibers (scene key &optional default)
   "Return KEY's fibers from either a finite fixture or resident source value."
   (multiple-value-bind (value present-p)
@@ -273,7 +238,7 @@ published."
                 (let ((local-materials
                         (gethash key (material-store-chunks material-cells))))
                   (setf (gethash cell
-                                 (authored-world-source-edits
+                                 (world-source-edits
                                   (streaming-scene-source scene)))
                         new-placement
                         (gethash key (streaming-scene-store scene))
@@ -486,7 +451,7 @@ silently empty the desired residency window."
     (scene source-keys &optional (collision-keys source-keys))
   "Publish visible materials and a possibly wider resident collision store."
   (let* ((source (streaming-scene-source scene))
-         (domain (authored-world-source-domain source))
+         (domain (world-source-domain source))
          (collision (luft:make-fiber-store domain))
          (materials (make-material-store)))
     (dolist (key collision-keys)
@@ -513,7 +478,7 @@ silently empty the desired residency window."
             :key (list :luft-authored-load key demand-token)
             :priority priority :scene scene :source source :chunk-key key
             :demand-token demand-token :incarnation incarnation
-            :edits (capture-authored-world-chunk-edits source key)))
+            :edits (capture-world-source-chunk-edits source key)))
          (ticket
            (production:schedule-production-request production-system request)))
     (setf (gethash key (streaming-scene-load-outstanding scene)) ticket)

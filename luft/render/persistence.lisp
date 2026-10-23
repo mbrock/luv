@@ -42,7 +42,7 @@
   "Return VIEWER's world as a save description, or NIL without one."
   (let ((source (persistent-world-source (viewer-source viewer))))
     (when source
-      (let* ((domain (authored-world-source-domain source))
+      (let* ((domain (world-source-domain source))
              (player (viewer-player viewer))
              (camera (viewer-camera viewer))
              (edits nil))
@@ -51,7 +51,7 @@
                                (luft:site-z cell)
                                (and placement (material-placement-name placement)))
                          edits))
-                 (authored-world-source-edits source))
+                 (world-source-edits source))
         (append
          (list :luft-world 1
                :seed (authored-world-source-seed source)
@@ -106,11 +106,11 @@ alone rather than applied to the wrong landscape."
   (let ((source (persistent-world-source scene))
         (description (and pathname (read-luft-world-description pathname))))
     (when (and source description)
-      (let ((domain (authored-world-source-domain source)))
+      (let ((domain (world-source-domain source)))
         (if (and (eql (getf description :seed) (authored-world-source-seed source))
                  (eql (getf description :x-bits) (luft:world-domain-x-bits domain))
                  (eql (getf description :y-bits) (luft:world-domain-y-bits domain)))
-            (let ((edits (authored-world-source-edits source)))
+            (let ((edits (world-source-edits source)))
               (dolist (edit (getf description :edits))
                 (destructuring-bind (x y z name) edit
                   (let ((placement (and name (placement-named name))))

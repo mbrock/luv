@@ -54,7 +54,7 @@
                                          :sky-factory nil :player-factory nil :torch-factory nil))
          (frame (render::make-renderer-frame-state renderer))
          (pass (make-instance 'gpu-test-encoder))
-         (builder (render::make-scene-builder)))
+         (builder (render::make-world-scene-builder)))
     (unwind-protect
          (progn
            (true (eq factory (getf (render::renderer-component-options renderer) :terrain-factory)))
@@ -80,7 +80,7 @@
          (frame (test-renderer-frame renderer))
          (target (render::renderer-target-generation renderer))
          (old-binding (render::renderer-frame-flame-bind-group renderer frame))
-         (builder (render::make-scene-builder)))
+         (builder (render::make-world-scene-builder)))
     (unwind-protect
          (progn
            (render::scene-builder-cell builder 10 10 2)
@@ -123,7 +123,7 @@
                (ecase replacement
                  (:targets (render::replace-renderer-target-generation renderer '(800 600)))
                  (:publication
-                  (let ((builder (render::make-scene-builder)))
+                  (let ((builder (render::make-world-scene-builder)))
                     (render::scene-builder-cell builder 10 10 2)
                     (multiple-value-bind (mesh generation)
                         (render::make-render-mesh (render::finish-scene-builder builder))
@@ -180,7 +180,7 @@
                                          :sky-factory nil :player-factory nil :torch-factory nil))
          (frame (test-renderer-frame renderer))
          (pass (make-instance 'gpu-test-encoder))
-         (builder (render::make-scene-builder)))
+         (builder (render::make-world-scene-builder)))
     (unwind-protect
          (progn
            (render::scene-builder-cell builder 10 10 2)
@@ -214,7 +214,7 @@
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
          (old (render::renderer-publication renderer))
          (before (test-gpu-resources device))
-         (builder (render::make-scene-builder)))
+         (builder (render::make-world-scene-builder)))
     (unwind-protect
          (progn
            (render::scene-builder-cell builder 10 10 2)
@@ -232,7 +232,7 @@
 (define-test failed-resident-release-is-retried-without-double-releasing-its-other-buffers
   (let* ((device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
-         (builder (render::make-scene-builder)))
+         (builder (render::make-world-scene-builder)))
     (render::scene-builder-cell builder 10 10 2)
     (multiple-value-bind (mesh generation)
         (render::make-render-mesh (render::finish-scene-builder builder))

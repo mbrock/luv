@@ -1,4 +1,4 @@
-(in-package #:luft.render)
+(in-package #:luft.world)
 
 ;;; Authored fixture scenes: the miter and bevel studies, the mountain
 ;;; sanctuary, the star gallery, and the highland landscape.
@@ -14,7 +14,7 @@
 The plots exercise an edge-touching pair, a corner-touching pair, and the
 four-sheet parity star.  Nothing else in the scene can hide their junctions.
 #WSEK3C"
-  (let ((builder (make-scene-builder :horizontal-bits 6)))
+  (let ((builder (make-world-scene-builder :horizontal-bits 6)))
     (labels ((place-star (mask centre-x)
                (dotimes (sample 8)
                  (when (logbitp sample mask)
@@ -30,13 +30,13 @@ four-sheet parity star.  Nothing else in the scene can hide their junctions.
 
 (defun make-bevel-limit-study-scene ()
   "One isolated stone cell for comparing sub-medial and medial bevels."
-  (let ((builder (make-scene-builder :horizontal-bits 4)))
+  (let ((builder (make-world-scene-builder :horizontal-bits 4)))
     (scene-builder-cell builder 6 4 3 :architecture-p t)
     (finish-scene-builder builder)))
 
 (defun make-voxel-light-shrine-scene (&key (voxel-light-propagation-p t))
   "A compact production fixture for colored propagation and face torches."
-  (let ((builder (make-scene-builder :horizontal-bits 6)))
+  (let ((builder (make-world-scene-builder :horizontal-bits 6)))
     ;; A pale receiving room with a dark backing visible through the crystal.
     (scene-builder-box builder 6 18 6 18 4 4 :architecture-p t)
     (scene-builder-box builder 6 18 18 18 5 13 :architecture-p t)
@@ -138,7 +138,7 @@ This is the old Holm's architectural sentence with its material menagerie
 removed: rolling approaches, a channel and rising high rock; a diagonal
 processional way; a two-arched stone bridge; a gate, curtain wall, paired
 turrets, an arcaded hall and a remote ridge beacon."
-  (let* ((builder (make-scene-builder
+  (let* ((builder (make-world-scene-builder
                    :horizontal-bits 7
                    :origin-x +sanctuary-origin-x+
                    :origin-y +sanctuary-origin-y+))
@@ -324,7 +324,7 @@ The sanctuary is the scene he belongs in, but it is also a scene in which
 half the useful camera angles look through a parapet.  This fixture keeps
 his exact world position and his exact deck height and removes everything
 else, so a turnaround can be shot around him without moving him."
-  (let ((builder (make-scene-builder :horizontal-bits 7)))
+  (let ((builder (make-world-scene-builder :horizontal-bits 7)))
     (scene-builder-box builder 56 67 40 58 11 13 :architecture-p t)
     (finish-scene-builder builder :player-p t)))
 
@@ -334,7 +334,7 @@ else, so a turnaround can be shot around him without moving him."
 The two L-shaped terraces retain five-, six-, and seven-cell vertex stars in
 one architectural context.  Their back edges meet a continuous wall so the
 same view also retains the truncated wall miter preserved by #DJK8HW."
-  (let ((builder (make-scene-builder :horizontal-bits 5)))
+  (let ((builder (make-world-scene-builder :horizontal-bits 5)))
     ;; Broad plinth and continuous back wall.
     (scene-builder-box builder 2 14 2 8 0 1 :architecture-p t)
     (scene-builder-box builder 2 14 8 9 0 7 :architecture-p t)
@@ -472,13 +472,13 @@ consequence of its own occupancy star and can be read on its own."
        (cons (- x tower-outer) (+ x tower-outer)) :axis :y))))
 
 (defun make-highland-sanctuary-scene
-    (&key (horizontal-bits 9) (seed 121) (streaming-p t))
+    (&key (horizontal-bits 9) (seed 121) (streaming-p t) mesh-preparer)
   "Make a large varied landscape with mountain chains and sparse ruins.
 
 The default 512 by 512 world spans sixty-four LUFT chunks. STREAMING-P wraps
 it in a seven-by-seven camera-driven window whose owners share one exact bevel
 policy; distance geometry awaits an explicit seam-transition representation."
-  (let* ((builder (make-scene-builder :horizontal-bits horizontal-bits))
+  (let* ((builder (make-world-scene-builder :horizontal-bits horizontal-bits))
          (size (ash 1 horizontal-bits)))
     (dotimes (x size)
       (dotimes (y size)
@@ -504,5 +504,5 @@ policy; distance geometry awaits an explicit seam-transition representation."
     (let ((scene (finish-scene-builder builder)))
       (if streaming-p
           (make-streaming-scene scene :residency-radius 3
-                                :mesh-preparer +render-population-preparer+)
+                                :mesh-preparer mesh-preparer)
           scene))))

@@ -5,6 +5,7 @@
                 #:make-vec3 #:vec3-x #:vec3-y #:vec3-z)
   (:local-nicknames (#:render #:luft.render)
                     (#:terrain #:luft.terrain)
+                    (#:world #:luft.world)
                     (#:shaders #:luft.render.shaders)
                     (#:quantities #:luft.quantities)
                     (#:math #:luv.arithmetic)
@@ -231,9 +232,9 @@
                                 :domain domain :seed 121))
          (left-key (luft:chunk-key-at 0 0))
          (right-key (luft:chunk-key-at 64 0))
-         (left-a (render::materialize-authored-world-chunk source left-key 1))
-         (left-b (render::materialize-authored-world-chunk source left-key 2))
-         (right (render::materialize-authored-world-chunk source right-key 3)))
+         (left-a (render::materialize-world-source-chunk source left-key 1))
+         (left-b (render::materialize-world-source-chunk source left-key 2))
+         (right (render::materialize-world-source-chunk source right-key 3)))
     (true (luft:fibers=
            (render::resident-cell-chunk-fibers left-a)
            (render::resident-cell-chunk-fibers left-b))
@@ -272,11 +273,11 @@
          (x 70) (y (round (render::large-world-road-centre-y x)))
          (z (1- (render::large-world-terrain-height source x y)))
          (cell (luft:make-site domain x y z luft:+cell-extent+ 1)))
-    (setf (gethash cell (render::authored-world-source-edits source)) nil)
+    (setf (gethash cell (render::world-source-edits source)) nil)
     (let ((resident
-            (render::materialize-authored-world-chunk
+            (render::materialize-world-source-chunk
              source key 1
-             :edits (render::capture-authored-world-chunk-edits
+             :edits (render::capture-world-source-chunk-edits
                      source key))))
       (true (zerop (luft:fibers-cell-bit
                     (render::resident-cell-chunk-fibers resident) x y z))
@@ -288,7 +289,7 @@
                       resident))))))))
 
 (define-test authored-world-demand-rejects-stale-incarnations
-  (let* ((scene (render:make-authored-world-streaming-scene
+  (let* ((scene (world:make-authored-world-streaming-scene
                  :horizontal-bits 8 :residency-radius 0))
          (source (render::streaming-scene-source scene))
          (key (luft:chunk-key-at 64 64))
@@ -313,7 +314,7 @@
           "the exact token, ticket, key, and incarnation install once")))
 
 (define-test authored-world-settled-residency-does-not-rematerialize-gameplay
-  (let* ((scene (render:make-authored-world-streaming-scene
+  (let* ((scene (world:make-authored-world-streaming-scene
                  :horizontal-bits 8 :residency-radius 0))
          (domain (render::scene-domain scene))
          (key (luft:chunk-key-at 64 64))
@@ -331,7 +332,7 @@
           "a settled frame does not rebuild immutable gameplay values")))
 
 (define-test authored-world-residency-is-bounded-and-absence-is-explicit
-  (let* ((scene (render:make-authored-world-streaming-scene
+  (let* ((scene (world:make-authored-world-streaming-scene
                  :horizontal-bits 8 :residency-radius 1))
          (domain (render::scene-domain scene))
          (materials (make-hash-table :test #'eql))
@@ -356,7 +357,7 @@
               (render::streaming-scene-cell-state scene -1 0 60)))))
 
 (define-test authored-world-player-spawns-supported-with-a-traversable-window
-  (let* ((scene (render:make-authored-world-streaming-scene))
+  (let* ((scene (world:make-authored-world-streaming-scene))
          (source (render::streaming-scene-source scene))
          (player (render::make-scene-walking-character scene))
          (position (render::body-position (render::character-body player)))
@@ -365,7 +366,7 @@
          (z (floor (vec3-z position)))
          (key (luft:chunk-key-at x y))
          (resident
-           (render::materialize-authored-world-chunk source key 1)))
+           (render::materialize-world-source-chunk source key 1)))
     (true (= 1 (render::streaming-scene-residency-radius scene))
           "ordinary play overlaps visible chunks across player seam crossings")
     (true (= 1 render::+authored-world-gameplay-radius+)
@@ -384,7 +385,7 @@
           "the authored road has an immediately traversable neighboring cell")))
 
 (define-test authored-world-player-waits-for-initial-collision-publication
-  (let* ((scene (render:make-authored-world-streaming-scene))
+  (let* ((scene (world:make-authored-world-streaming-scene))
          (source (render::streaming-scene-source scene))
          (player (render::make-scene-walking-character scene))
          (simulation (render::make-world-simulation scene))
@@ -397,7 +398,7 @@
     ;; Demand completion is not collision publication. Even an accepted CPU
     ;; chunk must not start physics before the owner publishes SCENE-SOLID.
     (setf (gethash key (render::streaming-scene-store scene))
-          (render::materialize-authored-world-chunk source key 1))
+          (render::materialize-world-source-chunk source key 1))
     (render::add-simulation-character simulation player)
     (render::set-character-movement player 1.0 0.0)
     (render::request-character-jump player)
@@ -425,13 +426,13 @@
             "published empty terrain is air, not a loading barrier"))))
 
 (define-test authored-world-gameplay-collision-crosses-the-render-seam
-  (let* ((scene (render:make-authored-world-streaming-scene
+  (let* ((scene (world:make-authored-world-streaming-scene
                  :horizontal-bits 8))
          (source (render::streaming-scene-source scene))
          (left-key (luft:chunk-key-at 0 0))
          (right-key (luft:chunk-key-at 64 0))
-         (left (render::materialize-authored-world-chunk source left-key 1))
-         (right (render::materialize-authored-world-chunk source right-key 2)))
+         (left (render::materialize-world-source-chunk source left-key 1))
+         (right (render::materialize-world-source-chunk source right-key 2)))
     (setf (gethash left-key (render::streaming-scene-store scene)) left
           (gethash right-key (render::streaming-scene-store scene)) right)
     (render::rebuild-authored-world-resident-values
@@ -470,13 +471,13 @@
           "an explicit pose assignment remains an immediate settled cut")))
 
 (define-test material-edits-share-other-chunks-and-freeze-worker-input
-  (let* ((scene (render:make-authored-world-streaming-scene
+  (let* ((scene (world:make-authored-world-streaming-scene
                  :horizontal-bits 8 :seed 121))
          (source (render::streaming-scene-source scene))
          (keys (list (luft:chunk-key-at 0 0) (luft:chunk-key-at 64 0))))
     (loop for key in keys for incarnation from 1
           do (setf (gethash key (render::streaming-scene-store scene))
-                   (render::materialize-authored-world-chunk
+                   (render::materialize-world-source-chunk
                     source key incarnation)))
     (render::rebuild-authored-world-resident-values scene keys)
     (let* ((snapshot (render::snapshot-streaming-scene-input scene))
@@ -571,13 +572,13 @@
                                           (luft:voxel-light-at b x y z)))))))))
 
 (define-test mesh-snapshots-retain-guard-chunk-materials
-  (let* ((scene (render:make-authored-world-streaming-scene
+  (let* ((scene (world:make-authored-world-streaming-scene
                  :horizontal-bits 8 :seed 121))
          (source (render::streaming-scene-source scene))
          (keys (list (luft:chunk-key-at 0 0) (luft:chunk-key-at 64 0))))
     (loop for key in keys for incarnation from 1
           do (setf (gethash key (render::streaming-scene-store scene))
-                   (render::materialize-authored-world-chunk
+                   (render::materialize-world-source-chunk
                     source key incarnation)))
     (render::rebuild-authored-world-resident-values scene (list (first keys)) keys)
     (let* ((cell (luft:make-site (render::scene-domain scene)
@@ -817,7 +818,7 @@
           "placement rejects blocks overlapping only the body's edge")))
 
 (define-test block-placement-protects-uncontrolled-bodies
-  (let* ((scene (render:make-authored-world-streaming-scene))
+  (let* ((scene (world:make-authored-world-streaming-scene))
          (simulation (render:make-world-simulation scene))
          (viewer (allocate-instance (find-class 'render:viewer)))
          (body (make-instance 'render:physical-body
@@ -1025,7 +1026,7 @@
           "every atlas vertex is strictly inside the shader's culling sphere")))
 
 (define-test streaming-star-reuse-matches-cold-compilation
-  (let ((builder (render::make-scene-builder :horizontal-bits 8)))
+  (let ((builder (render::make-world-scene-builder :horizontal-bits 8)))
     (dolist (xy '((10 10) (63 10) (64 10) (63 63) (64 64) (200 200)))
       (render::scene-builder-cell builder (first xy) (second xy) 2))
     (let* ((scene (render::make-streaming-scene

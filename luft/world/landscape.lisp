@@ -1,8 +1,8 @@
-(in-package #:luft.terrain)
+(in-package #:luft.world)
 
-;;; The authored large world: value-noise landscape readings, the
-;;; deterministic terrain and citadel source, its sparse semantic edits, and
-;;; the immutable resident chunk values a streaming scene materializes.
+;;; The atelier's large world: value-noise landscape readings, Luvcraft's
+;;; alpine relief, and the deterministic road, river, and citadel that a
+;;; world source generates chunk by chunk.
 
 (defun landscape-hash-reading (x y seed salt)
   "Return a stable coordinate reading in [-1, 1]."
@@ -115,29 +115,14 @@ upland instead of repeating one periodic profile."
 
 (defconstant +large-world-horizontal-bits+ 11)
 (defconstant +large-world-seed+ 121)
-(defconstant +authored-world-gameplay-radius+ 1)
 (defconstant +large-world-spawn-x+ 32)
 
-(defclass authored-world-source ()
-  ((domain :initarg :domain :reader authored-world-source-domain)
-   (seed :initarg :seed :initform +large-world-seed+
-         :reader authored-world-source-seed)
-   ;; Presence is meaningful: NIL is an authored removal, while absence means
-   ;; that the deterministic source still owns the cell.
-   (edits :initform (make-hash-table :test #'eql)
-          :reader authored-world-source-edits))
+(defclass authored-world-source (world-source)
+  ((seed :initarg :seed :initform +large-world-seed+
+         :reader authored-world-source-seed))
+  (:default-initargs :material-vocabulary (make-scene-material-vocabulary))
   (:documentation
-   "The canonical large-world description and its sparse semantic edits."))
-
-(defstruct (resident-cell-chunk
-             (:constructor %make-resident-cell-chunk
-                 (key incarnation fibers material-cells))
-             (:copier nil))
-  "One immutable, evictable materialization of an authored source chunk."
-  (key 0 :type luft:chunk-key :read-only t)
-  (incarnation 0 :type (integer 1 *) :read-only t)
-  (fibers nil :type luft:chunk-fibers :read-only t)
-  (material-cells nil :type hash-table :read-only t))
+   "The canonical large world: alpine relief, a road, a river, and a citadel."))
 
 (defun large-world-road-centre-y (x)
   "Authored west-to-east route from the old sanctuary spawn to the citadel."
@@ -295,7 +280,7 @@ the first view is across open land to a peak with sky above it."
 Candidates run along the road from well inside the corner; the first that
 opens onto a snow-line peak (see LARGE-WORLD-SPAWN-VIEW) wins.  A world too
 small for the search falls back to the road's first cell with yaw 0."
-  (let* ((domain (authored-world-source-domain source))
+  (let* ((domain (world-source-domain source))
          (x-limit (luft:world-domain-x-limit domain))
          (y-limit (luft:world-domain-y-limit domain))
          (reach *large-world-spawn-view-distance*)
@@ -376,96 +361,61 @@ column itself."
         source x y z height
         (large-world-surface-slope source x y height)))))
 
-(defun authored-world-edit-at (source cell)
-  "Return a sparse edited placement and whether SOURCE owns an edit at CELL."
-  (gethash cell (authored-world-source-edits source)))
-
-(defun capture-authored-world-chunk-edits (source key)
-  "Copy the sparse edits belonging to KEY for immutable worker use."
-  (let ((edits nil))
-    (maphash
-     (lambda (cell placement)
-       (when (= key (luft:site-chunk-key cell))
-         (push (cons cell placement) edits)))
-     (authored-world-source-edits source))
-    edits))
-
-(zdefun (materialize-authored-world-chunk :zone :luft/materialize-source-chunk
-                                          :value key)
-    (source key incarnation &key edits)
-  "Build KEY bit-identically from SOURCE and an immutable sparse edit capture."
-  (check-type source authored-world-source)
-  (let* ((domain (authored-world-source-domain source))
+(defmethod generate-world-source-chunk
+    ((source authored-world-source) key place)
+  (let* ((domain (world-source-domain source))
          (x0 (luft:chunk-origin-x key))
          (y0 (luft:chunk-origin-y key))
          (x1 (min (+ x0 luft:+chunk-size+)
                   (luft:world-domain-x-limit domain)))
          (y1 (min (+ y0 luft:+chunk-size+)
-                  (luft:world-domain-y-limit domain)))
-         (vocabulary (make-scene-material-vocabulary))
-         (limestone-offset
-           (domains:identity-vocabulary-offset
-            vocabulary *sanctuary-material-placement*))
-         (materials (make-hash-table :test #'eql :size 100000))
-         (offsets (make-hash-table :test #'eq))
-         (offset
-           (lambda (placement)
-             (or (gethash placement offsets)
-                 (setf (gethash placement offsets)
-                       (domains:identity-vocabulary-offset
-                        vocabulary placement))))))
-    (zone :luft/generate-source-materials
-      (loop for x from x0 below x1 do
-        (loop for y from y0 below y1 do
-          (let* ((height (large-world-terrain-height source x y))
-                 (slope (large-world-surface-slope source x y height)))
-            (dotimes (z height)
-              (setf (gethash
-                     (luft:make-site domain x y z luft:+cell-extent+ 1)
-                     materials)
-                    (funcall offset (large-world-column-placement
-                                     source x y z height slope))))
-            (when (and (<= (abs (- x 1500)) 45)
-                       (<= (abs (- y 650)) 45))
-              (loop for z from 24 to 47
-                    when (large-world-citadel-cell-p x y z)
-                      do (setf (gethash
-                                (luft:make-site
-                                 domain x y z luft:+cell-extent+ 1)
-                                materials)
-                               limestone-offset)))))))
-    (zone :luft/replay-source-edits
-      (dolist (edit edits)
-        (if (cdr edit)
-            (setf (gethash (car edit) materials)
-                  (domains:identity-vocabulary-offset vocabulary (cdr edit)))
-            (remhash (car edit) materials))))
-    (let ((fibers (luft:make-chunk-fibers domain key)))
-      (zone :luft/assemble-source-fibers
-        (maphash (lambda (cell offset)
-                   (declare (ignore offset))
-                   (setf (luft:fibers-cell-bit
-                          fibers (luft:site-x cell) (luft:site-y cell)
-                          (luft:site-z cell))
-                         1))
-                 materials))
-      (%make-resident-cell-chunk key incarnation fibers materials))))
+                  (luft:world-domain-y-limit domain))))
+    (loop for x from x0 below x1 do
+      (loop for y from y0 below y1 do
+        (let* ((height (large-world-terrain-height source x y))
+               (slope (large-world-surface-slope source x y height)))
+          (dotimes (z height)
+            (funcall place x y z
+                     (large-world-column-placement
+                      source x y z height slope)))
+          (when (and (<= (abs (- x 1500)) 45)
+                     (<= (abs (- y 650)) 45))
+            (loop for z from 24 to 47
+                  when (large-world-citadel-cell-p x y z)
+                    do (funcall place x y z
+                                *sanctuary-material-placement*))))))))
 
-(defclass authored-chunk-load-request (production:production-request)
-  ((scene :initarg :scene :reader authored-chunk-load-request-scene)
-   (source :initarg :source :reader authored-chunk-load-request-source)
-   (chunk-key :initarg :chunk-key :reader authored-chunk-load-request-chunk-key)
-   (demand-token :initarg :demand-token
-                 :reader authored-chunk-load-request-demand-token)
-   (incarnation :initarg :incarnation
-                :reader authored-chunk-load-request-incarnation)
-   (edits :initarg :edits :reader authored-chunk-load-request-edits)))
-
-(zdefmethod (production:perform-production-request
-             :zone :luft/produce-source-chunk)
-    ((request authored-chunk-load-request))
-  (materialize-authored-world-chunk
-   (authored-chunk-load-request-source request)
-   (authored-chunk-load-request-chunk-key request)
-   (authored-chunk-load-request-incarnation request)
-   :edits (authored-chunk-load-request-edits request)))
+(defun make-authored-world-streaming-scene
+    (&key (horizontal-bits +large-world-horizontal-bits+)
+      (seed +large-world-seed+) (frames-per-load 1) (residency-radius 1)
+      mesh-preparer)
+  "Make the canonical large demand world without materializing any chunk."
+  (let* ((domain (luft:make-world-domain
+                  :x-bits horizontal-bits :y-bits horizontal-bits))
+         (source (make-instance 'authored-world-source
+                                :domain domain :seed seed))
+         (builder (make-world-scene-builder :horizontal-bits horizontal-bits))
+         ;; Regional voxel light is deliberately not begun by this stage.
+         (empty (finish-scene-builder
+                 builder :player-p t :voxel-light-propagation-p nil)))
+    (make-instance
+     'streaming-scene
+     :source source
+     :solid (luft:make-fiber-store domain)
+     :material-vocabulary (scene-material-vocabulary empty)
+     :material-cells (make-material-store)
+     :authored-light-sources #()
+     :authored-light-opacity-table
+     (scene-authored-light-opacity-table empty)
+     :authored-light-revision 0
+     :authored-light-provenance (scene-authored-light-provenance empty)
+     :authored-light-generation (scene-authored-light-generation empty)
+     :content-revision 0
+     :torch-light-emission (scene-torch-light-emission empty)
+     :voxel-light-propagation-p nil
+     :light-generation (scene-authored-light-generation empty)
+     :torches #()
+     :player-p t
+     :frames-per-load frames-per-load
+     :residency-radius residency-radius
+     :mesh-preparer mesh-preparer)))

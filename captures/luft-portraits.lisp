@@ -25,7 +25,7 @@
                  luft.render:*inspection-ink-p* nil)
            (setf viewer
                  (luft.render:start-viewer
-                  :solid (luft.render:make-miter-study-scene)
+                  :solid (luft.world:make-miter-study-scene)
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
@@ -73,7 +73,7 @@
                   ;; default sanctuary constructor authors the requested
                   ;; presence or absence of its separate SDF player pass.
                   (or solid
-                      (luft.render:make-mountain-sanctuary-scene
+                      (luft.world:make-mountain-sanctuary-scene
                        :player-p player-p))
                   :bevel-width bevel-width
                   :surface-mesh surface-mesh
@@ -136,7 +136,7 @@
   ;; The propagation policy is immutable authored scene input.  NIL owns an
   ;; exact empty propagated generation while leaving direct crystal, flame,
   ;; and packed torch-body emission intact for the controlled A/B.
-  (luft.render:make-voxel-light-shrine-scene
+  (luft.world:make-voxel-light-shrine-scene
    :voxel-light-propagation-p propagation-p))
 
 (defun capture-luft-voxel-light-shrine
@@ -188,7 +188,7 @@
 
 (defun make-luft-gemstone-gallery-scene ()
   "Build one compact atlas of crystal/support relations and torch directions."
-  (let ((builder (luft.render::make-scene-builder :horizontal-bits 6)))
+  (let ((builder (luft.world::make-world-scene-builder :horizontal-bits 6)))
     ;; A grass court, dressed back wall, side return, and overhead stone beam
     ;; give the same crystal material four substantially different supports.
     (luft.render::scene-builder-box builder 4 33 4 29 2 3)
@@ -204,32 +204,32 @@
     (dolist (cell '((8 7 4) (10 8 4) (8 10 4) (11 11 4)))
       (destructuring-bind (x y z) cell
         (luft.render::scene-builder-cell
-         builder x y z :material luft.render::*crystal-material-placement*)))
+         builder x y z :material luft.world::*crystal-material-placement*)))
     (dolist (cell '((15 7 5) (17 7 5) (19 7 5) (16 9 5) (18 9 5)))
       (destructuring-bind (x y z) cell
         (luft.render::scene-builder-cell
-         builder x y z :material luft.render::*crystal-material-placement*)))
+         builder x y z :material luft.world::*crystal-material-placement*)))
     ;; A deliberately contiguous wall row tests whether the grip becomes one
     ;; composed bevel rhythm instead of a line of unrelated glued-on sockets.
     (loop for x from 8 to 14
           do (luft.render::scene-builder-cell
               builder x 27 10
-              :material luft.render::*crystal-material-placement*))
+              :material luft.world::*crystal-material-placement*))
     ;; A diamond/cross pattern exposes both convex perimeter and concave joins.
     (dolist (cell '((21 27 10) (23 27 8) (23 27 10) (23 27 12)
                     (25 27 10)))
       (destructuring-bind (x y z) cell
         (luft.render::scene-builder-cell
-         builder x y z :material luft.render::*crystal-material-placement*)))
+         builder x y z :material luft.world::*crystal-material-placement*)))
     ;; Hanging points, plus a side-wall pair, rotate the same contact law onto
     ;; downward and horizontal normals.
     (dolist (x '(8 12 17 22 26))
       (luft.render::scene-builder-cell
-       builder x 12 14 :material luft.render::*crystal-material-placement*))
+       builder x 12 14 :material luft.world::*crystal-material-placement*))
     (dolist (cell '((6 18 7) (6 21 9) (6 24 7)))
       (destructuring-bind (x y z) cell
         (luft.render::scene-builder-cell
-         builder x y z :material luft.render::*crystal-material-placement*)))
+         builder x y z :material luft.world::*crystal-material-placement*)))
     ;; Four attachment normals share one authored flame implementation.
     (luft.render::scene-builder-torch builder 29 8 3 :z :high)
     (luft.render::scene-builder-torch builder 18 28 13 :y :low)
@@ -450,7 +450,7 @@
                  pathname
                  (luv.arithmetic.lisp.vec3:make-vec3 80.0 43.0 32.0)
                  7.0 ,(format nil "LUFT uniform width ~D - contact" width)
-                 :solid (luft.render:make-mountain-sanctuary-scene
+                 :solid (luft.world:make-mountain-sanctuary-scene
                          :stair-boundary :open)
                  :bevel-width ,width))))
   (define-uniform-contact-capture luft-bevel-width-one-contact 1)
@@ -463,7 +463,7 @@
    pathname
    (luv.arithmetic.lisp.vec3:make-vec3 112.0 50.0 42.0)
    10.0 title :yaw 2.2455373 :pitch -0.5165006
-   :solid (luft.render:make-mountain-sanctuary-scene)
+   :solid (luft.world:make-mountain-sanctuary-scene)
    :bevel-width bevel-width))
 
 (luv:define-capture luft-sanctuary-tower-bevel-one
@@ -491,7 +491,7 @@
    pathname 4 "LUFT sanctuary tower - bevel 1/2"))
 
 (defun capture-luft-bevel-limit-cell (pathname width title)
-  (let ((scene (luft.render:make-bevel-limit-study-scene)))
+  (let ((scene (luft.world:make-bevel-limit-study-scene)))
     (multiple-value-bind (mesh generation)
         (luft.render:make-render-mesh scene :bevel-width width)
       (declare (ignore generation))
@@ -532,7 +532,7 @@
    pathname 4 "LUFT one-cell medial bevel width four"))
 
 (defun capture-luft-manifold-spikes (pathname wireframe title)
-  (let ((scene (luft.render:make-manifold-spike-scene)))
+  (let ((scene (luft.world:make-manifold-spike-scene)))
     (multiple-value-bind (mesh generation)
         (luft.render:make-render-mesh scene :bevel-width 2)
       (let ((display-mesh
@@ -585,7 +585,7 @@
            ;; vertex (12,8,3), placing that exact join at frame centre.
            (setf viewer
                  (luft.render:start-viewer
-                  :solid (luft.render:make-miter-study-scene)
+                  :solid (luft.world:make-miter-study-scene)
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
@@ -672,7 +672,7 @@
 (defun capture-luft-traveler
     (pathname &key (character-time 0.5) (yaw 2.2455373) (pitch -0.5165006)
                    (isometric-height 5.0) (aim-height 15.2) (distance 24.0)
-                   (scene-maker #'luft.render:make-traveler-study-scene)
+                   (scene-maker #'luft.world:make-traveler-study-scene)
                    (title "LUFT traveler study") (width 900) (height 900))
   (let ((viewer nil)
         (old-projection luft.render:*projection*)
@@ -686,8 +686,8 @@
                 (forward-z (sin pitch))
                 ;; The traveler's own world position, from the same three
                 ;; numbers the frame uniform packs for the shader.
-                (target-x (+ 29.5 luft.render::+sanctuary-origin-x+))
-                (target-y (+ (+ 24.5 luft.render::+sanctuary-origin-y+)
+                (target-x (+ 29.5 luft.world::+sanctuary-origin-x+))
+                (target-y (+ (+ 24.5 luft.world::+sanctuary-origin-y+)
                              (* 10.5 (sin (* character-time 0.22))))))
            (setf luft.render:*projection* :isometric
                  luft.render:*isometric-height* isometric-height
@@ -732,7 +732,7 @@
   (pathname)
   (capture-luft-traveler
    pathname :character-time 0.5 :isometric-height 7.0
-   :scene-maker #'luft.render:make-mountain-sanctuary-scene
+   :scene-maker #'luft.world:make-mountain-sanctuary-scene
    :title "LUFT traveler on the bridge"))
 
 (defun aim-luft-camera (camera x y z)
@@ -755,8 +755,8 @@
         (old-inspection-ink-p luft.render:*inspection-ink-p*)
         (old-character-time luft.render:*character-time*))
     (unwind-protect
-         (let* ((origin-x luft.render::+sanctuary-origin-x+)
-                (origin-y luft.render::+sanctuary-origin-y+)
+         (let* ((origin-x luft.world::+sanctuary-origin-x+)
+                (origin-y luft.world::+sanctuary-origin-y+)
                 (start-y (+ origin-y 10.5))
                 (camera
                   (luft.render:make-fly-camera
@@ -770,7 +770,7 @@
                  luft.render:*character-time* nil)
            (setf viewer
                  (luft.render:start-viewer
-                  :solid (luft.render:make-mountain-sanctuary-scene)
+                  :solid (luft.world:make-mountain-sanctuary-scene)
                   :bevel-width luft:+mesh-bevel-width+
                   :camera camera :title "LUFT wizard bridge walk"
                   :width 1280 :height 720))
@@ -867,7 +867,8 @@
            (force-output)
            (setf viewer
                  (luft.render:start-viewer
-                  :solid (luft.render:make-highland-sanctuary-scene)
+                  :solid (luft.world:make-highland-sanctuary-scene
+                          :mesh-preparer luft.render::+render-population-preparer+)
                   :bevel-width luft:+mesh-bevel-width+
                   :camera
                   (luft.render:make-fly-camera
@@ -931,7 +932,8 @@
                     :yaw 2.20 :pitch -0.20)))
              (setf viewer
                    (luft.render:start-viewer
-                    :solid (luft.render:make-highland-sanctuary-scene)
+                    :solid (luft.world:make-highland-sanctuary-scene
+                          :mesh-preparer luft.render::+render-population-preparer+)
                     :bevel-width luft:+mesh-bevel-width+
                     :camera camera :title "LUFT highland streaming flight"
                     :width 1280 :height 720))
@@ -1023,7 +1025,7 @@
 
 (defun make-luft-torch-frame-evidence-scene ()
   "Build one fixture spanning planar, band, convex, wall, and ceiling frames."
-  (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
+  (let ((builder (luft.world::make-world-scene-builder :horizontal-bits 5)))
     ;; A fixed earth/stone floor gives the attachment fixture scene context.
     (luft.render::scene-builder-box builder 3 9 4 11 2 4)
     (luft.render::scene-builder-box
@@ -1060,7 +1062,7 @@
 
 (defun make-luft-concave-step-torch-evidence-scene ()
   "Build the ordinary reentrant step from the attachment regression."
-  (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
+  (let ((builder (luft.world::make-world-scene-builder :horizontal-bits 5)))
     ;; The support top remains exposed while its +X neighbor rises one cell.
     ;; U=0.6 is the former width-two normal-ray miss: local chart realization
     ;; now moves the socket 0.4 mesh tick onto the finished top patch.
@@ -1085,7 +1087,7 @@
 
 (defun make-luft-realized-light-direction-evidence-scene (propagation-p)
   "Build two neutral wall receivers for flat and diagonal torch light."
-  (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
+  (let ((builder (luft.world::make-world-scene-builder :horizontal-bits 5)))
     ;; The floor and two-cell-thick limestone return are deliberately plain:
     ;; this plate tests realized torch light, not an emissive material contact.
     (luft.render::scene-builder-box
@@ -1138,7 +1140,7 @@
 
 (defun make-luft-opaque-bevel-occlusion-evidence-scene ()
   "Place one floor torch partly behind an ordinary opaque bevel edge."
-  (let ((builder (luft.render::make-scene-builder :horizontal-bits 5)))
+  (let ((builder (luft.world::make-world-scene-builder :horizontal-bits 5)))
     ;; The rear limestone floor owns the torch.  A connected, opaque return in
     ;; front of it ends at X=7; its finished high-X/front-Y width-two band is
     ;; the only foreground silhouette crossing the flame and body.

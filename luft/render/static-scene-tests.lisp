@@ -2,7 +2,7 @@
 
 (define-test static-scenes-retain-regional-geometry-and-light-through-publication
   (dolist (cells '(nil ((10 10)) ((63 63) (64 64))))
-    (let ((builder (render::make-scene-builder :horizontal-bits 7)))
+    (let ((builder (render::make-world-scene-builder :horizontal-bits 7)))
       (dolist (xy cells)
         (render::scene-builder-cell builder (first xy) (second xy) 2))
       (let* ((scene (render::finish-scene-builder builder))

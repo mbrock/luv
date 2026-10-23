@@ -90,15 +90,7 @@ this package draws; the renderer and the ateliers use it.")
   (:export
            #:%make-resident-cell-chunk
            #:%make-streaming-mesh-result
-           #:*beacon-material-placement*
            #:*body-vertical-velocity-declaration*
-           #:*crystal-material-placement*
-           #:*highland-rock-material-placement*
-           #:*sanctuary-material-placement*
-           #:*sand-material-placement*
-           #:*snow-material-placement*
-           #:*terminal-material-placement*
-           #:*terrain-material-placement*
            #:*torch-flame-material*
            #:*walking-displacement-function*
            #:*walking-displacement-realization*
@@ -110,11 +102,6 @@ this package draws; the renderer and the ateliers use it.")
            #:add-simulation-character
            #:advance-world-simulation
            #:authored-chunk-load-request
-           #:authored-world-edit-at
-           #:authored-world-source
-           #:authored-world-source-domain
-           #:authored-world-source-edits
-           #:authored-world-source-seed
            #:body-clear-at-p
            #:body-gravity
            #:body-grounded-p
@@ -126,7 +113,7 @@ this package draws; the renderer and the ateliers use it.")
            #:body-standable-cell-p
            #:body-velocity
            #:cancel-character-route
-           #:capture-authored-world-chunk-edits
+           #:capture-world-source-chunk-edits
            #:character-air-acceleration
            #:character-body
            #:character-controller
@@ -151,22 +138,15 @@ this package draws; the renderer and the ateliers use it.")
            #:ensure-semantic-instance
            #:evict-undesired-authored-world-residents
            #:finish-scene-builder
-           #:highland-landscape-height
+           #:generate-world-source-chunk
            #:inspection-cell-bit
            #:inspection-source-solid
            #:intent-direction-x
            #:intent-direction-y
            #:intent-jump-requested-p
-           #:large-world-citadel-cell-p
-           #:large-world-river-centre-x
-           #:large-world-road-centre-y
-           #:large-world-scenic-spawn
-           #:large-world-spawn-view
-           #:large-world-terrain-height
-           #:make-authored-world-streaming-scene
+           #:make-material-store
            #:make-render-mesh
            #:make-scene-builder
-           #:make-scene-material-vocabulary
            #:make-scene-mesh-generation-value
            #:make-scene-regional-meshes
            #:make-streaming-region-snapshot
@@ -177,6 +157,7 @@ this package draws; the renderer and the ateliers use it.")
            #:make-world-simulation
            #:material-cell-at
            #:material-cell-reader
+           #:material-kind
            #:material-kind-base-tone
            #:material-kind-oriented-tones
            #:material-kind-surface-emission
@@ -186,10 +167,11 @@ this package draws; the renderer and the ateliers use it.")
            #:material-store-chunks
            #:material-store-from-table
            #:material-store-with-cell
-           #:materialize-authored-world-chunk
+           #:materialize-world-source-chunk
            #:mesh-streaming-chunk
            #:movement-controller
            #:movement-intent
+           #:pack-terrain-tone
            #:physical-body
            #:prepare-streamed-mesh
            #:ready-streaming-scene-meshes
@@ -201,19 +183,25 @@ this package draws; the renderer and the ateliers use it.")
            #:remove-simulation-character
            #:request-character-jump
            #:reset-streaming-scene-publication
+           #:resident-cell-chunk
            #:resident-cell-chunk-fibers
            #:resident-cell-chunk-material-cells
            #:retarget-authored-world
            #:retarget-streaming-scene
            #:scene
            #:scene-authored-light-generation
+           #:scene-authored-light-opacity-table
+           #:scene-authored-light-provenance
+           #:scene-authored-light-sources
            #:scene-authored-voxel-light
+           #:scene-builder-architecture-material
            #:scene-builder-box
            #:scene-builder-carve-arch
            #:scene-builder-cell
            #:scene-builder-corbel
            #:scene-builder-crenellate
            #:scene-builder-disc
+           #:scene-builder-ground-material
            #:scene-builder-ring
            #:scene-builder-staircase
            #:scene-builder-torch
@@ -240,6 +228,7 @@ this package draws; the renderer and the ateliers use it.")
            #:scene-mesh-output-manifest-entry-tree
            #:scene-player-p
            #:scene-solid
+           #:scene-torch-light-emission
            #:scene-torches
            #:scene-voxel-light
            #:scene-voxel-light-propagation-p
@@ -291,4 +280,9 @@ this package draws; the renderer and the ateliers use it.")
            #:walking-route-start
            #:walking-route-status
            #:walking-route-visits
-           #:world-simulation))
+           #:world-simulation
+           #:world-source
+           #:world-source-domain
+           #:world-source-edit-at
+           #:world-source-edits
+           #:world-source-material-vocabulary))

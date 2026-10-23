@@ -249,19 +249,34 @@ inspectable cohort."
    (origin-x :initarg :origin-x :initform 0 :reader scene-builder-origin-x)
    (origin-y :initarg :origin-y :initform 0 :reader scene-builder-origin-y)
    (cells :initform (make-hash-table :test #'eql) :reader scene-builder-cells)
-   (material-vocabulary :initform (make-scene-material-vocabulary)
+   (material-vocabulary :initarg :material-vocabulary
                         :reader scene-builder-material-vocabulary)
+   (ground-material :initarg :ground-material :initform nil
+                    :reader scene-builder-ground-material)
+   (architecture-material :initarg :architecture-material :initform nil
+                          :reader scene-builder-architecture-material)
    (material-cells :initform (make-hash-table :test #'eql)
                    :reader scene-builder-material-cells)
    (torches :initform (make-hash-table :test #'eql)
             :reader scene-builder-torches)
    (light-revision :initform 0 :accessor scene-builder-light-revision)))
 
-(defun make-scene-builder (&key (horizontal-bits 6) (origin-x 0) (origin-y 0))
+(defun make-scene-builder
+    (&key (horizontal-bits 6) (origin-x 0) (origin-y 0)
+       material-vocabulary ground-material architecture-material)
+  "Make a builder over MATERIAL-VOCABULARY, a game's palette.
+
+GROUND-MATERIAL and ARCHITECTURE-MATERIAL are the placements a cell gets when
+the author names none."
+  (unless material-vocabulary
+    (error "A scene builder needs a game's material vocabulary."))
   (make-instance 'scene-builder
                  :domain (luft:make-world-domain
                           :x-bits horizontal-bits :y-bits horizontal-bits)
-                 :origin-x origin-x :origin-y origin-y))
+                 :origin-x origin-x :origin-y origin-y
+                 :material-vocabulary material-vocabulary
+                 :ground-material ground-material
+                 :architecture-material architecture-material))
 
 (defun scene-builder-cell
     (builder x y z &key (solid-p t) architecture-p (material nil material-p))
@@ -273,9 +288,10 @@ inspectable cohort."
                  z luft:+cell-extent+ 1)))
       (if solid-p
           (let ((placement
-                  (if material-p material
-                      (if architecture-p *sanctuary-material-placement*
-                          *terrain-material-placement*))))
+                  (cond (material-p material)
+                        (architecture-p
+                         (scene-builder-architecture-material builder))
+                        (t (scene-builder-ground-material builder)))))
             (check-type placement material-placement)
             (setf (gethash site (scene-builder-cells builder)) t
                   (gethash site (scene-builder-material-cells builder))
@@ -324,8 +340,9 @@ those frames to the independent torch drawing."
 (defun scene-builder-box
     (builder x0 x1 y0 y1 z0 z1
      &key (solid-p t) architecture-p
-       (material (if architecture-p *sanctuary-material-placement*
-                     *terrain-material-placement*)))
+       (material (if architecture-p
+                     (scene-builder-architecture-material builder)
+                     (scene-builder-ground-material builder))))
   (loop for z from z0 to z1 do
     (loop for y from y0 to y1 do
       (loop for x from x0 to x1 do
@@ -336,8 +353,9 @@ those frames to the independent torch drawing."
 (defun scene-builder-disc
     (builder cx cy radius z0 z1
      &key (solid-p t) architecture-p
-       (material (if architecture-p *sanctuary-material-placement*
-                     *terrain-material-placement*)))
+       (material (if architecture-p
+                     (scene-builder-architecture-material builder)
+                     (scene-builder-ground-material builder))))
   (let ((limit (expt (+ radius 0.5) 2)))
     (loop for x from (- cx (ceiling radius)) to (+ cx (ceiling radius)) do
       (loop for y from (- cy (ceiling radius)) to (+ cy (ceiling radius))
@@ -352,8 +370,9 @@ those frames to the independent torch drawing."
 (defun scene-builder-ring
     (builder cx cy inner outer z0 z1
      &key (solid-p t) architecture-p
-       (material (if architecture-p *sanctuary-material-placement*
-                     *terrain-material-placement*)))
+       (material (if architecture-p
+                     (scene-builder-architecture-material builder)
+                     (scene-builder-ground-material builder))))
   (let ((low (expt (+ inner 0.5) 2))
         (high (expt (+ outer 0.5) 2)))
     (loop for x from (- cx (ceiling outer)) to (+ cx (ceiling outer)) do

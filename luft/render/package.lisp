@@ -94,17 +94,6 @@
            #:*flame-time*
            #:light
            #:*light*
-           #:make-bevel-limit-study-scene
-           #:make-manifold-spike-scene
-           #:make-mountain-sanctuary-scene
-           #:make-miter-study-scene
-           #:make-traveler-study-scene
-           #:make-voxel-light-shrine-scene
-           #:make-demo-solid
-           #:make-gallery-solid
-           #:gallery-plot-report
-           #:gallery-plot-origin
-           #:*gallery*
            #:make-render-mesh
            #:make-whole-domain-diagnostic-mesh
            #:scene-builder-torch
@@ -123,7 +112,6 @@
            #:renderer-set-mesh #:renderer-set-meshes
            #:renderer-remove-mesh #:renderer-clear-meshes
            #:streaming-scene #:make-streaming-scene
-           #:make-authored-world-streaming-scene
            #:streaming-scene-light-generation
            #:scene-edit
            #:scene-edit-cell
@@ -132,7 +120,6 @@
            #:scene-edit-content-revision
            #:edit-streaming-scene-cell
            #:mesh-streaming-chunk
-           #:make-highland-sanctuary-scene
            #:fly-camera
            #:make-fly-camera
            #:camera-position

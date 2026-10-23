@@ -48,6 +48,17 @@
   (check-type mesh luft:surface-mesh)
   (%make-prepared-render-mesh mesh (make-render-population (list mesh))))
 
+;;; The mesher marks every occupied sample with code 1 before any palette
+;;; paints it.  A population whose meshes name no palette draws that code in
+;;; one neutral clay, so the renderer needs no game's materials.
+(defparameter +unpainted-terrain-descriptors+
+  (let ((words (make-array 8 :element-type '(unsigned-byte 32)
+                             :initial-element 0))
+        (clay (pack-terrain-tone '(0.50 0.47 0.42))))
+    (setf (aref words 4) clay (aref words 5) clay (aref words 6) clay)
+    words)
+  "AIR and the mesher's one unpainted occupied code.")
+
 (defun %make-star-render-population (meshes)
   "Flatten geometry and its parallel active-star appearance independently."
   (let* ((site-words
@@ -61,8 +72,7 @@
                      for words =
                        (luft:surface-mesh-appearance-descriptor-words mesh)
                      when (plusp (length words)) return words)
-               (compile-terrain-material-descriptors
-                (make-scene-material-vocabulary)))))
+               +unpainted-terrain-descriptors+)))
     (unless (= (* 2 (length site-words)) (length appearance-codes))
       (error "~D site words do not have a one-for-one eight-byte appearance (~D bytes)."
              (length site-words) (length appearance-codes)))

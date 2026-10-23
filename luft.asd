@@ -74,11 +74,23 @@
                              (:file "realized-light")
                              (:file "scene")
                              (:file "decoration")
-                             (:file "world")
+                             (:file "world-source")
                              (:file "streaming-state")
                              (:file "streaming")
                              (:file "streaming-mesh")
-                             (:file "streaming-publication")))))
+                             (:file "streaming-publication"))))
+  :in-order-to ((test-op (test-op "luft/terrain/test"))))
+
+(defsystem "luft/terrain/test"
+  :description "A second game on the terrain alone: palette, world source, and preparer."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/terrain" "luv/test-support")
+  :components ((:file "luft/terrain/tests"))
+  :perform (test-op (operation component)
+             (declare (ignore operation component))
+             (uiop:symbol-call '#:luv.test-support '#:test-package
+                               '#:luft.terrain.tests)))
 
 (defsystem "luft/renderer"
   :description "The indexed integer-mesh GPU renderer for LUFT solids."
@@ -118,7 +130,20 @@
                              (:file "renderer-targets")
                              (:file "renderer-frames")
                              (:file "world-text")
-                             (:file "frame")
+                             (:file "frame")))))
+
+(defsystem "luft/world"
+  :description "The Luft atelier's world: its palette, landscapes, and fixture scenes."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("luft/terrain")
+  :serial t
+  :components ((:module "world"
+                :pathname "luft/world"
+                :serial t
+                :components ((:file "package")
+                             (:file "palette")
+                             (:file "landscape")
                              (:file "fixtures")))))
 
 (defsystem "luft/simulation"
@@ -133,11 +158,13 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; Share Luv's substrate and compositor, not another game's runtime.
-  :depends-on ("luft/renderer" "luft/simulation" "luv/mcclim" "luv/workbench"
+  :depends-on ("luft/renderer" "luft/simulation" "luft/world"
+               "luv/mcclim" "luv/workbench"
                "luv/lobby/mcclim" "luv/terminal/canvas"
                "luv/tracy-capture" "luv/application-agent")
   :serial t
-  :components ((:file "luft/render/studio")
+  :components ((:file "luft/render/atelier-world")
+               (:file "luft/render/studio")
                (:file "luft/render/terminal")
                (:file "luft/render/persistence")
                (:file "luft/render/live-artifact")
