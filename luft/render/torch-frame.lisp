@@ -69,7 +69,12 @@
   (defconstant +torch-body-light-bit-count+ 12)
   (defconstant +torch-body-vertex-row-count+ 2)
   (defconstant +torch-body-vertex-scalar-count+ 8)
-  (defconstant +torch-body-side-count+ 8))
+  (defconstant +torch-body-side-count+ 8)
+  ;; Bits 12-15 of FLAGS name the drawn body: 0 a torch, 1 a standing
+  ;; lantern, 2 a hanging one.  Each body owns this many vertices of the
+  ;; shared body buffer, padded with zero-area triangles.
+  (defconstant +attachment-body-form-count+ 3)
+  (defconstant +attachment-body-vertex-stride+ 528))
 
 (deftype torch-flame-instance-data ()
   `(simple-array single-float (,+torch-flame-instance-scalar-count+)))
@@ -198,10 +203,15 @@ it maps the canonical torch body's dimensionless coordinates into the world."
                    position (aref data position))))))
     data))
 
-(defun pack-torch-body-frame-flags (packed-voxel-light)
-  "Pack RGB4 voxel light into a torch frame's FLAGS lane."
+(defun pack-torch-body-frame-flags (packed-voxel-light &optional (form-code 0))
+  "Pack RGB4 voxel light and a drawn-body FORM-CODE into a frame's FLAGS lane."
   (check-type packed-voxel-light (unsigned-byte 12))
-  packed-voxel-light)
+  (check-type form-code (integer 0 #.(1- +attachment-body-form-count+)))
+  (logior packed-voxel-light (ash form-code +torch-body-light-bit-count+)))
+
+(defun torch-frame-form-code (flags)
+  "The drawn-body code in a frame's FLAGS lane."
+  (ldb (byte 4 +torch-body-light-bit-count+) (floor flags)))
 
 (defun unpack-torch-body-frame-flags (flags)
   "Return the packed RGB4 voxel light encoded by FLAGS."

@@ -104,6 +104,7 @@
                 :serial t
                 :components ((:file "package")
                              (:file "frame-quantities")
+                             (:file "point-lights")
                              (:file "lighting")
                              (:file "shaders")
                              (:file "world-text-shaders")

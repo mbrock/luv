@@ -111,3 +111,36 @@
         (is = 1 (luft:fibers-cell-bit fibers x y (1- z)))
         (is = 0 (luft:fibers-cell-bit fibers x y z))
         (is = 0 (luft:fibers-cell-bit fibers x y (1+ z)))))))
+
+(define-test lanterns-stand-on-and-hang-from-their-neighbours
+  ;; Above a meadow: a plank with a lantern on it and one hanging beneath,
+  ;; and a lantern with nothing above or below, which stays a cube.
+  (let* ((lantern luvcraft::*lantern-block*)
+         (world (luvcraft:make-empty-little-block-world
+                 :seed 121 :relief :meadow :chunk-height 16))
+         (little (luvcraft:block-world-source world)))
+    (loop for (block x y z) in (list (list luvcraft::*planks-block* -20 13 -30)
+                                     (list lantern -20 14 -30)
+                                     (list lantern -20 12 -30)
+                                     (list lantern -24 14 -30))
+          do (luvcraft::record-block-edit
+              (luvcraft:little-world-source-edits little) block x y z))
+    (let* ((source (game::little-world-luft-source little 16))
+           (key (luft:chunk-key-at 1004 994))
+           (chunk (terrain:materialize-world-source-chunk
+                   source key 1
+                   :edits (terrain:capture-world-source-chunk-edits source key)))
+           (domain (terrain:world-source-domain source))
+           (materials (terrain::resident-cell-chunk-material-cells chunk))
+           (attachments (terrain:resident-cell-chunk-attachments chunk)))
+      (flet ((cell (x y z) (luft:make-site domain (+ 1024 x) (+ 1024 z) y
+                                           luft:+cell-extent+ 1)))
+        (is = 2 (length attachments))
+        (dolist (attachment attachments)
+          (true (eq :lantern (terrain:material-kind-attachment-form
+                              (terrain:surface-attachment-material attachment))))
+          (is = (cell -20 13 -30) (terrain::surface-attachment-support-cell attachment))
+          (true (null (gethash (terrain:surface-attachment-clearance-cell attachment)
+                               materials))))
+        (true (gethash (cell -20 13 -30) materials))
+        (true (gethash (cell -24 14 -30) materials))))))

@@ -129,9 +129,16 @@ face-anchored thing made of a material kind.  The terrain keeps an
 attachment's support cell solid and its clearance cell clear, refusing
 edits that would break either, and an attachment's light comes from its
 material; the Luft world's =scene-builder-torch= attaches its flame
-material, and the renderer's drawn flame keeps its own tone.  No path yet
-realizes attachments into frames, so attachment light is still the empty
-seed set it was for torches.
+material, and the renderer's drawn flame keeps its own tone.  Mesh
+decoration now realizes each owner's attachments into frames at their face
+chart point, and a material with an /attachment form/ becomes one when a
+world source materializes it: a Luvcraft lantern block stands on the solid
+cell below it, or hangs from the one above, as a drawn iron-and-glass
+lantern whose cell is its clearance.  The renderer lights the scene with
+the eight attachment lights nearest the eye, unoccluded, in the star and
+body shaders; the voxel light field still gets no attachment seeds, and a
+lantern placed by an atelier edit is still a cube until its chunk is
+materialized again.
 
 A game's palette reaches the terrain in two places.  A scene builder takes
 a material vocabulary and the placements a cell gets by default, and a

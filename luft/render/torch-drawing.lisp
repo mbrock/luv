@@ -65,7 +65,8 @@
   (values))
 
 ;;; The current implementation shares one three-row attachment frame between
-;;; a canonical bronze body mesh and a ray-integrated flame. Shader modules are
+;;; canonical body meshes -- a bronze torch, an iron and glass lantern, chosen
+;;; per frame by its form code -- and a ray-integrated torch flame. Shader modules are
 ;;; private resources; each pass has a program; geometry and sampling remain component-owned.
 
 (defclass framed-torch-drawing (torch-drawing gpu-resource-owner)
@@ -109,7 +110,7 @@
   (when (plusp count)
     (encode-program
      (if shadow-p (torch-drawing-shadow-program drawing) (torch-drawing-body-program drawing))
-     pass binding (make-gpu-draw-command :vertex-count (torch-body-vertex-count)
+     pass binding (make-gpu-draw-command :vertex-count +attachment-body-vertex-stride+
                                        :instance-count count))))
 
 (defmethod encode-torch-flames ((drawing framed-torch-drawing) pass binding count)
@@ -127,10 +128,10 @@
       (labels ((own (descriptor) (own-gpu-resource drawing device descriptor))
                (program (&rest description)
                  (own-gpu-object drawing (apply #'make-drawing-program device description))))
-        (let ((vertices (torch-body-vertex-data)))
+        (let ((vertices (attachment-body-vertex-data)))
           (setf (torch-drawing-vertices drawing)
                 (own (make-buffer-descriptor
-                      :label "luft canonical framed torch body"
+                      :label "luft canonical framed torch and lantern bodies"
                       :size (* 4 (length vertices)) :usage '(:storage :copy-dst))))
           (write-buffer (torch-drawing-vertices drawing) vertices))
         (setf (torch-drawing-depth-sampler drawing)

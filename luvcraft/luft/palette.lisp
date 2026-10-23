@@ -167,6 +167,9 @@ The kind's tone is the elements'; mortar has its own.")
    :light-opacity (luvcraft::block-kind-light-opacity kind)
    :light-emission (block-light-emission-rgb kind)
    :surface-emission (luvcraft::block-kind-surface-emission kind)
+   ;; A lantern is drawn as a lantern standing on, or hanging from, its
+   ;; neighbour rather than as a cube.
+   :attachment-form (and (eq (luvcraft:block-kind-name kind) :lantern) :lantern)
    :relief (first (block-surface (luvcraft:block-kind-name kind)))
    :relief-strength (second (block-surface (luvcraft:block-kind-name kind)))
    :roughness (third (block-surface (luvcraft:block-kind-name kind)))

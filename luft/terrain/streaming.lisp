@@ -242,7 +242,9 @@ published."
                         (%make-resident-cell-chunk
                          key
                          (incf (streaming-scene-next-incarnation scene))
-                         new-chunk local-materials)))
+                         new-chunk local-materials
+                         (let ((old (gethash key (streaming-scene-store scene))))
+                           (and old (resident-cell-chunk-attachments old))))))
                 (if (luft:fibers-empty-p new-chunk)
                     (remhash key (streaming-scene-store scene))
                     (setf (gethash key (streaming-scene-store scene))
@@ -460,6 +462,15 @@ silently empty the desired residency window."
         (let ((resident (gethash key (streaming-scene-store scene))))
           (setf (gethash key (material-store-chunks materials))
                 (resident-cell-chunk-material-cells resident)))))
+    ;; The visible chunks' fixtures are the scene's attachments, in face order.
+    (setf (scene-attachments scene)
+          (coerce
+           (sort (loop for key in source-keys
+                       append (copy-list
+                               (resident-cell-chunk-attachments
+                                (gethash key (streaming-scene-store scene)))))
+                 #'< :key #'surface-attachment-face)
+           'vector))
     (setf (scene-solid scene) collision
           (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))

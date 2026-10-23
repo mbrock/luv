@@ -104,6 +104,10 @@
           (aref camera-uniform-data 121) (/ 1.0f0 (second bloom))
           (aref camera-uniform-data 122) (/ 1.0f0 (first extent))
           (aref camera-uniform-data 123) (/ 1.0f0 (second extent))))
+  (write-attachment-point-lights
+   (renderer-torch-frame-data renderer)
+   (aref camera-uniform-data 0) (aref camera-uniform-data 1)
+   (aref camera-uniform-data 2) camera-uniform-data)
   (write-buffer (renderer-frame-state-camera-buffer frame) camera-uniform-data)
   (upload-torch-frame (renderer-torches renderer)
                       (renderer-frame-state-flame-effect-buffer frame) effect-time))

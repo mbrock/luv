@@ -2,12 +2,68 @@
 
 ;;; Finalize star-mesh appearance and light metadata, then record the exact
 ;;; outputs as a SCENE-MESH-GENERATION. Static compilation also combines the
-;;; region into one root. Authored attachment placement is not yet realized here.
+;;; region into one root. Each owner carries the frames of the attachments its
+;;; chunk supports; attachment light is not yet seeded into the voxel field.
 
 (defun default-face-stock (face)
   (mod (+ (luft:site-x face) (* 2 (luft:site-y face))
           (* 3 (luft:site-z face)) (luft:site-extent face))
        4))
+
+(defun surface-attachment-form-code (attachment normal-z)
+  "The drawn-body code of ATTACHMENT: 0 a torch, 1 a standing lantern, 2 a
+hanging one."
+  (ecase (or (material-kind-attachment-form (surface-attachment-material attachment))
+             :torch)
+    (:torch 0)
+    (:lantern (if (minusp normal-z) 2 1))))
+
+(defun %attachment-seed (x y z)
+  (let ((value (* (sin (+ (* x 0.1731) (* y 0.1173) (* z 0.2357))) 43758.5453)))
+    (- value (floor value))))
+
+(defun surface-attachment-frame-data (attachment)
+  "ATTACHMENT's realized frame: twelve floats in the renderer's torch frame
+order -- origin and seed, outward normal and flags, tangent and scale.
+
+The origin is the face's centre moved by the chart point U and V, half a cell
+each.  FLAGS holds the material's packed RGB4 emission in bits 0-11 and the
+drawn-body code (SURFACE-ATTACHMENT-FORM-CODE) from bit 12."
+  (let* ((support (surface-attachment-support-cell attachment))
+         (clearance (surface-attachment-clearance-cell attachment))
+         (nx (- (luft:site-x clearance) (luft:site-x support)))
+         (ny (- (luft:site-y clearance) (luft:site-y support)))
+         (nz (- (luft:site-z clearance) (luft:site-z support)))
+         ;; The face's centre is halfway between the two cell centres.
+         (cx (+ (luft:site-x support) 0.5 (* 0.5 nx)))
+         (cy (+ (luft:site-y support) 0.5 (* 0.5 ny)))
+         (cz (+ (luft:site-z support) 0.5 (* 0.5 nz)))
+         ;; Tangent U is the first other axis in X, Y, Z order; V the second.
+         (tangent (if (zerop nx) '(1 0 0) '(0 1 0)))
+         (bitangent (cond ((not (zerop nz)) '(0 1 0))
+                          (t '(0 0 1))))
+         (u (* 0.5 (surface-attachment-chart-u attachment)))
+         (v (* 0.5 (surface-attachment-chart-v attachment)))
+         (flags (logior (surface-attachment-light-emission attachment)
+                        (ash (surface-attachment-form-code attachment nz) 12))))
+    (map '(simple-array single-float (12))
+         (lambda (value) (coerce value 'single-float))
+         (list (+ cx (* u (first tangent)) (* v (first bitangent)))
+               (+ cy (* u (second tangent)) (* v (second bitangent)))
+               (+ cz (* u (third tangent)) (* v (third bitangent)))
+               (%attachment-seed cx cy cz)
+               nx ny nz flags
+               (first tangent) (second tangent) (third tangent)
+               1.0))))
+
+(defun scene-owner-attachment-frames (scene key)
+  "Frames of SCENE's attachments supported in chunk KEY, or all for NIL."
+  (loop for attachment across (scene-attachments scene)
+        when (or (null key)
+                 (not (integerp key))
+                 (= key (luft:site-chunk-key
+                         (surface-attachment-support-cell attachment))))
+          collect (surface-attachment-frame-data attachment)))
 
 (defun scene-mesh-light-generation (scene &optional reusable-light-generation)
   "Retain the exact material-source light generation for the current star mesh."
@@ -107,11 +163,10 @@ OWNERS is an alist of canonical chunk owner to finished mesh. The returned
 SCENE-MESH-GENERATION snapshots those exact outputs after metadata is final.
 APPEARANCE-PREPARED-P means their material arrays are already compiled.
 
-Authored attachments are retained by SCENE, but the star representation has no
-surface-attachment resolver yet, so this path produces no attachment frames.
-An independent drawing, such as the renderer's torches, consumes frames
-supplied by diagnostic callers; its presence does not imply that world
-attachments have been realized."
+Each owner's mesh carries the frames of the attachments whose support cell
+lies in its chunk (SURFACE-ATTACHMENT-FRAME-DATA); an independent drawing,
+such as the renderer's torches and lanterns, consumes them.  The frames do not
+yet seed the realized voxel light."
   (check-type owners list)
   (let* ((light-generation
            (zone :luft/realize-light
@@ -137,7 +192,10 @@ attachments have been realized."
                          (luft:surface-mesh-attachments surface) nil)
                    (dolist (companion (luft:surface-mesh-companions surface))
                      (initialize companion))))
-          (dolist (entry owners) (initialize (cdr entry))))))
+          (dolist (entry owners)
+            (initialize (cdr entry))
+            (setf (luft:surface-mesh-attachments (cdr entry))
+                  (scene-owner-attachment-frames scene (car entry)))))))
     ;; Snapshot only after appearance and light metadata are final.
     (values
      owners

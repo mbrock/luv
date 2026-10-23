@@ -29,6 +29,13 @@ top or bottom one."))
                    :reader material-kind-light-emission)
    (surface-emission :initarg :surface-emission :initform 0.0
                      :reader material-kind-surface-emission)
+   (attachment-form :initarg :attachment-form :initform nil
+                    :type (member nil :torch :lantern)
+                    :reader material-kind-attachment-form
+                    :documentation
+                    "NIL for a cube.  Otherwise the drawn body an attachment
+made of this kind takes; a streamed world realizes a cell of such a kind as
+an attachment on the face of a solid neighbour rather than a cube.")
    (relief :initarg :relief :initform :none :type #.`(member ,@+material-reliefs+)
            :reader material-kind-relief
            :documentation "The world-space height field the surface is cut from.")
