@@ -79,9 +79,9 @@
 (ensure-directories-exist #P".amp/in/artifacts/knobs.png")
 (capture (make-instance 'luvcraft:luvcraft-session
                         :camera (make-instance 'luvcraft::fly-camera))
-         "knobs-old" '(:grading :camera))
+         "knobs-old" '(:grading :camera :text))
 (let* ((scene (luft.world:make-authored-world-streaming-scene))
        (host (make-instance 'luvcraft.luft.game:luvcraft-viewer :source scene
                             :player (render::make-scene-walking-character scene)
                             :hotbar (list (luvcraft.luft:block-placement luvcraft::*stone-block*)))))
-  (capture host "knobs-luft" '(:grading :player :physics :terminal)))
+  (capture host "knobs-luft" '(:grading :player :physics :terminal :text)))

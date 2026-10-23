@@ -8,9 +8,23 @@
                     luvcraft::physics-substeps))
           (remove-if-not
            (lambda (knob)
-             (eq (symbol-package (luv.knobs:knob-name knob))
-                 (find-package :luvcraft.luft.game)))
+             (or (eq (symbol-package (luv.knobs:knob-name knob))
+                     (find-package :luvcraft.luft.game))
+                 (and (eq (symbol-package (luv.knobs:knob-name knob))
+                          (find-package :luvcraft))
+                      (eq :text (luv.knobs:knob-group knob)))))
            luv.knobs:*knobs*)))
+
+(defmethod luv.knobs:knob-rebuild-p :around
+    ((knob luv.knobs:knob) (viewer luvcraft-viewer))
+  (or (eq :text (luv.knobs:knob-group knob)) (call-next-method)))
+
+(defmethod luv.knobs:realize-knob progn
+    ((knob luv.knobs:scalar-knob) (viewer luvcraft-viewer))
+  (when (eq :text (luv.knobs:knob-group knob))
+    ;; World glyphs are tracked folded values; retained HUD glyphs also need
+    ;; their shader family invalidated when these shared Slug values change.
+    (luv.shader::note-shader-source-redefinition (luv.knobs:knob-name knob))))
 
 ;;; The solver and palette stay Y-up. Only this boundary knows Luft's axes.
 (defclass ball-terrain ()
@@ -44,6 +58,31 @@
             (luvcraft::make-physics-world
              :terrain (make-instance 'ball-terrain :scene (render:viewer-source viewer))))))
 
+(defun initialize-viewer-springs (viewer)
+  (unless (viewer-springs-initialized-p viewer)
+    (let ((springs (luvcraft::world-spring-coordinates (luvcraft-viewer-world viewer))))
+      (dolist (spring springs)
+        (let ((old (find-if
+                    (lambda (old)
+                      (and (= (luvcraft::luvcraft-spring-x old) (luvcraft::luvcraft-spring-x spring))
+                           (= (luvcraft::luvcraft-spring-y old) (luvcraft::luvcraft-spring-y spring))
+                           (= (luvcraft::luvcraft-spring-z old) (luvcraft::luvcraft-spring-z spring))
+                           (eq (luvcraft::luvcraft-spring-kind old) (luvcraft::luvcraft-spring-kind spring))))
+                    (viewer-springs viewer))))
+          (when old
+            (setf (luvcraft::luvcraft-spring-count spring) (luvcraft::luvcraft-spring-count old)))))
+      (setf (viewer-springs viewer) springs
+            (viewer-springs-initialized-p viewer) t))))
+
+(defmethod luvcraft::spring-block-at ((viewer luvcraft-viewer) x y z)
+  ;; Query published terrain, not the old world's generated/cached chunks.
+  (let* ((scene (render:viewer-source viewer))
+         (site (game:luvcraft-cell-site (streaming-source viewer) x y z)))
+    (when (and site (gethash (luft:chunk-key-at (luft:site-x site) (luft:site-y site))
+                             (terrain:streaming-scene-store scene)))
+      (let ((placement (terrain:scene-material-placement-at scene site)))
+        (values (and placement (game::luvcraft-block-for-placement placement)) :resident)))))
+
 (defmethod render:apply-viewer-world-edit :around ((viewer ball-game-state) cell placement)
   (multiple-value-bind (edit status) (call-next-method)
     (when (and edit (viewer-physics viewer))
@@ -51,6 +90,12 @@
        (viewer-physics viewer) (- (luft:site-x cell) 1024) (luft:site-z cell)
        (- (luft:site-y cell) 1024) 2.0))
     (values edit status)))
+
+(defmethod render:apply-viewer-world-edit :after ((viewer luvcraft-viewer) cell placement)
+  (declare (ignore cell placement))
+  ;; The inventory around method has not committed its overlay yet. Discover
+  ;; from that accepted-edit truth next tick, retaining unchanged throw counts.
+  (setf (viewer-springs-initialized-p viewer) nil))
 
 (defun post-viewer-physics-boxes (viewer physics)
   (luvcraft::clear-physics-boxes physics)
@@ -74,6 +119,9 @@
                                   :vz (vec3:vec3-z v) :owner animal))))
 
 (defmethod render:advance-viewer-game :after ((viewer ball-game-state) seconds)
+  (when (and (typep viewer 'luvcraft-viewer) (slot-boundp viewer 'luvcraft-world))
+    (initialize-viewer-springs viewer)
+    (when (viewer-springs viewer) (ensure-viewer-physics viewer)))
   (when (viewer-physics viewer)
     (let ((physics (viewer-physics viewer)))
       (clrhash (viewer-ball-previous-centers viewer))
@@ -85,6 +133,8 @@
             while (>= (viewer-physics-clock viewer) luvcraft::*physics-step-seconds*)
             do (decf (viewer-physics-clock viewer) luvcraft::*physics-step-seconds*)
                (post-viewer-physics-boxes viewer physics)
+               (dolist (spring (viewer-springs viewer))
+                 (luvcraft::spray-luvcraft-spring spring viewer physics))
                (luvcraft::step-physics-world physics)
                (luvcraft::handle-luvcraft-physics-events nil physics))
       (when (>= (viewer-physics-clock viewer) luvcraft::*physics-step-seconds*)

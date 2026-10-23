@@ -15,6 +15,7 @@
 
 (define-knob slug-filter-width
     (:group :text :label "text filter width" :unit-label " px"
+     :quantity (:quantity :font-scale :unit :one)
      :minimum 0.25 :maximum 4.0 :step 0.05
      :documentation
      "The box filter's width in pixels.  One is exact pixel coverage; wider
@@ -23,6 +24,7 @@ softens the edge (and needs the dilation to grow with it, which it does).")
 
 (define-knob slug-dilation-pixels
     (:group :text :label "text quad dilation" :unit-label " px"
+     :quantity (:quantity :font-scale :unit :one)
      :minimum 0.0 :maximum 4.0 :step 0.1
      :documentation
      "How far past its outline each glyph quad grows, in filter widths.  Half
@@ -32,6 +34,7 @@ edge, more costs fragments.")
 
 (define-knob slug-optical-weight
     (:group :text :label "text optical weight"
+     :quantity (:quantity :proportion :unit :one)
      :minimum 0.25 :maximum 2.0 :step 0.05
      :documentation
      "The exponent applied to coverage.  One is linear; the reference's
@@ -40,6 +43,7 @@ SLUG_WEIGHT is one half, which fattens thin strokes.")
 
 (define-knob slug-fill-rule
     (:group :text :label "text even-odd fill"
+     :quantity (:quantity :proportion :unit :one)
      :minimum 0.0 :maximum 1.0 :step 1.0
      :documentation
      "0 fills glyphs by the nonzero winding rule, 1 by even-odd (self-
@@ -48,6 +52,7 @@ overlapping contours become holes).")
 
 (define-knob slug-footprint-norm
     (:group :text :label "text footprint fwidth"
+     :quantity (:quantity :proportion :unit :one)
      :minimum 0.0 :maximum 1.0 :step 0.1
      :documentation
      "How the pixel's size in em is measured: 0 the gradient length, 1 fwidth
@@ -56,6 +61,7 @@ as the reference does; between blends.")
 
 (define-knob slug-early-exit
     (:group :text :label "text band early exit"
+     :quantity (:quantity :proportion :unit :one)
      :minimum 0.0 :maximum 1.0 :step 1.0
      :documentation
      "1 stops walking a band's sorted curves at the first one wholly behind
@@ -64,6 +70,7 @@ the sample; 0 walks them all.  The picture is the same either way.")
 
 (define-knob slug-root-epsilon
     (:group :text :label "text root epsilon"
+     :quantity (:quantity :proportion :unit :one)
      :minimum 0.000001 :maximum 0.01 :step 0.000005
      :documentation
      "Below this |a| a curve is solved as a line rather than a quadratic; also
@@ -72,6 +79,7 @@ the floor under the coverage divisions.")
 
 (define-knob slug-debug-view
     (:group :text :label "text band debug view"
+     :quantity (:quantity :proportion :unit :one)
      :minimum 0.0 :maximum 1.0 :step 1.0
      :documentation
      "1 paints each glyph quad with its band loads: red the horizontal band's

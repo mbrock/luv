@@ -114,3 +114,35 @@
                        (luvcraft::physics-world-awake physics)) 0)) 13.0)))
     (luv:handle-canvas-event viewer nil key)
     (true (not (host::viewer-ball-in-hand-p viewer)))))
+
+(define-test saved-springs-emit-original-bodies-only-in-resident-terrain
+  (let* ((world (luvcraft:make-empty-little-block-world :seed 7 :relief :meadow :chunk-height 16))
+         (overlay (luvcraft:little-world-source-edits (luvcraft:block-world-source world))))
+    (luvcraft::record-block-edit overlay luvcraft::*fountain-block* 8 14 8)
+    (luvcraft::record-block-edit overlay luvcraft::*lava-spring-block* 12 14 8)
+    (let* ((source (game:luvcraft-world-luft-source world))
+           (scene (game:make-luvcraft-streaming-scene source))
+           (key (luft:chunk-key-at 1032 1032))
+           (chunk (luft.terrain:materialize-world-source-chunk
+                   source key 1 :edits (luft.terrain:capture-world-source-chunk-edits source key)))
+           (viewer (make-instance 'host:luvcraft-viewer :source scene :luvcraft-world world
+                                  :hotbar (list (game:block-placement luvcraft::*stone-block*)))))
+      (setf (gethash key (luft.terrain:streaming-scene-store scene)) chunk)
+      (luft.terrain::rebuild-authored-world-resident-values scene (list key))
+      (dotimes (i 6) (render:advance-viewer-game viewer luvcraft::*physics-step-seconds*))
+      (let ((physics (host::viewer-physics viewer)))
+        ;; Same rate and kinds as old Luvcraft, even without taking out B.
+        (is = 13 (luvcraft::physics-world-body-count physics))
+        (is = 2 (length (host::viewer-springs viewer)))
+        (remhash key (luft.terrain:streaming-scene-store scene))
+        (dotimes (i 6) (render:advance-viewer-game viewer luvcraft::*physics-step-seconds*))
+        (is = 13 (luvcraft::physics-world-body-count physics))
+        (is = 6 (luvcraft::luvcraft-spring-count
+                 (find :lava-spring (host::viewer-springs viewer) :key #'luvcraft::luvcraft-spring-kind)))
+        ;; Removing an authored source retires it; rediscovery preserves the
+        ;; other source's deterministic throw sequence rather than restarting it.
+        (luvcraft::record-block-edit overlay nil 8 14 8)
+        (setf (host::viewer-springs-initialized-p viewer) nil)
+        (host::initialize-viewer-springs viewer)
+        (is = 1 (length (host::viewer-springs viewer)))
+        (is = 6 (luvcraft::luvcraft-spring-count (first (host::viewer-springs viewer))))))))

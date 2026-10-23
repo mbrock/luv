@@ -285,27 +285,27 @@ the layer of #W9QMPT that owns the feature afterwards.
 
 | Luvcraft feature | Size | Luft today | Lands in | What the crossing needs |
 |-
-| Terrain generator | 1.1k | alpine relief only | game, as world sources | port caves, crystals, trees, rocks |
-| Block vocabulary | 1.4k | 8 placements, tones | game palette | the material protocol |
-| Light (sky, block) | 1.1k + frontier 1.6k | voxel light, unstreamed | terrain | stream Luft's field (#JDB26Y), or the frontier language (#LX8GZ2) |
+| Terrain generator | 1.1k | old meadow/alpine source and edits | game, as world sources | shared source, axis adapter |
+| Block vocabulary | 1.4k | shared Luvcraft palette | game palette | material appearance is a separate port |
+| Light (sky, block) | 1.1k + frontier 1.6k | streamed voxel light | terrain | field (#JDB26Y), frontier language (#LX8GZ2) |
 | Meshing, renderer, TAA, pacing | 8k | done, and cheaper | terrain, renderer | delete |
 | Streaming, production | 1k | done | terrain | delete |
 | Player, walking, step-up | 0.6k | done (#8E110Y) | terrain queries, game character | delete |
 | Pathing (Move To) | 0.3k | click-to-walk A* | terrain queries | delete |
 | Place, mine, pick | in =app.lisp= | done, with undo and bevel-face rim (#7O90OS) | terrain edits, game rules | carried kind, reach rules |
 | Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | shared old instruments (#291ELY) | game | host protocol; both inventory modes and profiles |
-| Physics, balls | 3.7k | reused solver, throws, sphere figures (#0JMB9O) | physics, game | Luft occupancy/residency adapter; spring behaviours remain |
-| Critters | 0.7k | none | game | minds neutral; bodies re-hosted on queries |
+| Physics, balls | 3.7k | reused solver, throws, live fountain/lava sources (#0JMB9O, #PXUPMA) | physics, game | shared emitter, resident Luft queries |
+| Critters | 0.7k | old turtles, Luft body queries | game | relief/cast-shadow presentation remains |
 | Particles | 0.2k | reused mining burst, material-tinted figures (#7O90OS) | game simulation, figure stage | old motion and bounded population, Luft tones |
-| First-person hands, held items | 1k | none | game, on a renderer stage | animation neutral |
+| First-person hands, held items | 1k | separate hands/riding work | game, on a renderer stage | owned separately |
 | Sky, clock, night | 0.4k | done, and further | renderer | delete |
 | World text | 0.4k | done | renderer | delete |
-| Terminal walls, phone | 2.8k | terminal walls done | game, on renderer stages | phone needs stages; agent wall removed |
+| Terminal walls, phone | 2.8k | game terminal walls and modal shell focus (#PXUPMA) | game, on renderer stages | Urbit and focus camera remain; phone skipped |
 | Portals, mirror, video, tape, film | 2.6k | none | game, on renderer stages | Darwin and libav hosting; tape and film are behaviours |
 | Agents: gnome, cat, Fantus | 5.8k | original SDFs, dialogue and cloud (#JZWPAI) | game | shared presentation adapter; Luft tools and physical bodies |
 | Birthday content | 3.2k | none | game | follows stages and agents |
-| Knobs, intent, camera, sound, lobby | 1k | knobs via metabar, lobby | game, luv | mostly neutral |
-| CLIM menus, legend, metabar | 1.4k + 4.8k | workbench | luv | Luft already owns these on the workbench |
+| Knobs, intent, camera, sound, lobby | 1k | shared knobs including old text controls, lobby | game, luv | view bob and film soundtrack remain |
+| CLIM menus, legend, metabar | 1.4k + 4.8k | game workbench, complete F1/H legend (#PXUPMA) | luv | shared instrument layout |
 | Capture, gazetteer, benchmark | 0.9k | frame recording, Tracy | luv, game | gazetteer needs named views |
 
 About a quarter of Luvcraft, some 13,000 lines of renderer, meshing,
@@ -1061,8 +1061,8 @@ a reason to copy or rewrite it. Both games now use the same engine and
 the old game's cached chunk probe remains intact. Neither game saves
 physics bodies: old Luvcraft's save contains source/edits, player resume,
 and inhabitants, not its transient ball table. This port preserves that
-contract. Fountain and lava-spring block behaviours and first-person
-hand geometry remain separate work.
+contract. Fountain and lava-spring block behaviours now reuse the same
+emitter (#PXUPMA); first-person hand geometry remains separate work.
 
 Regression tests exercise resting/bounce, rolling down voxel stairs,
 wall contact, unload/resume with velocity preserved, and real host B and
@@ -1070,7 +1070,7 @@ mouse events. Seed-7 meadow captures compare 64 dropped balls after 1,200
 fixed steps on Linux Vulkan; dynamic resolution is disabled for the
 Luft capture. The old game continues to render through its own stage.
 
-** IDEA Keep block behaviour in a game's table
+** DONE Keep block behaviour in a game's table
 :PROPERTIES:
 :ID: PXWHNZ
 :END:
@@ -1082,6 +1082,11 @@ agents' tool vocabulary over the same queries.
 
 /Done when./ One behaviour block works in Luvcraft on Luft without the
 engine knowing its kind.
+
+Fountain and lava-spring blocks now meet that criterion (#PXUPMA). The
+game discovers the old world's authored sources and calls the original
+emitter against Luft's published residency. Tape and film remain future
+behaviours; this does not claim their playback is ported.
 
 ** DONE Turn the engine's real values with the old knob protocol
 :PROPERTIES:
@@ -1168,3 +1173,57 @@ watchdog is disabled. SDL's offscreen driver cannot enter native relative
 pointer mode, so the harness establishes that flag before dispatching action
 events; it does not bypass the editing handlers. The permanent regression
 test exercises the same raycast and mouse-edit boundary without a GPU.
+
+** DONE Compare and restore the small game affordances
+:PROPERTIES:
+:ID: PXUPMA
+:END:
+
+The October 2026 parity pass played both games headlessly on software
+Vulkan at native 1100 × 760. =scripts/capture-luvcraft-parity.lisp= builds
+the same seed-7 meadow deck, two springs and terminal wall in both hosts.
+It disables the fatal canvas watchdog for these deliberately slow runs.
+
+/Done./ Fountain and lava springs reuse the original fixed-step emitter,
+including source phase, water spheres and lava gobbets. Both hosts produce
+195 bodies after 90 steps. An unloaded source freezes; a removed source
+retires; unchanged sources retain their phase across edits. A real host
+placement discovers a third source on the next tick, without a B throw
+being needed to start physics.
+
+The terminal implementation now accepts game palette placements and uses
+the host overlay/focus lifetime. Tab opens a wall shell; typed =printf=
+output is checked in the real PTY screen and captured on the wall;
+Shift-Tab returns control. F1, Return and Escape stay with the shell while
+it owns focus. Urbit is not silently treated as a shell.
+
+The long walk-key row now fits its measured column instead of clipping W;
+the game legend includes Inventory and inherited F1/H controls. Both help
+keys are exercised. The eight original text knobs appear in the game's
+metabar, commit on release and invalidate their real shader consumers.
+Changing optical weight advances the installed renderer revision 0 → 1;
+the capture republishes terminal surfaces after rebuilding that renderer.
+Old/new text-metabar captures come from =capture-knob-metabars.lisp=.
+
+/Left./ Tape download/activation; film projection, playback, rewind and
+soundtrack; Urbit activation and the old terminal focus-camera easing;
+diagnostic world text/sign authoring and gazetteer named views where not
+exposed by the host; detailed companion construction previews, transcript
+cassettes, agent walls and the remaining old tool vocabulary; turtle atlas
+relief and cast shadows rather than the current box figures. View bob and
+landing dip belong with the old player-body phase and are noted for the
+hands/riding owner rather than independently changing locomotion here.
+
+/Not gaps./ Old Luvcraft also only has turtles; cats, gnomes and Fantus are
+companions, not an unported critter zoo. =sound.lisp= is film soundtrack
+plumbing, not missing footstep/mining audio. F1/H already worked: the gap
+was discoverability and legend layout. Spring blocks here are live sources,
+not a separate trampoline mechanic.
+
+/Skipped or owned elsewhere./ Phone, portals and birthday content were
+explicitly excluded. Hands/riding, material appearance, crosshair target
+highlight/block-break effects, sky and the quantity audit have other owners.
+The text controls only gain the quantity annotations required to join the
+existing host knob contract; a broader quantity audit is not part of this
+pass. Tests cover source lifecycle and phase, terminal geometry and focus,
+help bindings and shared knob identity in addition to the native captures.

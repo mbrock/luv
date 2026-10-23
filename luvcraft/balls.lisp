@@ -544,12 +544,18 @@ build this frame's sphere instance and shadow cube streams."
 (defparameter *lava-gobbet-period* 6
   "A lava spring spits one gobbet every this many steps.")
 
+(defgeneric spring-block-at (host x y z)
+  (:documentation "Return HOST's block and residency at a spring's Y-up cell."))
+
+(defmethod spring-block-at ((session luvcraft-session) x y z)
+  (world-block-at (luvcraft-session-world session) x y z))
+
 (defun spray-luvcraft-spring (spring session physics)
   (let ((x (luvcraft-spring-x spring))
         (y (luvcraft-spring-y spring))
         (z (luvcraft-spring-z spring)))
     (multiple-value-bind (block status)
-        (world-block-at (luvcraft-session-world session) x y z)
+        (spring-block-at session x y z)
       (when (and (eq status :resident) (typep block 'spring-block-kind))
         (ecase (luvcraft-spring-kind spring)
           (:fountain

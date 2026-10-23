@@ -82,10 +82,10 @@
 (defun terminal-cell-p (scene x y z)
   "Whether X,Y,Z is a solid terminal cell of SCENE."
   (and (= 1 (inspection-cell-bit (inspection-source-solid scene) x y z))
-       (eq *terminal-material-placement*
-           (scene-material-placement-at
-            scene (luft:make-site (scene-domain scene) x y z
-                                  luft:+cell-extent+ 1)))))
+       (let ((placement (scene-material-placement-at
+                         scene (luft:make-site (scene-domain scene) x y z
+                                               luft:+cell-extent+ 1))))
+         (and placement (eq :terminal (material-placement-name placement))))))
 
 (defun terminal-face-exposed-p (scene x y z normal)
   (destructuring-bind (dx dy dz) normal
@@ -494,7 +494,14 @@ and as many columns as that cell height affords across the wall."
 
 (defun viewer-terminals (viewer)
   (or (gethash viewer *viewer-terminals*)
-      (setf (gethash viewer *viewer-terminals*) (make-viewer-terminals))))
+      (setf (gethash viewer *viewer-terminals*)
+            (add-viewer-overlay viewer (make-viewer-terminals)))))
+
+(defmethod release-viewer-overlay ((state viewer-terminals))
+  (dolist (terminal (viewer-terminals-terminals state))
+    (close-world-terminal terminal))
+  (setf (viewer-terminals-terminals state) nil
+        (viewer-terminals-focus state) nil))
 
 (defmethod knobs:realize-knob progn
     ((knob terminal-emission-knob) (session game-host))
@@ -563,12 +570,15 @@ Return the terminal, or NIL when the crosshair is not on a terminal wall."
                     (push terminal (viewer-terminals-terminals state))
                     terminal))))
         (clear-viewer-controls viewer)
-        (setf (viewer-terminals-focus state) terminal)))))
+        (setf (viewer-terminals-focus state) terminal)
+        (focus-viewer viewer state)
+        terminal))))
 
 (defun unfocus-viewer-terminal (viewer)
-  (setf (viewer-terminals-focus (viewer-terminals viewer)) nil))
+  (when (eq (viewer-modal-focus viewer) (viewer-terminals viewer))
+    (unfocus-viewer viewer)))
 
-(defmethod advance-viewer-world-text ((viewer viewer))
+(defmethod advance-viewer-world-text ((viewer game-host))
   "Retire fallen walls, refresh changed screens, and publish the batches."
   (let ((state (viewer-terminals viewer))
         (scene (viewer-source viewer))
@@ -579,7 +589,7 @@ Return the terminal, or NIL when the crosshair is not on a terminal wall."
                      (terminal-surface-standing-p
                       scene (world-terminal-surface terminal)))
           (when (eq terminal (viewer-terminals-focus state))
-            (setf (viewer-terminals-focus state) nil))
+            (unfocus-viewer-terminal viewer))
           (setf (viewer-terminals-terminals state)
                 (remove terminal (viewer-terminals-terminals state)))
           ;; Unpublish before releasing what the renderer would draw.
@@ -597,23 +607,25 @@ Return the terminal, or NIL when the crosshair is not on a terminal wall."
   (and (eq :tab (canvas-key-event-key-name event))
        (member :shift (canvas-key-event-modifiers event))))
 
-(defmethod handle-canvas-event :around
-    ((viewer viewer) canvas (event canvas-key-event))
-  (let* ((state (viewer-terminals viewer))
-         (focus (viewer-terminals-focus state)))
-    (cond
-      ;; A focused wall takes every key but the one that gives it back.
-      (focus
-       (cond ((terminal-release-gesture-p event)
-              (when (typep event 'canvas-key-press-event)
-                (unfocus-viewer-terminal viewer)))
-             ((world-terminal-device focus)
-              (luv.terminal:send-pty-device-canvas-key-event
-               (world-terminal-device focus) event)))
-       nil)
-      (t (call-next-method)))))
+(defmethod viewer-focus-dismiss-key-p ((state viewer-terminals) (viewer game-host) event)
+  (declare (ignore state viewer))
+  (terminal-release-gesture-p event))
 
-(defmethod viewer-use-at-crosshair ((viewer viewer))
+(defmethod viewer-focus-left ((state viewer-terminals) (viewer game-host))
+  (declare (ignore viewer))
+  (setf (viewer-terminals-focus state) nil))
+
+(defmethod handle-viewer-focus-event ((state viewer-terminals) (viewer game-host) canvas event)
+  (declare (ignore canvas))
+  (when (typep event 'canvas-key-event)
+    (let ((terminal (viewer-terminals-focus state)))
+      (cond ((terminal-release-gesture-p event)
+             (when (typep event 'canvas-key-press-event) (unfocus-viewer viewer)))
+            ((and terminal (world-terminal-device terminal))
+             (luv.terminal:send-pty-device-canvas-key-event
+              (world-terminal-device terminal) event))))))
+
+(defmethod viewer-use-at-crosshair ((viewer game-host))
   "Tab on a terminal wall takes the keyboard there."
   (and (typep (viewer-mode viewer) 'first-person-mode)
        (focus-viewer-terminal viewer)))

@@ -37,6 +37,9 @@
           (luv.knobs:set-knob-value knob saved viewer))))
     (true (member :physics (mcluv:metabar-groups-for viewer)))
     (true (member :critters (mcluv:metabar-groups-for viewer)))
+    (true (member (luv.knobs:find-knob 'luvcraft::slug-optical-weight)
+                  (mcluv:metabar-controls-for viewer :text)))
+    (true (luv.knobs:knob-rebuild-p (luv.knobs:find-knob 'luvcraft::slug-optical-weight) viewer))
     (true (= (render::viewer-speed viewer)
              (luft.terrain:character-speed player)))))
 

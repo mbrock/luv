@@ -39,9 +39,14 @@
          (labels (mapcar #'mcluv:command-menu-entry-label
                          (mcluv:command-menu-entries-for-tables
                           (mcluv:command-menu-tables-for viewer)))))
-    (dolist (label '("Execute Command" "Toggle Metabar" "Inventory" "Creative Mode"))
+    (dolist (label '("Execute Command" "Toggle Metabar" "Inventory" "Creative Mode" "Use Terminal"))
       (true (member label labels :test #'string=)))
     (true (member :player (mcluv:metabar-groups-for viewer)))
+    (let ((keys (cdr (assoc "show keys"
+                            (cdr (assoc "Any time" (mcluv::keymap-legend-sections viewer)
+                                        :test #'string=)) :test #'string=))))
+      (true (member "F1" keys :test #'string=))
+      (true (member "H" keys :test #'string=)))
     (let ((walk (luv.knobs:find-knob 'render::movement-speed))
           (clock (luv.knobs:find-knob 'render::time-of-day)))
       (true (member walk (mcluv:metabar-controls-for viewer :player)))
@@ -58,8 +63,45 @@
                                       :timestamp 0 :key-name :x
                                       :unshifted-character #\x :modifiers '(:meta))
                         (make-instance 'luv:canvas-key-press-event
-                                       :timestamp 0 :key-name :return)))
+                                       :timestamp 0 :key-name :return)
+                        (make-instance 'luv:canvas-key-press-event
+                                       :timestamp 0 :key-name :f1)
+                        (make-instance 'luv:canvas-key-press-event
+                                       :timestamp 0 :key-name :h :unshifted-character #\h)))
       (true (render::viewer-key-command viewer event)))))
+
+(define-test game-terminal-material-and-keyboard-use-the-host-protocol
+  (let* ((terminal (game:block-placement luvcraft::*terminal-block*))
+         (builder (luft.terrain:make-scene-builder
+                   :horizontal-bits 11
+                   :material-vocabulary (game:luvcraft-palette-vocabulary game:*luvcraft-palette*)
+                   :ground-material terminal :architecture-material terminal)))
+    (loop for x from 1024 below 1028 do
+      (loop for z from 4 below 7 do (luft.terrain:scene-builder-cell builder x 1024 z)))
+    (let* ((scene (luft.terrain:finish-scene-builder builder))
+           (viewer (make-instance 'host:luvcraft-viewer :source scene :hotbar (list terminal)))
+           (surface (render::find-terminal-surface scene 1025 1024 5 '(0 -1 0)))
+           (state (render::viewer-terminals viewer))
+           (screen (make-instance 'render::world-terminal :surface surface
+                                  :columns 40 :rows 15 :terminal nil :glyph-cache nil)))
+      (true surface)
+      (is = 4 (render::terminal-surface-width surface))
+      (is = 3 (render::terminal-surface-height surface))
+      (setf (render::viewer-terminals-terminals state) (list screen)
+            (render::viewer-terminals-focus state) screen)
+      (render:focus-viewer viewer state)
+      ;; F1 and Return must belong to the shell, not open host drawers.
+      (dolist (name '(:f1 :return :escape))
+        (luv:handle-canvas-event viewer nil
+                                (make-instance 'luv:canvas-key-press-event :timestamp 0 :key-name name))
+        (is eq state (render:viewer-modal-focus viewer)))
+      (luv:handle-canvas-event viewer nil
+                              (make-instance 'luv:canvas-key-press-event :timestamp 0 :key-name :tab
+                                             :modifiers '(:shift)))
+      (true (null (render:viewer-modal-focus viewer)))
+      (true (null (render::viewer-terminals-focus state)))
+      (render:remove-viewer-overlay viewer state)
+      (true (null (render::viewer-terminals-terminals state))))))
 
 (define-test inventory-and-carried-identities-round-trip-through-the-game-save
   (let* ((world (luvcraft:make-empty-little-block-world :seed 291 :chunk-height 16))

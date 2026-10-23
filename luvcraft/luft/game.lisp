@@ -41,6 +41,8 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 (defclass ball-game-state ()
   ((physics :initform nil :accessor viewer-physics)
    (physics-clock :initform 0d0 :accessor viewer-physics-clock)
+   (springs :initform nil :accessor viewer-springs)
+   (springs-initialized-p :initform nil :accessor viewer-springs-initialized-p)
    (ball-hand :initform (make-instance 'luvcraft::ball) :reader viewer-ball-hand)
    (ball-in-hand-p :initform nil :accessor viewer-ball-in-hand-p)
    (ball-previous-centers :initform (make-hash-table) :reader viewer-ball-previous-centers)))
@@ -317,7 +319,12 @@ quickbar begins: things to build a house with, colours, and a lamp.")
                   ("place against it" "Right click")
                   ("pick its block" "Middle click")
                   ("choose a block" "Wheel")))
-    ("Any time" . luvcraft-window)))
+    ("Inventory" . luvcraft-window)
+    ("Any time" . render:luft-window)))
+
+(clim:define-command (com-use-terminal :command-table luvcraft-world
+                                      :name "Use Terminal" :keystroke (:tab)) ()
+  (render::viewer-use-at-crosshair (render:viewer-command-viewer)))
 
 (defmethod mcluv:keymap-legend-command-label
     ((viewer luvcraft-viewer) (name (eql 'com-select-hotbar-slot)) arguments table)

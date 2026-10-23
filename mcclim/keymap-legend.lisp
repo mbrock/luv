@@ -178,11 +178,14 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
        (- (+ top +keymap-legend-row-height+) 1)
        :radius 6 :ink *keymap-legend-row-ink*)
       (when keys
-        (draw-text* pane (format nil "~{~A~^  ~}" keys)
-                    keys-right middle
-                    :align-x :right :align-y :center
-                    :text-size 14 :text-face :bold
-                    :ink *keymap-legend-key-ink*))
+        (let* ((text (format nil "~{~A~^  ~}" keys))
+               (width (text-size medium text :text-style (make-text-style nil :bold 14)))
+               (size (* 14 (min 1 (/ (- +keymap-legend-keys-right+ 12)
+                                     (max 1 width))))))
+          (draw-text* pane text keys-right middle
+                      :align-x :right :align-y :center
+                      :text-size size :text-face :bold
+                      :ink *keymap-legend-key-ink*)))
       (draw-text* pane label (+ keys-right 18) middle
                   :align-y :center :text-size 14
                   :ink *keymap-legend-text-ink*))))
