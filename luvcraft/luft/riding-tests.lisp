@@ -1,0 +1,108 @@
+(in-package #:luvcraft.luft.game.tests)
+
+(defun riding-test-viewer (&key wall slope)
+  (let* ((scene (ball-test-scene :wall wall :slope slope))
+         (world (luvcraft:make-empty-little-block-world :seed 7))
+         (player (render::make-walking-character
+                  :position (luv.arithmetic.lisp.vec3:make-vec3 1032.5 1029.5 2.0)))
+         (viewer (make-instance 'host:luvcraft-viewer :source scene :luvcraft-world world
+                                :player player
+                                :hotbar (list (game:block-placement luvcraft::*grass-block*)))))
+    (setf (slot-value scene 'luft.terrain::source) (game:luvcraft-world-luft-source world)
+          (host::viewer-animals-initialized-p viewer) t
+          (host::viewer-agents-initialized-p viewer) t
+          (render:viewer-mode viewer) (make-instance 'render:first-person-mode)
+          (render:camera-position (render:viewer-camera viewer))
+          (luv.arithmetic.lisp.vec3:make-vec3 1032.5 1029.5 2.3)
+          (render:camera-yaw (render:viewer-camera viewer)) (/ pi 2)
+          (render:camera-pitch (render:viewer-camera viewer)) 0.0)
+    viewer))
+
+(defun ride-key (viewer name &optional release modifiers)
+  (luv:handle-canvas-event
+   viewer nil (make-instance (if release 'luv:canvas-key-release-event 'luv:canvas-key-press-event)
+                            :timestamp 0 :key-name name :modifiers modifiers)))
+
+(define-test riding-uses-real-tab-wasd-and-luft-slope-contact
+  (let* ((viewer (riding-test-viewer :slope t))
+         (turtle (make-instance 'luvcraft::turtle :seed 3 :yaw (/ pi 2) :heading (/ pi 2)
+                                :position (luv.arithmetic.lisp.vec3:make-vec3 8.5d0 8d0 8.5d0)))
+         (camera (render:viewer-camera viewer)))
+    (setf (host::viewer-animals viewer) (list turtle)
+          (render:camera-position camera) (luv.arithmetic.lisp.vec3:make-vec3 1032.5 1029.5 8.3))
+    (host::update-viewer-rides viewer)
+    (ride-key viewer :tab)
+    (let ((ride (render:viewer-modal-focus viewer)))
+      (true (typep ride 'luvcraft::critter-ride))
+      (true (render:viewer-focus-carries-player-p ride))
+      (true (host::viewer-body-visible-p viewer))
+      ;; The original seat is converted, not reconstructed from new constants.
+      (let* ((old (luvcraft::luvcraft-focus-camera-pose ride viewer))
+             (new (render:viewer-focus-camera-pose ride viewer)))
+        (is equalp (host::host-position viewer (luvcraft::camera-pose-position old))
+            (render:camera-pose-position new))
+        (is = (luvcraft::camera-pose-field-of-view old) (render:camera-pose-field-of-view new)))
+      (ride-key viewer :w)
+      (let ((start (luvcraft::critter-x turtle)))
+        (dotimes (frame 600)
+          (render::advance-viewer-world viewer (/ frame 60d0)))
+        (true (> (luvcraft::critter-x turtle) (+ start 5)))
+        (true (< (luvcraft::critter-y turtle) 6))
+        ;; At the lip of a stair the turtle can still be falling. Release
+        ;; forward and allow the original gravity to settle it on that tread.
+        (ride-key viewer :w t)
+        (dotimes (frame 60) (render::advance-viewer-world viewer (+ 10d0 (/ frame 60d0))))
+        (true (luvcraft::critter-grounded-p turtle)))
+      (let ((p (luft.terrain:body-position
+                (luft.terrain:character-body (render:viewer-player viewer)))))
+        (is equalp (host::animal-luft-position turtle) p))
+      (ride-key viewer :d)
+      (host::advance-viewer-ride viewer 0.1d0)
+      (true (> (luvcraft::turtle-heading turtle) (/ pi 2)))
+      (ride-key viewer :w t)
+      (ride-key viewer :d t)
+      (host::advance-viewer-ride viewer 0.1d0)
+      (true (luvcraft::turtle-resting-p turtle))
+      (let* ((pose (render:viewer-focus-camera-pose ride viewer))
+             (p (render:camera-pose-position pose)))
+        (setf (render:camera-position camera) p
+              (render:camera-field-of-view camera) (render:camera-pose-field-of-view pose)))
+      (ride-key viewer :tab nil '(:shift))
+      (true (null (render:viewer-modal-focus viewer)))
+      (let* ((body (luft.terrain:character-body (render:viewer-player viewer)))
+             (p (luft.terrain:body-position body)))
+        (true (luft.terrain::body-clear-at-p
+               (luft.terrain::inspection-source-solid (render:viewer-source viewer))
+               (luv.arithmetic.lisp.vec3:vec3-x p) (luv.arithmetic.lisp.vec3:vec3-y p)
+               (luv.arithmetic.lisp.vec3:vec3-z p)
+               (luft.terrain:body-height body) (luft.terrain:body-radius body))))
+      ;; Dismount eases out of the narrowed seat, rather than cutting the FOV.
+      (let ((fov (render:camera-field-of-view camera)))
+        (render::advance-viewer-camera viewer (/ 1d0 60) nil)
+        (true (> (render:camera-field-of-view camera) fov))
+        (true (render::viewer-focus-camera-origin viewer)))
+      (dotimes (frame 120) (render::advance-viewer-camera viewer (/ 1d0 60) nil))
+      (true (null (render::viewer-focus-camera-origin viewer)))
+      (is = 0d0 (luvcraft:movement-intent-axis (host::viewer-rider-intent viewer) :forward :backward)))))
+
+(define-test riding-target-is-occluded-and-forgotten-mount-releases-controls
+  (let* ((viewer (riding-test-viewer :wall t))
+         (turtle (make-instance 'luvcraft::turtle :seed 3
+                                :position (luv.arithmetic.lisp.vec3:make-vec3 21.5d0 2d0 8.5d0))))
+    (setf (host::viewer-animals viewer) (list turtle)
+          (render:camera-position (render:viewer-camera viewer))
+          (luv.arithmetic.lisp.vec3:make-vec3 1042.5 1032.5 2.3)
+          (render:camera-yaw (render:viewer-camera viewer)) 0.0)
+    (host::update-viewer-rides viewer)
+    (ride-key viewer :tab)
+    (true (null (render:viewer-modal-focus viewer)))
+    (setf (luv.arithmetic.lisp.vec3:vec3-x (luvcraft::critter-position turtle)) 19d0)
+    (ride-key viewer :tab)
+    (true (typep (render:viewer-modal-focus viewer) 'luvcraft::critter-ride))
+    (ride-key viewer :w)
+    (setf (host::viewer-animals viewer) nil)
+    (host::advance-viewer-ride viewer 0.1d0)
+    (host::update-viewer-rides viewer)
+    (true (null (render:viewer-modal-focus viewer)))
+    (true (luvcraft::movement-intent-still-p (host::viewer-rider-intent viewer)))
+    (true (notany (lambda (o) (typep o 'luvcraft::critter-ride)) (render:viewer-overlays viewer)))))

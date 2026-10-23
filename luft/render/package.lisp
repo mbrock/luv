@@ -219,6 +219,7 @@
            #:viewer-modal-focus #:focus-viewer #:unfocus-viewer
            #:viewer-focus-score #:viewer-focus-entered #:viewer-focus-left
            #:handle-viewer-focus-event #:viewer-focus-camera-pose #:viewer-focus-dismiss-key-p
+           #:viewer-focus-carries-player-p #:viewer-focus-return-camera-pose
            #:camera-pose #:make-camera-pose #:camera-pose-position
            #:camera-pose-yaw #:camera-pose-pitch #:camera-pose-field-of-view
            #:camera-pose-from-camera #:advance-camera-focus

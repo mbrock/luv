@@ -56,7 +56,9 @@ keeping a second copy of them."))
   (declare (ignore focus))
   t)
 
-(defun carry-luvcraft-player (session critter)
+(defgeneric carry-luvcraft-player (session critter))
+
+(defmethod carry-luvcraft-player (session critter)
   "Set the player on CRITTER's back, at rest and standing on nothing else."
   (let ((player (luvcraft-session-player session)))
     (when player
@@ -74,7 +76,9 @@ keeping a second copy of them."))
     (0.9d0 0.9d0) (-0.9d0 0.9d0) (0.9d0 -0.9d0) (-0.9d0 -0.9d0))
   "Where to try putting a rider down, nearest the animal first.")
 
-(defun dismount-luvcraft-player (session critter)
+(defgeneric dismount-luvcraft-player (session critter))
+
+(defmethod dismount-luvcraft-player (session critter)
   "Stand the player beside CRITTER somewhere their own box actually fits.
 
 An animal can walk under a ledge its rider could not stand under, so getting

@@ -17,6 +17,8 @@
   "Optional host replay callback, called with the open depth-tested scene pass.")
 (defvar *renderer-world-panel-encoder* nil
   "Optional host replay callback for native-density world panels.")
+(defvar *renderer-viewmodel-encoder* nil
+  "Optional host replay callback into native HDR, with isolated viewmodel depth.")
 
 (defun camera-clip-function (data)
   "Project a world point to the camera's homogeneous clip, as MESH-VIEW-CLIP."
@@ -428,6 +430,24 @@ final pass."
        (renderer-frame-flame-bind-group renderer frame)
        (renderer-flame-instance-count renderer)))
     (end-pass composite-pass))
+  ;; View-local items must occlude themselves, never test against terrain.
+  ;; Keep their depth independent of scene and panel depth sampled by the lens.
+  (let ((generation (renderer-target-generation renderer)))
+    (let ((pass
+            (begin-render-pass
+             encoder
+             (make-render-pass-descriptor
+              :label "luft native viewmodel"
+              :color-attachments
+              `((:view ,(renderer-target-generation-viewmodel-color-view generation)
+                 :load-op :clear :store-op :store :clear-value #(0.0 0.0 0.0 0.0)))
+              :depth-stencil-attachment
+              `(:view ,(renderer-target-generation-viewmodel-depth-view generation)
+                :depth-load-op :clear :depth-store-op :discard :depth-clear-value 1.0)))))
+      (when *renderer-viewmodel-encoder* (funcall *renderer-viewmodel-encoder* pass))
+      (end-pass pass))
+    (prepare-texture encoder (renderer-target-generation-viewmodel-color-texture generation)
+                     :texture-binding))
   (prepare-texture encoder (renderer-composite-texture renderer)
                    :texture-binding))
 

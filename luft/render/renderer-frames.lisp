@@ -151,7 +151,8 @@ releases for retry, but those retired bindings must never be served again. #RBNW
    frame (list :present (renderer-composite-view renderer) (renderer-depth-view renderer)
                (renderer-bloom-primary-view renderer)
                (renderer-bloom-secondary-view renderer)
-               (renderer-panel-color-view renderer) (renderer-panel-depth-view renderer))
+               (renderer-panel-color-view renderer) (renderer-panel-depth-view renderer)
+               (renderer-target-generation-viewmodel-color-view (renderer-target-generation renderer)))
    (lambda ()
      (make-presentation-binding
       (renderer-finishing renderer) (renderer-device renderer)
@@ -159,7 +160,8 @@ releases for retry, but those retired bindings must never be served again. #RBNW
       (renderer-frame-state-camera-buffer frame)
       (renderer-bloom-primary-view renderer)
       (renderer-bloom-secondary-view renderer)
-      (renderer-panel-color-view renderer) (renderer-panel-depth-view renderer)))))
+      (renderer-panel-color-view renderer) (renderer-panel-depth-view renderer)
+      (renderer-target-generation-viewmodel-color-view (renderer-target-generation renderer))))))
 
 (defun renderer-frame-lens-bind-group (renderer frame stage source)
   "Bind lens STAGE reading SOURCE to FRAME's camera upload."

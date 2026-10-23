@@ -295,9 +295,9 @@ the layer of #W9QMPT that owns the feature afterwards.
 | Place, mine, pick | in =app.lisp= | done, with undo and bevel-face rim (#7O90OS) | terrain edits, game rules | carried kind, reach rules |
 | Inventory, quickbar, icons | 0.1k + 1.6k McCLIM | shared old instruments (#291ELY) | game | host protocol; both inventory modes and profiles |
 | Physics, balls | 3.7k | reused solver, throws, live fountain/lava sources (#0JMB9O, #PXUPMA) | physics, game | shared emitter, resident Luft queries |
-| Critters | 0.7k | old turtles, Luft body queries | game | relief/cast-shadow presentation remains |
+| Critters, riding | 0.7k | original turtles and rides (#DEHFD4) | game | Luft contact adapter, figure bodies, neutral focus |
 | Particles | 0.2k | reused mining burst, material-tinted figures (#7O90OS) | game simulation, figure stage | old motion and bounded population, Luft tones |
-| First-person hands, held items | 1k | separate hands/riding work | game, on a renderer stage | owned separately |
+| First-person hands, held items | 1k | original bounded hands and ball (#DEHFD4) | game, native HDR viewmodel stage | original animation, geometry and shaders |
 | Sky, clock, night | 0.4k | original atmosphere/profile/clock + Luft night (#S84HR6) | game, renderer | shared shader functions; game-owned clock and engine knobs |
 | World text | 0.4k | done | renderer | delete |
 | Terminal walls, phone | 2.8k | game terminal walls and modal shell focus (#PXUPMA) | game, on renderer stages | Urbit and focus camera remain; phone skipped |
@@ -964,9 +964,43 @@ backends compile. Headless SDL with software Vulkan captures five turtles
 on seed 7's meadow and the original wizard on his isle. The live turtles
 walk and rest, and their descriptions round-trip through Luvcraft's own save
 reader. Still open: turtle atlas relief rather than flat tones, shadows
-cast by animal boxes, riding, and held-device stages. Agent bodies now use
+cast by animal boxes, and further held-device stages. Riding and hands now
+reuse the original implementations (#DEHFD4). Agent bodies now use
 their original SDF stage (#JZWPAI). The old critter renderer remains because old
 Luvcraft still plays through it.
+
+*** DONE Ride the original turtles with the original hands
+:PROPERTIES:
+:ID: DEHFD4
+:END:
+
+=luvcraft/luft/game= mounts turtles through the host's neutral Tab focus
+protocol. WASD drives the original =critter-ride=; Shift-Tab or Escape
+dismounts. The original seat, gait, steering, narrowed FOV and camera easing
+remain authoritative. The host suspends walking while carried; the existing
+Luft contact adapter moves the animal, and dismount checks Luft's player box
+against the original candidate offsets. The three original =:riding= knobs
+are exposed through =luv/knobs=, not copied into a game-only control panel.
+
+The original bounded SDF hands, palm poses, walking bob and landing animation
+now use a native HDR =:viewmodel= stage after terrain reconstruction, without
+scene depth or temporal history. An isolated native depth buffer gives held
+items their own self-occlusion; their HDR layer joins presentation after
+terrain AO and tilt shift, before exposure and paper grading. The original
+held-item vertices, atlas and block shaders draw the ball in hand.
+Selecting a building block does not put
+one in the palm in old Luvcraft, so this port preserves its empty-hand pose.
+Existing animal persistence is unchanged: neither host saves a mounted focus.
+
+Two host-input regressions exercise Tab/WASD, slope contact, seat conversion,
+safe dismount, camera return, occlusion and removal of the mounted animal.
+Matching 800 by 600 native software-Vulkan captures show idle selected-block
+hands, ball, mounted and descending states in both hosts. With the fatal
+canvas watchdog disabled for these slow captures, 600 equal ride steps take
+both turtles from height 10 to 8, with matching position and gait. Geometry
+is reused, not visually substituted; lighting is not pixel-identical, and
+the ball is mostly hidden by the shared hotbar. Turtle atlas relief and
+shadows remain the earlier figure port's limitations, not riding changes.
 
 *** DONE Give Luvcraft companions bodies and tools on Luft
 :PROPERTIES:

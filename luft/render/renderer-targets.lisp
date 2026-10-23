@@ -30,6 +30,10 @@
    (bounds-high-view :initform nil :reader renderer-target-generation-bounds-high-view)
    (composite-texture :initform nil :reader renderer-target-generation-composite-texture)
    (composite-view :initform nil :reader renderer-target-generation-composite-view)
+   (viewmodel-color-texture :initform nil :reader renderer-target-generation-viewmodel-color-texture)
+   (viewmodel-color-view :initform nil :reader renderer-target-generation-viewmodel-color-view)
+   (viewmodel-depth-texture :initform nil :reader renderer-target-generation-viewmodel-depth-texture)
+   (viewmodel-depth-view :initform nil :reader renderer-target-generation-viewmodel-depth-view)
    (panel-color-texture :initform nil :reader renderer-target-generation-panel-color-texture)
    (panel-color-view :initform nil :reader renderer-target-generation-panel-color-view)
    (panel-depth-texture :initform nil :reader renderer-target-generation-panel-depth-texture)
@@ -220,7 +224,7 @@ without one, presentation enlarges it directly."
       (render-scale-extent extent (renderer-scene-share renderer))))
 
 (defparameter *renderer-output-images*
-  '(:resolved :history :composite :panel-color :panel-depth :bloom-primary :bloom-secondary)
+  '(:resolved :history :composite :viewmodel-color :viewmodel-depth :panel-color :panel-depth :bloom-primary :bloom-secondary)
   "The images sized by the output, which a scene-only resize keeps.")
 
 (defun make-renderer-target-generation (renderer extent &optional previous)
@@ -297,6 +301,8 @@ starts over."
             (image :bounds-low :rgba16-float render-extent '(:render-attachment :texture-binding))
             (image :bounds-high :rgba16-float render-extent '(:render-attachment :texture-binding))))
         (image :composite :rgba16-float extent '(:render-attachment :texture-binding))
+        (image :viewmodel-color :rgba16-float extent '(:render-attachment :texture-binding))
+        (image :viewmodel-depth :depth32-float extent :render-attachment)
         (image :panel-color :rgba16-float extent '(:render-attachment :texture-binding))
         (image :panel-depth :depth32-float extent '(:render-attachment :texture-binding))
         (image :bloom-primary :rgba16-float (bloom-extent extent)

@@ -12,7 +12,7 @@
 (defgeneric advance-viewer-overlay (overlay viewer seconds)
   (:method (overlay viewer seconds) (declare (ignore overlay viewer seconds)) nil))
 (defgeneric viewer-overlay-stage (overlay)
-  (:documentation "Return :SCENE, :WORLD-PANEL, :HUD, or :NONE.")
+  (:documentation "Return :SCENE, :WORLD-PANEL, :VIEWMODEL, :HUD, or :NONE.")
   (:method (overlay) (declare (ignore overlay)) :none))
 (defgeneric viewer-world-panel-depth (overlay viewer)
   (:documentation "Camera-forward distance for far-to-near panel ordering.")
@@ -47,6 +47,12 @@
 (defgeneric viewer-focus-camera-pose (focus viewer)
   (:documentation "Return a host CAMERA-POSE in Luft's Z-up coordinates, or NIL.")
   (:method (focus viewer) (declare (ignore focus viewer)) nil))
+(defgeneric viewer-focus-carries-player-p (focus)
+  (:documentation "Whether FOCUS positions the player instead of player physics.")
+  (:method (focus) (declare (ignore focus)) nil))
+(defgeneric viewer-focus-return-camera-pose (viewer origin)
+  (:documentation "Optional moving return pose to ease toward after leaving focus.")
+  (:method (viewer origin) (declare (ignore viewer origin)) nil))
 
 (defun add-viewer-overlay (viewer overlay)
   (unless (member overlay (viewer-overlays viewer) :test #'eq)
@@ -541,6 +547,7 @@ before the operation boundary, or it would encode through resources which the
 
 (defmethod viewer-figures ((viewer t))
   (let ((player (and (not (typep (viewer-mode viewer) 'first-person-mode))
+                     (not (viewer-focus-carries-player-p (viewer-modal-focus viewer)))
                      (viewer-player viewer))))
     (when player (list (character-render-lanes player)))))
 
@@ -553,6 +560,9 @@ before the operation boundary, or it would encode through resources which the
          (*renderer-scene-overlay-encoder*
            (lambda (pass)
              (encode-viewer-overlays viewer :scene pass surface-texture)))
+         (*renderer-viewmodel-encoder*
+           (lambda (pass)
+             (encode-viewer-overlays viewer :viewmodel pass surface-texture)))
          (*renderer-world-panel-encoder*
            (lambda (pass)
              (encode-viewer-overlays viewer :world-panel pass surface-texture)))
@@ -973,6 +983,7 @@ before the operation boundary, or it would encode through resources which the
     ;; A free camera leaves the character waiting, and no character moves
     ;; until the ground under it is resident again.
     (unless (or (typep (viewer-mode viewer) 'free-camera-mode)
+                (viewer-focus-carries-player-p (viewer-modal-focus viewer))
                 (not (viewer-player-ground-resident-p viewer)))
       (advance-world-simulation (viewer-simulation viewer) dt))
     (advance-viewer-game viewer dt)
@@ -1001,6 +1012,17 @@ before the operation boundary, or it would encode through resources which the
     ;; Ordinary following resumes from the saved viewing direction and FOV.
     (let ((origin (viewer-focus-camera-origin viewer))
           (camera (viewer-camera viewer)))
+      (when-let ((pose (viewer-focus-return-camera-pose viewer origin)))
+        (advance-camera-focus camera pose dt)
+        (let ((p (camera-position camera)) (q (camera-pose-position pose)))
+          (when (> (+ (abs (- (vec3-x p) (vec3-x q)))
+                      (abs (- (vec3-y p) (vec3-y q)))
+                      (abs (- (vec3-z p) (vec3-z q)))
+                      (abs (shortest-angle-difference (camera-yaw camera) (camera-pose-yaw pose)))
+                      (abs (- (camera-pitch camera) (camera-pose-pitch pose)))
+                      (abs (- (camera-field-of-view camera) (camera-pose-field-of-view pose))))
+                   1.0e-4)
+            (return-from advance-viewer-camera nil))))
       (setf (camera-yaw camera) (camera-pose-yaw origin)
             (camera-pitch camera) (camera-pose-pitch origin)
             (camera-field-of-view camera) (camera-pose-field-of-view origin)
@@ -1273,7 +1295,9 @@ A completed pair is spent, so a third quick press starts a new one."
     ()
   (redo-viewer-world-edit (viewer-command-viewer)))
 
-(defun place-viewer-at-player-eyes (viewer)
+(defgeneric place-viewer-at-player-eyes (viewer))
+
+(defmethod place-viewer-at-player-eyes (viewer)
   (when (viewer-player viewer)
     (let ((position (body-position (character-body (viewer-player viewer)))))
       (setf (camera-position (viewer-camera viewer))

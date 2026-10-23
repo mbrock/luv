@@ -199,12 +199,19 @@ field; the left palm's last lane says which arm the instance covers."
     data)
   body)
 
+(defgeneric player-body-pipeline-layout (session)
+  (:method (session)
+    (live-shader-pipeline-layout (luvcraft-session-block-pipeline session))))
+
+(defgeneric player-body-scene-bind-group (session surface)
+  (:method (session surface)
+    (luvcraft-frame-scene-bind-group (luvcraft-frame-state session surface))))
+
 (defmethod encode-luvcraft-overlay
     ((body player-body) session pass surface-texture)
   (when (player-body-sdf-pipeline body)
     (place-player-body-sdf body)
-    (let* ((frame (luvcraft-frame-state session surface-texture))
-           (instance-buffer
+    (let* ((instance-buffer
              (canvas-frame-resource
               (player-body-sdf-instance-buffers body)
               (luvcraft-session-context session) surface-texture
@@ -222,7 +229,7 @@ field; the left palm's last lane says which arm the instance covers."
              (player-body-sdf-pipeline body)))
       (set-vertex-buffer pass 0 (player-body-sdf-vertex-buffer body))
       (set-vertex-buffer pass 1 instance-buffer)
-      (set-bind-group pass 0 (luvcraft-frame-scene-bind-group frame))
+      (set-bind-group pass 0 (player-body-scene-bind-group session surface-texture))
       (draw pass 6 2)))
   body)
 
@@ -267,8 +274,7 @@ field; the left palm's last lane says which arm the instance covers."
                     :label "player body SDF pipeline"
                     :device device
                     :layout
-                    (live-shader-pipeline-layout
-                     (luvcraft-session-block-pipeline session))
+                    (player-body-pipeline-layout session)
                     :vertex-buffers
                     '((:array-stride 12
                        :attributes
@@ -348,7 +354,7 @@ it away when it is already the thing in hand.  Returns what is now held."
                                 (make-instance type))))
     (player-body-hand-item body)))
 
-(defun advance-player-body (body session seconds)
+(defun advance-player-body (body session seconds &key (place-view-p t))
   "Ease BODY's held item and walking bob by SECONDS."
   (flet ((ease (current target rate)
            (let ((step (* rate seconds)))
@@ -393,7 +399,8 @@ it away when it is already the thing in hand.  Returns what is now held."
                        (player-body-airborne-speed body) 0d0)))
           (setf (player-body-grounded-p body) grounded-p))
         (incf (player-body-land-elapsed body) seconds)
-        (unless (or (luvcraft-session-focus-camera-active-p session)
+        (unless (or (not place-view-p)
+                    (luvcraft-session-focus-camera-active-p session)
                     (let ((focus (luvcraft-session-modal-focus session)))
                       (and focus (luvcraft-focus-carries-player-p focus))))
           (place-player-view body player (luvcraft-session-camera session))))))

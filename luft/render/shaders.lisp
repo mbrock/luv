@@ -1489,7 +1489,8 @@ NIL leaves the atelier's direct light unchanged.")
                  (bloom :texture-2d :binding 4 :sample-transfer :identity)
                  (shafts :texture-2d :binding 5 :sample-transfer :identity)
                  (panel-color :texture-2d :binding 6 :sample-transfer :identity)
-                 (panel-depth :depth-texture-2d :binding 7)))
+                 (panel-depth :depth-texture-2d :binding 7)
+                 (viewmodel :texture-2d :binding 8 :sample-transfer :identity)))
   (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (value (sample scene scene-sampler uv))
          (auto-exposure (swizzle sky-color-vector :w))
@@ -1712,8 +1713,18 @@ NIL leaves the atelier's direct light unchanged.")
            (+ (interpret (* (+ panel-radiance (* radiance scene-share)) auto-exposure)
                          :quantity quantities:scene-radiance :unit :one)
               (* lens scene-share)))
+         ;; Native view-local geometry has no relation to terrain depth:
+         ;; neither its AO nor its tilt shift may paint across a player's arms.
+         (held (sample viewmodel scene-sampler uv))
+         (world-share (assume-quantity (- 1.0 (swizzle held :w)) :unit :one))
+         (held-radiance (assume-quantity (swizzle held :xyz)
+                                         :quantity quantities:scene-radiance :unit :one))
+         (view-radiance
+           (+ (interpret (* held-radiance auto-exposure)
+                         :quantity quantities:scene-radiance :unit :one)
+              (* exposed-radiance world-share)))
          (graded
-           (representation (paper-grade (paper-tonemap exposed-radiance))))
+           (representation (paper-grade (paper-tonemap view-radiance))))
          ;; A restrained corner falloff; the frame should feel printed, not
          ;; port-holed.
          (centered (- uv (vec2 0.5 0.5)))

@@ -236,7 +236,9 @@
                (:file "luvcraft/luft/agents")
                (:file "luvcraft/luft/agent-tools")
                (:file "luvcraft/luft/presentation")
-               (:file "luvcraft/luft/feedback"))
+               (:file "luvcraft/luft/feedback")
+               (:file "luvcraft/luft/body-drawing")
+               (:file "luvcraft/luft/riding"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"
@@ -245,6 +247,7 @@
   :serial t
   :components ((:file "luvcraft/luft/game-tests")
                (:file "luvcraft/luft/ball-tests")
+               (:file "luvcraft/luft/riding-tests")
                (:file "luvcraft/luft/knob-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
