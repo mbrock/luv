@@ -23,6 +23,12 @@ corners lie outside one clip plane, so nothing visible is ever lost.")
 By default it casts its plain faces, shrunk one tick into the solid, for a
 seventh of the triangles.  A new renderer reads it.")
 
+(defparameter *merge-terrain-shadows-p* t
+  "Merge the default inward shadow faces into exact coplanar rectangles.
+
+A new renderer reads this. NIL retains the per-star draw path for comparison;
+flat terrain and explicit bevelled shadows also retain that path.")
+
 (defparameter *terrain-bevels-p* t
   "Whether terrain draws the bevelled star atlas or plain cube faces.
 
@@ -78,4 +84,3 @@ until light work filled the frame.")
   "Whether frames draw the resident terrain, so its cost can be subtracted.
 
 :SHADOW or :SCENE draws it into only that pass.")
-

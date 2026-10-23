@@ -283,10 +283,12 @@
 (define-test terrain-shaders-are-vertex-stages
   (let ((scene (shaders:terrain-vertex-specification))
         (shadow (shaders:terrain-shadow-vertex-specification))
+        (rectangles (shaders:terrain-shadow-rectangle-vertex-specification))
         (fragment (shaders:star-fragment-specification)))
     (true (eq :vertex (luv.shader:shader-specification-stage scene)))
     (true (eq :vertex (luv.shader:shader-specification-stage shadow)))
-    (dolist (specification (list scene shadow fragment))
+    (true (eq :vertex (luv.shader:shader-specification-stage rectangles)))
+    (dolist (specification (list scene shadow rectangles fragment))
       (true (luv.msl:compile-msl specification))
       (true (luv.spir-v:compile-shader-specification specification)))
     (let ((scene-bindings

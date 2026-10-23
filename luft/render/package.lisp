@@ -24,6 +24,7 @@
            #:fixture-body-fragment-specification
            #:terrain-vertex-specification
            #:terrain-shadow-vertex-specification
+           #:terrain-shadow-rectangle-vertex-specification
            #:sky-fragment-specification
            #:sky-temporal-fragment-specification
            #:temporal-neighbourhood-fragment-specification

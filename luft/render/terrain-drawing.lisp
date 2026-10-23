@@ -4,7 +4,8 @@
 ;;; shadow pass. It owns the immutable star tables and those two programs;
 ;;; resident owners supply sites sorted by star and their appearance, frames
 ;;; supply the camera.  Each star is one indexed patch instanced over its
-;;; run of sites (#8TUEPF).
+;;; run of sites (#8TUEPF). The default shadow pass instead instances merged
+;;; coplanar rectangles, one draw per resident (#5UH08L).
 
 (defclass terrain-drawing (gpu-resource-owner)
   (;; Per star: scene first index, scene index count, shadow first index,
@@ -15,6 +16,8 @@
    (scene-indices :initform nil :accessor terrain-scene-indices)
    (shadow-vertices :initform nil :accessor terrain-shadow-vertices)
    (shadow-indices :initform nil :accessor terrain-shadow-indices)
+   (merged-shadows-p :initarg :merged-shadows-p :initform nil
+                     :reader terrain-merged-shadows-p)
    (scene-program :accessor terrain-scene-program)
    (shadow-program :accessor terrain-shadow-program)
    ;; Barrels and crates standing in body cells (fixture-drawing.lisp).
@@ -22,12 +25,16 @@
 
 (defgeneric make-terrain-binding
     (drawing device sites camera
-     &key appearances lights descriptors shadow-map shadow-sampler shadow-p))
+     &key appearances lights descriptors shadow-map shadow-sampler shadow-p shadow-rectangles))
 (defgeneric encode-terrain (drawing pass binding resident &key shadow-p))
 
 (defmethod make-terrain-binding
     ((drawing terrain-drawing) device sites camera
-     &key appearances lights descriptors shadow-map shadow-sampler shadow-p)
+     &key appearances lights descriptors shadow-map shadow-sampler shadow-p shadow-rectangles)
+  (when (and shadow-p (terrain-merged-shadows-p drawing))
+    (return-from make-terrain-binding
+      (make-program-binding (terrain-shadow-program drawing) device
+                            :shadow-rectangles shadow-rectangles :camera-state camera)))
   (apply #'make-program-binding
          (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))
          device :sites sites :camera-state camera
@@ -40,6 +47,13 @@
                    :shadow-map shadow-map :shadow-sampler shadow-sampler))))
 
 (defmethod encode-terrain ((drawing terrain-drawing) pass binding resident &key shadow-p)
+  (when (and shadow-p (terrain-merged-shadows-p drawing))
+    (let ((count (resident-population-shadow-rectangle-count resident)))
+      (when (plusp count)
+        (set-pipeline pass (program-pipeline (terrain-shadow-program drawing)))
+        (set-bind-group pass 0 binding)
+        (draw-indexed pass (terrain-shadow-indices drawing) :uint32 6 count)))
+    (return-from encode-terrain))
   (let ((program (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing)))
         (runs (resident-population-star-runs resident))
         (ranges (terrain-star-ranges drawing))
@@ -93,6 +107,73 @@ included, outside its own caster, so nothing shades itself.
       (if bevels-p
           (luft:star-atlas-owned-triangles star)
           (luft:star-atlas-flat-owned-triangles star))))
+
+(defun merge-terrain-shadow-faces (sites)
+  "Compress the plain inward shadow surface into coplanar rectangles.
+
+Each rectangle is two vec4s: world-cell minimum and signed normal axis
+(+/-1..3), then XYZ extents and padding. The minimum includes the same
+one-tick inward shift as STAR-SHADOW-TRIANGLES. Only faces on the same
+oriented plane merge; holes and full lateral extents remain unchanged.
+This is a depth-only draw product, not a replacement semantic mesh. #5UH08L"
+  (declare (type (simple-array (unsigned-byte 32) (*)) sites))
+  (let ((planes (make-hash-table :test #'eql))
+        (rectangles (make-array 0 :element-type 'single-float
+                                 :adjustable t :fill-pointer 0)))
+    ;; A site owns the three faces incident to its all-positive sample.
+    ;; Pack sparse (U,V) cell coordinates instead of allocating per-corner
+    ;; lists or a dense array spanning an entire world-height plane.
+    (loop for offset from 0 below (length sites) by 4
+          for star = (aref sites (+ offset 3))
+          for occupied = (logbitp 7 star)
+          do (dotimes (axis 3)
+               (unless (eq occupied (logbitp (- 7 (ash 1 axis)) star))
+                 (let* ((plane (logior (ash (aref sites (+ offset axis)) 3)
+                                       (ash axis 1) (if occupied 0 1)))
+                        (cells (or (gethash plane planes)
+                                   (setf (gethash plane planes)
+                                         (make-hash-table :test #'eql))))
+                        (u (aref sites (+ offset (mod (1+ axis) 3))))
+                        (v (aref sites (+ offset (mod (+ 2 axis) 3)))))
+                   (setf (gethash (logior u (ash v 32)) cells) t)))))
+    (dolist (plane (sort (loop for key being the hash-keys of planes collect key) #'<))
+      (let* ((cells (gethash plane planes))
+             (axis (ldb (byte 2 1) plane))
+             (sign (if (logbitp 0 plane) 1 -1))
+             (u-axis (mod (1+ axis) 3))
+             (v-axis (mod (+ 2 axis) 3)))
+        (dolist (cell (sort (loop for key being the hash-keys of cells collect key) #'<))
+          (when (gethash cell cells)
+            (let* ((u (ldb (byte 32 0) cell))
+                   (v (ash cell -32))
+                   (width (loop for du from 1
+                                while (gethash (+ cell du) cells)
+                                finally (return du)))
+                   (height
+                     (loop for dv from 1
+                           while (loop for du below width
+                                       always (gethash (+ cell du (ash dv 32)) cells))
+                           finally (return dv))))
+              (dotimes (dv height)
+                (dotimes (du width)
+                  (remhash (+ cell du (ash dv 32)) cells)))
+              (dotimes (coordinate 3)
+                (vector-push-extend
+                 (coerce (cond ((= coordinate axis) (- (ash plane -3) (/ sign 8)))
+                               ((= coordinate u-axis) u)
+                               (t v))
+                         'single-float)
+                 rectangles))
+              (vector-push-extend (float (* sign (1+ axis))) rectangles)
+              (dotimes (coordinate 3)
+                (vector-push-extend
+                 (float (cond ((= coordinate u-axis) width)
+                              ((= coordinate v-axis) height)
+                              (t 0)))
+                 rectangles))
+              (vector-push-extend 0.0 rectangles))))))
+    (make-array (length rectangles) :element-type 'single-float
+                                   :initial-contents rectangles)))
 
 (defun star-patch-tables (bevels-p)
   "Index each star's owned triangles into shared scene and shadow tables.
@@ -174,7 +255,10 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
 
 (defun make-terrain-drawing (device target-formats sample-count
                              &key (fragment (shaders:star-fragment-specification)))
-  (let ((drawing (make-instance 'terrain-drawing)))
+  (let ((drawing (make-instance 'terrain-drawing
+                               :merged-shadows-p (and *merge-terrain-shadows-p*
+                                                      *terrain-bevels-p*
+                                                      (not *bevelled-shadows-p*)))))
     (with-gpu-construction (drawing)
       (multiple-value-bind (scene-words normals scene-indices shadow-words
                             shadow-indices ranges)
@@ -195,9 +279,15 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                 (terrain-scene-indices drawing)
                 (upload "luft star patch indices" scene-indices :index)
                 (terrain-shadow-vertices drawing)
-                (upload "luft star shadow vertices" shadow-words :storage)
+                (unless (terrain-merged-shadows-p drawing)
+                  (upload "luft star shadow vertices" shadow-words :storage))
                 (terrain-shadow-indices drawing)
-                (upload "luft star shadow indices" shadow-indices :index))))
+                (upload "luft star shadow indices"
+                        (if (terrain-merged-shadows-p drawing)
+                            (make-array 6 :element-type '(unsigned-byte 32)
+                                          :initial-contents '(0 1 2 2 1 3))
+                            shadow-indices)
+                        :index))))
       (setf (terrain-scene-program drawing)
             (own-gpu-object
              drawing
@@ -214,7 +304,9 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
              drawing
              (make-drawing-program
               device :label "luft sun shadow sites"
-              :vertex (shaders:terrain-shadow-vertex-specification)
+              :vertex (if (terrain-merged-shadows-p drawing)
+                          (shaders:terrain-shadow-rectangle-vertex-specification)
+                          (shaders:terrain-shadow-vertex-specification))
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
                                :depth-compare :less)))
             (terrain-fixtures drawing)

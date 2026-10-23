@@ -74,9 +74,9 @@
 
 (defmethod render::make-terrain-binding
     ((drawing replacement-terrain) device sites camera
-     &key appearances lights descriptors shadow-map shadow-sampler shadow-p)
+     &key appearances lights descriptors shadow-map shadow-sampler shadow-p shadow-rectangles)
   (declare (ignore sites camera appearances lights descriptors shadow-map
-                   shadow-sampler shadow-p))
+                   shadow-sampler shadow-p shadow-rectangles))
   (luv:create device (luv:make-bind-group-descriptor :label "replacement terrain")))
 
 (defmethod render::encode-terrain
@@ -590,3 +590,75 @@
     ;; bevelled vertex lies strictly inside it.
     (dolist (point bevel-points)
       (true (some (lambda (c) (or (<= c 1) (>= c 7))) point)))))
+
+(defun check-shadow-rectangles (sites &optional rectangle-count)
+  ;; Compare covered unit squares, not just total area: filling a hole while
+  ;; dropping another square must fail. The oracle is the existing atlas.
+  (let ((render::*bevelled-shadows-p* nil)
+        (expected (make-hash-table :test #'equal))
+        (actual (make-hash-table :test #'equal))
+        (rectangles (render::merge-terrain-shadow-faces sites)))
+    (loop for offset from 0 below (length sites) by 4 do
+      (dolist (triangle (render::star-shadow-triangles (aref sites (+ offset 3)) t))
+        (let* ((normal (render::star-triangle-normal-key triangle))
+               (minimum
+                 (loop for i below 3
+                       collect (+ (* 8 (aref sites (+ offset i)))
+                                  (reduce #'min triangle :key (lambda (p) (nth i p)))))))
+          (incf (gethash (list normal minimum) expected 0)))))
+    (loop for offset from 0 below (length rectangles) by 8
+          for direction = (round (aref rectangles (+ offset 3)))
+          for axis = (1- (abs direction))
+          for u-axis = (mod (1+ axis) 3)
+          for v-axis = (mod (+ axis 2) 3)
+          for normal = (loop for i below 3 collect (if (= i axis) (signum direction) 0))
+          do (loop for u below (round (aref rectangles (+ offset 4 u-axis))) do
+               (loop for v below (round (aref rectangles (+ offset 4 v-axis))) do
+                 (let ((minimum
+                         (loop for i below 3
+                               collect (+ (round (* 8 (aref rectangles (+ offset i))))
+                                          (cond ((= i u-axis) (* 8 u))
+                                                ((= i v-axis) (* 8 v))
+                                                (t 0))))))
+                   (incf (gethash (list normal minimum) actual 0) 2)))))
+    (true (equalp expected actual))
+    (when rectangle-count
+      (true (= (* 8 rectangle-count) (length rectangles))))))
+
+(define-test merged-shadow-rectangles-preserve-every-oriented-unit-face
+  (flet ((solid-sites (cells)
+           (let ((sites (make-array 0 :element-type '(unsigned-byte 32)
+                                     :adjustable t :fill-pointer 0)))
+             (maphash (lambda (point star)
+                        (dolist (coordinate point) (vector-push-extend coordinate sites))
+                        (vector-push-extend star sites))
+                      (luft::star-surface-sites cells))
+             (make-array (length sites) :element-type '(unsigned-byte 32)
+                                       :initial-contents sites))))
+    (check-shadow-rectangles (make-array 0 :element-type '(unsigned-byte 32)) 0)
+    (dotimes (star 256)
+      (check-shadow-rectangles
+       (make-array 4 :element-type '(unsigned-byte 32)
+                     :initial-contents (list 61 37 19 star))))
+    ;; An asymmetric box crosses an owner boundary and compresses to six
+    ;; rectangles. Then punch a tunnel and add a disconnected cell.
+    (let ((cells (make-hash-table :test #'equal)))
+      (loop for x from 62 below 67 do
+        (loop for y from 9 below 12 do
+          (loop for z from 3 below 5 do (setf (gethash (list x y z) cells) t))))
+      (check-shadow-rectangles (solid-sites cells) 6)
+      (loop for z from 3 below 5 do (remhash (list 64 10 z) cells))
+      (setf (gethash '(70 13 6) cells) t)
+      (let* ((sites (solid-sites cells))
+             (left nil) (right nil))
+        (check-shadow-rectangles sites)
+        ;; Each resident must preserve its own surface, even if the other
+        ;; side of a seam is absent or uses a different rectangle partition.
+        (loop for offset from 0 below (length sites) by 4
+              for record = (loop for i below 4 collect (aref sites (+ offset i)))
+              do (if (< (first record) 64) (push record left) (push record right)))
+        (dolist (records (list left right))
+          (let ((words (apply #'append records)))
+            (check-shadow-rectangles
+             (make-array (length words) :element-type '(unsigned-byte 32)
+                                       :initial-contents words))))))))

@@ -164,6 +164,8 @@ cohort untouched. No frame can interleave with the owner-thread publication."
    (descriptor-buffer :accessor resident-population-descriptor-buffer)
    ;; (STAR FIRST COUNT) for each star present, over the star-sorted sites.
    (star-runs :initform nil :accessor resident-population-star-runs)
+   (shadow-rectangle-buffer :initform nil :accessor resident-population-shadow-rectangle-buffer)
+   (shadow-rectangle-count :initform 0 :accessor resident-population-shadow-rectangle-count)
    ;; World-cell box (MIN-X MIN-Y MIN-Z MAX-X MAX-Y MAX-Z) around the drawn
    ;; geometry, or NIL when the population draws nothing.
    (bounds :initform nil :accessor resident-population-bounds)
@@ -383,6 +385,12 @@ and four light words; the arrays keep their one-for-one order.  The runs are
                         (render-population-descriptor-words population))
                 (resident-population-star-runs resident) runs
                 (resident-population-bounds resident) (site-bounds instances)))
+        (when (terrain-merged-shadows-p (renderer-terrain renderer))
+          (let ((rectangles (render-population-shadow-rectangles population)))
+            (setf (resident-population-shadow-rectangle-buffer resident)
+                  (upload "luft merged shadow rectangles" rectangles)
+                  (resident-population-shadow-rectangle-count resident)
+                  (/ (length rectangles) 8))))
         (let ((bodies (render-population-body-data population)))
           (when (plusp (length bodies))
             (setf (resident-population-body-buffer resident)

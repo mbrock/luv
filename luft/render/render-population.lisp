@@ -64,7 +64,8 @@
 (defstruct (render-population
              (:constructor %make-render-population
                  (instance-words appearance-words descriptor-words
-                  site-count light-words &optional body-data))
+                  site-count light-words &optional body-data
+                  (shadow-rectangles (merge-terrain-shadow-faces instance-words))))
              (:copier nil))
   "Geometry sites plus a one-for-one, independently replaceable appearance
 and voxel light."
@@ -81,6 +82,10 @@ and voxel light."
   (site-count 0 :type (integer 0 *) :read-only t)
   ;; Four words per site: STAR-LATTICE-LIGHT-WORDS.
   (light-words #() :type (simple-array (unsigned-byte 32) (*)) :read-only t)
+  ;; Geometry-only shadow compression is prepared on the worker and reused
+  ;; across appearance/light changes, independently of the scene's star runs.
+  (shadow-rectangles #.(make-array 0 :element-type 'single-float)
+                     :type (simple-array single-float (*)) :read-only t)
   ;; Fixture bodies (LUFT.TERRAIN::PACK-FIXTURE-BODIES), drawn beside the stars.
   (body-data #.(make-array 0 :element-type 'single-float)
              :type (simple-array single-float (*)) :read-only t))
@@ -348,11 +353,13 @@ unchanged over this mesh before sampling; otherwise repack and compare words."
               (render-population-descriptor-words population)
               (render-population-site-count population)
               lights
-              bodies))))
+              bodies
+              (render-population-shadow-rectangles population)))))
       (prepare-render-mesh mesh)))
 
 (defmethod streamed-mesh-preparation-signature
     ((preparer render-population-preparer))
   (list (symbol-function 'make-render-population)
         (symbol-function 'pack-terrain-appearance-codes)
-        (symbol-function 'star-lattice-light-words)))
+        (symbol-function 'star-lattice-light-words)
+        (symbol-function 'merge-terrain-shadow-faces)))

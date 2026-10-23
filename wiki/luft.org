@@ -1439,6 +1439,62 @@ setting, except inside the tree's shadow, where the canopy's bevels had let
 through a faint grid of light about a tenth as bright as the shadow around
 it.
 
+******* DONE Merge coplanar shadow faces before upload
+:PROPERTIES:
+:ID: 5UH08L
+:END:
+
+The fixed-star renderer now compresses #A4ZWDZ's shadow surface, not the
+visible bevel mesh. [[lisp:luft.render::merge-terrain-shadow-faces]] gathers
+each site's owned unit faces into oriented planes and greedily partitions
+each plane into rectangles. Their full lateral extent and one-tick inward
+offset stay unchanged. Holes remain holes. A rectangle is two =vec4=
+records, drawn with a shared four-vertex indexed quad; each resident needs
+one shadow draw. The worker prepares this geometry-only cache and relighting
+reuses it. Residency owns its GPU buffer under the existing publication and
+retirement rules.
+
+On the native-1080 yawl fixtures of #4C7L3C:
+
+| Scene | Shadow triangles before | After | Shadow draws before | After |
+|-
+| Alpine | 8,068 | 902 | 68 | 1 |
+| Cave | 11,692 | 36 | 32 | 1 |
+| Live alpine | 429,776 | 67,988 | 1,679 | 16 |
+
+Live alpine's rectangles occupy 1,087,808 bytes. Geometry tests compare
+every oriented unit square against the old atlas, including all 256 stars,
+a tunnel, a disconnected cell, and separately compressed chunk sides.
+Native Metal captures differ below the status bar by one pixel at one
+channel level in each alpine view, and 24 pixels by at most two levels in
+the cave. Geometric equality need not imply bit-identical depth interpolation
+after retriangulation. =*merge-terrain-shadows-p*= selects the old path for
+comparison; explicit bevelled shadows and flat terrain retain that path.
+
+Two interleaved control/treatment runs on the Apple M5, native 1920 by 1080,
+120 warmup frames and 600 measured frames per scene, put live alpine CPU
+encoding at 2.97--3.05 ms before and 2.15--2.22 ms after. GPU time did not
+improve: 13.38--13.48 ms before, 13.58--13.71 ms after. Serialized completion
+fell from 16.98--17.16 ms to 16.45--16.61 ms; the cave had no consistent
+improvement. Clocks were not locked. This is a CPU submission reduction,
+not evidence for a large whole-frame GPU gain. A separate preparation run
+spent 1.89--2.72 ms compressing each of the sixteen live alpine residents;
+this work is outside the frame loop and reused across relighting.
+
+******* NEXT Compress the visible surface without changing its light
+:PROPERTIES:
+:ID: 7B19HJ
+:END:
+
+#5UH08L establishes resident-owned compressed geometry, but does not reduce
+scene triangles or implement distance LoD. Recover #YGP21F's coplanar
+compression as a renderer product, admitting merges only when flat material
+outputs and the interpolated voxel-light field are preserved. Its historical
+71.8% reduction came from a width-four medial surface, not today's
+width-one bevels. A farther simplified surface needs explicit shared-boundary
+transitions before distance policy can select it; independent chunk bevel
+widths previously opened seams.
+
 ** IDEA Draw the torus, not only its fundamental domain
 :PROPERTIES:
 :ID: PGRM80

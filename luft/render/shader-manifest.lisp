@@ -6,6 +6,7 @@
   '(star-fragment-specification
     terrain-vertex-specification
     terrain-shadow-vertex-specification
+    terrain-shadow-rectangle-vertex-specification
     player-sdf-vertex-specification
     player-sdf-fragment-specification
     figure-box-vertex-specification

@@ -73,6 +73,7 @@ releases for retry, but those retired bindings must never be served again. #RBNW
       :lights (resident-population-light-buffer resident)
       :descriptors (resident-population-descriptor-buffer resident)
       :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer)
+      :shadow-rectangles (resident-population-shadow-rectangle-buffer resident)
       :shadow-p shadow-p))))
 
 (defun renderer-frame-component-binding (frame key make-binding)

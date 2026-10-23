@@ -1235,6 +1235,32 @@ NIL leaves the atelier's direct light unchanged.")
                 (light-clip-position world shadow-row-x shadow-row-y
                                      shadow-row-z shadow-row-w))))
 
+(define-live-shader terrain-shadow-rectangle-vertex-specification
+    (:stage :vertex
+     :inputs ((vertex-index :uint :built-in :vertex-index)
+              (instance-index :uint :built-in :instance-index))
+     :outputs ((clip-position :vec4 :built-in :position))
+     :resources ((shadow-rectangles :storage-buffer :binding 0 :element :vec4)
+                 (camera-state :uniform-block :binding 2
+                  :members #.(scene-uniform-prefix 23))))
+  (let* ((origin (buffer-element shadow-rectangles (* instance-index (uint 2.0))))
+         (extent (buffer-element shadow-rectangles (+ (* instance-index (uint 2.0))
+                                                     (uint 1.0))))
+         (axis (abs (swizzle origin :w)))
+         (corner-u (float (ldb (byte 1 0) vertex-index)))
+         (u (if (< (swizzle origin :w) 0.0) (- 1.0 corner-u) corner-u))
+         (v (float (ldb (byte 1 1) vertex-index)))
+         (world (assume-quantity
+                 (+ (swizzle origin :xyz)
+                    (* (swizzle extent :xyz)
+                       (vec3 (if (= axis 2.0) v u)
+                             (if (= axis 3.0) v u)
+                             (if (= axis 1.0) v u))))
+                 :quantity quantities:world-position :unit quantities:cell)))
+    (set-output clip-position
+                (light-clip-position world shadow-row-x shadow-row-y
+                                     shadow-row-z shadow-row-w))))
+
 (define-live-shader lattice-point-vertex-specification
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
