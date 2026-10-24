@@ -1,0 +1,232 @@
+{
+  "native/bricks-grazing-15": {
+    "mean_abs_rgb_255": 0.16578011908255086,
+    "max_channel_255": 129.0,
+    "pixels_over_8": 15981
+  },
+  "native/bricks-near-15": {
+    "mean_abs_rgb_255": 0.390651591842723,
+    "max_channel_255": 133.0,
+    "pixels_over_8": 33062
+  },
+  "native/floor-grazing-15": {
+    "mean_abs_rgb_255": 2.4628655614241,
+    "max_channel_255": 118.0,
+    "pixels_over_8": 171349
+  },
+  "native/floor-near-15": {
+    "mean_abs_rgb_255": 1.5012886345852896,
+    "max_channel_255": 11.0,
+    "pixels_over_8": 140
+  },
+  "native/grass-grazing-15": {
+    "mean_abs_rgb_255": 0.1216654746185446,
+    "max_channel_255": 126.0,
+    "pixels_over_8": 10010
+  },
+  "native/grass-near-15": {
+    "mean_abs_rgb_255": 0.15421939187206574,
+    "max_channel_255": 86.0,
+    "pixels_over_8": 6560
+  },
+  "native/iron-plate-grazing-15": {
+    "mean_abs_rgb_255": 0.01873945495892019,
+    "max_channel_255": 10.0,
+    "pixels_over_8": 4
+  },
+  "native/iron-plate-near-15": {
+    "mean_abs_rgb_255": 0.009964910993740219,
+    "max_channel_255": 9.0,
+    "pixels_over_8": 3
+  },
+  "native/isometric-15": {
+    "mean_abs_rgb_255": 1.158777906152191,
+    "max_channel_255": 110.0,
+    "pixels_over_8": 73460
+  },
+  "native/mosaic-grazing-15": {
+    "mean_abs_rgb_255": 0.35853766260758996,
+    "max_channel_255": 110.0,
+    "pixels_over_8": 29367
+  },
+  "native/mosaic-near-15": {
+    "mean_abs_rgb_255": 0.5179514805848983,
+    "max_channel_255": 151.0,
+    "pixels_over_8": 42046
+  },
+  "native/page-1-15": {
+    "mean_abs_rgb_255": 0.06986150846048514,
+    "max_channel_255": 55.0,
+    "pixels_over_8": 3405
+  },
+  "native/page-2-15": {
+    "mean_abs_rgb_255": 0.15042531665688577,
+    "max_channel_255": 114.0,
+    "pixels_over_8": 15527
+  },
+  "native/page-3-15": {
+    "mean_abs_rgb_255": 0.008435268730438185,
+    "max_channel_255": 20.0,
+    "pixels_over_8": 141
+  },
+  "native/page-4-15": {
+    "mean_abs_rgb_255": 0.07909911727308294,
+    "max_channel_255": 56.0,
+    "pixels_over_8": 2830
+  },
+  "native/page-5-15": {
+    "mean_abs_rgb_255": 0.17231636345852896,
+    "max_channel_255": 106.0,
+    "pixels_over_8": 16817
+  },
+  "native/page-6-15": {
+    "mean_abs_rgb_255": 0.06542464421948357,
+    "max_channel_255": 124.0,
+    "pixels_over_8": 5476
+  },
+  "native/page-7-15": {
+    "mean_abs_rgb_255": 0.0,
+    "max_channel_255": 0.0,
+    "pixels_over_8": 0
+  },
+  "native/red-wool-grazing-15": {
+    "mean_abs_rgb_255": 0.08966815214201877,
+    "max_channel_255": 92.0,
+    "pixels_over_8": 16797
+  },
+  "native/red-wool-near-15": {
+    "mean_abs_rgb_255": 0.15422061448552427,
+    "max_channel_255": 74.0,
+    "pixels_over_8": 21813
+  },
+  "native/wall-grazing-15": {
+    "mean_abs_rgb_255": 1.7720724520735525,
+    "max_channel_255": 95.0,
+    "pixels_over_8": 218501
+  },
+  "native/wood-grazing-15": {
+    "mean_abs_rgb_255": 0.046819218260954615,
+    "max_channel_255": 98.0,
+    "pixels_over_8": 1847
+  },
+  "native/wood-near-15": {
+    "mean_abs_rgb_255": 0.4127200704225352,
+    "max_channel_255": 82.0,
+    "pixels_over_8": 50700
+  },
+  "temporal/bricks-grazing-15": {
+    "mean_abs_rgb_255": 0.14807667620305165,
+    "max_channel_255": 82.0,
+    "pixels_over_8": 17883
+  },
+  "temporal/bricks-near-15": {
+    "mean_abs_rgb_255": 0.33143216940532083,
+    "max_channel_255": 83.0,
+    "pixels_over_8": 33669
+  },
+  "temporal/floor-grazing-15": {
+    "mean_abs_rgb_255": 1.4888124755477308,
+    "max_channel_255": 58.0,
+    "pixels_over_8": 134425
+  },
+  "temporal/floor-near-15": {
+    "mean_abs_rgb_255": 0.6906687084311424,
+    "max_channel_255": 8.0,
+    "pixels_over_8": 0
+  },
+  "temporal/grass-grazing-15": {
+    "mean_abs_rgb_255": 0.11514451291079812,
+    "max_channel_255": 69.0,
+    "pixels_over_8": 7496
+  },
+  "temporal/grass-near-15": {
+    "mean_abs_rgb_255": 0.09739766725352113,
+    "max_channel_255": 44.0,
+    "pixels_over_8": 4391
+  },
+  "temporal/iron-plate-grazing-15": {
+    "mean_abs_rgb_255": 0.024335968065336465,
+    "max_channel_255": 7.0,
+    "pixels_over_8": 0
+  },
+  "temporal/iron-plate-near-15": {
+    "mean_abs_rgb_255": 0.008954573796948357,
+    "max_channel_255": 6.0,
+    "pixels_over_8": 0
+  },
+  "temporal/isometric-15": {
+    "mean_abs_rgb_255": 0.629509609741784,
+    "max_channel_255": 58.0,
+    "pixels_over_8": 55799
+  },
+  "temporal/mosaic-grazing-15": {
+    "mean_abs_rgb_255": 0.34127756993348984,
+    "max_channel_255": 79.0,
+    "pixels_over_8": 28576
+  },
+  "temporal/mosaic-near-15": {
+    "mean_abs_rgb_255": 0.3990757042253521,
+    "max_channel_255": 103.0,
+    "pixels_over_8": 39951
+  },
+  "temporal/page-1-15": {
+    "mean_abs_rgb_255": 0.04161531690140845,
+    "max_channel_255": 33.0,
+    "pixels_over_8": 1501
+  },
+  "temporal/page-2-15": {
+    "mean_abs_rgb_255": 0.0895925029342723,
+    "max_channel_255": 56.0,
+    "pixels_over_8": 10681
+  },
+  "temporal/page-3-15": {
+    "mean_abs_rgb_255": 0.006741949090375587,
+    "max_channel_255": 15.0,
+    "pixels_over_8": 49
+  },
+  "temporal/page-4-15": {
+    "mean_abs_rgb_255": 0.03617774354460094,
+    "max_channel_255": 30.0,
+    "pixels_over_8": 1442
+  },
+  "temporal/page-5-15": {
+    "mean_abs_rgb_255": 0.10088012886345853,
+    "max_channel_255": 51.0,
+    "pixels_over_8": 10053
+  },
+  "temporal/page-6-15": {
+    "mean_abs_rgb_255": 0.040592600743348986,
+    "max_channel_255": 69.0,
+    "pixels_over_8": 3621
+  },
+  "temporal/page-7-15": {
+    "mean_abs_rgb_255": 0.0,
+    "max_channel_255": 0.0,
+    "pixels_over_8": 0
+  },
+  "temporal/red-wool-grazing-15": {
+    "mean_abs_rgb_255": 0.08116304161776212,
+    "max_channel_255": 44.0,
+    "pixels_over_8": 11424
+  },
+  "temporal/red-wool-near-15": {
+    "mean_abs_rgb_255": 0.10173320740414711,
+    "max_channel_255": 52.0,
+    "pixels_over_8": 13442
+  },
+  "temporal/wall-grazing-15": {
+    "mean_abs_rgb_255": 1.380415107834507,
+    "max_channel_255": 80.0,
+    "pixels_over_8": 189021
+  },
+  "temporal/wood-grazing-15": {
+    "mean_abs_rgb_255": 0.033814737382629106,
+    "max_channel_255": 44.0,
+    "pixels_over_8": 813
+  },
+  "temporal/wood-near-15": {
+    "mean_abs_rgb_255": 0.3256762580692488,
+    "max_channel_255": 57.0,
+    "pixels_over_8": 44335
+  }
+}

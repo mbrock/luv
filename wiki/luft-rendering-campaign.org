@@ -263,27 +263,39 @@ a plausible source of helper-fragment waste (#EFKH0C). Isolate scene bevels
 without changing shadow geometry or material shaders before attributing the
 helper count to them. Use actual profiling alongside runtime comparisons.
 
-* TODO Validate shared relief before enabling it
+* DONE Validate and adopt shared relief
 :PROPERTIES:
 :ID: XDZ78R
 :END:
 
 #ZRQM38 selects removal of repeated relief evaluation as the next shading
 bet, before adding a distant material tier. It saves work at existing scene
-coverage and is consistent with the hilltop-view goal. Screen derivatives
-are the measured prototype, not yet the selected production implementation.
+coverage and is consistent with the hilltop-view goal. The terrain fragment
+now shares one height evaluation between tone and its screen-gradient normal,
+instead of evaluating the material twice more at tangent offsets. Geometry,
+bevel widths, shadows, material authoring and visibility policy are unchanged.
 
-Check near materials, projected/grazing footprints, camera motion, temporal
-reconstruction, and material/chunk boundaries. Screen derivatives replace a
-fixed world-space finite difference with a pixel-quad difference; the
-appearance is not mathematically identical. If that fails the quality bar,
-try shared value-and-gradient evaluation rather than recomputing whole
-procedural fields three times or hiding more terrain. Keep geometry efficiency
-as a separate experiment retaining the indexed atlas and its memory reuse.
+Two fresh, reversed-order adjacent-frame comparisons of the integrated shader
+save 14.35--14.37% GPU time and 11.91--12.17% serialized completion time. Each
+variant has 900 measured frames per run, with the same native-1080 seed-7
+hilltop view and nine residents. All fifteen 120-frame windows in each run
+improve both metrics. These remain shared-governor comparisons, not displayed
+FPS or a claim about sustained candidate-only operation.
 
-Done when: a bounded shared-relief implementation passes those quality checks
-and a repeated runtime comparison, with unchanged coverage and no profiler
-or native watchdog sampler competing for the GPU.
+The bounded appearance gate now includes all 73 palette placements, twelve
+paired-material close/oblique views, extended near/grazing grass and stone,
+a grazing brick/cloth/tapestry/mosaic wall, both 64-cell chunk seams, and an
+isometric view. Native and 0.75-scale MetalFX sequences have independent
+histories, sixteen stationary frames and a 32-frame, 0.8-cell traverse. The
+inspected comparisons retain mortar, weave, patterns and bevel light bands,
+without observed new seam or motion artifacts. Fine normals differ; native
+fine-pattern aliasing still exists. Screen derivatives are not a band-limit
+or proof of stability for arbitrary materials and motion. Shared analytic
+value-and-gradient evaluation remains an alternative if those limits matter.
+
+[[file:measurements/yawl-shared-relief-dd41727/README.org][The adoption bundle]] retains reproduction scripts, raw timings, comparison
+images and limits. =make test= passes all 35 suites; all production Luft
+SPIR-V modules validate, and all 113 shaders compile with DXC.
 
 * DONE Isolate scene bevel cost without changing shadows
 :PROPERTIES:

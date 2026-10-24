@@ -1,0 +1,91 @@
+WARNING: No definition for +SF-MNOWAIT+
+WARNING: LUFT.RENDER also uses the following packages:
+  (LUFT.WORLD)
+See also:
+  The ANSI Standard, Macro DEFPACKAGE
+  The SBCL Manual, Variable *ON-PACKAGE-VARIANCE*
+WARNING: LUFT.RENDER also uses the following packages:
+  (LUFT.WORLD)
+See also:
+  The ANSI Standard, Macro DEFPACKAGE
+  The SBCL Manual, Variable *ON-PACKAGE-VARIANCE*
+luv 03:48:06.018 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/control-native/ floor-near 1920x1200 temporal=NIL scale=1.0
+luv 03:48:12.109 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:12.154 canvas closed "Luft game"
+luv 03:48:12.176 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/control-native/ floor-grazing 1920x1200 temporal=NIL scale=1.0
+luv 03:48:18.751 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:18.793 canvas closed "Luft game"
+luv 03:48:18.806 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/control-native/ wall-grazing 1920x1200 temporal=NIL scale=1.0
+luv 03:48:24.341 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:24.383 canvas closed "Luft game"
+luv 03:48:24.393 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/control-native/ isometric 1920x1200 temporal=NIL scale=1.0
+luv 03:48:28.937 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:28.975 canvas closed "Luft game"
+luv 03:48:28.980 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:48:29.145 metal begin Metal4FX temporal scaler 1440x900
+luv 03:48:29.237 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/control-temporal/ floor-near 1920x1200 temporal=:METALFX scale=0.75
+luv 03:48:34.560 canvas closing "Luft game" after 90 loop iterations
+luv 03:48:34.604 canvas closed "Luft game"
+luv 03:48:34.618 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:48:34.739 metal begin Metal4FX temporal scaler 1440x900
+luv 03:48:34.793 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/control-temporal/ floor-grazing 1920x1200 temporal=:METALFX scale=0.75
+luv 03:48:40.695 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:40.737 canvas closed "Luft game"
+luv 03:48:40.749 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:48:40.869 metal begin Metal4FX temporal scaler 1440x900
+luv 03:48:40.922 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/control-temporal/ wall-grazing 1920x1200 temporal=:METALFX scale=0.75
+luv 03:48:46.318 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:46.358 canvas closed "Luft game"
+luv 03:48:46.372 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:48:46.503 metal begin Metal4FX temporal scaler 1440x900
+luv 03:48:46.559 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/control-temporal/ isometric 1920x1200 temporal=:METALFX scale=0.75
+luv 03:48:51.441 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:51.476 canvas closed "Luft game"
+luv 03:48:51.587 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/shared-native/ floor-near 1920x1200 temporal=NIL scale=1.0
+luv 03:48:57.164 canvas closing "Luft game" after 89 loop iterations
+luv 03:48:57.202 canvas closed "Luft game"
+luv 03:48:57.214 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/shared-native/ floor-grazing 1920x1200 temporal=NIL scale=1.0
+luv 03:49:03.277 canvas closing "Luft game" after 89 loop iterations
+luv 03:49:03.319 canvas closed "Luft game"
+luv 03:49:03.332 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/shared-native/ wall-grazing 1920x1200 temporal=NIL scale=1.0
+luv 03:49:08.895 canvas closing "Luft game" after 89 loop iterations
+luv 03:49:08.937 canvas closed "Luft game"
+luv 03:49:08.951 canvas opened "Luft game", 1920x1200 pixels, metal
+QUALITY .amp/in/artifacts/relief-integration/shared-native/ isometric 1920x1200 temporal=NIL scale=1.0
+luv 03:49:14.020 canvas closing "Luft game" after 89 loop iterations
+luv 03:49:14.060 canvas closed "Luft game"
+luv 03:49:14.071 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:49:14.179 metal begin Metal4FX temporal scaler 1440x900
+luv 03:49:14.244 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/shared-temporal/ floor-near 1920x1200 temporal=:METALFX scale=0.75
+luv 03:49:19.641 canvas closing "Luft game" after 90 loop iterations
+luv 03:49:19.683 canvas closed "Luft game"
+luv 03:49:19.697 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:49:19.810 metal begin Metal4FX temporal scaler 1440x900
+luv 03:49:19.863 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/shared-temporal/ floor-grazing 1920x1200 temporal=:METALFX scale=0.75
+luv 03:49:25.761 canvas closing "Luft game" after 89 loop iterations
+luv 03:49:25.802 canvas closed "Luft game"
+luv 03:49:25.809 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:49:25.906 metal begin Metal4FX temporal scaler 1440x900
+luv 03:49:25.959 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/shared-temporal/ wall-grazing 1920x1200 temporal=:METALFX scale=0.75
+luv 03:49:31.390 canvas closing "Luft game" after 89 loop iterations
+luv 03:49:31.427 canvas closed "Luft game"
+luv 03:49:31.439 canvas opened "Luft game", 1920x1200 pixels, metal
+luv 03:49:31.541 metal begin Metal4FX temporal scaler 1440x900
+luv 03:49:31.594 metal complete Metal4FX temporal scaler
+QUALITY .amp/in/artifacts/relief-integration/shared-temporal/ isometric 1920x1200 temporal=:METALFX scale=0.75
+luv 03:49:36.495 canvas closing "Luft game" after 89 loop iterations
+luv 03:49:36.537 canvas closed "Luft game"

@@ -546,25 +546,23 @@ leaves, planks, snow, gloss, cloth, straw, cactus, metal, faceted."
   (- (* (swizzle a :yzx) (swizzle b :zxy))
      (* (swizzle a :zxy) (swizzle b :yzx))))
 
-(define-shader-function relief-normal (normal world code strength pattern fade nap-fade here)
-  "Bend NORMAL by the relief CODE and laid PATTERN at WORLD, by STRENGTH."
-  (let* ((helper (if (< (abs (swizzle normal :z)) 0.9)
-                     (vec3 0.0 0.0 1.0) (vec3 1.0 0.0 0.0)))
-         (tangent (normalize (cross-product normal helper)))
-         (bitangent (cross-product normal tangent))
-         ;; Fine enough to resolve a mortar joint's bevel.
-         (step 0.015)
-         ;; HERE is the fragment's height: do not evaluate that field twice.
-         (along-point (+ world (* tangent step)))
-         (across-point (+ world (* bitangent step)))
-         (along (surface-height code pattern along-point fade nap-fade
-                                (laid-pattern pattern normal along-point)))
-         (across (surface-height code pattern across-point fade nap-fade
-                                 (laid-pattern pattern normal across-point)))
-         (slope (* strength 0.09)))
-    (normalize (- normal (* (+ (* tangent (- along here))
-                               (* bitangent (- across here)))
-                            (/ slope step))))))
+(define-shader-function relief-normal (normal world strength height)
+  "Bend NORMAL by the screen-quad gradient of the shared surface HEIGHT."
+  ;; Tone and normal share one procedural evaluation (#XDZ78R). Pixel-quad
+  ;; differences replace fixed world-space offsets; this is not a band-limit.
+  (let* ((dx (derivative-x world))
+         (dy (derivative-y world))
+         (hx (derivative-x height))
+         (hy (derivative-y height))
+         (rx (cross-product dy normal))
+         (ry (cross-product normal dx))
+         (det (dot dx rx)))
+    ;; Keep the determinant's sign: mirrored screen bases must bend the
+    ;; normal the same way. A degenerate projection has no usable gradient.
+    (if (> (abs det) 0.000000000001)
+        (normalize (- normal (* (+ (* rx hx) (* ry hy))
+                                (/ (* strength 0.09) det))))
+        normal)))
 
 (define-shader-function material-specular (normal view sun roughness)
   "A rough dielectric's sun highlight, sharper as ROUGHNESS falls."
@@ -962,8 +960,7 @@ NIL leaves the atelier's direct light unchanged.")
                                     (/ distance (max 0.2 (abs (dot normal (normalize to-eye))))))))
          (laid (laid-pattern (representation material-pattern) normal world))
          (height (surface-height relief (representation material-pattern) world fade nap-fade laid))
-         (bent (relief-normal normal world relief strength
-                              (representation material-pattern) fade nap-fade height))
+         (bent (relief-normal normal world strength height))
          (mortar-tone (swizzle (representation material-mortar) :xyz))
          (element-tone
            (* (if (> (swizzle laid :w) 0.5)
