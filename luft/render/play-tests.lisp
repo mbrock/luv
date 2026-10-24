@@ -143,3 +143,45 @@
                            (render::load-luft-world-description
                             scene pathname))))))
       (uiop:delete-file-if-exists pathname))))
+
+(defclass motion-consuming-test-overlay ()
+  ((hits :initform 0 :accessor motion-overlay-hits)))
+
+(defmethod render:handle-viewer-overlay-event
+    ((overlay motion-consuming-test-overlay) viewer canvas event)
+  (declare (ignore viewer canvas event))
+  (incf (motion-overlay-hits overlay))
+  t)
+
+(defmethod render:handle-viewer-focus-event
+    ((overlay motion-consuming-test-overlay) viewer canvas event)
+  (declare (ignore viewer canvas event))
+  (incf (motion-overlay-hits overlay))
+  t)
+
+(define-test captured-motion-bypasses-overlay-hit-testing
+  (let* ((viewer (allocate-instance (find-class 'render:game-host)))
+         (camera (make-instance 'render:fly-camera))
+         (overlay (make-instance 'motion-consuming-test-overlay))
+         (event (make-instance 'luv:canvas-pointer-motion-event
+                               :x 100.0 :y 100.0 :delta-x 10.0 :delta-y 5.0)))
+    (setf (slot-value viewer 'render::modal-focus) nil
+          (slot-value viewer 'render::overlays) (list overlay)
+          (slot-value viewer 'render::mode) (make-instance 'render::first-person-mode)
+          (slot-value viewer 'render::pointer-captured-p) t
+          (slot-value viewer 'render::camera) camera
+          (slot-value viewer 'render::sensitivity) 0.01)
+    (luv:handle-canvas-event viewer nil event)
+    (true (zerop (motion-overlay-hits overlay)))
+    (true (< (abs (+ 0.1 (render:camera-yaw camera))) 0.00001))
+    (let ((yaw (render:camera-yaw camera)))
+      ;; Released cursors and explicit modal focus still belong to the UI.
+      (setf (render::viewer-pointer-captured-p viewer) nil)
+      (luv:handle-canvas-event viewer nil event)
+      (true (= 1 (motion-overlay-hits overlay)))
+      (true (= yaw (render:camera-yaw camera)))
+      (setf (render::viewer-pointer-captured-p viewer) t
+            (render:viewer-modal-focus viewer) overlay)
+      (luv:handle-canvas-event viewer nil event)
+      (true (= 2 (motion-overlay-hits overlay)))
+      (true (= yaw (render:camera-yaw camera))))))

@@ -1502,6 +1502,12 @@ inherit LUFT-PLAY and LUFT-PLAY-RELEASE."))
                   (when best (focus-viewer viewer best))))
            t)
           (focus (handle-viewer-focus-event focus viewer canvas event) t)
+          ;; Relative motion belongs to the camera, not the absolute cursor's
+          ;; incidental position over a HUD or world-space widget.
+          ((and (typep event 'canvas-pointer-motion-event)
+                (viewer-pointer-captured-p viewer)
+                (typep (viewer-mode viewer) '(or orbit-mode first-person-mode)))
+           (call-next-method))
           ((some (lambda (overlay)
                    (handle-viewer-overlay-event overlay viewer canvas event))
                  (reverse (viewer-overlays viewer))) t)
