@@ -44,7 +44,7 @@
              (dotimes (i 3 color)
                (setf (aref color i)
                      (* (aref color i) (+ 1.0 (* weight (- (nth i gains) 1.0))))))))
-      (tint (render::light-sun-color light) '(1.18 1.10 1.00))
+      (tint (render::light-sun-color light) '(1.22 1.10 0.94))
       (tint (render::light-sky-color light) '(1.24 1.16 1.00))
       (tint (render::light-ground-color light) '(1.24 1.16 1.00))
       (tint (render::light-zenith-color light) '(0.84 1.00 1.12))
@@ -86,8 +86,8 @@
          (sky (luvcraft::sky-frame-parameters (viewer-sky-clock viewer)
                                              (viewer-sky-profile viewer)))
          (daylight (daylight-look-weight (luvcraft::sky-frame-parameters-day-factor sky)))
-         (render::*haze-density* (* render::*haze-density* (- 1.0 (* daylight 0.38))))
-         (render::*vignette* (* render::*vignette* (- 1.0 (* daylight 0.60))))
+         (render::*haze-density* (* render::*haze-density* (- 1.0 (* daylight 0.15))))
+         (render::*vignette* (* render::*vignette* (- 1.0 (* daylight 0.45))))
          (render::*sky-hour* (* 24.0 (luvcraft::sky-clock-current-day-fraction
                                     (viewer-sky-clock viewer))))
         (render::*sky-elapsed* (viewer-sky-elapsed viewer))
@@ -99,6 +99,25 @@
     (call-next-method)))
 
 (in-package #:luft.render.shaders)
+
+(define-shader-function luvcraft-material-character (tone relief world normal distance)
+  "Coarse painted flecks and olive foliage, fading before they become shimmer."
+  (let* ((grass (< (abs (- relief 1.0)) 0.5))
+         (leaves (< (abs (- relief 5.0)) 0.5))
+         (snow (< (abs (- relief 7.0)) 0.5))
+         (vegetation (if grass 1.0 (if leaves 1.0 0.0)))
+         ;; A fixed world grid, like the old atlas texels, not screen-space grain.
+         (cell (floor (+ (* world 12.0) (* normal 0.03))))
+         (fleck (- (paper-hash cell) 0.5))
+         (footprint (* distance 0.0015))
+         (detail (- 1.0 (smoothstep 0.025 0.09 footprint)))
+         (contrast (if snow 0.08 (mix 0.24 0.70 vegetation)))
+         (tint (if grass (vec3 1.12 0.88 0.82)
+                   (if leaves (vec3 1.35 0.93 0.80) (vec3 1.0 1.0 1.0)))))
+    (let* ((paint (* tone tint))
+           (luma (dot paint (vec3 0.2126 0.7152 0.0722)))
+           (natural (mix paint (vec3 luma luma luma) (* vegetation 0.12))))
+      (* natural (+ 1.0 (* contrast (* fleck detail)))))))
 
 (define-shader-function luvcraft-blocklight (light gain)
   "The original scalar light's warm radiance, with the shared gain knob."
@@ -226,7 +245,9 @@
   (render:make-fixed-exposure luvcraft::*luvcraft-exposure*))
 
 (defun make-luvcraft-terrain-drawing (device target-formats sample-count)
-  (let ((luft.render.shaders::*terrain-blocklight-function*
+  (let ((luft.render.shaders::*terrain-material-character-function*
+          'luft.render.shaders::luvcraft-material-character)
+        (luft.render.shaders::*terrain-blocklight-function*
           'luft.render.shaders::luvcraft-blocklight)
         (luft.render.shaders::*terrain-cloud-visibility-function*
           'luft.render.shaders::luvcraft-cloud-visibility)

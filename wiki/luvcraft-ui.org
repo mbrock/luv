@@ -238,7 +238,7 @@ font glyph coverage.
 
 Luvcraft-on-Luft adds a daylight treatment to its existing sky profile. Warm
 sun and ambient channels lift the land; a bluer zenith, 28 percent less cloud
-coverage, 38 percent less haze density, and 60 percent less vignette make
+coverage, 15 percent less haze density, and 45 percent less vignette make
 midday feel clearer. The treatment ramps smoothly from day-factor 0.35 to
 0.85, preserving the original night and early twilight. The shared atelier
 look is untouched.
@@ -250,3 +250,27 @@ atmosphere. Native daytime comparisons at 11:00 showed clearer distance and
 less blue-grey snow. Clouds still move between captures; this is a visual
 comparison, not a controlled GPU performance benchmark. Tests cover night
 preservation, the zero-strength baseline, and daylight warmth/cloud reduction.
+
+* DONE Recover some of the old world’s painted texture
+:PROPERTIES:
+:ID: AVU8G2
+:END:
+
+The old Luvcraft reference has coarse atlas detail, olive foliage, warm
+slanting sun and atmospheric distance. The Luft bridge preserved atlas
+average colours but replaced painted detail with smoother procedural relief.
+A game-specific material-character function now restores world-aligned
+12-per-cell colour flecks, strongest on vegetation and restrained on snow.
+The flecks fade between roughly 17 and 60 cells to avoid keeping fine detail
+at distant scales. This is a new procedural treatment, not the original atlas.
+
+Grass and leaves shift toward olive with a small saturation reduction. The
+previous daylight experiment (#CZQ8X2) now keeps more haze and corner falloff,
+and gives sunlight a slightly warmer balance. Midday and 16:00 live captures
+checked both the ordinary day and the lower, warmer illumination in the
+reference. The hour is a preview choice, not a new default start time.
+
+The terrain hook is identity by default, preserving the atelier renderer.
+Luvcraft binds it when building its terrain pipeline. There are no new texture
+resources or render passes, but the added shader arithmetic is unprofiled;
+these screenshots establish appearance, not a 60 FPS performance result.

@@ -814,6 +814,14 @@ that density along the straight ray."
          (depth (* density (* distance (* base integral)))))
     (- 1.0 (exp (- depth)))))
 
+(defvar *terrain-material-character-function* nil
+  "Optional game material treatment; NIL preserves the atelier's surface tones.")
+
+(define-shader-abstraction terrain-material-character (tone relief world normal distance)
+  (if *terrain-material-character-function*
+      `(,*terrain-material-character-function* ,tone ,relief ,world ,normal ,distance)
+      tone))
+
 (defvar *surface-atmosphere-function* nil
   "Optional game atmosphere; NIL keeps the height-falling paper haze.")
 
@@ -997,8 +1005,10 @@ NIL leaves the atelier's direct light unchanged.")
          (surface-tone (if (> relief 12.5)
                            (faceted-tone base-tone normal world fade)
                            base-tone))
-         (tone (* (mix surface-tone (swizzle (representation material-accent) :xyz) fringe)
-                  (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear))))
+         (tone (terrain-material-character
+                (* (mix surface-tone (swizzle (representation material-accent) :xyz) fringe)
+                   (+ 1.0 (* strength 0.5 (- height 0.5)) (* 0.22 wear)))
+                relief world normal distance))
          (view (normalize (mix (- forward) (- (swizzle eye :xyz) world)
                                divisor)))
          ;; Conductors use neutral ambient energy and a coloured sun lobe.
