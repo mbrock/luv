@@ -31,11 +31,32 @@
   (luvcraft::advance-sky-clock (viewer-sky-clock viewer) seconds)
   (incf (viewer-sky-elapsed viewer) seconds))
 
-(defun update-luvcraft-light (viewer light)
-  "Evaluate the original profile once, transforming only its Y-up direction."
+(defparameter *daylight-look-strength* 1.0
+  "Clear, warm daytime art direction. Zero restores the original atmosphere.")
+
+(defun daylight-look-weight (day-factor)
+  (* *daylight-look-strength* (luvcraft::sky-smoothstep 0.35 0.85 day-factor)))
+
+(defun apply-daylight-look (light)
+  "Tune existing light lanes on the CPU; preserve night and twilight colours."
+  (let ((weight (daylight-look-weight (render::light-day-factor light))))
+    (flet ((tint (color gains)
+             (dotimes (i 3 color)
+               (setf (aref color i)
+                     (* (aref color i) (+ 1.0 (* weight (- (nth i gains) 1.0))))))))
+      (tint (render::light-sun-color light) '(1.18 1.10 1.00))
+      (tint (render::light-sky-color light) '(1.24 1.16 1.00))
+      (tint (render::light-ground-color light) '(1.24 1.16 1.00))
+      (tint (render::light-zenith-color light) '(0.84 1.00 1.12))
+      (setf (render::light-cloudiness light)
+            (* (render::light-cloudiness light) (- 1.0 (* weight 0.28))))))
+  light)
+
+(defun update-luvcraft-light (viewer light &optional parameters)
+  "Apply the shared profile, transform its direction, and tune daytime light."
   (let* ((luvcraft::*sky-sun-orbit-tilt* (viewer-sun-orbit-tilt viewer))
-         (sky (luvcraft::sky-frame-parameters
-               (viewer-sky-clock viewer) (viewer-sky-profile viewer)))
+         (sky (or parameters (luvcraft::sky-frame-parameters
+                              (viewer-sky-clock viewer) (viewer-sky-profile viewer))))
          (sun (luvcraft::sky-frame-parameters-sun-direction sky)))
     (flet ((lane (color) (concatenate 'vector color #(1.0))))
       (setf (render::light-sky-origin-offset light) (viewer-sky-origin-offset viewer)
@@ -56,20 +77,25 @@
             (render::light-fog-color light) (lane (luvcraft::sky-frame-parameters-fog-color sky))
             (render::light-cloudiness light) (luvcraft::sky-frame-parameters-cloudiness sky)
             (render::light-sun-angular-width light) (luvcraft::sky-frame-parameters-sun-angular-width sky))))
-  light)
+  (apply-daylight-look light))
 
 (defmethod render::encode-viewer-frame :around
     ((viewer luvcraft-viewer) encoder surface-texture extent &key inspector-p)
   (declare (ignore encoder surface-texture extent inspector-p))
-  (let ((render::*sky-hour* (* 24.0 (luvcraft::sky-clock-current-day-fraction
+  (let* ((luvcraft::*sky-sun-orbit-tilt* (viewer-sun-orbit-tilt viewer))
+         (sky (luvcraft::sky-frame-parameters (viewer-sky-clock viewer)
+                                             (viewer-sky-profile viewer)))
+         (daylight (daylight-look-weight (luvcraft::sky-frame-parameters-day-factor sky)))
+         (render::*haze-density* (* render::*haze-density* (- 1.0 (* daylight 0.38))))
+         (render::*vignette* (* render::*vignette* (- 1.0 (* daylight 0.60))))
+         (render::*sky-hour* (* 24.0 (luvcraft::sky-clock-current-day-fraction
                                     (viewer-sky-clock viewer))))
         (render::*sky-elapsed* (viewer-sky-elapsed viewer))
-        (luvcraft::*sky-sun-orbit-tilt* (viewer-sun-orbit-tilt viewer))
         (render::*sky-sunset-azimuth* (vec3:make-vec3 -1.0 0.0 0.0))
         (render::*light* (viewer-sky-light viewer))
         (render::*sky-light-evaluator*
           (lambda (light hour) (declare (ignore hour))
-            (update-luvcraft-light viewer light))))
+            (update-luvcraft-light viewer light sky))))
     (call-next-method)))
 
 (in-package #:luft.render.shaders)

@@ -265,3 +265,14 @@
     (let ((data (mcluv::default-inventory-preferences)))
       (setf (getf (first (getf data :players)) :kit) bad-kit)
       (fail (mcluv::validate-inventory-preferences data)))))
+
+(define-test material-traits-use-real-light-values
+  (let ((marble (luvcraft:block-kind-named :marble))
+        (lantern (luvcraft:block-kind-named :lantern)))
+    (true (equal '(:light-off "Light" "0 / 15")
+                 (first (mcluv::inventory-material-traits marble))))
+    (true (equal '(:light "Light" "14 / 15")
+                 (first (mcluv::inventory-material-traits lantern))))
+    (true (equal '(:glow "Glow" "1.10")
+                 (second (mcluv::inventory-material-traits lantern))))
+    (true (search "stone" (first (mcluv::inventory-material-description marble))))))

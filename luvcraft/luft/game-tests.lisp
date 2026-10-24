@@ -295,3 +295,21 @@
     (is string= "11:30" (mcluv:status-bar-channel-value :daytime viewer nil))
     (setf (render::host-sky-hour viewer) 24.0)
     (is string= "00:00" (mcluv:status-bar-channel-value :daytime viewer nil))))
+
+(define-test daylight-look-preserves-night-and-warms-day
+  (flet ((sample (factor)
+           (let ((light (host::make-luvcraft-light)))
+             (setf (render::light-day-factor light) factor
+                   (render::light-sun-color light) (vector 1.0 1.0 1.0 1.0)
+                   (render::light-sky-color light) (vector 1.0 1.0 1.0 1.0)
+                   (render::light-ground-color light) (vector 1.0 1.0 1.0 1.0)
+                   (render::light-zenith-color light) (vector 1.0 1.0 1.0 1.0)
+                   (render::light-cloudiness light) 0.5)
+             (host::apply-daylight-look light))))
+    (let ((host::*daylight-look-strength* 1.0))
+      (is equalp #(1.0 1.0 1.0 1.0) (render::light-sun-color (sample 0.0)))
+      (is = 0.5 (render::light-cloudiness (sample 0.0)))
+      (true (> (aref (render::light-sun-color (sample 1.0)) 0) 1.0))
+      (true (< (render::light-cloudiness (sample 1.0)) 0.5)))
+    (let ((host::*daylight-look-strength* 0.0))
+      (is equalp #(1.0 1.0 1.0 1.0) (render::light-sun-color (sample 1.0))))))

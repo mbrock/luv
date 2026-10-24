@@ -163,13 +163,78 @@ on the bar wears the number key that selects it."
                     "—"))
           (cons "Stack" (inventory-entry-quantity-label entry)))))
 
+(defgeneric inventory-material-description (block)
+  (:documentation "Short, player-facing lines beneath a material's name."))
+
+(defmethod inventory-material-description ((block luvcraft:block-kind))
+  (or (cdr (assoc (luvcraft:block-kind-name block)
+                  '((:marble "Pale stone with" "flowing veins.")
+                    (:marble-tiles "Veined stone," "cut into tiles.")
+                    (:lantern "A warm light in" "an iron frame.")
+                    (:crystal "A bright crystal" "with a cool glow.")
+                    (:lit-window "A window glowing" "with warm light.")
+                    (:grass "Soft green grass" "over earthy soil.")
+                    (:snow "A soft blanket" "of white snow.")
+                    (:leaves "A little piece" "of the canopy.")
+                    (:sand "Pale grains from" "a sunny shore.")
+                    (:dirt "Earth for paths" "and landscapes."))))
+      (let ((categories (luvcraft:block-kind-categories block)))
+        (cond ((member :masonry categories) '("Made for walls" "and buildings."))
+              ((member :woodwork categories) '("A wood material" "for building."))
+              ((member :roofing categories) '("A finishing touch" "for rooftops."))
+              ((member :colors categories) '("A splash of colour" "for your world."))
+              ((member :natural categories) '("A piece of the" "natural world."))
+              ((member :decor categories) '("A small detail" "to make it yours."))
+              (t '("A material for" "your next idea."))))))
+
+(defgeneric inventory-material-traits (block)
+  (:documentation "Rows of (ICON LABEL VALUE), using actual block properties."))
+
+(defmethod inventory-material-traits ((block luvcraft:block-kind))
+  (append
+   (list (list (if (plusp (luvcraft:block-light-emission block)) :light :light-off)
+               "Light" (format nil "~D / 15" (luvcraft:block-light-emission block))))
+   (when (plusp (luvcraft:block-surface-emission block))
+     (list (list :glow "Glow" (format nil "~,2F" (luvcraft:block-surface-emission block)))))
+   (list (list :solid (if (luvcraft:block-solid-p block) "Solid block" "Non-solid") nil))))
+
+(defun draw-material-trait-icon (medium kind x y)
+  "Small native vector icons; no dependence on the font's symbol coverage."
+  (let ((ink (ui-ink (if (member kind '(:light :glow)) :selection :muted))))
+    (case kind
+      ((:light :light-off)
+       (draw-analytic-rounded-rectangle* medium (+ x 2) (- y 8) (+ x 14) (+ y 4)
+                                         :radius 6 :ink ink)
+       (draw-analytic-rounded-rectangle* medium (+ x 5) (+ y 3) (+ x 11) (+ y 8)
+                                         :radius 1 :ink ink))
+      (:glow
+       (draw-analytic-rounded-rectangle* medium (+ x 7) (- y 8) (+ x 9) (+ y 8)
+                                         :radius 1 :ink ink)
+       (draw-analytic-rounded-rectangle* medium x (- y 1) (+ x 16) (+ y 1)
+                                         :radius 1 :ink ink))
+      (t
+       (draw-analytic-rounded-rectangle* medium (+ x 2) (- y 6) (+ x 14) (+ y 6)
+                                         :radius 2 :ink ink)))))
+
 (defun draw-inventory-details (frame pane selected entry)
-  "A material portrait and one useful action, without renderer properties."
   (declare (ignore frame))
-  (draw-block-icon pane selected 695 85 94)
+  (draw-block-icon pane selected 704 78 80)
   (draw-text* pane (inventory-clipped-label (inventory-entry-label entry) 19)
-              744 210 :align-x :center :align-y :center
-              :text-face :bold :text-size (ui-text-size :body) :ink (ui-ink :text)))
+              744 187 :align-x :center :align-y :center
+              :text-face :bold :text-size (ui-text-size :body) :ink (ui-ink :text))
+  (loop for line in (inventory-material-description selected) for y from 215 by 20
+        do (draw-text* pane line 744 y :align-x :center :align-y :center
+                       :text-size (ui-text-size :caption) :ink (ui-ink :muted)))
+  (with-sheet-medium (medium pane)
+    (draw-analytic-rounded-rectangle* medium 678 255 808 256 :radius 0 :ink (ui-ink :border))
+    (loop for (icon label value) in (inventory-material-traits selected)
+          for y from 275 by 27
+          do (draw-material-trait-icon medium icon 678 y)
+             (draw-text* pane label 702 y :align-y :center
+                         :text-size (ui-text-size :caption) :ink (ui-ink :text))
+             (when value
+               (draw-text* pane value 810 y :align-x :right :align-y :center
+                           :text-size (ui-text-size :caption) :ink (ui-ink :text))))))
 
 (defmethod handle-repaint ((pane inventory-pane) region)
   (declare (ignore region))

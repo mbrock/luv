@@ -213,3 +213,40 @@ Home/End reach the catalog ends, and I or Escape closes the inventory.
 Old player preferences and saved speedbars still load, but the inventory
 has no profile-switch control or separate simple/full presentation. Retained
 native HUD composition and the capped scene resolution are unchanged (#LEEWJB).
+
+* DONE Material portraits explain what is in your hand
+:PROPERTIES:
+:ID: FP8GAR
+:END:
+
+The inventory portrait (#6OND7O) now has a two-line description and a small
+trait list. Marble is pale, veined stone; a lantern is warm light in an iron
+frame. =inventory-material-description= and =inventory-material-traits= are
+extensible generics rather than separate layouts for each material.
+
+Traits read the existing block properties: emitted light on the 0–15 scale,
+surface glow when nonzero, and solidity. A lantern reports light 14/15 and
+glow 1.10; marble reports light 0/15. These are distinct: surface glow does
+not necessarily illuminate neighbours. No hardness or durability is invented.
+The bulb, glow and solid markers use native vector shapes, independent of
+font glyph coverage.
+
+* DONE A clearer, warmer daytime atmosphere
+:PROPERTIES:
+:ID: CZQ8X2
+:END:
+
+Luvcraft-on-Luft adds a daylight treatment to its existing sky profile. Warm
+sun and ambient channels lift the land; a bluer zenith, 28 percent less cloud
+coverage, 38 percent less haze density, and 60 percent less vignette make
+midday feel clearer. The treatment ramps smoothly from day-factor 0.35 to
+0.85, preserving the original night and early twilight. The shared atelier
+look is untouched.
+
+This changes CPU-authored light/uniform values and uses the existing render
+passes. The original filmic curve, saturation and contrast remain unchanged.
+Set =luvcraft.luft.game::*daylight-look-strength*= to zero for the original
+atmosphere. Native daytime comparisons at 11:00 showed clearer distance and
+less blue-grey snow. Clouds still move between captures; this is a visual
+comparison, not a controlled GPU performance benchmark. Tests cover night
+preservation, the zero-strength baseline, and daylight warmth/cloud reduction.
