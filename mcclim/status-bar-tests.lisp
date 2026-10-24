@@ -180,14 +180,14 @@
     ;; The upper edge is exactly NDC -1; the bar does not reserve a margin.
     (true (< (abs (+ 1.0 (- center-y half-height))) 1.0e-6))))
 
-(define-test status-bar-panel-is-translucent-analytic-and-never-an-image
+(define-test status-bar-panel-is-opaque-analytic-and-never-an-image
   (let ((medium (fresh-gpu-medium)))
-    (setf (clim:medium-ink medium) mcluv::*status-bar-panel-ink*)
+    (setf (clim:medium-ink medium) (mcluv::ui-ink :surface))
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 0 0 900 28 0 t)
     (let ((vertices (mcluv::gpu-medium-analytic-vertices medium))
           (commands (mcluv::gpu-medium-commands medium)))
-      (true (< (abs (- 0.72 (aref vertices 2))) 1.0e-5))
+      (true (< (abs (- 1.0 (aref vertices 2))) 1.0e-5))
       (true (= 1 (length commands)))
       (true (typep (aref commands 0) 'mcluv::gpu-analytic-command))
       (true (null (mcluv:gpu-medium-fallback-report medium)))

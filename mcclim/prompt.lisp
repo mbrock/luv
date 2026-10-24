@@ -24,23 +24,15 @@
 (defconstant +message-line-limit+ 24)
 (defconstant +message-history-limit+ 64)
 
-(defparameter *prompt-edge-ink* (command-menu-alpha-ink 0.38 0.44 0.40 0.88))
-(defparameter *prompt-panel-ink* (command-menu-alpha-ink 0.040 0.044 0.042 0.94))
-(defparameter *prompt-label-ink* (make-rgb-color 0.58 0.78 0.54))
-(defparameter *prompt-text-ink* (make-rgb-color 0.93 0.92 0.87))
-(defparameter *prompt-muted-ink* (make-rgb-color 0.60 0.62 0.57))
-(defparameter *prompt-row-ink* (command-menu-alpha-ink 0.11 0.12 0.112 0.64))
-(defparameter *prompt-selected-row-ink*
-  (command-menu-alpha-ink 0.55 0.75 0.53 0.94))
-(defparameter *prompt-selected-text-ink* (make-rgb-color 0.055 0.065 0.055))
-(defparameter *message-panel-ink* (command-menu-alpha-ink 0.030 0.034 0.032 0.90))
-(defparameter *message-error-ink* (make-rgb-color 0.96 0.55 0.48))
-
 (defparameter *prompt-text-style* (make-text-style :fix nil 16))
 (defparameter *message-text-style* (make-text-style :fix nil 15))
 
 (defclass prompt-pane (transparent-gpu-application-pane) ())
+
+(define-ui-themed-pane prompt-pane)
 (defclass message-pane (transparent-gpu-application-pane) ())
+
+(define-ui-themed-pane message-pane)
 
 ;;; ---------------------------------------------------------------------
 ;;; Prompt state.  Slots are prefixed: every instrument's state mixes into
@@ -185,9 +177,9 @@ submitted text after the prompt has closed."
 
 (defun draw-prompt-panel (pane left top right bottom ink)
   (draw-analytic-rounded-rectangle* pane (+ left 6) (+ top 8) (- right 1) (- bottom 1)
-                                    :radius 14 :ink *command-menu-shadow-ink*)
+                                    :radius 14 :ink (ui-ink :shadow))
   (draw-analytic-rounded-rectangle* pane left top right bottom
-                                    :radius 14 :ink *prompt-edge-ink*)
+                                    :radius 14 :ink (ui-ink :border))
   (draw-analytic-rounded-rectangle* pane (+ left 2) (+ top 2) (- right 2) (- bottom 2)
                                     :radius 12 :ink ink))
 
@@ -207,16 +199,16 @@ submitted text after the prompt has closed."
              (text (prompt-text frame))
              (text-x (+ +prompt-margin+ 12 label-width))
              (text-width (text-size pane text :text-style *prompt-text-style*)))
-        (draw-prompt-panel pane 0 0 width height *prompt-panel-ink*)
+        (draw-prompt-panel pane 0 0 width height (ui-ink :surface))
         (draw-text* pane label (+ +prompt-margin+ 12) field-y
                     :align-y :center :text-style *prompt-text-style*
-                    :ink *prompt-label-ink*)
+                    :ink (ui-ink :accent))
         (draw-text* pane text text-x field-y
                     :align-y :center :text-style *prompt-text-style*
-                    :ink *prompt-text-ink*)
+                    :ink (ui-ink :text))
         (draw-rectangle* pane (+ text-x text-width 1) (- field-y 10)
                          (+ text-x text-width 3) (+ field-y 10)
-                         :ink *prompt-label-ink*)
+                         :ink (ui-ink :accent))
         (let* ((candidates (prompt-candidates frame))
                (selected (prompt-selected frame))
                (count (length candidates))
@@ -234,18 +226,17 @@ submitted text after the prompt has closed."
                     pane +prompt-margin+ (+ y 1) (- width +prompt-margin+)
                     (- (+ y +prompt-row-height+) 1)
                     :radius 6
-                    :ink (if chosen *prompt-selected-row-ink* *prompt-row-ink*))
+                    :ink (if chosen (ui-ink :selection-soft) (ui-ink :raised)))
                    (draw-text* pane candidate (+ +prompt-margin+ 10)
                                (+ y (/ +prompt-row-height+ 2))
                                :align-y :center :text-style *prompt-text-style*
-                               :ink (if chosen
-                                        *prompt-selected-text-ink*
-                                        *prompt-text-ink*))))))))
+                               :ink (ui-ink :text))))))))
 
 (defun prepare-prompt (frame)
   "Ensure FRAME's prompt has a complete retained revision for this frame."
   (let ((mirror (command-menu-mirror frame)))
-    (if (or (prompt-dirty-p frame)
+    (if (or (ui-theme-changed-p frame)
+            (prompt-dirty-p frame)
             (null (gpu-mirror-prepared-commands mirror)))
         (progn (repaint-gpu-mirror mirror)
                (setf (prompt-dirty-p frame) nil))
@@ -312,12 +303,12 @@ SECONDS NIL it stays until replaced or cleared."
       (with-sheet-medium (medium pane)
         (ensure-command-menu-gpu-medium medium))
       (with-bounding-rectangle* (left top right bottom) pane
-        (draw-prompt-panel pane 0 0 (- right left) (- bottom top) *message-panel-ink*)
+        (draw-prompt-panel pane 0 0 (- right left) (- bottom top) (ui-ink :surface))
         (loop for line in (message-lines frame)
               for y from (+ +message-margin+ (/ +message-line-height+ 2))
                 by +message-line-height+
               do (draw-text* pane line (+ +message-margin+ 8) y
                              :align-y :center :text-style *message-text-style*
                              :ink (if (message-error-p frame)
-                                      *message-error-ink*
-                                      *prompt-text-ink*)))))))
+                                      (ui-ink :danger)
+                                      (ui-ink :text))))))))

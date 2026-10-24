@@ -22,13 +22,6 @@ a hint is showing, so a hint appearing never moves the bar.")
 (defun palette-alpha-ink (red green blue alpha)
   (compose-in (make-rgb-color red green blue) (make-opacity alpha)))
 
-(defparameter *palette-shadow-ink* (palette-alpha-ink 0.0 0.0 0.0 0.30))
-(defparameter *palette-edge-ink* (palette-alpha-ink 0.16 0.20 0.17 0.80))
-(defparameter *palette-well-ink* (palette-alpha-ink 0.004 0.005 0.005 0.70))
-(defparameter *palette-caption-ink* (palette-alpha-ink 0.004 0.005 0.005 0.82))
-(defparameter *palette-text-ink* (make-rgb-color 0.93 0.92 0.87))
-(defparameter *palette-muted-ink* (make-rgb-color 0.54 0.56 0.52))
-(defparameter *palette-accent* '(0.95 0.86 0.55))
 
 ;;; ---------------------------------------------------------------------
 ;;; Application protocol.
@@ -101,6 +94,8 @@ lists of linear 0..1 components, as every workbench ink is."))
   (hint nil))
 
 (defclass palette-pane (transparent-gpu-application-pane) ())
+
+(define-ui-themed-pane palette-pane)
 
 (defclass palette-state ()
   ;; Slot names are prefixed: the workbench frame mixes several instrument
@@ -199,10 +194,10 @@ and the dark chamfer that runs round both, as the world draws its cells."
 
 (defun draw-palette-pill (pane medium center-x top bottom text
                           &key (width +palette-caption-width+)
-                            (ink *palette-text-ink*) (text-size 12))
+                            (ink (ui-ink :text)) (text-size 12))
   (draw-analytic-rounded-rectangle*
    medium (- center-x (/ width 2.0)) top (+ center-x (/ width 2.0)) bottom
-   :radius (/ (- bottom top) 2.0) :ink *palette-caption-ink*)
+   :radius (/ (- bottom top) 2.0) :ink (ui-ink :inset))
   (draw-text* pane text center-x (/ (+ top bottom) 2.0)
               :align-x :center :align-y :center :text-size text-size
               :ink ink))
@@ -235,17 +230,8 @@ and the dark chamfer that runs round both, as the world draws its cells."
                                :width hint-width :text-size 13)))
         (draw-analytic-rounded-rectangle*
          medium 3 (+ bar-top 5) (+ width 1) (+ bar-bottom 2)
-         :radius 16 :ink *palette-shadow-ink*)
-        (draw-analytic-rounded-rectangle*
-         medium 0 bar-top width bar-bottom
-         :radius 16 :ink *palette-edge-ink*)
-        (draw-analytic-rounded-rectangle*
-         medium 1.5 (+ bar-top 1.5) (- width 1.5) (- bar-bottom 1.5)
-         :radius 15
-         :ink (make-linear-gradient
-               0 bar-top 0 bar-bottom
-               (palette-alpha-ink 0.030 0.034 0.031 0.86)
-               (palette-alpha-ink 0.008 0.010 0.009 0.86)))
+         :radius 16 :ink (ui-ink :shadow))
+        (draw-ui-surface medium 0 bar-top width bar-bottom)
         (loop for slot in slots
               for index from 0
               for selected-p = (eql index selected)
@@ -253,27 +239,12 @@ and the dark chamfer that runs round both, as the world draws its cells."
               for right = (+ left +palette-slot-width+)
               for top = (+ bar-top 10)
               for bottom = (+ top +palette-slot-height+)
-              do (when selected-p
-                   (draw-analytic-rounded-rectangle*
-                    medium (- left 2) (- top 2) (+ right 2) (+ bottom 2)
-                    :radius 10 :ink (palette-color *palette-accent*)))
-                 (draw-analytic-rounded-rectangle*
-                  medium left top right bottom :radius 8
-                  :ink (if selected-p
-                           (make-linear-gradient
-                            0 top 0 bottom
-                            (palette-color *palette-accent* 0.34)
-                            (palette-color *palette-accent* 0.13))
-                           *palette-well-ink*))
+              do (draw-ui-tile medium left top right bottom :selected selected-p)
                  (draw-palette-block
                   medium (- (/ (+ left right) 2.0) 18) (+ top 13) 36
                   (palette-slot-tones slot) (palette-slot-luminous-p slot))
-                 (draw-text* pane (palette-slot-key slot)
-                             (+ left 7) (+ top 9)
-                             :align-x :left :align-y :center :text-size 10
-                             :ink (if selected-p
-                                      (make-rgb-color 0.98 0.95 0.82)
-                                      *palette-muted-ink*)))
+                 (draw-ui-keycap medium (palette-slot-key slot)
+                                  (+ left 3) (+ top 3) :width 14 :height 14))
         (when selected
           (draw-palette-pill
            pane medium center (- bar-bottom 28) (- bar-bottom 10)

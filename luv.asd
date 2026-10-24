@@ -581,6 +581,7 @@ offsets and of headers."
                              (:file "port")
                              (:file "mirror")
                              (:file "gpu")
+                             (:file "ui-theme")
                              (:file "command-menu")
                              (:file "source-update")
                              (:file "metabar")

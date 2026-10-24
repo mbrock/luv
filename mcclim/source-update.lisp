@@ -16,23 +16,6 @@
 (defun source-update-alpha-ink (red green blue alpha)
   (compose-in (make-rgb-color red green blue) (make-opacity alpha)))
 
-(defparameter *source-update-shadow-ink*
-  (source-update-alpha-ink 0.0 0.0 0.0 0.38))
-(defparameter *source-update-edge-ink*
-  (source-update-alpha-ink 0.36 0.43 0.48 0.94))
-(defparameter *source-update-panel-ink*
-  (source-update-alpha-ink 0.055 0.065 0.075 0.96))
-(defparameter *source-update-row-ink*
-  (source-update-alpha-ink 0.11 0.13 0.15 0.82))
-(defparameter *source-update-button-ink*
-  (source-update-alpha-ink 0.22 0.48 0.37 0.96))
-(defparameter *source-update-button-muted-ink*
-  (source-update-alpha-ink 0.18 0.20 0.22 0.88))
-(defparameter *source-update-text-ink* (make-rgb-color 0.91 0.93 0.94))
-(defparameter *source-update-muted-ink* (make-rgb-color 0.59 0.64 0.68))
-(defparameter *source-update-accent-ink* (make-rgb-color 0.57 0.86 0.70))
-(defparameter *source-update-error-ink* (make-rgb-color 0.96 0.49 0.43))
-
 (defstruct source-update-snapshot
   state
   heading
@@ -628,6 +611,8 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
 
 (defclass source-update-pane (transparent-gpu-application-pane) ())
 
+(define-ui-themed-pane source-update-pane)
+
 (defclass source-update-state ()
   ((session :initarg :session :initform nil
             :reader source-update-frame-session)
@@ -752,31 +737,31 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
           (error "The source update panel requires retained direct GPU media."))
         (draw-analytic-rounded-rectangle*
          medium (+ left 8) (+ top 10) right bottom :radius 18
-         :ink *source-update-shadow-ink*)
+         :ink (ui-ink :shadow))
         (draw-analytic-rounded-rectangle*
-         medium left top right bottom :radius 18 :ink *source-update-edge-ink*)
+         medium left top right bottom :radius 18 :ink (ui-ink :border))
         (draw-analytic-rounded-rectangle*
          medium (+ left 2) (+ top 2) (- right 2) (- bottom 2)
-         :radius 16 :ink *source-update-panel-ink*)
+         :radius 16 :ink (ui-ink :surface))
         (draw-text* pane "Source Update" +source-update-margin+ 31
                     :align-y :center :text-size 22 :text-face :bold
-                    :ink *source-update-text-ink*)
+                    :ink (ui-ink :text))
         (draw-text* pane (source-update-state-label state)
                     (- +source-update-width+ +source-update-margin+) 31
                     :align-x :right :align-y :center :text-size 14
                     :ink (if error-p
-                             *source-update-error-ink*
-                             *source-update-accent-ink*))
+                             (ui-ink :danger)
+                             (ui-ink :accent)))
         (draw-text* pane (source-update-snapshot-heading snapshot)
                     +source-update-margin+ 67
                     :align-y :center :text-size 18 :text-face :bold
                     :ink (if error-p
-                             *source-update-error-ink*
-                             *source-update-text-ink*))
+                             (ui-ink :danger)
+                             (ui-ink :text)))
         (draw-analytic-rounded-rectangle*
          medium +source-update-margin+ 82
          (- +source-update-width+ +source-update-margin+) 532
-         :radius 9 :ink *source-update-row-ink*)
+         :radius 9 :ink (ui-ink :raised))
         (loop for line in (source-update-display-lines frame snapshot)
               for index from 0 below 19
               for y = (+ +source-update-content-top+
@@ -784,26 +769,26 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
               do (draw-text* pane line (+ +source-update-margin+ 13) y
                              :align-y :top :text-size 14
                              :ink (if (and error-p (zerop index))
-                                      *source-update-error-ink*
-                                      *source-update-text-ink*)))
+                                      (ui-ink :danger)
+                                      (ui-ink :text))))
         (let ((enabled-p (source-update-action-enabled-p snapshot)))
           (draw-analytic-rounded-rectangle*
            medium +source-update-margin+ +source-update-button-top+
            315 +source-update-button-bottom+ :radius 9
            :ink (if enabled-p
-                    *source-update-button-ink*
-                    *source-update-button-muted-ink*))
+                    (ui-ink :accent)
+                    (ui-ink :inset)))
           (draw-text* pane (source-update-action-label snapshot)
                       169 (/ (+ +source-update-button-top+
                                 +source-update-button-bottom+) 2)
                       :align-x :center :align-y :center :text-size 16
-                      :text-face :bold :ink *source-update-text-ink*))
+                      :text-face :bold :ink (ui-ink :text)))
         (draw-text* pane (source-update-snapshot-footer snapshot)
                     (- +source-update-width+ +source-update-margin+)
                     (/ (+ +source-update-button-top+
                           +source-update-button-bottom+) 2)
                     :align-x :right :align-y :center :text-size 12
-                    :ink *source-update-muted-ink*)))))
+                    :ink (ui-ink :muted))))))
 
 (defun source-update-mirror (frame &key (errorp t))
   (let* ((sheet (frame-top-level-sheet frame))

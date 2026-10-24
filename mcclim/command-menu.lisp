@@ -19,28 +19,6 @@
 (defun command-menu-alpha-ink (red green blue alpha)
   (compose-in (make-rgb-color red green blue) (make-opacity alpha)))
 
-;; Uniform translucent inks remain uniform composita in McCLIM.  The direct
-;; compositor carries their alpha with the semantic primitive and
-;; premultiplies RGB in its vertex shader before blending over the game.
-(defparameter *command-menu-shadow-ink*
-  (command-menu-alpha-ink 0.0 0.0 0.0 0.42))
-(defparameter *command-menu-edge-ink*
-  (command-menu-alpha-ink 0.38 0.44 0.40 0.88))
-(defparameter *command-menu-panel-ink*
-  (command-menu-alpha-ink 0.055 0.060 0.056 0.92))
-(defparameter *command-menu-field-edge-ink*
-  (command-menu-alpha-ink 0.48 0.67 0.50 0.86))
-(defparameter *command-menu-field-ink*
-  (command-menu-alpha-ink 0.018 0.021 0.019 0.78))
-(defparameter *command-menu-row-ink*
-  (command-menu-alpha-ink 0.11 0.12 0.112 0.64))
-(defparameter *command-menu-selected-row-ink*
-  (command-menu-alpha-ink 0.55 0.75 0.53 0.94))
-(defparameter *command-menu-text-ink* (make-rgb-color 0.93 0.92 0.87))
-(defparameter *command-menu-muted-ink* (make-rgb-color 0.64 0.66 0.61))
-(defparameter *command-menu-selected-text-ink*
-  (make-rgb-color 0.055 0.065 0.055))
-
 (define-condition command-menu-requires-direct-gpu (error)
   ((object :initarg :object :reader command-menu-non-gpu-object))
   (:report
@@ -128,6 +106,8 @@ application currently disables.  Required arguments are read after selection."
          entries))))
 
 (defclass mx-command-menu-pane (transparent-gpu-application-pane) ())
+
+(define-ui-themed-pane mx-command-menu-pane)
 
 (defclass command-menu-state ()
   ((owner-frame :initarg :owner-frame :initform nil
@@ -315,14 +295,14 @@ Named options retain the command's defaults; M-x asks for required arguments."
      stream left (+ top 2) right (- (+ top +command-menu-row-height+) 2)
      :radius 7
      :ink (if selected-p
-              *command-menu-selected-row-ink*
-              *command-menu-row-ink*))
+              (ui-ink :selection-soft)
+              (ui-ink :surface)))
     (draw-text* stream (command-menu-entry-label entry) (+ left 12)
                 (+ top (/ +command-menu-row-height+ 2))
                 :align-y :center :text-size 17
                 :ink (if selected-p
-                         *command-menu-selected-text-ink*
-                         *command-menu-text-ink*))))
+                         (ui-ink :text)
+                         (ui-ink :text)))))
 
 (defun ensure-command-menu-gpu-medium (medium)
   (unless (typep medium 'luv-gpu-medium)
@@ -344,27 +324,27 @@ Named options retain the command's defaults; M-x asks for required arguments."
         ;; provide borders without invoking McCLIM's decomposed outline path.
         (draw-analytic-rounded-rectangle*
          medium (+ left 7) (+ top 9) (- right-edge 1) (- bottom 1)
-         :radius 18 :ink *command-menu-shadow-ink*)
+         :radius 18 :ink (ui-ink :shadow))
         (draw-analytic-rounded-rectangle*
          medium left top right-edge bottom
-         :radius 18 :ink *command-menu-edge-ink*)
+         :radius 18 :ink (ui-ink :border))
         (draw-analytic-rounded-rectangle*
          medium (+ left 2) (+ top 2) (- right-edge 2) (- bottom 2)
-         :radius 16 :ink *command-menu-panel-ink*)
+         :radius 16 :ink (ui-ink :surface))
         (draw-text* pane "M-x" margin 30
                     :align-y :center :text-size 22 :text-face :bold
-                    :ink *command-menu-text-ink*)
+                    :ink (ui-ink :text))
         (draw-text* pane "Esc cancels" right 30
                     :align-x :right :align-y :center :text-size 14
-                    :ink *command-menu-muted-ink*)
+                    :ink (ui-ink :muted))
         (draw-analytic-rounded-rectangle*
          medium margin +command-menu-field-top+
          right +command-menu-field-bottom+
-         :radius 9 :ink *command-menu-field-edge-ink*)
+         :radius 9 :ink (ui-ink :focus))
         (draw-analytic-rounded-rectangle*
          medium (+ margin 1) (+ +command-menu-field-top+ 1)
          (- right 1) (- +command-menu-field-bottom+ 1)
-         :radius 8 :ink *command-menu-field-ink*)
+         :radius 8 :ink (ui-ink :raised))
         (let* ((prompt (if (command-menu-pending-command frame)
                            (format nil "~A: "
                                    (getf (command-menu-argument-options frame)
@@ -380,10 +360,10 @@ Named options retain the command's defaults; M-x asks for required arguments."
                                  (make-text-style nil nil 18))))
           (draw-text* pane text text-x text-y
                       :align-y :center :text-size 18
-                      :ink *command-menu-text-ink*)
+                      :ink (ui-ink :text))
           (draw-rectangle* pane (+ text-x width 2) (- text-y 11)
                            (+ text-x width 4) (+ text-y 11)
-                           :ink *command-menu-field-edge-ink*))
+                           :ink (ui-ink :focus)))
         (multiple-value-bind (visible start)
             (command-menu-visible-results frame)
           (loop for entry in visible
@@ -401,7 +381,7 @@ Named options retain the command's defaults; M-x asks for required arguments."
                           "No matching command") margin
                       (+ +command-menu-results-top+ 20)
                       :align-y :center :text-size 16
-                      :ink *command-menu-muted-ink*))
+                      :ink (ui-ink :muted)))
         (draw-text* pane
                     (if (command-menu-pending-command frame)
                         "RET accepts  ·  Esc cancels"
@@ -409,7 +389,7 @@ Named options retain the command's defaults; M-x asks for required arguments."
                                 (length results)))
                     margin (- +command-menu-height+ 24)
                     :align-y :center :text-size 14
-                    :ink *command-menu-muted-ink*)))))
+                    :ink (ui-ink :muted))))))
 
 (defun command-menu-mirror (frame &key (errorp t))
   "Return FRAME's embedded direct-GPU mirror."
@@ -464,7 +444,8 @@ revision for replay by the owning application's next presentation pass."
 (defun prepare-command-menu (frame)
   "Ensure FRAME has a complete retained revision for direct composition."
   (let ((mirror (command-menu-mirror frame)))
-    (if (or (command-menu-dirty-p frame)
+    (if (or (ui-theme-changed-p frame)
+            (command-menu-dirty-p frame)
             (null (gpu-mirror-prepared-commands mirror)))
         (repaint-command-menu frame)
         ;; Static semantic media must still observe live shader revisions.

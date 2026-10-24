@@ -274,14 +274,14 @@
       (true (< (abs (- 230.0 x)) 1.0e-4))
       (true (< (abs (- 120.0 y)) 1.0e-4)))))
 
-(define-test metabar-panel-is-translucent-analytic-and-prepares-no-image
+(define-test metabar-panel-is-opaque-analytic-and-prepares-no-image
   (let ((medium (fresh-gpu-medium)))
-    (setf (clim:medium-ink medium) mcluv::*metabar-panel-ink*)
+    (setf (clim:medium-ink medium) (mcluv::ui-ink :surface))
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 0 0 460 240 15 t)
     (let ((vertices (mcluv::gpu-medium-analytic-vertices medium))
           (semantic-commands (mcluv::gpu-medium-commands medium)))
-      (true (< (abs (- 0.90 (aref vertices 2))) 1.0e-5))
+      (true (< (abs (- 1.0 (aref vertices 2))) 1.0e-5))
       (true (= 1 (length semantic-commands)))
       (true (typep (aref semantic-commands 0)
                    'mcluv::gpu-analytic-command))

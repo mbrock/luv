@@ -218,6 +218,8 @@
             #() #() #() #() #() #())))
     (setf (slot-value frame 'clim-internals::top-level-sheet) sheet
           (clim:sheet-direct-mirror sheet) mirror)
+    ;; The synthetic revision represents a drawing in the current theme.
+    (mcluv:ui-theme-changed-p frame)
     ;; Initial semantic publication has no compositor.  Every later probe
     ;; observation therefore belongs to the tested static refresh boundary.
     (mcluv::publish-gpu-mirror-prepared-revision mirror revision)
@@ -823,3 +825,24 @@
              (aref (mcluv::gpu-medium-commands medium) 0))))
       (true clip)
       (true (equal '(0.1 0.2 0.8 0.9) clip)))))
+
+(define-test shared-theme-invalidates-once-per-identity
+  (let ((owner (list :theme-test))
+        (mcluv::*ui-theme* (mcluv::make-field-atelier-theme)))
+    (true (mcluv::ui-theme-changed-p owner))
+    (false (mcluv::ui-theme-changed-p owner))
+    (let ((original (mcluv::ui-ink :surface)))
+      (true (eq original (mcluv::ui-ink :surface)))
+      (setf mcluv::*ui-theme* (mcluv::make-field-atelier-theme))
+      (true (mcluv::ui-theme-changed-p owner))
+      (false (mcluv::ui-theme-changed-p owner)))
+    (fail (mcluv::ui-ink :unknown-role))))
+
+(define-test workshop-text-remains-readable-on-its-surfaces
+  (flet ((luminance (role)
+           (multiple-value-bind (r g b) (clim:color-rgb (mcluv::ui-ink role))
+             (+ (* 0.2126 r) (* 0.7152 g) (* 0.0722 b)))))
+    (dolist (surface '(:surface :raised :inset :selection-soft))
+      (dolist (text '(:text :muted))
+        (true (>= (/ (+ 0.05 (luminance surface))
+                     (+ 0.05 (luminance text))) 4.5))))))

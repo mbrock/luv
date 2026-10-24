@@ -975,6 +975,10 @@ every key and pointer event."
   workbench)
 
 (defun refresh-workbench (workbench)
+  ;; The shell owns several retained panes, including inactive help/messages.
+  ;; A theme identity change republishes their shared mirror once.
+  (when (mcluv::ui-theme-changed-p workbench)
+    (mcluv:repaint-gpu-mirror (workbench-mirror workbench)))
   (multiple-value-bind (width height)
       (luv:canvas-logical-size
        (workbench-application-canvas (workbench-application workbench)))

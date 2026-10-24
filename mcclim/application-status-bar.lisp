@@ -22,12 +22,6 @@
 (defun status-bar-alpha-ink (red green blue alpha)
   (compose-in (make-rgb-color red green blue) (make-opacity alpha)))
 
-(defparameter *status-bar-panel-ink*
-  (status-bar-alpha-ink 0.010 0.012 0.014 0.72))
-(defparameter *status-bar-edge-ink*
-  (status-bar-alpha-ink 0.68 0.72 0.70 0.19))
-(defparameter *status-bar-text-ink* (make-rgb-color 0.86 0.88 0.86))
-
 (defparameter +status-bar-base-channels+
   '(:application :pid :fps :heap :lobby :worktree)
   "The application-neutral status vocabulary, in presentation order.")
@@ -154,6 +148,8 @@ They must inspect already-owned state and must not perform I/O or wait."))
   value)
 
 (defclass status-bar-pane (transparent-gpu-application-pane) ())
+
+(define-ui-themed-pane status-bar-pane)
 
 (defvar *status-bar-construction-width* 1024
   "Logical width used while MAKE-EMBEDDED-STATUS-BAR realizes its pane.")
@@ -326,19 +322,18 @@ semantic repaint."
   (let* ((bar (pane-frame pane))
          (width (status-bar-logical-width bar)))
     (with-sheet-medium (medium pane)
-      ;; Both layers are analytic direct-GPU media.  The panel's alpha reaches
-      ;; the game's already-rendered color through premultiplied blending.
+      ;; Opaque theme surfaces keep this small status line readable over the world.
       (draw-analytic-rounded-rectangle*
        medium 0 0 width +status-bar-height+
-       :radius 0 :ink *status-bar-panel-ink*)
+       :radius 0 :ink (ui-ink :surface))
       (draw-analytic-rounded-rectangle*
        medium 0 (- +status-bar-height+ 1) width +status-bar-height+
-       :radius 0 :ink *status-bar-edge-ink*)
+       :radius 0 :ink (ui-ink :border))
       ;; Every field intentionally shares this exact face and size.
       (draw-text* pane (status-bar-display-string bar medium)
                   +status-bar-horizontal-pad+ (/ +status-bar-height+ 2)
                   :align-y :center :text-size +status-bar-text-size+
-                  :ink *status-bar-text-ink*))))
+                  :ink (ui-ink :muted)))))
 
 (define-condition status-bar-requires-direct-gpu (error)
   ((object :initarg :object :reader status-bar-non-gpu-object))
@@ -427,6 +422,8 @@ semantic repaint."
     (bar logical-width
      &key (now (get-internal-real-time)) (resize-frame-p t))
   "Count one presented frame and occasionally publish a bounded state sample."
+  (when (ui-theme-changed-p bar)
+    (setf (status-bar-dirty-p bar) t))
   (resize-status-bar bar logical-width :resize-frame-p resize-frame-p)
   (incf (status-bar-frames-since-sample bar))
   (let* ((before (status-bar-last-sample-ticks bar))

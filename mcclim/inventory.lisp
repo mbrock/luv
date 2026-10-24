@@ -34,13 +34,7 @@
     (:luminous "Luminous")
     (:colors "Colours")))
 
-(defparameter *inventory-panel-ink* (make-rgb-color 0.040 0.050 0.065))
-(defparameter *inventory-light-edge* (make-rgb-color 0.055 0.065 0.080))
-(defparameter *inventory-text-ink* (make-rgb-color 0.90 0.88 0.82))
-(defparameter *inventory-muted-ink* (make-rgb-color 0.30 0.35 0.40))
-(defparameter *inventory-accent-ink* (make-rgb-color 0.56 0.45 0.24))
-
-(defclass inventory-pane (application-pane) ())
+(defclass inventory-pane (transparent-gpu-application-pane) ())
 
 (define-application-frame luvcraft-inventory ()
   ((session :initarg :session :reader inventory-session)
@@ -64,12 +58,9 @@
   (:panes
    (inventory
     (make-pane 'inventory-pane
-               :default-text-style (make-text-style :sans-serif nil :normal))))
-  (:layouts
-   (default
-    (horizontally (:width +inventory-view-width+
-                   :height +inventory-view-height+)
-      inventory))))
+               :default-text-style (make-text-style :sans-serif nil :normal)
+               :width +inventory-view-width+ :height +inventory-view-height+)))
+  (:layouts (default inventory)))
 
 (defun inventory-block-preview-tile (block)
   (let ((tiles (luvcraft:block-kind-face-tiles block)))
@@ -136,6 +127,7 @@ every cell makes the word louder than the block it is about."
 (defun inventory-visible-state-for (frame)
   (let ((session (inventory-session frame)))
     (list
+     *ui-theme*
      (inventory-simple-state frame)
      (inventory-category frame)
      (inventory-page frame)
@@ -155,12 +147,12 @@ every cell makes the word louder than the block it is about."
       (with-sheet-medium (medium pane)
         (draw-analytic-rounded-rectangle*
          medium 16 top 150 (+ top 27) :radius 4
-         :ink *inventory-panel-ink*))
+         :ink (ui-ink :hover)))
       (draw-line* pane 17 (+ top 5) 17 (+ top 22)
-                  :ink *inventory-accent-ink* :line-thickness 2))
+                  :ink (ui-ink :selection) :line-thickness 2))
     (draw-text* pane label 27 (+ top 14)
                 :align-y :center :text-size 12
-                :ink (if selected-p *inventory-text-ink* *inventory-muted-ink*))
+                :ink (if selected-p (ui-ink :text) (ui-ink :muted)))
     (draw-text* pane
                 (format nil "~D"
                         (count-if
@@ -171,7 +163,7 @@ every cell makes the word louder than the block it is about."
                           (luvcraft:player-inventory
                            (inventory-session frame)))))
                 140 (+ top 14) :align-x :right :align-y :center
-                :text-size 10 :ink *inventory-muted-ink*)))
+                :text-size 10 :ink (ui-ink :muted))))
 
 (defun draw-inventory-page-controls (frame pane)
   (let ((page (inventory-page frame))
@@ -180,18 +172,18 @@ every cell makes the word louder than the block it is about."
       (dolist (left '(574 616))
         (draw-analytic-rounded-rectangle*
          medium left 12 (+ left 34) 43 :radius 4
-         :ink *inventory-panel-ink*)))
+         :ink (ui-ink :hover))))
     (draw-text* pane "‹" 591 27 :align-x :center :align-y :center
                 :text-size 20
-                :ink (if (plusp page) +white+ *inventory-muted-ink*))
+                :ink (if (plusp page) (ui-ink :text) (ui-ink :muted)))
     (draw-text* pane "›" 633 27 :align-x :center :align-y :center
                 :text-size 20
-                :ink (if (< page (1- count)) +white+ *inventory-muted-ink*))
+                :ink (if (< page (1- count)) (ui-ink :text) (ui-ink :muted)))
     (draw-text* pane (format nil "~D materials   ·   ~D / ~D"
                             (length (inventory-filtered-entries frame))
                             (1+ page) count)
                 558 27 :align-x :right :align-y :center :text-size 12
-                :ink *inventory-muted-ink*)))
+                :ink (ui-ink :muted))))
 
 (defun draw-inventory-entry
     (frame pane entry index left top width height)
@@ -213,21 +205,21 @@ on the bar wears the number key that selects it."
       (when (< index luvcraft::+block-inventory-quickbar-size+)
         (draw-text* pane (format nil "~D" (mod (1+ index) 10))
                     (+ left 6) (+ top 10) :align-y :center :text-size 10
-                    :ink *inventory-accent-ink*))
+                    :ink (ui-ink :selection)))
       (when (luvcraft:block-inventory-entry-quantity entry)
         (draw-text* pane (inventory-entry-quantity-label entry)
                     (- (+ left width) 6) (- (+ top height) 5)
                     :align-x :right :align-y :bottom :text-size 10
-                    :ink *inventory-muted-ink*)))))
+                    :ink (ui-ink :muted))))))
 
 (defun draw-inventory-quickbar (frame pane entries)
   (draw-text* pane "Quickbar" +inventory-quickbar-left+
               (- +inventory-quickbar-top+ 14)
-              :align-y :center :text-size 14 :ink *inventory-text-ink*)
+              :align-y :center :text-size 14 :ink (ui-ink :text))
   (draw-text* pane "Hover a material + 1–9, 0 to assign" +inventory-quickbar-right+
               (- +inventory-quickbar-top+ 14)
               :align-x :right :align-y :center :text-size 11
-              :ink *inventory-muted-ink*)
+              :ink (ui-ink :muted))
   (let ((slot-width
           (/ (- +inventory-quickbar-right+ +inventory-quickbar-left+)
              (max 1 (length entries)))))
@@ -248,10 +240,10 @@ on the bar wears the number key that selects it."
               pane (inventory-atlas frame) block
               (+ left (/ (- slot-width 40) 2))
               (+ +inventory-quickbar-top+ 10) :scale 5/2)
-             (draw-text* pane (format nil "~D" (mod (1+ index) 10))
-                         (+ left 9) (+ +inventory-quickbar-top+ 10)
-                         :align-y :center :text-size 10
-                         :ink *inventory-muted-ink*))))
+             (with-sheet-medium (medium pane)
+               (draw-ui-keycap medium (format nil "~D" (mod (1+ index) 10))
+                                (+ left 6) (+ +inventory-quickbar-top+ 3)
+                                :width 14 :height 14)))))
 
 (defgeneric inventory-detail-rows (block entry)
   (:documentation
@@ -284,20 +276,20 @@ on the bar wears the number key that selects it."
 (defun draw-inventory-details (frame pane selected entry)
   (draw-text* pane (if (inventory-hovered-block frame) "Inspecting" "In hand")
               674 78 :align-y :center :text-size 11
-              :ink *inventory-muted-ink*)
+              :ink (ui-ink :muted))
   (draw-inventory-block-tile pane (inventory-atlas frame) selected 710 94
                              :scale 4)
   (draw-text* pane (inventory-clipped-label (inventory-entry-label entry) 21)
               746 182 :align-x :center :align-y :center :text-size 13
-              :ink *inventory-text-ink*)
-  (draw-line* pane 674 202 818 202 :ink *inventory-light-edge*)
+              :ink (ui-ink :text))
+  (draw-line* pane 674 202 818 202 :ink (ui-ink :border))
   (loop for (label . value) in (inventory-detail-rows selected entry)
         for y from 224 by 24
         do (draw-text* pane label 668 y :align-y :center :text-size 10
-                       :ink *inventory-muted-ink*)
+                       :ink (ui-ink :muted))
            (draw-text* pane (format nil "~A" value) 820 y
                        :align-x :right :align-y :center :text-size 10
-                       :ink *inventory-text-ink*)))
+                       :ink (ui-ink :text))))
 
 (defmethod handle-repaint ((pane inventory-pane) region)
   (declare (ignore region))
@@ -321,9 +313,9 @@ on the bar wears the number key that selects it."
                                      :height +inventory-view-height+)
       (unless (inventory-preferences frame)
         (draw-text* pane "Material library" 22 27
-                    :align-y :center :text-size 18 :ink *inventory-text-ink*))
-      (draw-line* pane 16 52 824 52 :ink *inventory-light-edge*)
-      (draw-line* pane 658 64 658 350 :ink *inventory-light-edge*)
+                    :align-y :center :text-size 18 :ink (ui-ink :text)))
+      (draw-line* pane 16 52 824 52 :ink (ui-ink :border))
+      (draw-line* pane 658 64 658 350 :ink (ui-ink :border))
       (draw-inventory-page-controls frame pane)
       (loop for (category label) in *inventory-categories*
             for index from 0
@@ -341,26 +333,27 @@ on the bar wears the number key that selects it."
       (draw-inventory-quickbar frame pane quickbar-entries)
       (when inspected-entry
         (draw-inventory-details frame pane inspected inspected-entry))
-      (draw-line* pane 16 364 824 364 :ink *inventory-light-edge*)
+      (draw-line* pane 16 364 824 364 :ink (ui-ink :border))
       (draw-text* pane "IN HAND" 24 378 :align-y :center
-                  :text-size 10 :ink *inventory-muted-ink*)
+                  :text-size 10 :ink (ui-ink :muted))
       (when selected-entry
         (draw-text* pane
                     (inventory-clipped-label
                      (inventory-entry-label selected-entry) 17)
                     24 410 :align-y :center
-                    :text-size 12 :ink *inventory-text-ink*))
+                    :text-size 12 :ink (ui-ink :text)))
       (draw-text* pane "1–9, 0 to select" 24 430 :align-y :center
-                  :text-size 11 :ink *inventory-muted-ink*)
+                  :text-size 11 :ink (ui-ink :muted))
       (draw-text* pane "I / Esc   Close" 24 477
-                  :align-y :center :text-size 11 :ink *inventory-muted-ink*)
+                  :align-y :center :text-size 11 :ink (ui-ink :muted))
       (draw-text* pane "Click a material to equip" 166 477
-                  :align-y :center :text-size 11 :ink *inventory-muted-ink*)
+                  :align-y :center :text-size 11 :ink (ui-ink :muted))
       (draw-text* pane "Wheel / ← →   Browse pages" 824 477
                   :align-x :right :align-y :center :text-size 11
-                  :ink *inventory-muted-ink*))))
+                  :ink (ui-ink :muted)))))
 
 (defun repaint-inventory (frame)
+  (make-gpu-frame-background-transparent frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
     (check-type mirror luv-gpu-mirror)
     (repaint-gpu-mirror mirror))
@@ -609,6 +602,7 @@ on the bar wears the number key that selects it."
                (make-application-frame
                 'luvcraft-inventory :frame-manager manager :enable t
                 :session session))))
+      (make-gpu-frame-background-transparent frame)
       (initialize-inventory-preferences frame)
       (setf (frame-pretty-name frame) title
             (inventory-visible-state frame) (inventory-visible-state-for frame))

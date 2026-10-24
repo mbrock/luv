@@ -393,42 +393,34 @@
              (repaint-inventory frame) t)
             (t (call-next-method)))))))
 
-(defparameter *simple-paper* (make-rgb-color 0.84 0.78 0.64))
-(defparameter *simple-ink* (make-rgb-color 0.025 0.055 0.035))
-(defparameter *simple-focus* (make-rgb-color 0.98 0.70 0.16))
-
 (defun simple-panel (pane x y width height &key selected dark)
   (with-sheet-medium (medium pane)
-    (draw-analytic-rounded-rectangle*
-     medium x y (+ x width) (+ y height) :radius 9
-     :ink (if selected *simple-focus*
-              (if dark *simple-ink* (make-rgb-color 0.70 0.65 0.53))))
-    (when selected
-      (draw-analytic-rounded-rectangle*
-       medium (+ x 2) (+ y 2) (- (+ x width) 2) (- (+ y height) 2)
-       :radius 7
-       :ink (if dark *simple-ink* (make-rgb-color 0.70 0.65 0.53))))))
+    (draw-ui-surface medium x y (+ x width) (+ y height)
+                     :radius (ui-metric :control-radius)
+                     :rim (if selected 2 1)
+                     :edge (if selected :selection :border)
+                     :fill (if dark :accent :raised))))
 
 (defun simple-label (pane text x y &key (size 15) light)
   (draw-text* pane text x y :align-x :center :align-y :center
-              :text-size size :ink (if light *simple-paper* *simple-ink*)))
+              :text-size size :ink (ui-ink (if light :on-accent :text))))
 
 (defun draw-inventory-header (frame pane)
   (let ((simple (inventory-simple-p frame)))
     (if simple
         (progn
-          (draw-rectangle* pane 0 0 840 47 :ink *simple-paper*)
+          (draw-rectangle* pane 0 0 840 47 :ink (ui-ink :surface))
           (simple-panel pane 18 8 137 34 :dark t)
           (simple-label pane "Choose your building blocks" 408 27 :size 20))
         (with-sheet-medium (medium pane)
           (draw-hotbar-slot pane medium 18 10 155 42)
           (draw-text* pane "Material library" 174 27 :align-y :center
-                      :text-size 16 :ink *inventory-text-ink*)))
+                      :text-size 16 :ink (ui-ink :text))))
     (draw-text* pane (format nil "Player ~D  · F2"
                             (1+ (inventory-active-player frame)))
                 86 25 :align-x :center :align-y :center :text-size 13
-                :ink (if simple *simple-paper* *inventory-text-ink*))
-    (let ((ink (if simple *simple-ink* *inventory-text-ink*)))
+                :ink (ui-ink (if simple :on-accent :text)))
+    (let ((ink (ui-ink :text)))
       (draw-rectangle* pane 654 15 674 35 :filled nil :ink ink :line-thickness 2)
       (unless simple
         (draw-line* pane 657 25 662 31 :ink ink :line-thickness 2)
@@ -442,7 +434,7 @@
          (entries (simple-inventory-entries frame))
          (zone (inventory-simple-focus frame))
          (cursor (inventory-simple-cursor frame)))
-    (draw-rectangle* pane 0 0 840 500 :ink *simple-paper*)
+    (draw-ui-surface pane 0 0 840 500)
     (simple-label pane "Choose your building blocks" 408 27 :size 21)
     (loop for (category label name) in *simple-inventory-categories*
           for i from 0 for x = (+ 20 (* i 134)) do

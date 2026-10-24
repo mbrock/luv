@@ -11,19 +11,9 @@
 (defconstant +lobby-hud-height+ 140)
 (defconstant +lobby-hud-margin+ 16)
 
-(defun lobby-hud-alpha-ink (red green blue alpha)
-  (compose-in (make-rgb-color red green blue) (make-opacity alpha)))
-
-(defparameter *lobby-hud-shadow-ink*
-  (lobby-hud-alpha-ink 0.0 0.0 0.0 0.30))
-(defparameter *lobby-hud-edge-ink*
-  (lobby-hud-alpha-ink 0.44 0.49 0.46 0.48))
-(defparameter *lobby-hud-panel-ink*
-  (lobby-hud-alpha-ink 0.025 0.030 0.034 0.84))
-(defparameter *lobby-hud-text-ink* (make-rgb-color 0.82 0.85 0.83))
-(defparameter *lobby-hud-muted-ink* (make-rgb-color 0.49 0.53 0.51))
-
 (defclass lobby-hud-pane (mcluv:transparent-gpu-application-pane) ())
+
+(mcluv::define-ui-themed-pane lobby-hud-pane)
 
 (defclass lobby-hud-state ()
   ((client :initarg :client :initform nil :reader lobby-hud-client)
@@ -39,7 +29,7 @@
   (:menu-bar nil)
   ;; The pane background is part of McCLIM's retained stream.  Leaving it at
   ;; the implementation default paints an opaque white rectangle behind the
-  ;; rounded translucent card even though the card itself is analytic.
+  ;; rounded card even though the card itself is analytic.
   (:panes (sheet (make-pane 'lobby-hud-pane
                             :background +transparent-ink+
                             :width +lobby-hud-width+
@@ -54,10 +44,10 @@
 
 (defun lobby-status-ink (status)
   (ecase status
-    (:online (make-rgb-color 0.34 0.86 0.43))
-    ((:starting :connecting) (make-rgb-color 0.88 0.70 0.28))
-    (:offline (make-rgb-color 0.72 0.38 0.32))
-    ((:stopping :stopped) (make-rgb-color 0.38 0.42 0.41))))
+    (:online (mcluv:ui-ink :accent))
+    ((:starting :connecting) (mcluv:ui-ink :selection))
+    (:offline (mcluv:ui-ink :danger))
+    ((:stopping :stopped) (mcluv:ui-ink :muted))))
 
 (defun lobby-short-error (error)
   (when error
@@ -79,39 +69,35 @@
     (with-sheet-medium (medium pane)
       (mcluv:draw-analytic-rounded-rectangle*
        medium 4 5 (- +lobby-hud-width+ 2) (- +lobby-hud-height+ 1)
-       :radius 14 :ink *lobby-hud-shadow-ink*)
-      (mcluv:draw-analytic-rounded-rectangle*
-       medium 1 1 (- +lobby-hud-width+ 3) (- +lobby-hud-height+ 5)
-       :radius 13 :ink *lobby-hud-edge-ink*)
-      (mcluv:draw-analytic-rounded-rectangle*
-       medium 2 2 (- +lobby-hud-width+ 4) (- +lobby-hud-height+ 6)
-       :radius 12 :ink *lobby-hud-panel-ink*)
+       :radius 14 :ink (mcluv:ui-ink :shadow))
+      (mcluv:draw-ui-surface
+       medium 1 1 (- +lobby-hud-width+ 3) (- +lobby-hud-height+ 5))
       (draw-circle* pane 20 22 5 :ink (lobby-status-ink status))
       (draw-text* pane "lobby" 34 22
                   :align-y :center :text-size 14 :text-face :bold
-                  :ink *lobby-hud-text-ink*)
+                  :ink (mcluv:ui-ink :text))
       (draw-text* pane (string-downcase (symbol-name status))
                   (- +lobby-hud-width+ 18) 22
                   :align-x :right :align-y :center :text-size 11
-                  :ink *lobby-hud-muted-ink*)
+                  :ink (mcluv:ui-ink :muted))
       (cond
         (peers
          (loop for peer in peers
                for y from 51 by 21
                repeat 4
                do (draw-circle* pane 21 y 4
-                                :ink (make-rgb-color 0.34 0.86 0.43))
+                                :ink (mcluv:ui-ink :accent))
                   (draw-text* pane (luv.lobby:lobby-peer-name peer) 35 y
                               :align-y :center :text-size 13
-                              :ink *lobby-hud-text-ink*)))
+                              :ink (mcluv:ui-ink :text))))
         ((and error (eq status :offline))
          (draw-text* pane (lobby-short-error error) 17 52
                      :align-y :center :text-size 11
-                     :ink *lobby-hud-muted-ink*))
+                     :ink (mcluv:ui-ink :muted)))
         (t
          (draw-text* pane "quiet" 17 52
                      :align-y :center :text-size 11
-                     :ink *lobby-hud-muted-ink*))))))
+                     :ink (mcluv:ui-ink :muted)))))))
 
 (defun lobby-hud-mirror (frame &key (errorp t))
   (let* ((sheet (frame-top-level-sheet frame))
@@ -159,7 +145,8 @@
          (snapshot (and client (luv.lobby:lobby-client-snapshot client)))
          (revision
            (if snapshot (luv.lobby:lobby-snapshot-revision snapshot) -1)))
-    (if (or (not (eql revision (lobby-hud-painted-revision frame)))
+    (if (or (mcluv:ui-theme-changed-p frame)
+            (not (eql revision (lobby-hud-painted-revision frame)))
             (null (mcluv::gpu-mirror-prepared-commands
                    (lobby-hud-mirror frame))))
         (progn

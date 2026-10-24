@@ -21,18 +21,6 @@
   "Where a column's keys end, from its left; labels follow a gutter.")
 (defconstant +keymap-legend-viewport-margin+ 24)
 
-(defparameter *keymap-legend-shadow-ink*
-  (compose-in (make-rgb-color 0.0 0.0 0.0) (make-opacity 0.42)))
-(defparameter *keymap-legend-edge-ink*
-  (compose-in (make-rgb-color 0.16 0.20 0.17) (make-opacity 0.90)))
-(defparameter *keymap-legend-panel-ink*
-  (compose-in (make-rgb-color 0.010 0.012 0.011) (make-opacity 0.90)))
-(defparameter *keymap-legend-row-ink*
-  (compose-in (make-rgb-color 0.048 0.054 0.050) (make-opacity 0.80)))
-(defparameter *keymap-legend-key-ink* (make-rgb-color 0.58 0.78 0.54))
-(defparameter *keymap-legend-text-ink* (make-rgb-color 0.93 0.92 0.87))
-(defparameter *keymap-legend-muted-ink* (make-rgb-color 0.60 0.62 0.57))
-
 ;;; ---------------------------------------------------------------------
 ;;; Application protocol.
 
@@ -144,6 +132,8 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
 
 (defclass keymap-legend-pane (transparent-gpu-application-pane) ())
 
+(define-ui-themed-pane keymap-legend-pane)
+
 (defvar *keymap-legend-construction-height* 480)
 
 (defclass keymap-legend-state ()
@@ -176,7 +166,7 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
        medium left (+ top 2)
        (+ left +keymap-legend-column-width+)
        (- (+ top +keymap-legend-row-height+) 1)
-       :radius 6 :ink *keymap-legend-row-ink*)
+       :radius 6 :ink (ui-ink :inset))
       (when keys
         (let* ((text (format nil "~{~A~^  ~}" keys))
                (width (text-size medium text :text-style (make-text-style nil :bold 14)))
@@ -185,10 +175,10 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
           (draw-text* pane text keys-right middle
                       :align-x :right :align-y :center
                       :text-size size :text-face :bold
-                      :ink *keymap-legend-key-ink*)))
+                      :ink (ui-ink :accent))))
       (draw-text* pane label (+ keys-right 18) middle
                   :align-y :center :text-size 14
-                  :ink *keymap-legend-text-ink*))))
+                  :ink (ui-ink :text)))))
 
 (defmethod handle-repaint ((pane keymap-legend-pane) region)
   (declare (ignore region))
@@ -200,18 +190,18 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
     (with-sheet-medium (medium pane)
       (draw-analytic-rounded-rectangle*
        medium 7 9 (- width 1) (- height 1)
-       :radius 18 :ink *keymap-legend-shadow-ink*)
+       :radius 18 :ink (ui-ink :shadow))
       (draw-analytic-rounded-rectangle*
-       medium 0 0 width height :radius 18 :ink *keymap-legend-edge-ink*)
+       medium 0 0 width height :radius 18 :ink (ui-ink :border))
       (draw-analytic-rounded-rectangle*
        medium 2 2 (- width 2) (- height 2)
-       :radius 16 :ink *keymap-legend-panel-ink*)
+       :radius 16 :ink (ui-ink :surface))
       (draw-text* pane "Keys" margin 32
                   :align-y :center :text-size 22 :text-face :bold
-                  :ink *keymap-legend-text-ink*)
+                  :ink (ui-ink :text))
       (draw-text* pane "any key closes" (- width margin) 32
                   :align-x :right :align-y :center :text-size 14
-                  :ink *keymap-legend-muted-ink*)
+                  :ink (ui-ink :muted))
       (loop for column in (keymap-legend-columns sections)
             for left from margin
               by (+ +keymap-legend-column-width+ +keymap-legend-column-gap+)
@@ -221,7 +211,7 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
                                left (+ y 15)
                                :align-y :center :text-size 11
                                :text-face :bold
-                               :ink *keymap-legend-muted-ink*)
+                               :ink (ui-ink :muted))
                    (incf y +keymap-legend-header-height+)
                    (dolist (row (cdr section))
                      (draw-keymap-legend-row pane medium row left y)

@@ -2,7 +2,9 @@
 
 (in-package #:mcluv)
 
-(defclass hotbar-pane (application-pane) ())
+(defclass hotbar-pane (transparent-gpu-application-pane) ())
+
+(define-ui-themed-pane hotbar-pane)
 
 (defun hotbar-material-color (block)
   (destructuring-bind (red green blue)
@@ -23,18 +25,11 @@
      (hotbar-scaled-color components 1.18)
      (hotbar-scaled-color components 0.68))))
 
-(defun hotbar-selection-ink (top bottom)
-  "A quiet neutral edge for the currently selected material."
-  (make-linear-gradient
-   0 top 0 bottom
-   (make-rgb-color 0.78 0.82 0.80)
-   (make-rgb-color 0.40 0.46 0.48)))
-
 (defun hotbar-visible-state-for (frame)
   (let ((session (hotbar-session frame)))
     ;; The bar's own materials belong to its state: choosing a block in the
     ;; inventory can swap a new one onto it without changing the selection.
-    (list (luvcraft:player-selected-block session)
+    (list *ui-theme* (luvcraft:player-selected-block session)
           (luvcraft:player-creative-p session)
           (luvcraft:block-inventory-quickbar-blocks
            (luvcraft:player-inventory session))
@@ -75,61 +70,21 @@
 
 (defun draw-hotbar-shell (pane medium &key (width +hotbar-width+)
                                           (height +hotbar-height+))
-  "The shared inventory chassis: graphite, with a single lit edge."
-  ;; Cover the whole sheet first.  The chassis is drawn at the bar's declared
-  ;; size, and a sheet that is larger than that -- a frame outliving a resize
-  ;; -- would otherwise show through as bare white.
-  (with-bounding-rectangle* (left top right bottom) pane
-    (draw-rectangle* pane left top right bottom
-                     :ink (make-rgb-color 0.004 0.005 0.007)))
-  (draw-analytic-rounded-rectangle*
-   medium 0 0 width height :radius 10
-   :ink (make-linear-gradient
-         0 0 0 height
-         (make-rgb-color 0.09 0.10 0.12)
-         (make-rgb-color 0.025 0.032 0.043)))
-  (draw-analytic-rounded-rectangle*
-   medium 1 1 (- width 1) (- height 1) :radius 9
-   :ink (make-linear-gradient
-         0 0 0 height
-         (make-rgb-color 0.020 0.026 0.035)
-         (make-rgb-color 0.008 0.011 0.016)))
-  ;; A single bright hairline along the top edge is what reads as "made of
-  ;; something" without drawing a border around every slot.
-  (draw-line* pane 12 1.5 (- width 12) 1.5
-              :ink (make-rgb-color 0.16 0.19 0.23) :line-thickness 1))
+  "Inventory and quickbar share the workshop's bone surface."
+  (declare (ignore pane))
+  (draw-ui-surface medium 0 0 width height))
 
 (defun draw-hotbar-slot (pane medium left top right bottom
-                         &key selected-p hovered-p (accent '(0.56 0.45 0.24)))
-  "A one-pixel analytic rim, with the same inset on every side.
+                         &key selected-p hovered-p accent)
+  (declare (ignore pane accent))
+  (draw-ui-tile medium left top right bottom
+                :selected selected-p :hovered hovered-p))
 
-Outline-mode roundrects decompose into aliased line segments on this port;
-two filled distance fields keep both edges of the rim smooth at any scale."
-  (declare (ignore pane))
-  (draw-analytic-rounded-rectangle*
-   medium left top right bottom :radius 5
-   :ink (cond (selected-p (hotbar-scaled-color accent 1.0))
-              (hovered-p (make-rgb-color 0.16 0.20 0.25))
-              (t (make-rgb-color 0.028 0.035 0.045))))
-  (draw-analytic-rounded-rectangle*
-   medium (+ left 1) (+ top 1) (- right 1) (- bottom 1) :radius 4
-   :ink (if selected-p
-            (make-linear-gradient
-             0 top 0 bottom
-             (hotbar-scaled-color accent 0.10)
-             (hotbar-scaled-color accent 0.045))
-            (make-linear-gradient
-             0 top 0 bottom
-             (make-rgb-color 0.008 0.010 0.014)
-             (if hovered-p
-                 (make-rgb-color 0.050 0.064 0.080)
-                 (make-rgb-color 0.021 0.027 0.036))))))
-
-(defun draw-hotbar-caption (pane text &key (ink '(0.90 0.88 0.82)))
+(defun draw-hotbar-caption (pane text &key ink)
   "The one label the bar carries: what is currently chosen."
   (draw-text* pane text (/ +hotbar-width+ 2.0) (- +hotbar-height+ 17)
               :align-x :center :align-y :center :text-size 12
-              :ink (apply #'make-rgb-color ink)))
+              :ink (if ink (apply #'make-rgb-color ink) (ui-ink :text))))
 
 (defun hotbar-creative-button-at-p (u v)
   (and (<= 12 (* u +hotbar-width+) 146)
@@ -139,12 +94,12 @@ two filled distance fields keep both edges of the rim smooth at any scale."
   (let ((active (luvcraft:player-creative-p session)))
     (draw-analytic-rounded-rectangle*
      medium 12 70 146 92 :radius 5
-     :ink (if active (make-rgb-color 0.025 0.045 0.035)
-              (make-rgb-color 0.016 0.022 0.030)))
+     :ink (if active (ui-ink :accent)
+              (ui-ink :inset)))
     (draw-text* pane (if active "Creative ON · F6" "Creative · F6") 79 81
                 :align-x :center :align-y :center :text-size 12
-                :ink (if active (make-rgb-color 0.74 0.80 0.72)
-                         (make-rgb-color 0.30 0.35 0.40)))))
+                :ink (if active (ui-ink :on-accent)
+                         (ui-ink :muted)))))
 
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
@@ -157,10 +112,10 @@ two filled distance fields keep both edges of the rim smooth at any scale."
     (with-sheet-medium (medium pane)
       (draw-hotbar-shell pane medium)
       (draw-line* pane 12 68 (- +hotbar-width+ 12) 68
-                  :ink (make-rgb-color 0.045 0.055 0.070))
+                  :ink (ui-ink :border))
       (draw-text* pane "Inventory · I" (- +hotbar-width+ 16) 81
                   :align-x :right :align-y :center :text-size 12
-                  :ink (make-rgb-color 0.30 0.35 0.40))
+                  :ink (ui-ink :muted))
       (draw-hotbar-creative-button pane medium session)
       (let ((count (max 1 (length blocks))))
         (loop for block in blocks
@@ -188,14 +143,10 @@ two filled distance fields keep both edges of the rim smooth at any scale."
                             "∞" (format nil "~D" quantity))
                         (- right 5) (- bottom 4)
                         :align-x :right :align-y :bottom :text-size 10
-                        :ink (make-rgb-color 0.70 0.72 0.70))))
+                        :ink (ui-ink :muted))))
                    ;; The tenth slot's key is 0, at the end of the number row.
-                   (draw-text* pane (format nil "~D" (mod (1+ index) 10))
-                               (+ left 7) (+ top 10)
-                               :align-x :left :align-y :center :text-size 10
-                               :ink (if selected-p
-                                        (make-rgb-color 0.98 0.95 0.82)
-                                        (make-rgb-color 0.46 0.48 0.52))))))
+                   (draw-ui-keycap medium (format nil "~D" (mod (1+ index) 10))
+                                   (+ left 3) (+ top 3) :width 14 :height 14))))
       ;; Nine labels is nine things to read; the chosen one is the only name
       ;; that answers a question the player is actually asking.
       (draw-hotbar-caption
@@ -209,13 +160,13 @@ two filled distance fields keep both edges of the rim smooth at any scale."
    (visible-selection :initform nil :accessor hotbar-visible-selection))
   (:menu-bar nil)
   (:panes
-   (bar (make-pane 'hotbar-pane)))
-  (:layouts
-   (default
-    (horizontally (:width +hotbar-width+ :height +hotbar-height+) bar))))
+   (bar (make-pane 'hotbar-pane
+                   :width +hotbar-width+ :height +hotbar-height+)))
+  (:layouts (default bar)))
 
 (defun repaint-hotbar (frame)
   "Repaint and publish one complete material palette."
+  (make-gpu-frame-background-transparent frame)
   (let ((mirror (sheet-direct-mirror (frame-top-level-sheet frame))))
     (check-type mirror luv-gpu-mirror)
     (repaint-gpu-mirror mirror))
@@ -332,6 +283,7 @@ two filled distance fields keep both edges of the rim smooth at any scale."
              (make-application-frame
               'luvcraft-hotbar :frame-manager manager :enable t
               :session session))))
+    (make-gpu-frame-background-transparent frame)
     (setf (frame-pretty-name frame) title
           (hotbar-visible-selection frame)
           (hotbar-visible-state-for frame))

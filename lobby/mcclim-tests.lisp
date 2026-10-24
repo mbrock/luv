@@ -29,6 +29,7 @@
             #() #() #() #() #() #())))
     (setf (slot-value frame 'clim-internals::top-level-sheet) sheet
           (clim:sheet-direct-mirror sheet) mirror)
+    (mcluv:ui-theme-changed-p frame)
     (mcluv::publish-gpu-mirror-prepared-revision mirror revision)
     (setf (mcluv:mirror-compositor mirror) probe)
     (values probe revision)))
@@ -65,15 +66,15 @@
     (true (< (abs (- 640.0 (* half-width (first drawable)))) 1.0e-4))
     (true (< (abs (- 280.0 (* half-height (second drawable)))) 1.0e-4))))
 
-(define-test lobby-hud-panel-is-translucent-analytic-media
+(define-test lobby-hud-panel-is-opaque-analytic-media
   (let ((medium (make-instance 'mcluv:luv-gpu-medium)))
     (setf (clim:medium-ink medium)
-          luv.lobby.mcclim::*lobby-hud-panel-ink*)
+          (mcluv:ui-ink :surface))
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 0 0 320 140 12 t)
     (let ((vertices (mcluv::gpu-medium-analytic-vertices medium))
           (commands (mcluv::gpu-medium-commands medium)))
-      (true (< (abs (- 0.84 (aref vertices 2))) 1.0e-5))
+      (true (< (abs (- 1.0 (aref vertices 2))) 1.0e-5))
       (true (= 1 (length commands)))
       (true (typep (aref commands 0) 'mcluv::gpu-analytic-command))
       (true (null (mcluv:gpu-medium-fallback-report medium)))

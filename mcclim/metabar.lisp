@@ -23,29 +23,6 @@
 
 ;; Every background ink carries alpha into the direct compositor.  Its solid
 ;; and analytic shaders premultiply RGB before the ordinary OVER blend.
-(defparameter *metabar-shadow-ink*
-  (metabar-alpha-ink 0.0 0.0 0.0 0.34))
-(defparameter *metabar-edge-ink*
-  (metabar-alpha-ink 0.42 0.46 0.40 0.82))
-(defparameter *metabar-panel-ink*
-  (metabar-alpha-ink 0.070 0.073 0.066 0.90))
-(defparameter *metabar-row-ink*
-  (metabar-alpha-ink 0.16 0.16 0.15 0.68))
-(defparameter *metabar-selected-row-ink*
-  (metabar-alpha-ink 0.23 0.25 0.22 0.90))
-(defparameter *metabar-header-ink*
-  (metabar-alpha-ink 0.12 0.125 0.115 0.76))
-(defparameter *metabar-track-ink*
-  (metabar-alpha-ink 0.30 0.30 0.28 0.82))
-(defparameter *metabar-fill-ink*
-  (metabar-alpha-ink 0.58 0.78 0.54 0.96))
-(defparameter *metabar-rebuild-ink*
-  (metabar-alpha-ink 0.85 0.68 0.40 0.98))
-(defparameter *metabar-knob-ink* (make-rgb-color 0.93 0.93 0.90))
-(defparameter *metabar-text-ink* (make-rgb-color 0.91 0.89 0.82))
-(defparameter *metabar-muted-ink* (make-rgb-color 0.60 0.60 0.55))
-(defparameter *metabar-error-ink* (make-rgb-color 0.94 0.48 0.40))
-
 ;;; ---------------------------------------------------------------------
 ;;; Application protocol.
 
@@ -195,6 +172,8 @@ derived work out of motion-event bursts."))
      +metabar-bottom-pad+))
 
 (defclass metabar-pane (transparent-gpu-application-pane) ())
+
+(define-ui-themed-pane metabar-pane)
 
 (defvar *metabar-construction-height* 600
   "Logical height used while MAKE-EMBEDDED-METABAR realizes its layout.")
@@ -507,69 +486,58 @@ derived work out of motion-event bursts."))
 (defun draw-metabar-selection-mark (medium top bottom)
   (draw-analytic-rounded-rectangle*
    medium 7 (+ top 4) 11 (- bottom 4) :radius 2
-   :ink *metabar-fill-ink*))
+   :ink (ui-ink :accent)))
 
 (defun draw-metabar-group-row (medium row top selected-p open-p)
   (let ((bottom (+ top (metabar-row-height row))))
     (draw-analytic-rounded-rectangle*
      medium 7 (+ top 2) (- +metabar-width+ 8) (- bottom 2) :radius 6
-     :ink (if selected-p *metabar-selected-row-ink* *metabar-header-ink*))
+     :ink (if selected-p (ui-ink :hover) (ui-ink :inset)))
     (when selected-p (draw-metabar-selection-mark medium top bottom))
     (draw-text* medium (if open-p "▾" "▸")
                 +metabar-pad+ (/ (+ top bottom) 2)
                 :align-y :center :text-size 15
-                :ink (if open-p *metabar-fill-ink* *metabar-muted-ink*))
+                :ink (if open-p (ui-ink :accent) (ui-ink :muted)))
     (draw-text* medium (metabar-row-label row)
                 (+ +metabar-pad+ 22) (/ (+ top bottom) 2)
                 :align-y :center :text-size 15 :text-face :bold
                 :ink (if (or open-p selected-p)
-                         *metabar-text-ink* *metabar-muted-ink*))
+                         (ui-ink :text) (ui-ink :muted)))
     (draw-text* medium (format nil "~D" (metabar-row-count row))
                 (- +metabar-width+ +metabar-pad+) (/ (+ top bottom) 2)
                 :align-x :right :align-y :center :text-size 13
-                :ink *metabar-muted-ink*)))
+                :ink (ui-ink :muted))))
 
 (defun draw-metabar-control-title (medium row top selected-p)
   (draw-text* medium (metabar-row-label row)
               +metabar-pad+ (+ top 24)
-              :align-y :center :text-size 17 :ink *metabar-text-ink*)
+              :align-y :center :text-size 17 :ink (ui-ink :text))
   (when (metabar-row-change-kind row)
     (draw-circle* medium
                   (+ +metabar-pad+ 10
                      (text-size medium (metabar-row-label row)
-                                :text-style (make-text-style nil nil 17)))
-                  (+ top 24) 4 :ink *metabar-rebuild-ink*))
+                                :text-style (make-text-style :sans-serif :roman 17)))
+                  (+ top 24) 4 :ink (ui-ink :selection)))
   (draw-text* medium (metabar-row-value-label row)
               (- +metabar-width+ +metabar-pad+) (+ top 24)
               :align-x :right :align-y :center :text-size 17
               :text-face :bold
-              :ink (if selected-p *metabar-fill-ink* *metabar-text-ink*)))
+              :ink (if selected-p (ui-ink :accent) (ui-ink :text))))
 
 (defun draw-metabar-scalar-row (frame medium row top selected-p)
   (let* ((track-y (+ top 52))
          (control (metabar-row-subject row))
          (preview (metabar-preview-fraction frame control))
-         (fraction (if preview preview (metabar-row-fraction row)))
-         (knob-x (+ +metabar-track-left+
-                    (* fraction (- +metabar-track-right+
-                                   +metabar-track-left+)))))
+         (fraction (if preview preview (metabar-row-fraction row))))
     (draw-metabar-control-title medium row top selected-p)
     (draw-text* medium "−" (- +metabar-track-left+ 18) track-y
                 :align-x :center :align-y :center :text-size 24
-                :ink *metabar-muted-ink*)
+                :ink (ui-ink :muted))
     (draw-text* medium "+" (+ +metabar-track-right+ 18) track-y
                 :align-x :center :align-y :center :text-size 24
-                :ink *metabar-muted-ink*)
-    (draw-analytic-rounded-rectangle*
-     medium +metabar-track-left+ (- track-y 4)
-     +metabar-track-right+ (+ track-y 4) :radius 4
-     :ink *metabar-track-ink*)
-    (when (> knob-x +metabar-track-left+)
-      (draw-analytic-rounded-rectangle*
-       medium +metabar-track-left+ (- track-y 4) knob-x (+ track-y 4)
-       :radius 4 :ink *metabar-fill-ink*))
-    (draw-circle* medium knob-x track-y 10 :ink *metabar-panel-ink*)
-    (draw-circle* medium knob-x track-y 8 :ink *metabar-knob-ink*)))
+                :ink (ui-ink :muted))
+    (draw-ui-slider medium +metabar-track-left+ +metabar-track-right+
+                    track-y fraction)))
 
 (defun draw-metabar-switch-row (medium row top selected-p)
   (let* ((y (+ top (/ (metabar-row-height row) 2)))
@@ -577,12 +545,8 @@ derived work out of motion-event bursts."))
          (left (- right 48))
          (on-p (not (null (metabar-row-value row)))))
     (draw-text* medium (metabar-row-label row) +metabar-pad+ y
-                :align-y :center :text-size 17 :ink *metabar-text-ink*)
-    (draw-analytic-rounded-rectangle*
-     medium left (- y 12) right (+ y 12) :radius 12
-     :ink (if on-p *metabar-fill-ink* *metabar-track-ink*))
-    (draw-circle* medium (if on-p (- right 12) (+ left 12)) y 8
-                  :ink *metabar-knob-ink*)
+                :align-y :center :text-size 17 :ink (ui-ink :text))
+    (draw-ui-switch medium left right y on-p)
     (when selected-p
       (draw-metabar-selection-mark
        medium top (+ top (metabar-row-height row))))))
@@ -591,7 +555,7 @@ derived work out of motion-event bursts."))
   (let ((bottom (+ top (metabar-row-height row))))
     (draw-analytic-rounded-rectangle*
      medium 7 (+ top 2) (- +metabar-width+ 8) (- bottom 2) :radius 6
-     :ink (if selected-p *metabar-selected-row-ink* *metabar-row-ink*))
+     :ink (if selected-p (ui-ink :hover) (ui-ink :surface)))
     (when (and selected-p (eq :scalar (metabar-row-control-kind row)))
       (draw-metabar-selection-mark medium top bottom))
     (ecase (metabar-row-control-kind row)
@@ -602,11 +566,11 @@ derived work out of motion-event bursts."))
   (let ((bottom (+ top (metabar-row-height row))))
     (draw-analytic-rounded-rectangle*
      medium 10 (+ top 4) (- +metabar-width+ 10) (- bottom 4) :radius 7
-     :ink (if selected-p *metabar-fill-ink* *metabar-selected-row-ink*))
+     :ink (if selected-p (ui-ink :accent) (ui-ink :hover)))
     (draw-text* medium (metabar-row-label row)
                 (/ +metabar-width+ 2) (/ (+ top bottom) 2)
                 :align-x :center :align-y :center :text-size 16
-                :ink (if selected-p *metabar-panel-ink* *metabar-text-ink*))))
+                :ink (if selected-p (ui-ink :surface) (ui-ink :text)))))
 
 (defmethod handle-repaint ((pane metabar-pane) region)
   (declare (ignore region))
@@ -616,12 +580,8 @@ derived work out of motion-event bursts."))
         (ensure-metabar-gpu-medium medium)
         (draw-analytic-rounded-rectangle*
          medium (+ left 5) (+ top 7) right bottom :radius 16
-         :ink *metabar-shadow-ink*)
-        (draw-analytic-rounded-rectangle*
-         medium left top right bottom :radius 15 :ink *metabar-edge-ink*)
-        (draw-analytic-rounded-rectangle*
-         medium (+ left 2) (+ top 2) (- right 2) (- bottom 2)
-         :radius 13 :ink *metabar-panel-ink*)
+         :ink (ui-ink :shadow))
+        (draw-ui-surface medium left top right bottom)
         (let ((y +metabar-top-pad+))
           (loop for row in (metabar-rows frame)
                 for index from 0
@@ -644,10 +604,10 @@ derived work out of motion-event bursts."))
           (if (metabar-diagnostic frame)
               (draw-text* medium "change failed · inspect the metabar"
                           +metabar-pad+ status-y :align-y :bottom
-                          :text-size 12 :ink *metabar-error-ink*)
+                          :text-size 12 :ink (ui-ink :danger))
               (draw-text* medium "↑↓ choose  ·  ←→ change  ·  space applies"
                           +metabar-pad+ status-y :align-y :bottom
-                          :text-size 12 :ink *metabar-muted-ink*)))))))
+                          :text-size 12 :ink (ui-ink :muted))))))))
 
 (defun metabar-mirror (frame &key (errorp t))
   "Return FRAME's embedded direct-GPU mirror."
@@ -691,7 +651,8 @@ derived work out of motion-event bursts."))
 (defun prepare-metabar (frame)
   "Ensure FRAME's next direct composition sees its latest semantic revision."
   (let ((mirror (metabar-mirror frame)))
-    (if (or (metabar-dirty-p frame)
+    (if (or (ui-theme-changed-p frame)
+            (metabar-dirty-p frame)
             (null (gpu-mirror-prepared-commands mirror)))
         (repaint-metabar frame)
         (prepare-gpu-mirror-compositor mirror)))

@@ -20,6 +20,10 @@
                     (#:spv #:luv.spir-v)
                     (#:vec #:luv.arithmetic.lisp.vec3))
   (:export #:luv-port
+           #:ui-theme #:make-field-atelier-theme #:*ui-theme*
+           #:ui-ink #:ui-metric #:ui-theme-changed-p
+           #:draw-ui-surface #:draw-ui-tile #:draw-ui-keycap
+           #:draw-ui-slider #:draw-ui-switch
            #:instrument-canvas
            #:instrument-context
            #:instrument-device

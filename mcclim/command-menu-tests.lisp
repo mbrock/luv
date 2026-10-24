@@ -188,14 +188,14 @@
       (true (< (abs (- 310.0 x)) 1.0e-4))
       (true (< (abs (- 210.0 y)) 1.0e-4)))))
 
-(define-test m-x-analytic-ink-is-translucent-and-prepares-no-image-command
+(define-test m-x-analytic-ink-is-opaque-and-prepares-no-image-command
   (let ((medium (fresh-gpu-medium)))
-    (setf (clim:medium-ink medium) mcluv::*command-menu-panel-ink*)
+    (setf (clim:medium-ink medium) (mcluv::ui-ink :surface))
     (mcluv::medium-draw-analytic-rounded-rectangle*
      medium 0 0 620 420 18 t)
     (let ((vertices (mcluv::gpu-medium-analytic-vertices medium))
           (semantic-commands (mcluv::gpu-medium-commands medium)))
-      (true (< (abs (- 0.92 (aref vertices 2))) 1.0e-5))
+      (true (< (abs (- 1.0 (aref vertices 2))) 1.0e-5))
       (true (= 1 (length semantic-commands)))
       (true (typep (aref semantic-commands 0) 'mcluv::gpu-analytic-command))
       (true (null (mcluv:gpu-medium-fallback-report medium)))
