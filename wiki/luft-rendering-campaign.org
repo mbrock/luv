@@ -25,6 +25,12 @@ history on [[file:luft.org][the Luft page]]. This page connects their conclusion
 
 Origin: [[https://ampcode.com/threads/T-01a16974-f1f6-7698-9082-658f7825c505][the terrain, compiler, and Xcode investigation]], 2026-10-23.
 
+The artistic and representation direction is now [[file:luft-far-field.org][Beauty in the breakdown]].
+#KK9136 keeps the large-horizon ambition; #238VRI makes pleasant softness and
+selective detail legitimate; #BBFT2Q scopes the next small attempts. This
+ledger preserves the measurements without turning the latest fast experiment
+into an automatic product decision.
+
 * DONE Recover real shader profiling before guessing again
 :PROPERTIES:
 :ID: 45005M
@@ -305,30 +311,33 @@ This ablation also removes useful near bevels; it does not identify the
 subset due to distant or grazing slivers or establish a production LOD gain.
 Inspected images retain terrain coverage but intentionally have square edges.
 
-* NEXT Retire bevel work by projected feature size
+* WAIT Retire bevel work by projected feature size
 :PROPERTIES:
 :ID: D8CYLU
 :END:
 
-#S5CFOO makes bevel retirement a stronger immediate geometry bet than
-coplanar merging or the first two-material cache (#FSOEGQ). Keep near and
-silhouette-important bevels; measure projected width and foreshortening,
-not just world distance. Retire geometry that cannot earn its raster work,
-not the landscape behind it. Material shading efficiency remains necessary.
+#S5CFOO made bevel retirement a stronger immediate geometry bet than
+coplanar merging or the first two-material cache (#FSOEGQ). The experiment
+below established useful headroom, but not the right replacement appearance.
+Retire work, not the landscape behind it or the lighting character of its
+unresolved surfaces. Material shading efficiency remains necessary.
 
-Keep the indexed atlas and shared boundary decisions. A flat face must meet
-its neighbours consistently as bevel patches retire; independent per-chunk
-bevel widths previously opened seams. Charge per-frame selection, uploads,
-transition buffers and memory to the candidate. Validate near/far boundaries,
-silhouettes, moving cameras, temporal reconstruction, caves and editing before
-any default change. The all-flat result is a counterfactual, not the target
-appearance and not a promise to recover the full 49.8%.
+Keep the indexed atlas as the reference and require consistent boundaries
+from any replacement. Independent per-chunk bevel widths previously opened
+seams. Charge per-frame selection, uploads, transition buffers and memory to
+the candidate. Validate near/far boundaries, silhouettes, moving cameras,
+temporal reconstruction, caves and editing before any default change. The
+all-flat result is a counterfactual, not the target appearance and not a
+promise to recover the full 49.8%.
 
 #YHVCJU now establishes a boundary-consistent shared-corner morph and a
-repeatable native runtime gain. Next remove its measured selection/upload
-overhead with a fence-safe rendering product, and solve previous-frame LOD
-motion, transition normals and singular contacts before considering a default.
-The corner-displacement bound is not yet an orientation-aware strip-width test.
+repeatable native runtime gain. The 2026-10-24 discussion rejects promoting
+its 2px/4px corner-displacement policy as the next product step: the bound
+does not measure the actual perceptual opportunity, and shrinking bevels
+drains their diagonal lighting bands away. #VK1FJV records that correction.
+Do not merely optimize its selector and call the representation settled.
+The next investigation is #BBFT2Q: a cheaper drawing medium for the fixed
+surface, with intentional softness allowed and implementation choices open.
 
 ** DONE Measure shared-corner retirement with its selection cost
 :PROPERTIES:
