@@ -232,7 +232,11 @@ independent host timer competes with the display's cadence."))
   t)
 
 (defclass canvas ()
-  ((clock
+  ((output-pixel-budget
+    :initarg :output-pixel-budget :initform nil
+    :accessor canvas-output-pixel-budget
+    :documentation "Optional Metal presentation pixel ceiling; NIL keeps native output.")
+   (clock
     :initarg :clock
     :initform (make-demand-clock)
     :accessor canvas-clock)
@@ -245,6 +249,23 @@ independent host timer competes with the display's cadence."))
     :initform nil
     :accessor canvas-event-handler))
   (:documentation "A native destination with a lifetime and frame clock."))
+
+(defun budgeted-output-extent (width height budget)
+  "Fit native WIDTH and HEIGHT within BUDGET pixels, preserving aspect ratio.
+
+NIL leaves native output untouched. Reduced dimensions round down to even
+pixels where possible; small native outputs are never enlarged."
+  (check-type width (integer 1 *))
+  (check-type height (integer 1 *))
+  (when budget (check-type budget (real 1 *)))
+  (if (or (null budget) (<= (* width height) budget))
+      (list width height)
+      (let* ((scale (sqrt (/ budget (* width height))))
+             (w (min width (floor budget)
+                     (max 1 (* 2 (floor (* width scale) 2)))))
+             (h (min height (floor budget w)
+                     (max 1 (* 2 (floor (* height scale) 2))))))
+        (list w h))))
 
 (defun canvas-time (canvas)
   "Return the one stable time shared by CANVAS's current event-loop turn."

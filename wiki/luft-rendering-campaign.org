@@ -383,3 +383,49 @@ The measured candidate pays its 1.96 MB upload and about 1.4–1.5 ms additional
 CPU encoding per frame. Its mutable staging buffer is only safe in the serialized
 harness. Default rendering and semantic topology remain unchanged. This is useful
 headroom evidence and a transition oracle, not a completed production LOD system.
+
+* DONE Bound laptop presentation separately from scene resolution
+:PROPERTIES:
+:ID: KIGTDN
+:END:
+
+On 2026-10-24 the live laptop session (pid 95205, fullscreen 3420 by 2146)
+was drawing a 1282 by 804 scene into 7.34 million output pixels. One retained
+GPU sample was 26.7 ms. Lowering only the Metal drawable, without resizing
+the window, gave these exploratory frame-serial rates: native output 30.4 Hz;
+1710 by 1072 output 44.1 Hz; 1282 by 804 output with a fixed 962 by 604 scene
+59.1, 59.8, 59.3 Hz over consecutive five-second windows. The final windows
+were unfocused. These are live-session observations, not controlled shader
+benchmarks or proof of sustained movement performance.
+
+MetalFX scaler construction also stalled live resizing: the session log
+shows repeated roughly 0.14–0.48 second constructions while the controller
+grew the scene. Resolution is not a free per-frame dial on this path.
+
+The interactive Luft Metal canvas now defaults to a 1,048,576-pixel output
+ceiling, retaining aspect ratio and fullscreen placement. Smaller windows
+stay native; NIL opts into native output. The scene still starts at 0.75
+of output dimensions. Its controller reserves 25 percent GPU headroom and
+requires eight consecutive quiet windows (64 samples, at least 6.4 seconds)
+before each growth attempt. Shrinking remains prompt. Other HAL clients
+keep native output unless they opt into a budget; explicit fixed-scale and
+offscreen capture paths bypass it.
+
+With the permanent ceiling enabled in that same live image, output was
+1292 by 810 and the scene stayed 968 by 608 across three five-second windows:
+59.4, 58.9, 59.7 Hz, all unfocused. HAL and renderer suites passed (912 and
+35,798 tests).
+
+This adopts Moppe's bounded-resolution principle, not its 4.2 MP scene
+ceiling: our evidence calls for budgeting the reconstruction output too.
+
+** NEXT Validate focused movement and amortize scaler construction
+:PROPERTIES:
+:ID: UZ9JWP
+:END:
+
+Measure focused fullscreen traversal with this policy, including a changing
+view and streaming. Check sharpness and pointer/HUD alignment at reduced
+output. If growth still hitches, prepare or cache scaler generations rather
+than repeatedly compiling them on the presentation thread. Do not infer a
+shader optimization from this resolution reduction.

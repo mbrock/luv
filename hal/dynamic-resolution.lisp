@@ -108,6 +108,10 @@ the next one."
          :documentation "The most the pixel count shrinks at once.")
    (rise :initarg :rise :initform 1.10 :reader dynamic-resolution-rise
          :documentation "The most the pixel count grows at once.")
+   (growth-windows :initarg :growth-windows :initform 1
+                   :reader dynamic-resolution-growth-windows
+                   :documentation "Consecutive quiet windows required before growth.")
+   (quiet-windows :initform 0 :accessor %dynamic-resolution-quiet-windows)
    (current-step :initform nil :accessor %dynamic-resolution-step)
    (pixels :initform 1.0 :accessor %dynamic-resolution-pixels)
    (sample-sum :initform 0d0 :accessor %dynamic-resolution-sum)
@@ -133,7 +137,8 @@ the next one."
 
 (defun reset-dynamic-resolution (controller)
   "Return CONTROLLER to the whole scene with no evidence gathered."
-  (setf (%dynamic-resolution-step controller) nil
+  (setf (%dynamic-resolution-quiet-windows controller) 0
+        (%dynamic-resolution-step controller) nil
         (%dynamic-resolution-pixels controller) 1.0
         (%dynamic-resolution-sum controller) 0d0
         (%dynamic-resolution-count controller) 0
@@ -162,14 +167,22 @@ Returns true when the share changed."
       (setf (%dynamic-resolution-sum controller) 0d0
             (%dynamic-resolution-count controller) 0)
       (cond ((> mean budget)
+             (setf (%dynamic-resolution-quiet-windows controller) 0)
              (setf (%dynamic-resolution-pixels controller)
                    (* (%dynamic-resolution-pixels controller)
                       (max toward (dynamic-resolution-fall controller)))))
             ((< mean (* budget (dynamic-resolution-quiet controller)))
+             ;; Growth needs sustained spare time, not one quiet sample window.
+             (when (< (incf (%dynamic-resolution-quiet-windows controller))
+                      (dynamic-resolution-growth-windows controller))
+               (return-from observe-dynamic-resolution nil))
+             (setf (%dynamic-resolution-quiet-windows controller) 0)
              (setf (%dynamic-resolution-pixels controller)
                    (* (%dynamic-resolution-pixels controller)
                       (min toward (dynamic-resolution-rise controller)))))
-            (t (return-from observe-dynamic-resolution nil)))
+            (t
+             (setf (%dynamic-resolution-quiet-windows controller) 0)
+             (return-from observe-dynamic-resolution nil)))
       (setf (%dynamic-resolution-pixels controller)
             (max (/ (* fewest fewest) (float (* steps steps)))
                  (min 1.0 (%dynamic-resolution-pixels controller))))

@@ -30,7 +30,10 @@
    (frame-index :initform 0 :accessor renderer-frame-index)
    ;; Dynamic resolution: the controller choosing the scene's share, and the
    ;; GPU times a stopwatch thread delivers for it at frame boundaries.
-   (dynamic-resolution :initform (make-dynamic-resolution)
+   ;; Reserve time for presentation; MetalFX resizing is expensive, so grow
+   ;; only after sustained spare time (64 samples). See #KIGTDN.
+   (dynamic-resolution :initform (make-dynamic-resolution
+                                 :headroom 0.75 :growth-windows 8)
                        :reader renderer-dynamic-resolution)
    (gpu-times :initform nil :accessor renderer-gpu-times)
    (gpu-times-lock :initform (sb-thread:make-mutex :name "luft GPU times")

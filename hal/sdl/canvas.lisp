@@ -481,7 +481,7 @@ arbitrary window dimensions commonly fail in SDL_Vulkan_CreateSurface."
 
 (defun make-sdl-canvas (&key (title "luv canvas") (width 800) (height 600)
                           x y (visible-p t) (fullscreen-p nil)
-                          (high-pixel-density-p nil)
+                          (high-pixel-density-p nil) output-pixel-budget
                           (clock (make-demand-clock))
                           (time (make-lazy-clock))
                           (presentation-api :vulkan))
@@ -492,6 +492,7 @@ is finally created."
   (make-instance 'sdl-canvas :title title :width width :height height
                               :x x :y y :visible-p visible-p
                               :clock clock :time time
+                              :output-pixel-budget output-pixel-budget
                               :fullscreen-p fullscreen-p
                               :high-pixel-density-p high-pixel-density-p
                               :presentation-api presentation-api))

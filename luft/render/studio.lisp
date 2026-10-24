@@ -1762,6 +1762,7 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
            :title title :width width :height height :visible-p nil
            :fullscreen-p fullscreen-p
            :high-pixel-density-p t
+           :output-pixel-budget *output-pixel-budget*
            :presentation-api (sdl-presentation-api-for provider)))
         (device nil)
         (renderer nil)

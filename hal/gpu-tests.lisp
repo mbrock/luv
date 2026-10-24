@@ -511,3 +511,30 @@
     (true (= 1.0 (luv:dynamic-resolution-share controller)))
     (luv:reset-dynamic-resolution controller)
     (true (= 1.0 (luv:dynamic-resolution-share controller)))))
+
+(define-test output-budget-bounds-retina-without-enlarging-small-windows
+  (true (equal '(3420 2146) (luv:budgeted-output-extent 3420 2146 nil)))
+  (true (equal '(1 1) (luv:budgeted-output-extent 3420 2146 1)))
+  (true (equal '(1 4) (luv:budgeted-output-extent 1 10000 4)))
+  (true (equal '(641 481) (luv:budgeted-output-extent 641 481 1048576)))
+  (destructuring-bind (width height)
+      (luv:budgeted-output-extent 3420 2146 1048576)
+    (true (<= (* width height) 1048576))
+    (true (< (abs (- (/ width height) (/ 3420 2146))) 0.005))
+    (true (evenp width))
+    (true (evenp height))))
+
+(define-test resolution-growth-needs-consecutive-quiet-windows
+  (let ((controller (luv:make-dynamic-resolution
+                     :window 1 :in-flight 0 :growth-windows 3)))
+    (luv:observe-dynamic-resolution controller 0.03d0 (/ 1d0 60))
+    (let ((small (luv:dynamic-resolution-share controller)))
+      (dotimes (i 2)
+        (false (luv:observe-dynamic-resolution controller 0.001d0 (/ 1d0 60))))
+      ;; A merely adequate window interrupts the growth streak.
+      (false (luv:observe-dynamic-resolution controller 0.014d0 (/ 1d0 60)))
+      (dotimes (i 2)
+        (false (luv:observe-dynamic-resolution controller 0.001d0 (/ 1d0 60))))
+      (true (= small (luv:dynamic-resolution-share controller)))
+      (true (luv:observe-dynamic-resolution controller 0.001d0 (/ 1d0 60)))
+      (true (> (luv:dynamic-resolution-share controller) small)))))

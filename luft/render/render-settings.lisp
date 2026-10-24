@@ -36,6 +36,12 @@ Both are the same renderer: each star's indexed patch, instanced over the
 sites of that star, read from one 256-star table.  The flat table keeps only each star's owned faces, pushed out
 to the cell edges.  A new renderer reads it.")
 
+(defparameter *output-pixel-budget* 1048576
+  "Interactive Metal output ceiling, independent of the fullscreen window.
+
+About one megapixel keeps Retina reconstruction affordable on the laptop.
+NIL opts into native output. Explicit captures bypass this ceiling.")
+
 (defparameter *dynamic-resolution-frame-rate* 60
   "The frame rate LUFT holds by drawing its scene smaller, or NIL for never.
 
