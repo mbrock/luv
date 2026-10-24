@@ -744,17 +744,17 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
          medium (+ left 2) (+ top 2) (- right 2) (- bottom 2)
          :radius 16 :ink (ui-ink :surface))
         (draw-text* pane "Source Update" +source-update-margin+ 31
-                    :align-y :center :text-size 22 :text-face :bold
+                    :align-y :center :text-size (ui-text-size :heading) :text-face :bold
                     :ink (ui-ink :text))
         (draw-text* pane (source-update-state-label state)
                     (- +source-update-width+ +source-update-margin+) 31
-                    :align-x :right :align-y :center :text-size 14
+                    :align-x :right :align-y :center :text-size (ui-text-size :caption)
                     :ink (if error-p
                              (ui-ink :danger)
                              (ui-ink :accent)))
         (draw-text* pane (source-update-snapshot-heading snapshot)
                     +source-update-margin+ 67
-                    :align-y :center :text-size 18 :text-face :bold
+                    :align-y :center :text-size (ui-text-size :body) :text-face :bold
                     :ink (if error-p
                              (ui-ink :danger)
                              (ui-ink :text)))
@@ -767,7 +767,7 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
               for y = (+ +source-update-content-top+
                          (* index +source-update-line-height+))
               do (draw-text* pane line (+ +source-update-margin+ 13) y
-                             :align-y :top :text-size 14
+                             :align-y :top :text-size (ui-text-size :caption)
                              :ink (if (and error-p (zerop index))
                                       (ui-ink :danger)
                                       (ui-ink :text))))
@@ -781,13 +781,13 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
           (draw-text* pane (source-update-action-label snapshot)
                       169 (/ (+ +source-update-button-top+
                                 +source-update-button-bottom+) 2)
-                      :align-x :center :align-y :center :text-size 16
+                      :align-x :center :align-y :center :text-size (ui-text-size :body)
                       :text-face :bold :ink (ui-ink :text)))
         (draw-text* pane (source-update-snapshot-footer snapshot)
                     (- +source-update-width+ +source-update-margin+)
                     (/ (+ +source-update-button-top+
                           +source-update-button-bottom+) 2)
-                    :align-x :right :align-y :center :text-size 12
+                    :align-x :right :align-y :center :text-size (ui-text-size :caption)
                     :ink (ui-ink :muted))))))
 
 (defun source-update-mirror (frame &key (errorp t))

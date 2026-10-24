@@ -37,14 +37,15 @@
 
 (defun place-workbench-metabar (pane width height pane-height slide)
   "Fit the original drawer in its parent; return whether its placement changed."
-  (let* ((available-height (max 1 (- height mcluv::+status-bar-height+)))
+  (let* ((top-margin (mcluv:status-bar-overlay-height (clim:pane-frame pane)))
+         (available-height (max 1 (- height top-margin)))
          (scale (mcluv::metabar-panel-scale
                  (list mcluv::+metabar-width+ pane-height) (list width available-height)))
          (eased (- 1d0 (expt (- 1d0 slide) 3)))
          (transform (clim:make-transformation
                      scale 0 0 scale
                      (floor (* scale mcluv::+metabar-width+ (- eased 1d0)))
-                     (+ mcluv::+status-bar-height+
+                     (+ top-margin
                         (floor (- available-height (* scale pane-height)) 2))))
          (changed (not (clim:transformation-equal
                         transform (clim:sheet-transformation pane)))))
@@ -60,7 +61,7 @@
     (cond
       ((typep child 'mcluv::status-bar-pane)
        (clim:move-and-resize-sheet
-        child 0 0 width mcluv::+status-bar-height+))
+        child 0 0 width (mcluv:status-bar-overlay-height (clim:pane-frame child))))
       ((typep child 'mcluv::palette-pane)
        (multiple-value-bind (left top pane-width pane-height)
            (mcluv::palette-placement (clim:pane-frame child) width height)
@@ -150,13 +151,13 @@
                               :min-width 1
                               :min-height mcluv::+status-bar-height+
                               :max-width clim:+fill+
-                              :max-height mcluv::+status-bar-height+)
+                              :max-height clim:+fill+)
                              ;; Painted empty until its owner has a palette.
                              (clim:make-pane
                               'mcluv::palette-pane
                               :background clim:+transparent-ink+
                               :width mcluv::+palette-caption-width+
-                              :height mcluv::+palette-height+)
+                              :height mcluv::*palette-height*)
                              ;; Painted empty until there is a message.
                              (clim:make-pane
                               'mcluv:message-pane

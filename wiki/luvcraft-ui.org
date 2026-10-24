@@ -119,10 +119,10 @@ decoded once into the renderer's linear-light colors.
 | Role | sRGB |
 |------+------|
 | Surface / raised / inset | F3EFE4 / FAF7EF / E9E5D8 |
-| Text / muted | 233E33 / 566357 |
-| Border | C7CBBB |
+| Text / muted | 233E33 / 3E4B40 |
+| Border / forest | C7CBBB / 1F3D2E |
 | Accent / on-accent | 5B704D / FAF7EF |
-| Selection / selection-soft | B95135 / F0D8C7 |
+| Selection / selection-soft | B95135 / E7A889 |
 | Keyboard focus / hover | 314F3D / E0E6D5 |
 | Error | A52F2A |
 
@@ -136,7 +136,19 @@ This deliberately small library does not introduce a second widget system.
 Quickbar, full and picture-first inventory, metabar, status, key help,
 command search, prompts/messages, source-update panel, lobby, and the generic
 material palette consume this theme. Ordinary pane labels share sans-serif
-text styling; explicit code/numeric text retains its specialized style.
+text styling through bundled DM Sans regular and bold. =ui-text-size= owns
+the compact type scale: 14-point captions, 16-point body text, 20-point
+headings, and 12-point keycap numbers. Symbol keys use the fixed-family
+fallback because DM Sans does not contain all navigation glyphs; explicit
+code text retains its specialized style. The font license and provenance
+are in =fonts/LICENSE-DMSans.txt= and =fonts/README-DMSans.md=.
+
+Field Kit now supplies forest inventory sidebars and expanded metabar groups,
+with cream labels and warmer terracotta selection tiles. The play hotbar is
+68 logical pixels tall instead of 98: no permanent footer, material caption,
+or zero stock counts. Inventory and creative mode remain on I and F6, with
+help inside the inventory. The generic material bar likewise drops its
+permanent caption and shrinks from 104 to 80 logical pixels.
 Selection has a thicker terracotta rim; focus uses a dark forest rim.
 
 Replace the theme at a canvas frame boundary to restyle live. Retained owners
@@ -151,8 +163,8 @@ interaction and direct-GPU suites remain the checks for input geometry and
 analytic rendering. Native overlays and the capped world remain separate
 as described in #LEEWJB.
 
-The implementation checks passed 453 McCLIM, 279 inventory/HUD, 76 workbench,
-and 13 lobby assertions. Live captures confirmed the shared inventory and
+The implementation checks passed 456 McCLIM, 279 inventory/HUD, 76 workbench,
+13 lobby, and 449 Luvcraft-on-Luft game assertions. Live captures confirmed the shared inventory and
 metabar treatment. A repeated native-resolution capture batch exposed a
 separate scaler-recreation stall: the watchdog sample on 2026-10-24 stopped
 inside =MTLFXTemporalScalerDescriptor newTemporalScalerWithDevice:compiler:=,
@@ -171,9 +183,12 @@ when a second consumer needs them, rather than invented in advance.
 :ID: 9MDH7R
 :END:
 
-Luvcraft's normal status now shows application, contextual player hint and
-FPS. PID, heap, worktree, coordinates, chunk counts and streaming queues are
-retained through luvcraft.luft.game::*status-diagnostics-p*, off by default.
+Luvcraft's normal status is a small upper-right daytime capsule, driven by
+the actual world clock. It replaces the full-width strip and does not shrink
+type to squeeze in telemetry. The shared =status-bar-presentation= protocol
+keeps conventional strips available to tools and diagnostics.
+
+FPS, PID, heap, worktree, coordinates, chunk counts and streaming queues are
+retained through =luvcraft.luft.game::*status-diagnostics-p*=, off by default.
 A future diagnostics drawer can expose this vocabulary without consuming
-the play HUD. Keep FPS during performance work; whether it is part of the
-long-term default HUD remains a product choice.
+the play HUD.

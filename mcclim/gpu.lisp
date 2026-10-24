@@ -1436,7 +1436,9 @@ else NIL."
                                    (user-homedir-pathname)))))
 
 (defparameter *sans-serif-font-preferences*
-  '(("Iosevka Aile" "IosevkaAile-Regular.ttf" "IosevkaAile-Bold.ttf"
+  '(("DM Sans" "DMSans-Regular.ttf" "DMSans-Bold.ttf"
+     "DMSans-Italic.ttf" "DMSans-BoldItalic.ttf")
+    ("Iosevka Aile" "IosevkaAile-Regular.ttf" "IosevkaAile-Bold.ttf"
      "IosevkaAile-Italic.ttf" "IosevkaAile-BoldItalic.ttf")
     ("Input Sans" "InputSans-Regular.ttf" "InputSans-Bold.ttf"
      "InputSans-Italic.ttf" "InputSans-BoldItalic.ttf"))

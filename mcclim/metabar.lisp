@@ -492,35 +492,35 @@ derived work out of motion-event bursts."))
   (let ((bottom (+ top (metabar-row-height row))))
     (draw-analytic-rounded-rectangle*
      medium 7 (+ top 2) (- +metabar-width+ 8) (- bottom 2) :radius 6
-     :ink (if selected-p (ui-ink :hover) (ui-ink :inset)))
+     :ink (ui-ink (if open-p :forest :inset)))
     (when selected-p (draw-metabar-selection-mark medium top bottom))
     (draw-text* medium (if open-p "▾" "▸")
                 +metabar-pad+ (/ (+ top bottom) 2)
-                :align-y :center :text-size 15
-                :ink (if open-p (ui-ink :accent) (ui-ink :muted)))
+                :text-family :fix
+                :align-y :center :text-size (ui-text-size :body)
+                :ink (ui-ink (if open-p :on-accent :text)))
     (draw-text* medium (metabar-row-label row)
                 (+ +metabar-pad+ 22) (/ (+ top bottom) 2)
-                :align-y :center :text-size 15 :text-face :bold
-                :ink (if (or open-p selected-p)
-                         (ui-ink :text) (ui-ink :muted)))
+                :align-y :center :text-size (ui-text-size :body) :text-face :bold
+                :ink (ui-ink (if open-p :on-accent :text)))
     (draw-text* medium (format nil "~D" (metabar-row-count row))
                 (- +metabar-width+ +metabar-pad+) (/ (+ top bottom) 2)
-                :align-x :right :align-y :center :text-size 13
-                :ink (ui-ink :muted))))
+                :align-x :right :align-y :center :text-size (ui-text-size :caption)
+                :ink (ui-ink (if open-p :on-accent :muted)))))
 
 (defun draw-metabar-control-title (medium row top selected-p)
   (draw-text* medium (metabar-row-label row)
               +metabar-pad+ (+ top 24)
-              :align-y :center :text-size 17 :ink (ui-ink :text))
+              :align-y :center :text-size (ui-text-size :body) :ink (ui-ink :text))
   (when (metabar-row-change-kind row)
     (draw-circle* medium
                   (+ +metabar-pad+ 10
                      (text-size medium (metabar-row-label row)
-                                :text-style (make-text-style :sans-serif :roman 17)))
+                                :text-style (make-text-style :sans-serif :roman (ui-text-size :body))))
                   (+ top 24) 4 :ink (ui-ink :selection)))
   (draw-text* medium (metabar-row-value-label row)
               (- +metabar-width+ +metabar-pad+) (+ top 24)
-              :align-x :right :align-y :center :text-size 17
+              :align-x :right :align-y :center :text-size (ui-text-size :body)
               :text-face :bold
               :ink (if selected-p (ui-ink :accent) (ui-ink :text))))
 
@@ -531,10 +531,10 @@ derived work out of motion-event bursts."))
          (fraction (if preview preview (metabar-row-fraction row))))
     (draw-metabar-control-title medium row top selected-p)
     (draw-text* medium "−" (- +metabar-track-left+ 18) track-y
-                :align-x :center :align-y :center :text-size 24
+                :align-x :center :align-y :center :text-size 24 :text-family :fix
                 :ink (ui-ink :muted))
     (draw-text* medium "+" (+ +metabar-track-right+ 18) track-y
-                :align-x :center :align-y :center :text-size 24
+                :align-x :center :align-y :center :text-size 24 :text-family :fix
                 :ink (ui-ink :muted))
     (draw-ui-slider medium +metabar-track-left+ +metabar-track-right+
                     track-y fraction)))
@@ -545,7 +545,7 @@ derived work out of motion-event bursts."))
          (left (- right 48))
          (on-p (not (null (metabar-row-value row)))))
     (draw-text* medium (metabar-row-label row) +metabar-pad+ y
-                :align-y :center :text-size 17 :ink (ui-ink :text))
+                :align-y :center :text-size (ui-text-size :body) :ink (ui-ink :text))
     (draw-ui-switch medium left right y on-p)
     (when selected-p
       (draw-metabar-selection-mark
@@ -569,7 +569,7 @@ derived work out of motion-event bursts."))
      :ink (if selected-p (ui-ink :accent) (ui-ink :hover)))
     (draw-text* medium (metabar-row-label row)
                 (/ +metabar-width+ 2) (/ (+ top bottom) 2)
-                :align-x :center :align-y :center :text-size 16
+                :align-x :center :align-y :center :text-size (ui-text-size :body)
                 :ink (if selected-p (ui-ink :surface) (ui-ink :text)))))
 
 (defmethod handle-repaint ((pane metabar-pane) region)
@@ -604,10 +604,10 @@ derived work out of motion-event bursts."))
           (if (metabar-diagnostic frame)
               (draw-text* medium "change failed · inspect the metabar"
                           +metabar-pad+ status-y :align-y :bottom
-                          :text-size 12 :ink (ui-ink :danger))
-              (draw-text* medium "↑↓ choose  ·  ←→ change  ·  space applies"
+                          :text-size (ui-text-size :caption) :ink (ui-ink :danger))
+              (draw-text* medium "Arrows choose / change · Space applies"
                           +metabar-pad+ status-y :align-y :bottom
-                          :text-size 12 :ink (ui-ink :muted))))))))
+                          :text-size (ui-text-size :caption) :ink (ui-ink :muted))))))))
 
 (defun metabar-mirror (frame &key (errorp t))
   "Return FRAME's embedded direct-GPU mirror."

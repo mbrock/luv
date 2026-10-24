@@ -284,3 +284,14 @@
     (incf (aref data 4) 1.0)
     (let ((previous (host::creature-figure-vertices data t)))
       (true (< (abs (- (- (aref previous 0) (aref actual 0)) 1.0)) 0.0002)))))
+
+(define-test quiet-game-status-follows-the-world-clock
+  (let ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
+        (host::*status-diagnostics-p* nil))
+    (setf (slot-value viewer 'host::sky-clock) (make-instance 'luvcraft::sky-clock)
+          (render::host-sky-hour viewer) 11.5)
+    (is equal '(:daytime) (mcluv:status-bar-channels-for viewer))
+    (is eq :chip (mcluv:status-bar-presentation viewer))
+    (is string= "Daytime  11:30" (mcluv:status-bar-channel-value :daytime viewer nil))
+    (setf (render::host-sky-hour viewer) 24.0)
+    (is string= "Night  00:00" (mcluv:status-bar-channel-value :daytime viewer nil))))

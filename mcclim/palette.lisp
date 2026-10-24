@@ -13,8 +13,8 @@
 (defconstant +palette-hint-height+ 34
   "Room above the bar for one short hint pill.  It is reserved whether or not
 a hint is showing, so a hint appearing never moves the bar.")
-(defconstant +palette-bar-height+ 104)
-(defconstant +palette-height+ (+ +palette-hint-height+ +palette-bar-height+))
+(defparameter *palette-bar-height* 80)
+(defparameter *palette-height* (+ +palette-hint-height+ *palette-bar-height*))
 (defconstant +palette-bottom-margin+ 18)
 (defconstant +palette-maximum-items+ 10)
 (defconstant +palette-caption-width+ 196)
@@ -194,7 +194,7 @@ and the dark chamfer that runs round both, as the world draws its cells."
 
 (defun draw-palette-pill (pane medium center-x top bottom text
                           &key (width +palette-caption-width+)
-                            (ink (ui-ink :text)) (text-size 12))
+                            (ink (ui-ink :text)) (text-size (ui-text-size :caption)))
   (draw-analytic-rounded-rectangle*
    medium (- center-x (/ width 2.0)) top (+ center-x (/ width 2.0)) bottom
    :radius (/ (- bottom top) 2.0) :ink (ui-ink :inset))
@@ -214,7 +214,7 @@ and the dark chamfer that runs round both, as the world draws its cells."
          (width (palette-logical-width frame))
          (center (/ width 2.0))
          (bar-top +palette-hint-height+)
-         (bar-bottom (+ bar-top +palette-bar-height+))
+         (bar-bottom (+ bar-top *palette-bar-height*))
          (row-left (/ (- width (+ (* 2 +palette-pad+)
                                   (* (length slots) +palette-slot-width+)
                                   (* (max 0 (1- (length slots)))
@@ -225,9 +225,9 @@ and the dark chamfer that runs round both, as the world draws its cells."
         (alexandria:when-let ((hint (palette-snapshot-hint snapshot)))
           (let ((hint-width
                   (+ 28 (text-size pane hint
-                                   :text-style (make-text-style nil nil 13)))))
+                                   :text-style (make-text-style :sans-serif :roman (ui-text-size :caption))))))
             (draw-palette-pill pane medium center 2 (- bar-top 8) hint
-                               :width hint-width :text-size 13)))
+                               :width hint-width :text-size (ui-text-size :caption))))
         (draw-analytic-rounded-rectangle*
          medium 3 (+ bar-top 5) (+ width 1) (+ bar-bottom 2)
          :radius 16 :ink (ui-ink :shadow))
@@ -244,11 +244,7 @@ and the dark chamfer that runs round both, as the world draws its cells."
                   medium (- (/ (+ left right) 2.0) 18) (+ top 13) 36
                   (palette-slot-tones slot) (palette-slot-luminous-p slot))
                  (draw-ui-keycap medium (palette-slot-key slot)
-                                  (+ left 3) (+ top 3) :width 14 :height 14))
-        (when selected
-          (draw-palette-pill
-           pane medium center (- bar-bottom 28) (- bar-bottom 10)
-           (palette-slot-label (nth selected slots))))))))
+                                  (+ left 3) (+ top 3) :width 16 :height 16))))))
 
 ;;; ---------------------------------------------------------------------
 ;;; Placement.
@@ -257,7 +253,7 @@ and the dark chamfer that runs round both, as the world draws its cells."
   "Return the palette's left, top, width, and height in the viewport."
   (let ((width (palette-logical-width frame)))
     (values (max 0 (floor (- viewport-width width) 2))
-            (max 0 (- viewport-height +palette-height+
+            (max 0 (- viewport-height *palette-height*
                       +palette-bottom-margin+))
             width
-            +palette-height+)))
+            *palette-height*)))

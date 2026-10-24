@@ -9,7 +9,7 @@
 (in-package #:mcluv)
 
 (defconstant +status-bar-height+ 28)
-(defconstant +status-bar-text-size+ 12)
+(defconstant +status-bar-text-size+ 16)
 (defconstant +status-bar-horizontal-pad+ 12)
 (defconstant +status-bar-maximum-channels+ 12)
 (defconstant +status-bar-maximum-field-characters+ 48)
@@ -25,6 +25,18 @@
 (defparameter +status-bar-base-channels+
   '(:application :pid :fps :heap :lobby :worktree)
   "The application-neutral status vocabulary, in presentation order.")
+
+(defgeneric status-bar-presentation (owner)
+  (:documentation "Choose :STRIP for workbench telemetry or :CHIP for a quiet game HUD."))
+
+(defmethod status-bar-presentation ((owner t))
+  (declare (ignore owner))
+  :strip)
+
+(defun status-bar-overlay-height (bar)
+  (if (and (typep bar 'status-bar)
+           (eq :chip (status-bar-presentation (status-bar-owner bar))))
+      64 +status-bar-height+))
 
 (defgeneric status-bar-channels-for (owner)
   (:documentation
@@ -283,7 +295,7 @@ They must inspect already-owned state and must not perform I/O or wait."))
    0
    (text-size medium text
               :text-style
-              (make-text-style nil nil +status-bar-text-size+))))
+              (make-text-style :sans-serif :roman +status-bar-text-size+))))
 
 (defun fitted-status-bar-field-strings (bar medium)
   "Return the longest leading field sequence which fits BAR's current width.
@@ -295,7 +307,8 @@ the same Slug-shaped font advance as drawing, and only runs during a sparse
 semantic repaint."
   (let ((available-width
           (max 0 (- (status-bar-logical-width bar)
-                    (* 2 +status-bar-horizontal-pad+))))
+                    (if (eq :chip (status-bar-presentation (status-bar-owner bar)))
+                        64 (* 2 +status-bar-horizontal-pad+)))))
         (accepted ""))
     (loop for field in (status-bar-visible-fields bar)
           for text = (status-bar-field-string field)
@@ -320,20 +333,31 @@ semantic repaint."
 (defmethod handle-repaint ((pane status-bar-pane) region)
   (declare (ignore region))
   (let* ((bar (pane-frame pane))
-         (width (status-bar-logical-width bar)))
+         (width (status-bar-logical-width bar))
+         (chip-p (eq :chip (status-bar-presentation (status-bar-owner bar)))))
     (with-sheet-medium (medium pane)
-      ;; Opaque theme surfaces keep this small status line readable over the world.
-      (draw-analytic-rounded-rectangle*
-       medium 0 0 width +status-bar-height+
-       :radius 0 :ink (ui-ink :surface))
-      (draw-analytic-rounded-rectangle*
-       medium 0 (- +status-bar-height+ 1) width +status-bar-height+
-       :radius 0 :ink (ui-ink :border))
-      ;; Every field intentionally shares this exact face and size.
-      (draw-text* pane (status-bar-display-string bar medium)
-                  +status-bar-horizontal-pad+ (/ +status-bar-height+ 2)
-                  :align-y :center :text-size +status-bar-text-size+
-                  :ink (ui-ink :muted)))))
+      (if chip-p
+          (let* ((text (status-bar-display-string bar medium))
+                 (text-width (text-size medium text :text-style
+                                        (make-text-style :sans-serif :roman
+                                                         (ui-text-size :body))))
+                 (right (- width 16))
+                 (left (max 16 (- right text-width 32))))
+            (unless (zerop (length text))
+              (draw-ui-surface medium left 16 right 52 :radius 10)
+              (draw-text* medium text (+ left 16) 34 :align-y :center
+                          :text-size (ui-text-size :body) :ink (ui-ink :text))))
+          (progn
+            (draw-analytic-rounded-rectangle*
+             medium 0 0 width +status-bar-height+
+             :radius 0 :ink (ui-ink :surface))
+            (draw-analytic-rounded-rectangle*
+             medium 0 (- +status-bar-height+ 1) width +status-bar-height+
+             :radius 0 :ink (ui-ink :border))
+            (draw-text* pane (status-bar-display-string bar medium)
+                        +status-bar-horizontal-pad+ (/ +status-bar-height+ 2)
+                        :align-y :center :text-size +status-bar-text-size+
+                        :ink (ui-ink :muted)))))))
 
 (define-condition status-bar-requires-direct-gpu (error)
   ((object :initarg :object :reader status-bar-non-gpu-object))
@@ -413,8 +437,9 @@ semantic repaint."
       (change-space-requirements
        (status-bar-pane-for bar)
        :width logical-width :min-width logical-width :max-width logical-width
-       :height +status-bar-height+
-       :min-height +status-bar-height+ :max-height +status-bar-height+
+       :height (status-bar-overlay-height bar)
+       :min-height (status-bar-overlay-height bar)
+       :max-height (status-bar-overlay-height bar)
        :resize-frame resize-frame-p)))
   bar)
 
@@ -454,7 +479,7 @@ semantic repaint."
       viewport-logical-extent
     (let* ((source-width (status-bar-logical-width bar))
            (half-width (/ source-width viewport-width))
-           (half-height (/ +status-bar-height+ viewport-height))
+           (half-height (/ (status-bar-overlay-height bar) viewport-height))
            ;; Direct McCLIM's affine follows the authored sheet convention:
            ;; clip-space -1 is the screen top and +1 is the screen bottom.
            (center-y (+ -1.0 half-height)))

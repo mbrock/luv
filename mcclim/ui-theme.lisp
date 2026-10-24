@@ -20,9 +20,9 @@
    :name :field-atelier
    :inks (loop for (role hex) in
                  '((:surface #xf3efe4) (:raised #xfaf7ef) (:inset #xe9e5d8)
-                   (:border #xc7cbbb) (:text #x233e33) (:muted #x566357)
+                   (:forest #x1f3d2e) (:border #xc7cbbb) (:text #x233e33) (:muted #x3e4b40)
                    (:accent #x5b704d) (:on-accent #xfaf7ef)
-                   (:selection #xb95135) (:selection-soft #xf0d8c7)
+                   (:selection #xb95135) (:selection-soft #xe7a889)
                    (:focus #x314f3d) (:hover #xe0e6d5) (:track #xd4d6c7)
                    (:danger #xa52f2a) (:shadow #x26342b))
                append (list role (if (eq role :shadow)
@@ -35,6 +35,10 @@
 (defun ui-ink (role)
   (or (getf (ui-theme-inks *ui-theme*) role)
       (error "Unknown UI ink role ~S." role)))
+
+(defun ui-text-size (role)
+  "The field kit's small, comfortable type scale in logical points."
+  (ecase role (:key 12) (:caption 14) (:body 16) (:heading 20)))
 
 (defun ui-metric (role)
   (ecase role (:panel-radius 12) (:control-radius 6) (:tile-radius 6)
@@ -69,7 +73,7 @@
   (draw-ui-surface medium x y (+ x width) (+ y height)
                    :fill :inset :radius 4)
   (draw-text* medium label (+ x (/ width 2)) (+ y (/ height 2))
-              :align-x :center :align-y :center :text-size 10
+              :align-x :center :align-y :center :text-size (ui-text-size :key)
               :ink (ui-ink :text)))
 
 (defun draw-ui-slider (medium left right y fraction)
@@ -89,7 +93,7 @@
   (draw-circle* medium (if on-p (- right 12) (+ left 12)) y 8
                 :ink (ui-ink :raised)))
 
-(defparameter *ui-text-style* (make-text-style :sans-serif :roman :normal))
+(defparameter *ui-text-style* (make-text-style :sans-serif :roman (ui-text-size :body)))
 
 (defmacro define-ui-themed-pane (class)
   `(defmethod handle-repaint :around ((pane ,class) region)

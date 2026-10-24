@@ -299,7 +299,7 @@ Named options retain the command's defaults; M-x asks for required arguments."
               (ui-ink :surface)))
     (draw-text* stream (command-menu-entry-label entry) (+ left 12)
                 (+ top (/ +command-menu-row-height+ 2))
-                :align-y :center :text-size 17
+                :align-y :center :text-size (ui-text-size :body)
                 :ink (if selected-p
                          (ui-ink :text)
                          (ui-ink :text)))))
@@ -332,10 +332,10 @@ Named options retain the command's defaults; M-x asks for required arguments."
          medium (+ left 2) (+ top 2) (- right-edge 2) (- bottom 2)
          :radius 16 :ink (ui-ink :surface))
         (draw-text* pane "M-x" margin 30
-                    :align-y :center :text-size 22 :text-face :bold
+                    :align-y :center :text-size (ui-text-size :heading) :text-face :bold
                     :ink (ui-ink :text))
         (draw-text* pane "Esc cancels" right 30
-                    :align-x :right :align-y :center :text-size 14
+                    :align-x :right :align-y :center :text-size (ui-text-size :caption)
                     :ink (ui-ink :muted))
         (draw-analytic-rounded-rectangle*
          medium margin +command-menu-field-top+
@@ -357,9 +357,9 @@ Named options retain the command's defaults; M-x asks for required arguments."
                            2))
                (width (text-size pane text
                                  :text-style
-                                 (make-text-style nil nil 18))))
+                                 (make-text-style :sans-serif :roman (ui-text-size :body)))))
           (draw-text* pane text text-x text-y
-                      :align-y :center :text-size 18
+                      :align-y :center :text-size (ui-text-size :body)
                       :ink (ui-ink :text))
           (draw-rectangle* pane (+ text-x width 2) (- text-y 11)
                            (+ text-x width 4) (+ text-y 11)
@@ -380,7 +380,7 @@ Named options retain the command's defaults; M-x asks for required arguments."
                                      (command-menu-argument-type frame) nil)))
                           "No matching command") margin
                       (+ +command-menu-results-top+ 20)
-                      :align-y :center :text-size 16
+                      :align-y :center :text-size (ui-text-size :body)
                       :ink (ui-ink :muted)))
         (draw-text* pane
                     (if (command-menu-pending-command frame)
@@ -388,7 +388,7 @@ Named options retain the command's defaults; M-x asks for required arguments."
                         (format nil "~D command~:P  ·  ↑↓ choose  ·  RET runs"
                                 (length results)))
                     margin (- +command-menu-height+ 24)
-                    :align-y :center :text-size 14
+                    :align-y :center :text-size (ui-text-size :caption)
                     :ink (ui-ink :muted))))))
 
 (defun command-menu-mirror (frame &key (errorp t))

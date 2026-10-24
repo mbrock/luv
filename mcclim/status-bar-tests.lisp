@@ -207,3 +207,21 @@
                   (lambda (command)
                     (typep command 'mcluv::gpu-prepared-image-command))
                   prepared))))))))
+
+(defclass chip-status-bar-test-owner (stable-status-bar-test-owner) ())
+(defmethod mcluv:status-bar-presentation ((owner chip-status-bar-test-owner))
+  (declare (ignore owner))
+  :chip)
+
+(define-test compact-status-keeps-its-margins-without-shrinking-type
+  (let* ((bar (make-status-bar-test-frame (make-instance 'chip-status-bar-test-owner)))
+         (medium (fresh-gpu-medium))
+         (text "Daytime  11:00")
+         (advance (mcluv::measured-status-bar-text-width medium text)))
+    (setf (mcluv:status-bar-visible-fields bar)
+          (list (mcluv::make-status-bar-field :channel :daytime :value text))
+          (mcluv:status-bar-logical-width bar) (+ 64 (ceiling advance)))
+    (true (= 64 (mcluv:status-bar-overlay-height bar)))
+    (true (string= text (mcluv::status-bar-display-string bar medium)))
+    (setf (mcluv:status-bar-logical-width bar) (+ 64 (floor (1- advance))))
+    (true (string= "" (mcluv::status-bar-display-string bar medium)))))

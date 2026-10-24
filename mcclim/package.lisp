@@ -21,7 +21,7 @@
                     (#:vec #:luv.arithmetic.lisp.vec3))
   (:export #:luv-port
            #:ui-theme #:make-field-atelier-theme #:*ui-theme*
-           #:ui-ink #:ui-metric #:ui-theme-changed-p
+           #:ui-ink #:ui-metric #:ui-text-size #:ui-theme-changed-p
            #:draw-ui-surface #:draw-ui-tile #:draw-ui-keycap
            #:draw-ui-slider #:draw-ui-switch
            #:instrument-canvas
@@ -212,6 +212,7 @@
            #:status-bar-field-channel
            #:status-bar-field-label
            #:status-bar-field-value
+           #:status-bar-presentation #:status-bar-overlay-height
            #:status-bar-channels-for
            #:status-bar-channel-label
            #:status-bar-channel-value

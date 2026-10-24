@@ -169,15 +169,18 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
        :radius 6 :ink (ui-ink :inset))
       (when keys
         (let* ((text (format nil "~{~A~^  ~}" keys))
-               (width (text-size medium text :text-style (make-text-style nil :bold 14)))
-               (size (* 14 (min 1 (/ (- +keymap-legend-keys-right+ 12)
-                                     (max 1 width))))))
+               (width (text-size medium text
+                                 :text-style (make-text-style
+                                              :fix :bold (ui-text-size :caption))))
+               (size (* (ui-text-size :caption)
+                        (min 1 (/ (- +keymap-legend-keys-right+ 12)
+                                  (max 1 width))))))
           (draw-text* pane text keys-right middle
                       :align-x :right :align-y :center
-                      :text-size size :text-face :bold
+                      :text-size size :text-face :bold :text-family :fix
                       :ink (ui-ink :accent))))
       (draw-text* pane label (+ keys-right 18) middle
-                  :align-y :center :text-size 14
+                  :align-y :center :text-size (ui-text-size :caption)
                   :ink (ui-ink :text)))))
 
 (defmethod handle-repaint ((pane keymap-legend-pane) region)
@@ -197,10 +200,10 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
        medium 2 2 (- width 2) (- height 2)
        :radius 16 :ink (ui-ink :surface))
       (draw-text* pane "Keys" margin 32
-                  :align-y :center :text-size 22 :text-face :bold
+                  :align-y :center :text-size (ui-text-size :heading) :text-face :bold
                   :ink (ui-ink :text))
       (draw-text* pane "any key closes" (- width margin) 32
-                  :align-x :right :align-y :center :text-size 14
+                  :align-x :right :align-y :center :text-size (ui-text-size :caption)
                   :ink (ui-ink :muted))
       (loop for column in (keymap-legend-columns sections)
             for left from margin
@@ -209,7 +212,7 @@ leave it out.  Rows merge by label, so this decides how coarse a legend is."))
                  (dolist (section column)
                    (draw-text* pane (string-upcase (car section))
                                left (+ y 15)
-                               :align-y :center :text-size 11
+                               :align-y :center :text-size (ui-text-size :caption)
                                :text-face :bold
                                :ink (ui-ink :muted))
                    (incf y +keymap-legend-header-height+)

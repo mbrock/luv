@@ -401,8 +401,10 @@
                      :edge (if selected :selection :border)
                      :fill (if dark :accent :raised))))
 
-(defun simple-label (pane text x y &key (size 15) light)
+(defun simple-label (pane text x y &key (size (ui-text-size :body)) light)
   (draw-text* pane text x y :align-x :center :align-y :center
+              :text-family (if (member text '("✓" "‹" "›" "+") :test #'string=)
+                               :fix :sans-serif)
               :text-size size :ink (ui-ink (if light :on-accent :text))))
 
 (defun draw-inventory-header (frame pane)
@@ -411,14 +413,14 @@
         (progn
           (draw-rectangle* pane 0 0 840 47 :ink (ui-ink :surface))
           (simple-panel pane 18 8 137 34 :dark t)
-          (simple-label pane "Choose your building blocks" 408 27 :size 20))
+          (simple-label pane "Your building kit" 408 27 :size (ui-text-size :heading)))
         (with-sheet-medium (medium pane)
           (draw-hotbar-slot pane medium 18 10 155 42)
           (draw-text* pane "Material library" 174 27 :align-y :center
-                      :text-size 16 :ink (ui-ink :text))))
+                      :text-face :bold :text-size (ui-text-size :heading) :ink (ui-ink :text))))
     (draw-text* pane (format nil "Player ~D  · F2"
                             (1+ (inventory-active-player frame)))
-                86 25 :align-x :center :align-y :center :text-size 13
+                86 25 :align-x :center :align-y :center :text-size (ui-text-size :caption)
                 :ink (ui-ink (if simple :on-accent :text)))
     (let ((ink (ui-ink :text)))
       (draw-rectangle* pane 654 15 674 35 :filled nil :ink ink :line-thickness 2)
@@ -426,7 +428,7 @@
         (draw-line* pane 657 25 662 31 :ink ink :line-thickness 2)
         (draw-line* pane 662 31 671 18 :ink ink :line-thickness 2))
       (draw-text* pane "Full inventory · F3" 683 25 :align-y :center
-                  :text-size 13 :ink ink))))
+                  :text-size (ui-text-size :caption) :ink ink))))
 
 (defun draw-simple-inventory (frame pane)
   (let* ((inventory (inventory-data frame))
@@ -435,7 +437,7 @@
          (zone (inventory-simple-focus frame))
          (cursor (inventory-simple-cursor frame)))
     (draw-ui-surface pane 0 0 840 500)
-    (simple-label pane "Choose your building blocks" 408 27 :size 21)
+    (simple-label pane "Your building kit" 408 27 :size (ui-text-size :heading))
     (loop for (category label name) in *simple-inventory-categories*
           for i from 0 for x = (+ 20 (* i 134)) do
             (simple-panel pane x 58 126 61
@@ -443,7 +445,7 @@
                                          (eq category (inventory-category frame)))
                           :dark (eq category (inventory-category frame)))
             (draw-block-icon pane (luvcraft:block-kind-named name) (+ x 47) 62 31)
-            (simple-label pane label (+ x 63) 105 :size 13
+            (simple-label pane label (+ x 63) 105 :size (ui-text-size :caption)
                           :light (eq category (inventory-category frame))))
     (loop for entry in entries for i from 0
           for block = (luvcraft:block-inventory-entry-block entry) do
@@ -455,9 +457,9 @@
                             (string-capitalize
                              (substitute #\Space #\-
                                          (symbol-name (luvcraft:block-kind-name block))))
-                            (+ x 130) (+ y 86) :size 15)
+                            (+ x 130) (+ y 86) :size (ui-text-size :body))
               (when (member block kit)
-                (simple-label pane "✓" (+ x 238) (+ y 19) :size 20))))
+                (simple-label pane "✓" (+ x 238) (+ y 19) :size (ui-text-size :heading)))))
     (simple-label pane "‹" 38 366 :size 25)
     (simple-label pane "›" 802 366 :size 25)
     (simple-label pane
@@ -465,7 +467,7 @@
                       "Kit full — choose a block to replace"
                       (format nil "My blocks     ·     Page ~D of ~D"
                               (1+ (inventory-page frame)) (simple-inventory-pages frame)))
-                  420 367 :size 15)
+                  420 367 :size (ui-text-size :body))
     (loop for i below 6 for block = (nth i kit) do
       (multiple-value-bind (x y width height) (simple-inventory-slot i)
         (simple-panel pane x y width height :dark t
@@ -477,11 +479,11 @@
             (simple-label pane "+" (+ x 63) (+ y 31) :size 27 :light t))))
     (simple-label pane
                   (if (inventory-pending-block frame)
-                      "← ↑ ↓ →  Move     Enter  Replace     Esc  Cancel"
-                      "← ↑ ↓ →  Move     Enter  Add     Tab  My blocks")
-                  305 483 :size 14)
+                      "Arrows: move     Enter: replace     Esc: cancel"
+                      "Arrows: move     Enter: add     Tab: my blocks")
+                  305 483 :size (ui-text-size :caption))
     (simple-panel pane 620 466 197 30 :dark t)
-    (simple-label pane "▶  Let's build  · Esc" 718 481 :size 14 :light t)
+    (simple-label pane "Let's build  · Esc" 718 481 :size (ui-text-size :caption) :light t)
     (alexandria:when-let ((progress (simple-inventory-animation frame)))
       (when (< progress 1)
         (let* ((entry (position (inventory-added-block frame) entries

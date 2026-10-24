@@ -43,11 +43,11 @@
 ;;;; disagree about which one the player clicked.
 
 (defconstant +hotbar-width+ 612)
-(defconstant +hotbar-height+ 98)
+(defparameter *hotbar-height* 68)
 (defconstant +hotbar-pad+ 12)
 (defconstant +hotbar-gap+ 6)
 (defconstant +hotbar-slot-height+ 54)
-(defconstant +hotbar-slot-top+ 10)
+(defparameter *hotbar-slot-top* 7)
 
 (defun hotbar-slot-geometry (count index)
   "Left, top, right, and bottom of slot INDEX of COUNT, dividing the bar."
@@ -55,8 +55,8 @@
          (slot-width
            (/ (- content (* +hotbar-gap+ (1- count))) (float count)))
          (left (+ +hotbar-pad+ (* index (+ slot-width +hotbar-gap+)))))
-    (values left +hotbar-slot-top+ (+ left slot-width)
-            (+ +hotbar-slot-top+ +hotbar-slot-height+))))
+    (values left *hotbar-slot-top* (+ left slot-width)
+            (+ *hotbar-slot-top* +hotbar-slot-height+))))
 
 (defun hotbar-slot-at (count u)
   "The slot index at horizontal texture fraction U, or NIL between slots."
@@ -69,7 +69,7 @@
                  (return index))))))
 
 (defun draw-hotbar-shell (pane medium &key (width +hotbar-width+)
-                                          (height +hotbar-height+))
+                                          (height *hotbar-height*))
   "Inventory and quickbar share the workshop's bone surface."
   (declare (ignore pane))
   (draw-ui-surface medium 0 0 width height))
@@ -79,27 +79,6 @@
   (declare (ignore pane accent))
   (draw-ui-tile medium left top right bottom
                 :selected selected-p :hovered hovered-p))
-
-(defun draw-hotbar-caption (pane text &key ink)
-  "The one label the bar carries: what is currently chosen."
-  (draw-text* pane text (/ +hotbar-width+ 2.0) (- +hotbar-height+ 17)
-              :align-x :center :align-y :center :text-size 12
-              :ink (if ink (apply #'make-rgb-color ink) (ui-ink :text))))
-
-(defun hotbar-creative-button-at-p (u v)
-  (and (<= 12 (* u +hotbar-width+) 146)
-       (<= 70 (* v +hotbar-height+) 92)))
-
-(defun draw-hotbar-creative-button (pane medium session)
-  (let ((active (luvcraft:player-creative-p session)))
-    (draw-analytic-rounded-rectangle*
-     medium 12 70 146 92 :radius 5
-     :ink (if active (ui-ink :accent)
-              (ui-ink :inset)))
-    (draw-text* pane (if active "Creative ON · F6" "Creative · F6") 79 81
-                :align-x :center :align-y :center :text-size 12
-                :ink (if active (ui-ink :on-accent)
-                         (ui-ink :muted)))))
 
 (defmethod handle-repaint ((pane hotbar-pane) region)
   (declare (ignore region))
@@ -111,12 +90,6 @@
             (luvcraft:player-inventory session))))
     (with-sheet-medium (medium pane)
       (draw-hotbar-shell pane medium)
-      (draw-line* pane 12 68 (- +hotbar-width+ 12) 68
-                  :ink (ui-ink :border))
-      (draw-text* pane "Inventory · I" (- +hotbar-width+ 16) 81
-                  :align-x :right :align-y :center :text-size 12
-                  :ink (ui-ink :muted))
-      (draw-hotbar-creative-button pane medium session)
       (let ((count (max 1 (length blocks))))
         (loop for block in blocks
               for index from 0
@@ -135,25 +108,17 @@
                            (luvcraft:block-inventory-entry-quantity
                             (luvcraft:block-inventory-entry-for
                              (luvcraft:player-inventory session) block))))
-                     (when quantity
+                     (when (and quantity (plusp quantity)
+                                (not (luvcraft:player-creative-p session)))
                        (draw-text*
                         pane
-                        (if (and (luvcraft:player-creative-p session)
-                                 (not (luvcraft:block-kind-carried-p block)))
-                            "∞" (format nil "~D" quantity))
+                        (format nil "~D" quantity)
                         (- right 5) (- bottom 4)
-                        :align-x :right :align-y :bottom :text-size 10
+                        :align-x :right :align-y :bottom :text-size (ui-text-size :caption)
                         :ink (ui-ink :muted))))
                    ;; The tenth slot's key is 0, at the end of the number row.
                    (draw-ui-keycap medium (format nil "~D" (mod (1+ index) 10))
-                                   (+ left 3) (+ top 3) :width 14 :height 14))))
-      ;; Nine labels is nine things to read; the chosen one is the only name
-      ;; that answers a question the player is actually asking.
-      (draw-hotbar-caption
-       pane
-       (string-capitalize
-        (substitute #\Space #\- (symbol-name
-                                  (luvcraft:block-kind-name selected))))))))
+                                   (+ left 3) (+ top 3) :width 16 :height 16)))))))
 
 (define-application-frame luvcraft-hotbar ()
   ((session :initarg :session :reader hotbar-session)
@@ -161,7 +126,7 @@
   (:menu-bar nil)
   (:panes
    (bar (make-pane 'hotbar-pane
-                   :width +hotbar-width+ :height +hotbar-height+)))
+                   :width +hotbar-width+ :height *hotbar-height*)))
   (:layouts (default bar)))
 
 (defun repaint-hotbar (frame)
@@ -237,13 +202,10 @@
                              (luvcraft:player-inventory session)))))
         ;; HOTBAR-SLOT-AT reads the same geometry the painter does, so a click
         ;; in the gap between two slots chooses neither rather than guessing.
-        (cond
-          ((hotbar-creative-button-at-p (first uv) (second uv))
-           (toggle-instrument-creative-mode session))
-          ((<= +hotbar-slot-top+ (* (second uv) +hotbar-height+)
-               (+ +hotbar-slot-top+ +hotbar-slot-height+))
-           (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
-             (luvcraft:select-luvcraft-block session (1+ slot)))))
+        (when (<= *hotbar-slot-top* (* (second uv) *hotbar-height*)
+                  (+ *hotbar-slot-top* +hotbar-slot-height+))
+          (alexandria:when-let ((slot (hotbar-slot-at count (first uv))))
+            (luvcraft:select-luvcraft-block session (1+ slot))))
         (repaint-hotbar frame)))
     t))
 

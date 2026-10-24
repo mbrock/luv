@@ -146,13 +146,13 @@ every cell makes the word louder than the block it is about."
     (when selected-p
       (with-sheet-medium (medium pane)
         (draw-analytic-rounded-rectangle*
-         medium 16 top 150 (+ top 27) :radius 4
-         :ink (ui-ink :hover)))
+         medium 18 top 150 (+ top 27) :radius 4
+         :ink (ui-ink :selection-soft)))
       (draw-line* pane 17 (+ top 5) 17 (+ top 22)
                   :ink (ui-ink :selection) :line-thickness 2))
     (draw-text* pane label 27 (+ top 14)
-                :align-y :center :text-size 12
-                :ink (if selected-p (ui-ink :text) (ui-ink :muted)))
+                :align-y :center :text-size (ui-text-size :caption)
+                :ink (if selected-p (ui-ink :text) (ui-ink :on-accent)))
     (draw-text* pane
                 (format nil "~D"
                         (count-if
@@ -163,7 +163,8 @@ every cell makes the word louder than the block it is about."
                           (luvcraft:player-inventory
                            (inventory-session frame)))))
                 140 (+ top 14) :align-x :right :align-y :center
-                :text-size 10 :ink (ui-ink :muted))))
+                :text-size (ui-text-size :caption)
+                :ink (ui-ink (if selected-p :text :on-accent)))))
 
 (defun draw-inventory-page-controls (frame pane)
   (let ((page (inventory-page frame))
@@ -174,15 +175,15 @@ every cell makes the word louder than the block it is about."
          medium left 12 (+ left 34) 43 :radius 4
          :ink (ui-ink :hover))))
     (draw-text* pane "‹" 591 27 :align-x :center :align-y :center
-                :text-size 20
+                :text-size (ui-text-size :heading)
                 :ink (if (plusp page) (ui-ink :text) (ui-ink :muted)))
     (draw-text* pane "›" 633 27 :align-x :center :align-y :center
-                :text-size 20
+                :text-size (ui-text-size :heading)
                 :ink (if (< page (1- count)) (ui-ink :text) (ui-ink :muted)))
     (draw-text* pane (format nil "~D materials   ·   ~D / ~D"
                             (length (inventory-filtered-entries frame))
                             (1+ page) count)
-                558 27 :align-x :right :align-y :center :text-size 12
+                558 27 :align-x :right :align-y :center :text-size (ui-text-size :caption)
                 :ink (ui-ink :muted))))
 
 (defun draw-inventory-entry
@@ -204,21 +205,21 @@ on the bar wears the number key that selects it."
        (+ top (/ (- height 40) 2.0)) :scale 5/2)
       (when (< index luvcraft::+block-inventory-quickbar-size+)
         (draw-text* pane (format nil "~D" (mod (1+ index) 10))
-                    (+ left 6) (+ top 10) :align-y :center :text-size 10
+                    (+ left 6) (+ top 10) :align-y :center :text-size (ui-text-size :caption)
                     :ink (ui-ink :selection)))
-      (when (luvcraft:block-inventory-entry-quantity entry)
+      (when (plusp (or (luvcraft:block-inventory-entry-quantity entry) 0))
         (draw-text* pane (inventory-entry-quantity-label entry)
                     (- (+ left width) 6) (- (+ top height) 5)
-                    :align-x :right :align-y :bottom :text-size 10
+                    :align-x :right :align-y :bottom :text-size (ui-text-size :caption)
                     :ink (ui-ink :muted))))))
 
 (defun draw-inventory-quickbar (frame pane entries)
   (draw-text* pane "Quickbar" +inventory-quickbar-left+
               (- +inventory-quickbar-top+ 14)
-              :align-y :center :text-size 14 :ink (ui-ink :text))
+              :align-y :center :text-size (ui-text-size :caption) :ink (ui-ink :text))
   (draw-text* pane "Hover a material + 1–9, 0 to assign" +inventory-quickbar-right+
               (- +inventory-quickbar-top+ 14)
-              :align-x :right :align-y :center :text-size 11
+              :align-x :right :align-y :center :text-size (ui-text-size :caption)
               :ink (ui-ink :muted))
   (let ((slot-width
           (/ (- +inventory-quickbar-right+ +inventory-quickbar-left+)
@@ -243,7 +244,7 @@ on the bar wears the number key that selects it."
              (with-sheet-medium (medium pane)
                (draw-ui-keycap medium (format nil "~D" (mod (1+ index) 10))
                                 (+ left 6) (+ +inventory-quickbar-top+ 3)
-                                :width 14 :height 14)))))
+                                :width 16 :height 16)))))
 
 (defgeneric inventory-detail-rows (block entry)
   (:documentation
@@ -275,20 +276,20 @@ on the bar wears the number key that selects it."
 
 (defun draw-inventory-details (frame pane selected entry)
   (draw-text* pane (if (inventory-hovered-block frame) "Inspecting" "In hand")
-              674 78 :align-y :center :text-size 11
+              674 78 :align-y :center :text-size (ui-text-size :caption)
               :ink (ui-ink :muted))
   (draw-inventory-block-tile pane (inventory-atlas frame) selected 710 94
                              :scale 4)
   (draw-text* pane (inventory-clipped-label (inventory-entry-label entry) 21)
-              746 182 :align-x :center :align-y :center :text-size 13
+              746 182 :align-x :center :align-y :center :text-size (ui-text-size :caption)
               :ink (ui-ink :text))
   (draw-line* pane 674 202 818 202 :ink (ui-ink :border))
   (loop for (label . value) in (inventory-detail-rows selected entry)
         for y from 224 by 24
-        do (draw-text* pane label 668 y :align-y :center :text-size 10
+        do (draw-text* pane label 668 y :align-y :center :text-size (ui-text-size :caption)
                        :ink (ui-ink :muted))
            (draw-text* pane (format nil "~A" value) 820 y
-                       :align-x :right :align-y :center :text-size 10
+                       :align-x :right :align-y :center :text-size (ui-text-size :caption)
                        :ink (ui-ink :text))))
 
 (defmethod handle-repaint ((pane inventory-pane) region)
@@ -309,11 +310,12 @@ on the bar wears the number key that selects it."
          (cell-height (/ (- +inventory-grid-bottom+ +inventory-grid-top+)
                          +inventory-grid-rows+)))
     (with-sheet-medium (medium pane)
-      (draw-hotbar-shell pane medium :width +inventory-view-width+
-                                     :height +inventory-view-height+)
+      (draw-ui-surface medium 0 0 +inventory-view-width+ +inventory-view-height+
+                       :edge :forest :rim 3)
+      (draw-ui-surface medium 14 60 154 350 :fill :forest :edge :forest :radius 8)
       (unless (inventory-preferences frame)
         (draw-text* pane "Material library" 22 27
-                    :align-y :center :text-size 18 :ink (ui-ink :text)))
+                    :align-y :center :text-size (ui-text-size :body) :ink (ui-ink :text)))
       (draw-line* pane 16 52 824 52 :ink (ui-ink :border))
       (draw-line* pane 658 64 658 350 :ink (ui-ink :border))
       (draw-inventory-page-controls frame pane)
@@ -335,21 +337,21 @@ on the bar wears the number key that selects it."
         (draw-inventory-details frame pane inspected inspected-entry))
       (draw-line* pane 16 364 824 364 :ink (ui-ink :border))
       (draw-text* pane "IN HAND" 24 378 :align-y :center
-                  :text-size 10 :ink (ui-ink :muted))
+                  :text-size (ui-text-size :caption) :ink (ui-ink :muted))
       (when selected-entry
         (draw-text* pane
                     (inventory-clipped-label
                      (inventory-entry-label selected-entry) 17)
                     24 410 :align-y :center
-                    :text-size 12 :ink (ui-ink :text)))
+                    :text-size (ui-text-size :caption) :ink (ui-ink :text)))
       (draw-text* pane "1–9, 0 to select" 24 430 :align-y :center
-                  :text-size 11 :ink (ui-ink :muted))
+                  :text-size (ui-text-size :caption) :ink (ui-ink :muted))
       (draw-text* pane "I / Esc   Close" 24 477
-                  :align-y :center :text-size 11 :ink (ui-ink :muted))
-      (draw-text* pane "Click a material to equip" 166 477
-                  :align-y :center :text-size 11 :ink (ui-ink :muted))
-      (draw-text* pane "Wheel / ← →   Browse pages" 824 477
-                  :align-x :right :align-y :center :text-size 11
+                  :align-y :center :text-size (ui-text-size :caption) :ink (ui-ink :muted))
+      (draw-text* pane "Click to equip · F6 creative" 166 477
+                  :align-y :center :text-size (ui-text-size :caption) :ink (ui-ink :muted))
+      (draw-text* pane "Arrow keys: pages" 824 477
+                  :align-x :right :align-y :center :text-size (ui-text-size :caption)
                   :ink (ui-ink :muted)))))
 
 (defun repaint-inventory (frame)
