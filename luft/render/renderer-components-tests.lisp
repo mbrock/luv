@@ -662,3 +662,37 @@
             (check-shadow-rectangles
              (make-array (length words) :element-type '(unsigned-byte 32)
                                        :initial-contents words))))))))
+
+(define-test native-hud-follows-bounded-world-presentation
+  (let* ((render::*output-pixel-budget* 1048576)
+         (device (make-instance 'gpu-test-device))
+         (renderer (render:make-renderer device :bgra8-unorm '(3420 2146)))
+         (frame (test-renderer-frame renderer))
+         (encoder (make-instance 'gpu-test-encoder))
+         (overlay-target nil))
+    (unwind-protect
+         (progn
+           (true (equal '(1292 810) (render::renderer-extent renderer)))
+           (true (equal '(968 608) (render::renderer-render-extent renderer)))
+           (let ((luv:*fixed-render-scale* 1.0))
+             (true (equal '(3420 2146)
+                          (render::renderer-world-output-extent '(3420 2146)))))
+           (render::encode-renderer-presentation
+            renderer frame encoder :native-surface
+            (lambda (pass)
+              (setf overlay-target
+                    (find-if (lambda (command)
+                               (typep command 'luv::render-pass-descriptor))
+                             (test-gpu-commands pass)))))
+           (true (eq :native-surface
+                     (getf (first (luv::render-pass-descriptor-color-attachments
+                                   overlay-target)) :view)))
+           (let ((passes (remove-if-not
+                          (lambda (command) (typep command 'luv::render-pass-descriptor))
+                          (reverse (test-gpu-commands encoder)))))
+             (true (= 2 (length passes)))
+             (true (eq (render::renderer-target-generation-presentation-view
+                        (render::renderer-target-generation renderer))
+                       (getf (first (luv::render-pass-descriptor-color-attachments
+                                     (first passes))) :view)))))
+      (render:destroy-renderer renderer))))

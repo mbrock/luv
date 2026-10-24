@@ -661,7 +661,6 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:clock-wait-timeout
            #:service-canvas-clock
            #:canvas
-           #:canvas-output-pixel-budget
            #:budgeted-output-extent
            #:canvas-context
            #:context-canvas

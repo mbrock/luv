@@ -37,10 +37,11 @@ sites of that star, read from one 256-star table.  The flat table keeps only eac
 to the cell edges.  A new renderer reads it.")
 
 (defparameter *output-pixel-budget* 1048576
-  "Interactive Metal output ceiling, independent of the fullscreen window.
+  "Interactive world reconstruction and post-processing pixel ceiling.
 
-About one megapixel keeps Retina reconstruction affordable on the laptop.
-NIL opts into native output. Explicit captures bypass this ceiling.")
+The final drawable and HUD stay native. About one megapixel keeps the world
+pipeline affordable on the laptop; NIL opts into native world output.
+Explicit fixed-scale captures bypass this ceiling.")
 
 (defparameter *dynamic-resolution-frame-rate* 60
   "The frame rate LUFT holds by drawing its scene smaller, or NIL for never.

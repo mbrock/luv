@@ -130,25 +130,17 @@ on the frame while this thread waits for a drawable."
             :reason :unsupported-native-format :details format))))
 
 (defun synchronize-metal-canvas-drawable-size (context)
-  "Fit the drawable to the canvas output budget without resizing its window."
-  (let ((canvas (context-canvas context)))
-    (multiple-value-bind (native-width native-height) (canvas-size canvas)
-      (destructuring-bind (width height)
-          (budgeted-output-extent
-           native-width native-height
-           (unless (canvas-fixed-render-scale canvas)
-             (canvas-output-pixel-budget canvas)))
-        (luv.metal:set-layer-drawable-size
-         (metal-canvas-layer context) width height)
-        (multiple-value-bind (layer-width layer-height)
-            (luv.metal:layer-drawable-size (metal-canvas-layer context))
-          (unless (and (= width (round layer-width))
-                       (= height (round layer-height)))
-            (error 'canvas-error :canvas canvas
-                   :operation :drawable-size :reason :native-size-mismatch
-                   :details (list :requested (list width height)
-                                  :metal (list layer-width layer-height))))
-          (setf (canvas-extent context) (list width height)))))))
+  "Keep the drawable native so final HUD overlays retain display resolution."
+  (multiple-value-bind (width height) (canvas-size (context-canvas context))
+    (luv.metal:set-layer-drawable-size (metal-canvas-layer context) width height)
+    (multiple-value-bind (layer-width layer-height)
+        (luv.metal:layer-drawable-size (metal-canvas-layer context))
+      (unless (and (= width (round layer-width)) (= height (round layer-height)))
+        (error 'canvas-error :canvas (context-canvas context)
+               :operation :drawable-size :reason :native-size-mismatch
+               :details (list :requested (list width height)
+                              :metal (list layer-width layer-height))))
+      (setf (canvas-extent context) (list width height)))))
 
 (defun configure-metal-canvas-context (context configuration)
   (unless (typep configuration 'canvas-configuration)

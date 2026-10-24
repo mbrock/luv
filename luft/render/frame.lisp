@@ -113,6 +113,7 @@ per-instance records, from FIGURE-LANES or BOX-FIGURE. POINTER, as fractions of 
 and INK-STRENGTH fill the inspection lanes.  FIXED-EXPOSURE replaces
 measured exposure.  OVERLAY-ENCODER receives the
 final pass."
+  (setf extent (renderer-world-output-extent extent))
   (ensure-renderer-extent renderer extent)
   (let* ((*projection* projection)
          (frame (renderer-frame-state-for renderer context surface-texture))
@@ -506,18 +507,39 @@ the primary and the shafts in the secondary for presentation to add back."
 
 (defun encode-renderer-presentation
     (renderer frame encoder surface-texture overlay-encoder)
-  (let ((present-pass
-          (begin-render-pass
-           encoder
-           (make-render-pass-descriptor
-            :label "luft HDR presentation"
-            :color-attachments
-            `((:view ,surface-texture :load-op :clear :store-op :store
-               :clear-value #(0.0 0.0 0.0 1.0)))))))
-    (encode-presentation (renderer-finishing renderer) present-pass
+  "Grade at world resolution, copy to the native drawable, then draw the HUD.
+
+World and screen instruments follow distinct pixel budgets; see #LEEWJB."
+  (let* ((generation (renderer-target-generation renderer))
+         (finishing (renderer-finishing renderer))
+         (world-view (renderer-target-generation-presentation-view generation))
+         (world-texture (renderer-target-generation-presentation-texture generation))
+         (present-pass
+           (begin-render-pass
+            encoder
+            (make-render-pass-descriptor
+             :label "luft bounded world presentation"
+             :color-attachments
+             `((:view ,world-view :load-op :clear :store-op :store
+                :clear-value #(0.0 0.0 0.0 1.0)))))))
+    (encode-presentation finishing present-pass
                          (renderer-frame-present-bind-group renderer frame))
-    ;; Both MetalFX and the direct HDR path publish here.  The atelier
-    ;; overlay remains later than tone mapping and glow in either case.
-    (when overlay-encoder
-      (funcall overlay-encoder present-pass))
-    (end-pass present-pass)))
+    (end-pass present-pass)
+    (prepare-texture encoder world-texture :texture-binding)
+    (let* ((program (finishing-display-program finishing))
+           (binding
+             (renderer-frame-program-binding
+              renderer frame (list :native-display world-view) program
+              :scene world-view :scene-sampler (finishing-sampler finishing)))
+           (display-pass
+             (begin-render-pass
+              encoder
+              (make-render-pass-descriptor
+               :label "luft native display and HUD"
+               :color-attachments
+               `((:view ,surface-texture :load-op :clear :store-op :store
+                  :clear-value #(0.0 0.0 0.0 1.0)))))))
+      (encode-program program display-pass binding
+                      (make-gpu-draw-command :vertex-count 3))
+      (when overlay-encoder (funcall overlay-encoder display-pass))
+      (end-pass display-pass))))

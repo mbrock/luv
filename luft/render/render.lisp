@@ -109,7 +109,7 @@ choices. Resident geometry and resized targets are published independently."
              (declare (ignore data count))
              (setf (renderer-publication renderer)
                    (%make-empty-renderer-publication :flame-instance-buffer buffer)))
-           (replace-renderer-target-generation renderer extent)
+           (replace-renderer-target-generation renderer (renderer-world-output-extent extent))
            (setf completed-p t)
            renderer)
       (unless completed-p

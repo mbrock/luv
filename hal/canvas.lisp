@@ -232,11 +232,7 @@ independent host timer competes with the display's cadence."))
   t)
 
 (defclass canvas ()
-  ((output-pixel-budget
-    :initarg :output-pixel-budget :initform nil
-    :accessor canvas-output-pixel-budget
-    :documentation "Optional Metal presentation pixel ceiling; NIL keeps native output.")
-   (clock
+  ((clock
     :initarg :clock
     :initform (make-demand-clock)
     :accessor canvas-clock)

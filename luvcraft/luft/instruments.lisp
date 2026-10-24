@@ -22,11 +22,15 @@
 (defmethod mcluv:toggle-instrument-creative-mode ((viewer luvcraft-viewer))
   (setf (viewer-creative-p viewer) (not (viewer-creative-p viewer))))
 
-;; The generic palette is gone, but its contextual game hints are not. Put
-;; them early in the shared HUD so debug fields cannot push them offscreen.
+(defparameter *status-diagnostics-p* nil
+  "Include engine telemetry in the game status line when explicitly enabled.")
+
+;; Ordinary play needs a short hint, not the engine's complete status dump.
 (defmethod mcluv:status-bar-channels-for ((viewer luvcraft-viewer))
-  (let ((channels (call-next-method)))
-    (list* (first channels) :player-hint (rest channels))))
+  (if *status-diagnostics-p*
+      (let ((channels (call-next-method)))
+        (list* (first channels) :player-hint (rest channels)))
+      '(:application :player-hint :fps)))
 
 (defmethod mcluv:status-bar-channel-label
     ((channel (eql :player-hint)) (viewer luvcraft-viewer))

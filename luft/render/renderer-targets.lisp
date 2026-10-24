@@ -6,6 +6,8 @@
 (defclass renderer-target-generation (gpu-resource-owner)
   ;; Initialize privately, then publish this complete identity in one swap.
   ((extent :initform nil :reader renderer-target-generation-extent)
+   (presentation-texture :initform nil :reader renderer-target-generation-presentation-texture)
+   (presentation-view :initform nil :reader renderer-target-generation-presentation-view)
    (render-extent :initform nil :reader renderer-target-generation-render-extent)
    (temporal-scaler :initform nil :reader renderer-target-generation-temporal-scaler)
    (depth-msaa-texture :initform nil :reader renderer-target-generation-depth-msaa-texture)
@@ -212,6 +214,12 @@ SHARE is the part of *RENDER-SCALE* dynamic resolution currently draws."
             (max 2 (* 2 (round (* 0.5 *render-scale* share dimension)))))
           extent))
 
+(defun renderer-world-output-extent (extent)
+  "Bound world reconstruction independently of the native HUD drawable."
+  (if *fixed-render-scale*
+      extent
+      (budgeted-output-extent (first extent) (second extent) *output-pixel-budget*)))
+
 (defun renderer-render-scale-extent (renderer extent)
   "Return RENDERER's internal extent for output EXTENT.
 
@@ -224,7 +232,7 @@ without one, presentation enlarges it directly."
       (render-scale-extent extent (renderer-scene-share renderer))))
 
 (defparameter *renderer-output-images*
-  '(:resolved :history :composite :viewmodel-color :viewmodel-depth :panel-color :panel-depth :bloom-primary :bloom-secondary)
+  '(:resolved :history :composite :viewmodel-color :viewmodel-depth :presentation :bloom-primary :bloom-secondary)
   "The images sized by the output, which a scene-only resize keeps.")
 
 (defun make-renderer-target-generation (renderer extent &optional previous)
@@ -300,11 +308,13 @@ starts over."
                    '(:render-attachment :texture-binding :copy-dst))
             (image :bounds-low :rgba16-float render-extent '(:render-attachment :texture-binding))
             (image :bounds-high :rgba16-float render-extent '(:render-attachment :texture-binding))))
+        (image :presentation (finishing-output-format (renderer-finishing renderer))
+               extent '(:render-attachment :texture-binding))
         (image :composite :rgba16-float extent '(:render-attachment :texture-binding))
         (image :viewmodel-color :rgba16-float extent '(:render-attachment :texture-binding))
         (image :viewmodel-depth :depth32-float extent :render-attachment)
-        (image :panel-color :rgba16-float extent '(:render-attachment :texture-binding))
-        (image :panel-depth :depth32-float extent '(:render-attachment :texture-binding))
+        (image :panel-color :rgba16-float render-extent '(:render-attachment :texture-binding))
+        (image :panel-depth :depth32-float render-extent '(:render-attachment :texture-binding))
         (image :bloom-primary :rgba16-float (bloom-extent extent)
                '(:render-attachment :texture-binding))
         (image :bloom-secondary :rgba16-float (bloom-extent extent)

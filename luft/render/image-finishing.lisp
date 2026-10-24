@@ -6,7 +6,9 @@
 ;;; and their borrowed bindings.
 
 (defclass image-finishing (gpu-resource-owner)
-  ((composite-program :accessor finishing-composite-program)
+  ((output-format :initarg :output-format :reader finishing-output-format)
+   (display-program :accessor finishing-display-program)
+   (composite-program :accessor finishing-composite-program)
    (bloom-bright-program :accessor finishing-bloom-bright-program)
    (bloom-horizontal-program :accessor finishing-bloom-horizontal-program)
    (bloom-vertical-program :accessor finishing-bloom-vertical-program)
@@ -69,7 +71,7 @@ to its SOURCE view and the frame's CAMERA uniform."))
   (mapcar (lambda (dimension) (max 1 (floor dimension +bloom-divisor+))) extent))
 
 (defun make-image-finishing (device color-format)
-  (let ((finishing (make-instance 'image-finishing)))
+  (let ((finishing (make-instance 'image-finishing :output-format color-format)))
     (with-gpu-construction (finishing)
       (flet ((program (label fragment format)
                (own-gpu-object
@@ -98,6 +100,9 @@ to its SOURCE view and the frame's CAMERA uniform."))
               (finishing-sun-shaft-program finishing)
               (program "luft sun shafts"
                        (shaders::sun-shaft-fragment-specification) :rgba16-float)
+              (finishing-display-program finishing)
+              (program "luft native display copy"
+                       (shaders::hdr-copy-fragment-specification) color-format)
               (finishing-present-program finishing)
               (program "luft HDR presentation"
                        (shaders:present-fragment-specification) color-format))))))

@@ -1,0 +1,161 @@
+#+title: Luvcraft UI: one family of workshop instruments
+#+startup: overview
+
+* A shared visual language, not a new skin per tool
+:PROPERTIES:
+:ID: 23O6C3
+:END:
+
+The inventory, quickbar, metabar, status line, and in-world instruments
+should feel like parts of one workshop. The first study uses actual daytime
+screenshots from the laptop session, not an invented game. It keeps the
+material cubes, existing controls, and current interactions while exploring
+three visual directions. No direction has been selected as the production
+palette yet.
+
+The immediate engineering constraint is #LEEWJB: crisp screen overlays must
+not force the world renderer to reconstruct every Retina pixel. The frame
+budget from #KIGTDN still applies.
+
+* DONE Separate world resolution from overlay resolution
+:PROPERTIES:
+:ID: LEEWJB
+:END:
+
+The native display stays 3420 by 2146 on the measured laptop. The world has
+an independent 1,048,576-pixel reconstruction ceiling, with dynamic scene
+resolution below it. Terrain, sky, exposure, bloom, shafts, depth-aware
+presentation and grading stay inside that budget. The finished world image
+is linearly sampled once into the native drawable; screen overlays are drawn
+last into that same native pass. This avoids rerunning the expensive world
+presentation shader at Retina resolution just to sharpen labels.
+
+World-panel color and depth targets follow the dynamic scene extent. They
+remain perspectival and depth-composited into the world, rather than jumping
+into the flat HUD. Their source content may retain its own logical layout,
+but its visible rasterization belongs to the world budget. Hotbar, inventory,
+metabar, status, and workbench sheets are screen overlays and retain native
+pixel coverage. Explicit fixed-scale captures bypass the world budget.
+
+This is three grids: dynamic scene, capped reconstructed world, native UI.
+Input and layout stay in logical window coordinates; GPU target dimensions
+must not become another UI layout scale.
+
+Live validation after loading: native display 3420 by 2146, reconstructed
+world 1292 by 810, scene 968 by 608. Separate five-second measurements after
+two-second settling periods gave 59.5 Hz in play, 59.7 with inventory open,
+and 59.5 with the metabar open. All were unfocused; focused movement and
+world-panel interaction remain follow-up checks. Renderer and Luvcraft-on-Luft
+game suites passed 35,908 and 445 checks. A recorded-pass test verifies that
+world presentation precedes the copy and HUD, with the overlay callback
+receiving the native attachment.
+
+* Three directions from the same screenshots
+:PROPERTIES:
+:ID: JK08FO
+:END:
+
+The [[file:measurements/laptop-ui-20261024/daytime.png][daytime HUD]],
+[[file:measurements/laptop-ui-20261024/inventory.png][inventory]], and
+[[file:measurements/laptop-ui-20261024/metabar.png][metabar]] are actual pre-change
+captures at the previous low drawable resolution. They show the inconsistency:
+a dark inventory, grey-green slider drawer, separate keycap treatments, and
+a telemetry-heavy status strip.
+
+The following boards were generated with the built-in image_gen tool using
+all three screenshots as references. [[file:measurements/laptop-ui-20261024/prompts.json][Exact prompts]] are retained. These are
+proposals, not implemented screenshots or precise specifications. Generated
+key labels, palette hex codes, counts, and shortcuts need verification; in
+particular, do not inherit invented F3 diagnostics bindings or rearranged
+quickbar selection numbers from the boards.
+
+** Quiet atelier
+:PROPERTIES:
+:ID: 7LQLC4
+:END:
+
+Warm bone surfaces, charcoal text, moss selection, restrained brass. The
+calmest option; a useful starting point for a creative workshop. Keep strong
+text contrast against bright sky and snow. Avoid decorative texture and
+making every surface look like a separate floating card.
+
+[[file:measurements/laptop-ui-20261024/quiet-atelier.png]]
+
+** Night instrument
+:PROPERTIES:
+:ID: HLF9P9
+:END:
+
+Blue-charcoal panels, ivory text, amber selection. Closest to the current
+inventory and easiest to migrate incrementally. The proposal overuses blue
+panel outlines and has an oversized help block; simplify both. Monospace is
+for numeric values and code, not every label.
+
+[[file:measurements/laptop-ui-20261024/night-instrument.png]]
+
+** Playful field kit
+:PROPERTIES:
+:ID: JJSCKE
+:END:
+
+Chalk, forest green, terracotta selection. Friendlier, stronger ties to the
+world's materials. Keep the palette and material tiles; drop the promotional
+copy and oversized title/time badges from actual play. Those are design-board
+presentation, not new HUD requirements.
+
+[[file:measurements/laptop-ui-20261024/field-kit.png]]
+
+* NEXT One theme owner and a small component vocabulary
+:PROPERTIES:
+:ID: 9Z486I
+:END:
+
+Start with one shared style owner in McCLIM, consumed by existing retained
+widget drawing. Do not create parallel widget frameworks or turn generated
+boards into raster UI assets. Keep layout dimensions in logical points and
+let the GPU backend supply native pixel density.
+
+The first token set should name roles rather than widgets:
+
+| Family | Roles |
+|--------+-------|
+| Color | surface, raised-surface, text, muted-text, border, accent, selection, focus, danger |
+| Spacing | 4, 8, 12, 16, 24 logical points |
+| Typography | body label, section heading, caption, numeric value, keycap |
+| Geometry | control height, panel padding, tile size, radius, border width |
+| State | default, hover, pressed, selected, keyboard-focus, disabled, error |
+
+Use semantic tokens rather than copying RGB triples into each screen.
+Selection and keyboard focus must remain distinguishable, including without
+color. Keep material thumbnails faithful to the material; a selection border
+must not recolor the object. A repeated control should share sizing, baseline,
+spacing and state treatment wherever it appears.
+
+The initial components are panel, heading, material tile, quickbar slot,
+button, keycap, slider/value row, toggle, section disclosure, tooltip and
+context hint. A slider row needs an aligned label, readable numeric value,
+consistent track/thumb, and identical keyboard/mouse behavior in every tool.
+
+Migrate the inventory and quickbar together, then the metabar, then status
+and world instruments. Current style roots include mcclim/metabar.lisp,
+mcclim/inventory-simple.lisp, mcclim/application-status-bar.lisp and
+mcclim/paper.lisp. A theme change should update all consumers through the
+same live owner and invalidate their retained drawings together.
+
+Acceptance: capture the same daylight and night views with inventory,
+metabar and quickbar; check native and reduced world resolutions; inspect
+hover, selection, focus, disabled and error states; check pointer hit targets
+against drawn controls; measure frame time with each overlay open. Avoid
+full-screen blur, per-frame UI texture rebuilds, and unnecessary animation.
+
+* DONE Ordinary status is not a diagnostics dump
+:PROPERTIES:
+:ID: 9MDH7R
+:END:
+
+Luvcraft's normal status now shows application, contextual player hint and
+FPS. PID, heap, worktree, coordinates, chunk counts and streaming queues are
+retained through luvcraft.luft.game::*status-diagnostics-p*, off by default.
+A future diagnostics drawer can expose this vocabulary without consuming
+the play HUD. Keep FPS during performance work; whether it is part of the
+long-term default HUD remains a product choice.

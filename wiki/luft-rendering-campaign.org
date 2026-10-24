@@ -402,14 +402,16 @@ MetalFX scaler construction also stalled live resizing: the session log
 shows repeated roughly 0.14–0.48 second constructions while the controller
 grew the scene. Resolution is not a free per-frame dial on this path.
 
-The interactive Luft Metal canvas now defaults to a 1,048,576-pixel output
-ceiling, retaining aspect ratio and fullscreen placement. Smaller windows
-stay native; NIL opts into native output. The scene still starts at 0.75
-of output dimensions. Its controller reserves 25 percent GPU headroom and
+The first iteration capped the Metal drawable at 1,048,576 pixels. This
+blurred the HUD, so #LEEWJB moves the ceiling into world reconstruction and
+post-processing instead: the drawable and final HUD remain native, with a
+simple enlarged world copy underneath. Smaller worlds stay native; NIL opts
+into native world output. The scene still starts at 0.75 of world output
+dimensions. Its controller reserves 25 percent GPU headroom and
 requires eight consecutive quiet windows (64 samples, at least 6.4 seconds)
-before each growth attempt. Shrinking remains prompt. Other HAL clients
-keep native output unless they opt into a budget; explicit fixed-scale and
-offscreen capture paths bypass it.
+before each growth attempt. Shrinking remains prompt. HAL drawables remain
+native; explicit fixed-scale and offscreen capture paths bypass the world
+ceiling.
 
 With the permanent ceiling enabled in that same live image, output was
 1292 by 810 and the scene stayed 968 by 608 across three five-second windows:
