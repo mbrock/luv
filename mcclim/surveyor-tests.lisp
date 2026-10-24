@@ -190,34 +190,19 @@
             (luvcraft:luvcraft-overlay-stage
              (allocate-instance
               (find-class 'mcluv:luvcraft-inventory-overlay)))))
-  ;; Probe logical cell centres, empty cells, and panel boundaries.
-  (flet ((slot (x y count) (mcluv::inventory-slot-at (/ x 840) (/ y 440) count))
-         (category (x y) (mcluv::inventory-category-at (/ x 840) (/ y 440)))
-         (page (x y) (mcluv::inventory-page-direction-at (/ x 840) (/ y 440))))
-    (true (= 0 (slot 110 85 9)))
-    (true (= 3 (slot 330 85 9)))
-    (true (= 9 (slot 185 145 40)))
-    (true (null (slot 185 145 9)))
-    (true (= 39 (slot 620 330 40)))
-    (true (null (slot 620 355 40)))
-    (true (null (slot 40 85 40)))
-    (true (null (slot 700 85 40)))
-    (true (eq :all (category 40 78)))
-    (true (eq :building (category 40 140)))
-    (true (eq :colors (category 40 325)))
-    (true (null (category 75 78)))
-    (true (= -1 (page 720 30)))
-    (true (= 1 (page 798 30)))
-    (true (null (page 759 30))))
-  (true (= 0 (mcluv::inventory-quickbar-slot-at (/ 50 840) (/ 395 440) 10)))
-  (true (= 9 (mcluv::inventory-quickbar-slot-at (/ 800 840) (/ 395 440) 10)))
-  (true (null (mcluv::inventory-quickbar-slot-at (/ 830 840) (/ 395 440) 10)))
-  (true (mcluv::inventory-category-block-p
-         :roofing (luvcraft:block-kind-named :thatch)))
-  (true (mcluv::inventory-category-block-p
-         :natural luvcraft::*grass-block*))
-  (true (not (mcluv::inventory-category-block-p
-              :natural luvcraft::*stone-block*))))
+  (flet ((slot (x y count &optional (scroll 0))
+           (mcluv::inventory-slot-at (/ x 840) (/ y 364) count scroll)))
+    (true (= 0 (slot 50 85 70)))
+    (true (= 3 (slot 290 85 70)))
+    (true (= 8 (slot 50 145 70)))
+    (true (= 39 (slot 620 330 70)))
+    (true (= 8 (slot 50 85 70 (mcluv::inventory-row-height))))
+    (true (null (slot 50 355 70)))
+    (true (null (slot 10 85 70)))
+    (true (null (slot 700 85 70)))
+    (true (= 0 (mcluv::inventory-max-scroll 40)))
+    (true (= (* 4 (mcluv::inventory-row-height)) (mcluv::inventory-max-scroll 70)))
+    (true (null (slot 620 330 9)))))
 
 (define-test building-kit-keeps-six-unique-blocks-and-never-replaces-silently
   (let* ((inventory (luvcraft:make-block-inventory))
@@ -280,8 +265,3 @@
     (let ((data (mcluv::default-inventory-preferences)))
       (setf (getf (first (getf data :players)) :kit) bad-kit)
       (fail (mcluv::validate-inventory-preferences data)))))
-
-(define-test unified-inventory-category-pictures-resolve-to-real-materials
-  (dolist (category mcluv::*inventory-categories*)
-    (true (luvcraft:block-kind-named
-           (cdr (assoc (first category) mcluv::*inventory-category-icons*)) nil))))

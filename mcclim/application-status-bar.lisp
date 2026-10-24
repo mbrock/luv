@@ -337,16 +337,31 @@ semantic repaint."
          (chip-p (eq :chip (status-bar-presentation (status-bar-owner bar)))))
     (with-sheet-medium (medium pane)
       (if chip-p
-          (let* ((text (status-bar-display-string bar medium))
-                 (text-width (text-size medium text :text-style
-                                        (make-text-style :sans-serif :roman
-                                                         (ui-text-size :body))))
-                 (right (- width 16))
-                 (left (max 16 (- right text-width 32))))
-            (unless (zerop (length text))
-              (draw-ui-surface medium left 16 right 52 :radius 10)
-              (draw-text* medium text (+ left 16) 34 :align-y :center
-                          :text-size (ui-text-size :body) :ink (ui-ink :text))))
+          (let* ((fields (status-bar-visible-fields bar))
+                 (clock (find :daytime fields :key #'status-bar-field-channel))
+                 (fps (find :fps fields :key #'status-bar-field-channel))
+                 (right (- width 18))
+                 (left (- right 112)))
+            (when clock
+              (draw-ui-surface medium left 16 right 52 :radius 18
+                               :fill :forest :edge :forest)
+              (draw-analytic-rounded-rectangle* medium (+ left 13) 25 (+ left 31) 43
+                                                :radius 9 :ink (ui-ink :on-accent))
+              (draw-analytic-rounded-rectangle* medium (+ left 14.5) 26.5 (+ left 29.5) 41.5
+                                                :radius 7.5 :ink (ui-ink :forest))
+              (draw-analytic-rounded-rectangle* medium (+ left 21) 29 (+ left 22.5) 35
+                                                :radius 0.7 :ink (ui-ink :on-accent))
+              (draw-analytic-rounded-rectangle* medium (+ left 21) 34 (+ left 26) 35.5
+                                                :radius 0.7 :ink (ui-ink :on-accent))
+              (draw-text* medium (status-bar-field-value clock) (+ left 42) 34
+                          :align-y :center :text-size (ui-text-size :body)
+                          :ink (ui-ink :on-accent)))
+            (when fps
+              (let ((text (format nil "~A fps" (status-bar-field-value fps))))
+                (draw-text* medium text 20 35 :align-y :center
+                            :text-size (ui-text-size :caption) :ink (ui-ink :forest))
+                (draw-text* medium text 19 34 :align-y :center
+                            :text-size (ui-text-size :caption) :ink (ui-ink :on-accent)))))
           (progn
             (draw-analytic-rounded-rectangle*
              medium 0 0 width +status-bar-height+

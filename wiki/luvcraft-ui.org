@@ -183,12 +183,12 @@ when a second consumer needs them, rather than invented in advance.
 :ID: 9MDH7R
 :END:
 
-Luvcraft's normal status is a small upper-right daytime capsule, driven by
-the actual world clock. It replaces the full-width strip and does not shrink
+Luvcraft's normal status is a small upper-right forest clock pill, driven by
+the actual world clock, with a quiet FPS label in the upper-left corner. It replaces the full-width strip and does not shrink
 type to squeeze in telemetry. The shared =status-bar-presentation= protocol
 keeps conventional strips available to tools and diagnostics.
 
-FPS, PID, heap, worktree, coordinates, chunk counts and streaming queues are
+PID, heap, worktree, coordinates, chunk counts and streaming queues are
 retained through =luvcraft.luft.game::*status-diagnostics-p*=, off by default.
 A future diagnostics drawer can expose this vocabulary without consuming
 the play HUD.
@@ -198,22 +198,18 @@ the play HUD.
 :ID: 6OND7O
 :END:
 
-The user's next Field Kit study replaces the simple/full distinction with
-one material browser. The 840 by 440 logical panel has a forest category
-rail, a forty-cell material tray, a large material portrait, and a full-width
-ten-slot quickbar. Category pictures use real material icons; their names
-appear in the header on hover. The portrait names the material and explains
-equipping, without renderer properties such as opacity or surface emission.
-All categories and catalog pages remain available.
+The inventory is now one alphabetically ordered material tray, without
+categories, page buttons, player labels, or instruction copy. Its 840 by 364
+logical panel shows a clipped, continuously scrolling grid and a material
+portrait. Fractional wheel/trackpad deltas move the tray directly. A small
+scroll thumb shows the position; keyboard movement scrolls its row into view.
 
-This replaces both old inventory presentations and their overlapping pointer
-handlers. Player profiles still round-trip their saved quickbars and legacy
-kit data; applying either profile selects the unified full catalog. F2
-switches player. F3 no longer switches presentation. The old six-card view,
-kit replacement dialog, and separate full-mode header are removed.
+The normal speedbar remains visible in its normal screen position, outside
+the inventory. Click or Enter equips the chosen material and closes the tray
+without modifying the speedbar. Number keys can still explicitly assign a
+hovered material to a slot. Arrow keys navigate, Page Up/Down move a screen,
+Home/End reach the catalog ends, and I or Escape closes the inventory.
 
-Click equips a material; hovering and pressing 1–9 or 0 assigns its slot.
-Arrow keys move through the grid, Enter equips, Tab cycles categories,
-and Page Up/Down or the wheel changes pages. I or Escape closes the view.
-Rendering and pointer hit testing share the same layout dimensions. Native
-HUD composition and the capped scene resolution are unchanged (#LEEWJB).
+Old player preferences and saved speedbars still load, but the inventory
+has no profile-switch control or separate simple/full presentation. Retained
+native HUD composition and the capped scene resolution are unchanged (#LEEWJB).

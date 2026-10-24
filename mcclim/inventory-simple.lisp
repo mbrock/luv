@@ -95,9 +95,7 @@
             (or (blocks (getf profile :kit))
                 (list (luvcraft:block-kind-named :grass))))
       (luvcraft::arrange-luvcraft-quickbar session (getf profile :bar)))
-    (setf (inventory-category frame) :natural
-          (inventory-page frame) 0
-          (inventory-hovered-category frame) nil
+    (setf (inventory-scroll frame) 0.0
           (inventory-hovered-block frame) nil)
     (luvcraft:update-player-instruments session)))
 
@@ -137,14 +135,6 @@
 (defun inventory-simple-state (frame)
   ;; The legacy name is retained for the inventory's visible-state protocol.
   (list (and (inventory-preferences frame) (inventory-active-player frame))))
-
-(defmethod luvcraft:handle-luvcraft-focus-event :around
-    ((overlay luvcraft-inventory-overlay) session canvas
-     (event luv:canvas-key-press-event))
-  (if (and (eq :f2 (luv:canvas-key-event-key-name event))
-           (not (luv:canvas-key-event-repeat-p event)))
-      (progn (switch-inventory-player (widget-overlay-frame overlay)) t)
-      (call-next-method)))
 
 (defmethod handle-repaint :around ((pane inventory-pane) region)
   (with-text-style (pane (make-text-style :sans-serif :roman (ui-text-size :body)))

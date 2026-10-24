@@ -30,7 +30,7 @@
   (if *status-diagnostics-p*
       (let ((channels (call-next-method)))
         (list* (first channels) :player-hint (rest channels)))
-      '(:daytime)))
+      '(:daytime :fps)))
 
 (defmethod mcluv:status-bar-presentation ((viewer luvcraft-viewer))
   (declare (ignore viewer))
@@ -46,10 +46,7 @@
   (declare (ignore channel bar))
   (let* ((minutes (mod (floor (* 60 (render::host-sky-hour viewer))) 1440))
          (hour (floor minutes 60)))
-    (format nil "~A  ~2,'0D:~2,'0D"
-            (cond ((< hour 6) "Night") ((< hour 8) "Morning")
-                  ((< hour 18) "Daytime") ((< hour 20) "Evening") (t "Night"))
-            hour (mod minutes 60))))
+    (format nil "~2,'0D:~2,'0D" hour (mod minutes 60))))
 
 (defmethod mcluv:status-bar-channel-label
     ((channel (eql :player-hint)) (viewer luvcraft-viewer))
