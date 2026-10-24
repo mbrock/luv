@@ -62,7 +62,7 @@
 
 (defun %gather-star-sites (chains x0 x1 y0 y1)
   "Return ordered packed records for every mixed occupancy star in the box."
-  (let* ((window (%materialize-star-selection-window chains x0 x1 y0 y1))
+  (let* ((window (%materialize-star-selection-window chains x0 (1+ x1) y0 (1+ y1)))
          (below (star-selection-window-below window))
          (above (star-selection-window-above window))
          (records (make-array 4096 :element-type '(unsigned-byte 32)
@@ -156,7 +156,7 @@
                        northwest northeast active 0)
               (gather active 0 x y southwest southeast
                       northwest northeast))))))
-    records))
+    (values records window)))
 
 (defun %star-site-words (records x0 y0)
   "Expand compact local records directly into the public four-word GPU ABI."
@@ -186,6 +186,41 @@ even a bare diagnostic mesh retains all eight neighboring occupancy values."
                  (setf (aref codes (+ offset sample)) 1))))
     codes))
 
+(defun %surface-edge-class (solid-neighbor air-neighbor)
+  "0 is flush, 1 convex, 2 concave. A diagonal contact keeps separate rims."
+  (cond ((not solid-neighbor) 1) (air-neighbor 2) (t 0)))
+
+(defun %star-edge-shaping (records window x0 y0)
+  "Classify all twelve owned face edges using the captured occupancy halo."
+  (let ((edges (make-array (length records) :element-type '(unsigned-byte 32)
+                                           :initial-element 0)))
+    (labels ((occupied (point)
+               (let ((z (aref point 2)))
+                 (and (<= 0 z) (< z 256)
+                      (logbitp (mod z 64)
+                               (aref (star-selection-window-above window)
+                                     (+ (%star-window-fiber-base
+                                         window (aref point 0) (aref point 1))
+                                        (floor z 64))))))))
+      (loop for record across records for index from 0 do
+        (let* ((star (%packed-star-mask record))
+               (origin (vector (+ x0 (%packed-star-x record))
+                               (+ y0 (%packed-star-y record)) (%packed-star-z record))))
+          (dotimes (axis 3)
+            (unless (eq (logbitp 7 star) (logbitp (- 7 (ash 1 axis)) star))
+              (let ((solid (copy-seq origin)) (air (copy-seq origin)))
+                (decf (aref (if (logbitp 7 star) air solid) axis))
+                (dotimes (edge 4)
+                  (let* ((tangent (mod (+ axis 1 (floor edge 2)) 3))
+                         (step (if (evenp edge) -1 1)))
+                    (incf (aref solid tangent) step)
+                    (incf (aref air tangent) step)
+                    (setf (ldb (byte 2 (+ (* axis 8) (* edge 2))) (aref edges index))
+                          (%surface-edge-class (occupied solid) (occupied air)))
+                    (decf (aref solid tangent) step)
+                    (decf (aref air tangent) step)))))))))
+    edges))
+
 (defun mesh-star-chunk (chunk chunk-key &key outside-domain-policy)
   "Turn one resident chunk neighborhood into the complete mesh-shader ABI.
 CHUNK is the owner's chain or fibers; neighbors arrive by MISSING-CHUNK."
@@ -204,11 +239,13 @@ CHUNK is the owner's chain or fibers; neighbors arrive by MISSING-CHUNK."
                ((nil) nil)
                (:air (invoke-restart 'treat-as-air))
                (:solid (invoke-restart 'treat-as-solid))))))
-      (let ((records
-              (%gather-star-sites
-               (%mesh-star-neighborhood chunk chunk-key) x0 x1 y0 y1)))
+      (multiple-value-bind (records window)
+          (%gather-star-sites
+           (%mesh-star-neighborhood chunk chunk-key) x0 x1 y0 y1)
         (let ((mesh
                 (make-surface-mesh domain (%star-site-words records x0 y0))))
-          (setf (surface-mesh-appearance-codes mesh)
+          (setf (surface-mesh-edge-shaping mesh)
+                (%star-edge-shaping records window x0 y0)
+                (surface-mesh-appearance-codes mesh)
                 (%occupancy-appearance-codes records))
           mesh)))))

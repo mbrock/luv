@@ -244,8 +244,13 @@
   (declare (ignore device))
   (render:make-fixed-exposure luvcraft::*luvcraft-exposure*))
 
+(defparameter *rounded-terrain-edges-p* t
+  "Subtle normal-only rims on plain terrain; rebuild shaders after changing.")
+
 (defun make-luvcraft-terrain-drawing (device target-formats sample-count)
-  (let ((luft.render.shaders::*terrain-material-character-function*
+  (let ((luft.render.shaders::*terrain-edge-shaping-p*
+          (and *rounded-terrain-edges-p* (not render::*terrain-bevels-p*)))
+        (luft.render.shaders::*terrain-material-character-function*
           'luft.render.shaders::luvcraft-material-character)
         (luft.render.shaders::*terrain-blocklight-function*
           'luft.render.shaders::luvcraft-blocklight)

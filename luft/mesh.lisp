@@ -15,6 +15,10 @@
     #.(make-array 0 :element-type '(unsigned-byte 32))
     :type (simple-array (unsigned-byte 32) (*))
     :read-only t)
+  ;; Three owned faces, four signed edge classes each (two bits per edge).
+  ;; Kept separate from canonical occupancy; the renderer packs it above W's star.
+  (edge-shaping #.(make-array 0 :element-type '(unsigned-byte 32))
+                :type (simple-array (unsigned-byte 32) (*)))
   ;; Appearance is a parallel derived product: eight u8 material codes for
   ;; each active star, in sample-bit order.  It never participates in star
   ;; selection, atlas geometry, or triangle ownership.

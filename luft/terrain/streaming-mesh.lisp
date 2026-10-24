@@ -280,7 +280,9 @@ appearance reads authored cells directly and needs no meshed context owners."
                    ;; New metadata shell: never change an installed mesh's light
                    ;; or attachment witnesses when borrowing immutable arrays.
                    (if old-mesh
-                       (setf (luft:surface-mesh-appearance-codes mesh)
+                       (setf (luft::surface-mesh-edge-shaping mesh)
+                             (luft::surface-mesh-edge-shaping old-mesh)
+                             (luft:surface-mesh-appearance-codes mesh)
                              (luft:surface-mesh-appearance-codes old-mesh)
                              (luft:surface-mesh-appearance-descriptor-words mesh)
                              descriptors)

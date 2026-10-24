@@ -124,7 +124,7 @@ This is a depth-only draw product, not a replacement semantic mesh. #5UH08L"
     ;; Pack sparse (U,V) cell coordinates instead of allocating per-corner
     ;; lists or a dense array spanning an entire world-height plane.
     (loop for offset from 0 below (length sites) by 4
-          for star = (aref sites (+ offset 3))
+          for star = (logand #xff (aref sites (+ offset 3)))
           for occupied = (logbitp 7 star)
           do (dotimes (axis 3)
                (unless (eq occupied (logbitp (- 7 (ash 1 axis)) star))

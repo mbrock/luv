@@ -1299,3 +1299,28 @@
                  (render::scene-material-cells scene)
                  (luft:make-site domain 10 10 2 luft:+cell-extent+ 1) 2))
           (check-cold (compile-current)))))))
+
+(define-test rounded-edge-upload-preserves-canonical-stars
+  (let* ((mesh (luft:mesh-star-chunk (luft::%one-cell-chain) 0
+                                     :outside-domain-policy :air))
+         (canonical (luft:surface-mesh-star-site-words mesh))
+         (packed (render::pack-site-edge-shaping mesh)))
+    (true (not (equalp canonical packed)))
+    (loop for i from 3 below (length packed) by 4 do
+      (true (= (aref canonical i) (logand #xff (aref packed i))))
+      (true (< (aref canonical i) 256)))
+    (true (equalp (render::merge-terrain-shadow-faces canonical)
+                  (render::merge-terrain-shadow-faces packed)))
+    (multiple-value-bind (sorted appearances runs)
+        (render::sort-sites-by-star
+         packed (render::pack-terrain-appearance-codes
+                 (luft:surface-mesh-appearance-codes mesh)))
+      (declare (ignore appearances))
+      (dolist (run runs)
+        (destructuring-bind (star first count) run
+          (loop for site from first below (+ first count) do
+            (true (= star (logand #xff (aref sorted (+ 3 (* site 4))))))))))))
+
+(define-test rounded-edge-fragment-compiles
+  (let ((shaders::*terrain-edge-shaping-p* t))
+    (true (shaders:star-fragment-specification))))

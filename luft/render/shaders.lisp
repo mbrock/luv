@@ -814,6 +814,41 @@ that density along the straight ray."
          (depth (* density (* distance (* base integral)))))
     (- 1.0 (exp (- depth)))))
 
+(defvar *terrain-edge-shaping-p* nil
+  "Round plain cube shading normals; the atelier and real bevels stay unchanged.")
+
+(define-shader-function edge-class-value (code)
+  (if (= code (uint 1.0)) 1.0 (if (= code (uint 2.0)) -1.0 0.0)))
+
+(define-shader-function rounded-cube-normal (bent normal world edges distance)
+  "A narrow normal-only rim on exposed edges, filtered before it becomes subpixel."
+  (let* ((nx (abs (swizzle normal :x)))
+         (ny (abs (swizzle normal :y)))
+         (u (if (> nx 0.5) (vec3 0.0 1.0 0.0)
+                (if (> ny 0.5) (vec3 0.0 0.0 1.0) (vec3 1.0 0.0 0.0))))
+         (v (if (> nx 0.5) (vec3 0.0 0.0 1.0)
+                (if (> ny 0.5) (vec3 1.0 0.0 0.0) (vec3 0.0 1.0 0.0))))
+         (uv (fract (vec2 (dot world u) (dot world v))))
+         (ramps (- (vec4 1.0 1.0 1.0 1.0)
+                   (smoothstep (vec4 0.0 0.0 0.0 0.0) (vec4 0.10 0.10 0.10 0.10)
+                               (vec4 (swizzle uv :x) (- 1.0 (swizzle uv :x))
+                                     (swizzle uv :y) (- 1.0 (swizzle uv :y))))))
+         (rim (* ramps edges))
+         (lean (+ (* u (- (swizzle rim :y) (swizzle rim :x)))
+                  (* v (- (swizzle rim :w) (swizzle rim :z)))))
+         (dx (derivative-x world))
+         (dy (derivative-y world))
+         (footprint (sqrt (max (dot dx dx) (dot dy dy))))
+         (fade (* (- 1.0 (smoothstep 0.04 0.16 footprint))
+                  (- 1.0 (smoothstep 20.0 55.0 distance))))
+         (rounded (normalize (+ normal (* lean 0.75)))))
+    (normalize (+ bent (* (- rounded normal) fade)))))
+
+(define-shader-abstraction terrain-edge-normal (bent normal world edges distance)
+  (if *terrain-edge-shaping-p*
+      `(rounded-cube-normal ,bent ,normal ,world ,edges ,distance)
+      bent))
+
 (defvar *terrain-material-character-function* nil
   "Optional game material treatment; NIL preserves the atelier's surface tones.")
 
@@ -925,6 +960,7 @@ NIL leaves the atelier's direct light unchanged.")
               (material-accent :vec4 :location 9 :interpolation :flat
                                :components #.(luft.terrain::terrain-varying-components :accent))
 
+              (edge-shaping :vec4 :location 11 :interpolation :flat)
               (voxel-light :vec4 :location 10
                            :components #.(luft.terrain::terrain-varying-components :light)))
      :outputs ((color-output :vec4 :location 0)
@@ -968,7 +1004,8 @@ NIL leaves the atelier's direct light unchanged.")
                                     (/ distance (max 0.2 (abs (dot normal (normalize to-eye))))))))
          (laid (laid-pattern (representation material-pattern) normal world))
          (height (surface-height relief (representation material-pattern) world fade nap-fade laid))
-         (bent (relief-normal normal world strength height))
+         (bent (terrain-edge-normal (relief-normal normal world strength height)
+                                    normal world edge-shaping distance))
          (mortar-tone (swizzle (representation material-mortar) :xyz))
          (element-tone
            (* (if (> (swizzle laid :w) 0.5)
@@ -1095,6 +1132,7 @@ NIL leaves the atelier's direct light unchanged.")
                (material-accent-output :vec4 :location 9 :interpolation :flat
                                        :components #.(luft.terrain::terrain-varying-components :accent))
 
+               (edge-shaping-output :vec4 :location 11 :interpolation :flat)
                (voxel-light-output :vec4 :location 10
                                    :components #.(luft.terrain::terrain-varying-components :light)))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
@@ -1235,6 +1273,17 @@ NIL leaves the atelier's direct light unchanged.")
                       (+ (swizzle clip :y) (* (swizzle jitter :y) (swizzle clip :w)))
                       (swizzle clip :z) (swizzle clip :w)))
     (set-output world-position-output world)
+    (set-output edge-shaping-output
+                (let* ((n (abs (representation normal)))
+                       (word (if (> (swizzle n :x) 0.5)
+                                 (ldb (byte 8 8) (swizzle site :w))
+                                 (if (> (swizzle n :y) 0.5)
+                                     (ldb (byte 8 16) (swizzle site :w))
+                                     (ldb (byte 8 24) (swizzle site :w))))))
+                  (vec4 (edge-class-value (ldb (byte 2 0) word))
+                        (edge-class-value (ldb (byte 2 2) word))
+                        (edge-class-value (ldb (byte 2 4) word))
+                        (edge-class-value (ldb (byte 2 6) word)))))
     (set-output mesh-normal-output normal)
     (set-output current-clip-output clip)
     (set-output previous-clip-output previous)

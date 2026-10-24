@@ -309,7 +309,10 @@ its exact empty light field so normal publication validation still applies."
              (scene-domain scene)
              (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
                     (mapcar #'luft:surface-mesh-star-site-words meshes)))))
-      (setf (luft:surface-mesh-appearance-codes root)
+      (setf (luft::surface-mesh-edge-shaping root)
+            (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
+                   (mapcar #'luft::surface-mesh-edge-shaping meshes))
+            (luft:surface-mesh-appearance-codes root)
             (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
                    (mapcar #'luft:surface-mesh-appearance-codes meshes))
             (luft:surface-mesh-appearance-descriptor-words root) descriptors

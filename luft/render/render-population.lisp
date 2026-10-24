@@ -238,12 +238,22 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
     words)
   "AIR and the mesher's one unpainted occupied code.")
 
+(defun pack-site-edge-shaping (mesh)
+  "Keep canonical stars intact; use the upload lane's spare 24 bits for edges."
+  (let ((words (copy-seq (luft:surface-mesh-star-site-words mesh)))
+        (edges (luft::surface-mesh-edge-shaping mesh)))
+    (unless (or (zerop (length edges)) (= (* 4 (length edges)) (length words)))
+      (error "Edge shaping must have one word per star."))
+    (loop for edge across edges for offset from 3 by 4 do
+      (setf (aref words offset) (logior (aref words offset) (ash edge 8))))
+    words))
+
 (defun %make-star-render-population (meshes)
   "Flatten geometry and its parallel active-star appearance independently."
   (load-time-value (ensure-terrain-quantity-contract))
   (let* ((site-words
            (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
-                  (mapcar #'luft:surface-mesh-star-site-words meshes)))
+                  (mapcar #'pack-site-edge-shaping meshes)))
          (appearance-codes
            (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
                   (mapcar #'luft:surface-mesh-appearance-codes meshes)))

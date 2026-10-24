@@ -62,6 +62,42 @@
              (%check (zerop (logand star (1- star)))))
     (%check (= 44 (surface-mesh-triangle-count mesh)))))
 
+(defun %test-normal-only-edges ()
+  ;; A staircase across the owner boundary: a flush top, an inside corner,
+  ;; and an exposed rim. Both owners must classify their shared site alike.
+  (let* ((domain (make-world-domain :horizontal-bits 8))
+         (left (make-chain-builder domain))
+         (right (make-chain-builder domain)))
+    (dolist (cell '((63 4 4) (64 4 4) (65 4 4) (65 4 5)))
+      (destructuring-bind (x y z) cell
+        (chain-builder-add-site (if (< x 64) left right)
+                                (make-site domain x y z +cell-extent+ 1))))
+    (let ((a (finish-chain-builder left)) (b (finish-chain-builder right)))
+      (handler-bind ((missing-chunk
+                       (lambda (c)
+                         (let ((key (missing-chunk-key c)))
+                           (cond ((= key (chunk-key-at 63 4)) (invoke-restart 'use-chunk a))
+                                 ((= key (chunk-key-at 64 4)) (invoke-restart 'use-chunk b))
+                                 (t (invoke-restart 'treat-as-air)))))))
+        (let ((ma (mesh-star-chunk a (chunk-key-at 63 4) :outside-domain-policy :air))
+              (mb (mesh-star-chunk b (chunk-key-at 64 4) :outside-domain-policy :air)))
+          (flet ((top (mesh x)
+                   (loop with sites = (surface-mesh-star-site-words mesh)
+                         for i from 0 below (length sites) by 4
+                         when (and (= x (aref sites i)) (= 4 (aref sites (+ i 1)))
+                                   (= 5 (aref sites (+ i 2))))
+                           return (ldb (byte 8 16) (aref (surface-mesh-edge-shaping mesh) (/ i 4))))))
+            (%check (= #x51 (top ma 63)))
+            (%check (= #x58 (top ma 64)))
+            (%check (= (top ma 64) (top mb 64))))))))
+  (let* ((mesh (mesh-star-chunk (%one-cell-chain) 0 :outside-domain-policy :air))
+         (words (surface-mesh-star-site-words mesh)))
+    (loop for i from 0 below (length words) by 4 for star = (aref words (+ i 3)) do
+      (dotimes (axis 3)
+        (unless (eq (logbitp 7 star) (logbitp (- 7 (ash 1 axis)) star))
+          (%check (= #x55 (ldb (byte 8 (* axis 8))
+                               (aref (surface-mesh-edge-shaping mesh) (/ i 4))))))))))
+
 (defun %test-word-parallel-star-selection ()
   "Compare dense selection with the small atlas-oriented occupancy oracle."
   (let* ((domain (make-world-domain :horizontal-bits 6))
@@ -480,6 +516,7 @@ triangles and all 48 signed-axis symmetries."
   (%test-chunk-fibers)
   (%test-disjoint-chain-concatenation)
   (%test-one-cell-stars)
+  (%test-normal-only-edges)
   (%test-word-parallel-star-selection)
   (%test-star-selection-instruction-kernel)
   (%test-atlas)

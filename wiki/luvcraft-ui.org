@@ -274,3 +274,32 @@ The terrain hook is identity by default, preserving the atelier renderer.
 Luvcraft binds it when building its terrain pipeline. There are no new texture
 resources or render passes, but the added shader arithmetic is unprofiled;
 these screenshots establish appearance, not a 60 FPS performance result.
+
+* NEXT Try normal-only rounding on plain terrain
+:PROPERTIES:
+:ID: XSVMQA
+:END:
+
+The old renderer's friendly cube edges came partly from shading normals,
+not beveled silhouettes. The Luft bridge now classifies each owned face's
+four edges from the meshing occupancy halo: flush, convex, or concave.
+Diagonal contacts keep separate convex rims. Metadata is a parallel CPU
+product; canonical star occupancy stays unchanged. The renderer packs the
+12 two-bit classes into the spare upper 24 bits of its existing site lane.
+
+Luvcraft's plain-face shader bends normals within a tenth of a cell at
+exposed rims, then combines this with the existing material relief. Flush
+planes stay flat. The effect fades with pixel footprint and from 20 to 55
+cells. Geometric bevel mode and the atelier retain their existing shading.
+The experiment can be disabled with
+=luvcraft.luft.game::*rounded-terrain-edges-p*= followed by a shader refresh.
+There are no new triangles, buffers or passes; arithmetic cost is unprofiled.
+
+Tests cover isolated cube rims, flush and concave edges across a chunk
+boundary, canonical occupancy preservation, sorting and shadow merging.
+
+The first live reload retained obsolete SURFACE-MESH layouts and stopped
+terrain publication. A clean image restart restored the scene with no terrain
+production errors; the player's position survived. Reloads that change this
+structure must discard the old image's instances and compiled accessors.
+The live afternoon frame confirms seamless flat snow and subtle exposed rims.
