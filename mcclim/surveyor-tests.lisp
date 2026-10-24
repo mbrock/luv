@@ -190,26 +190,28 @@
             (luvcraft:luvcraft-overlay-stage
              (allocate-instance
               (find-class 'mcluv:luvcraft-inventory-overlay)))))
-  (true (= 0 (mcluv::inventory-slot-at 0.21 0.15 9)))
-  ;; Eight columns by five rows: a page holds forty square material wells.
-  (true (= 3 (mcluv::inventory-slot-at 0.45 0.15 9)))
-  (true (= 9 (mcluv::inventory-slot-at 0.31 0.31 40)))
-  (true (null (mcluv::inventory-slot-at 0.31 0.31 9)))
-  (true (= 23 (mcluv::inventory-slot-at 0.76 0.40 40)))
-  (true (= 39 (mcluv::inventory-slot-at 0.76 0.70 40)))
-  (true (null (mcluv::inventory-slot-at 0.76 0.72 40)))
-  (true (null (mcluv::inventory-slot-at 0.01 0.20 9)))
-  (true (null (mcluv::inventory-slot-at 0.50 0.95 9)))
-  (true (eq :all (mcluv::inventory-category-at 0.05 0.15)))
-  (true (eq :building (mcluv::inventory-category-at 0.05 0.28)))
-  (true (= -1 (mcluv::inventory-page-direction-at 0.70 0.05)))
-  (true (= 1 (mcluv::inventory-page-direction-at 0.75 0.05)))
-  (true (null (mcluv::inventory-page-direction-at 0.50 0.05)))
-  (true (eq :masonry (mcluv::inventory-category-at 0.05 0.33)))
-  (true (eq :colors (mcluv::inventory-category-at 0.05 0.64)))
-  (true (= 0 (mcluv::inventory-quickbar-slot-at 0.21 0.84 10)))
-  (true (= 9 (mcluv::inventory-quickbar-slot-at 0.97 0.84 10)))
-  (true (null (mcluv::inventory-quickbar-slot-at 0.99 0.84 10)))
+  ;; Probe logical cell centres, empty cells, and panel boundaries.
+  (flet ((slot (x y count) (mcluv::inventory-slot-at (/ x 840) (/ y 440) count))
+         (category (x y) (mcluv::inventory-category-at (/ x 840) (/ y 440)))
+         (page (x y) (mcluv::inventory-page-direction-at (/ x 840) (/ y 440))))
+    (true (= 0 (slot 110 85 9)))
+    (true (= 3 (slot 330 85 9)))
+    (true (= 9 (slot 185 145 40)))
+    (true (null (slot 185 145 9)))
+    (true (= 39 (slot 620 330 40)))
+    (true (null (slot 620 355 40)))
+    (true (null (slot 40 85 40)))
+    (true (null (slot 700 85 40)))
+    (true (eq :all (category 40 78)))
+    (true (eq :building (category 40 140)))
+    (true (eq :colors (category 40 325)))
+    (true (null (category 75 78)))
+    (true (= -1 (page 720 30)))
+    (true (= 1 (page 798 30)))
+    (true (null (page 759 30))))
+  (true (= 0 (mcluv::inventory-quickbar-slot-at (/ 50 840) (/ 395 440) 10)))
+  (true (= 9 (mcluv::inventory-quickbar-slot-at (/ 800 840) (/ 395 440) 10)))
+  (true (null (mcluv::inventory-quickbar-slot-at (/ 830 840) (/ 395 440) 10)))
   (true (mcluv::inventory-category-block-p
          :roofing (luvcraft:block-kind-named :thatch)))
   (true (mcluv::inventory-category-block-p
@@ -279,19 +281,7 @@
       (setf (getf (first (getf data :players)) :kit) bad-kit)
       (fail (mcluv::validate-inventory-preferences data)))))
 
-(define-test simple-inventory-cards-and-controls-have-distinct-hit-targets
-  (loop for index below 6 do
-    (multiple-value-bind (x y width height) (mcluv::simple-inventory-card index)
-      (true (equal (list :blocks index)
-                   (multiple-value-list
-                    (mcluv::simple-inventory-hit (+ x (/ width 2))
-                                                 (+ y (/ height 2)))))))
-    (multiple-value-bind (x y width height) (mcluv::simple-inventory-slot index)
-      (true (equal (list :kit index)
-                   (multiple-value-list
-                    (mcluv::simple-inventory-hit (+ x (/ width 2))
-                                                 (+ y (/ height 2))))))))
-  (true (equal '(:mode 0) (multiple-value-list (mcluv::simple-inventory-hit 740 25))))
-  (true (equal '(:profile 0) (multiple-value-list (mcluv::simple-inventory-hit 80 25))))
-  (true (equal '(:play 0) (multiple-value-list (mcluv::simple-inventory-hit 700 480))))
-  (true (null (mcluv::simple-inventory-hit 18 130))))
+(define-test unified-inventory-category-pictures-resolve-to-real-materials
+  (dolist (category mcluv::*inventory-categories*)
+    (true (luvcraft:block-kind-named
+           (cdr (assoc (first category) mcluv::*inventory-category-icons*)) nil))))

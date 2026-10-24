@@ -3,23 +3,23 @@
 (in-package #:mcluv)
 
 (defconstant +inventory-view-width+ 840)
-(defconstant +inventory-view-height+ 500)
+(defparameter *inventory-view-height* 440)
 (defconstant +inventory-sidebar-left+ 8)
-(defconstant +inventory-sidebar-right+ 158)
-(defconstant +inventory-grid-left+ 166)
-(defconstant +inventory-grid-top+ 56)
-(defconstant +inventory-grid-right+ 650)
-(defconstant +inventory-grid-bottom+ 358)
+(defparameter *inventory-sidebar-right* 70)
+(defparameter *inventory-grid-left* 80)
+(defparameter *inventory-grid-top* 64)
+(defparameter *inventory-grid-right* 650)
+(defparameter *inventory-grid-bottom* 350)
 (defconstant +inventory-grid-columns+ 8)
 (defconstant +inventory-grid-rows+ 5)
 (defconstant +inventory-page-size+
   (* +inventory-grid-columns+ +inventory-grid-rows+))
 (defconstant +inventory-details-left+ 658)
 (defconstant +inventory-details-right+ 832)
-(defconstant +inventory-quickbar-left+ 166)
+(defparameter *inventory-quickbar-left* 16)
 (defconstant +inventory-quickbar-right+ 824)
-(defconstant +inventory-quickbar-top+ 392)
-(defconstant +inventory-quickbar-bottom+ 452)
+(defparameter *inventory-quickbar-top* 368)
+(defparameter *inventory-quickbar-bottom* 428)
 (defconstant +inventory-category-top+ 64)
 (defconstant +inventory-category-pitch+ 31)
 
@@ -43,13 +43,8 @@
    (page :initform 0 :accessor inventory-page)
    ;; The block under the pointer: what the inspector shows and what a
    ;; number key puts on the bar.  NIL when the pointer is not over a cell.
+   (hovered-category :initform nil :accessor inventory-hovered-category)
    (hovered :initform nil :accessor inventory-hovered-block)
-   (simple-focus :initform :blocks :accessor inventory-simple-focus)
-   (simple-cursor :initform 0 :accessor inventory-simple-cursor)
-   (pending-block :initform nil :accessor inventory-pending-block)
-   (added-block :initform nil :accessor inventory-added-block)
-   (added-slot :initform nil :accessor inventory-added-slot)
-   (added-time :initform nil :accessor inventory-added-time)
    (preferences :initform nil :accessor inventory-preferences)
    (preferences-writer :initform nil :accessor inventory-preferences-writer)
    (atlas :initform (luvcraft:make-block-texture-atlas)
@@ -59,7 +54,7 @@
    (inventory
     (make-pane 'inventory-pane
                :default-text-style (make-text-style :sans-serif nil :normal)
-               :width +inventory-view-width+ :height +inventory-view-height+)))
+               :width +inventory-view-width+ :height *inventory-view-height*)))
   (:layouts (default inventory)))
 
 (defun inventory-block-preview-tile (block)
@@ -130,6 +125,7 @@ every cell makes the word louder than the block it is about."
      *ui-theme*
      (inventory-simple-state frame)
      (inventory-category frame)
+     (inventory-hovered-category frame)
      (inventory-page frame)
      (inventory-hovered-block frame)
      (luvcraft:player-selected-block session)
@@ -139,52 +135,36 @@ every cell makes the word louder than the block it is about."
            collect (list entry
                          (luvcraft:block-inventory-entry-quantity entry))))))
 
+(defparameter *inventory-category-icons*
+  '((:all . :bricks) (:natural . :grass) (:building . :planks)
+    (:masonry . :stone) (:woodwork . :wood) (:roofing . :thatch)
+    (:decor . :bookshelf) (:luminous . :lantern) (:colors . :red-wool)))
+
 (defun draw-inventory-category (frame pane category label index)
-  (let* ((top (+ +inventory-category-top+
-                (* index +inventory-category-pitch+)))
-         (selected-p (eq category (inventory-category frame))))
-    (when selected-p
-      (with-sheet-medium (medium pane)
-        (draw-analytic-rounded-rectangle*
-         medium 18 top 150 (+ top 27) :radius 4
-         :ink (ui-ink :selection-soft)))
-      (draw-line* pane 17 (+ top 5) 17 (+ top 22)
-                  :ink (ui-ink :selection) :line-thickness 2))
-    (draw-text* pane label 27 (+ top 14)
-                :align-y :center :text-size (ui-text-size :caption)
-                :ink (if selected-p (ui-ink :text) (ui-ink :on-accent)))
-    (draw-text* pane
-                (format nil "~D"
-                        (count-if
-                         (lambda (entry)
-                           (inventory-category-block-p
-                            category (luvcraft:block-inventory-entry-block entry)))
-                         (luvcraft:block-inventory-entries
-                          (luvcraft:player-inventory
-                           (inventory-session frame)))))
-                140 (+ top 14) :align-x :right :align-y :center
-                :text-size (ui-text-size :caption)
-                :ink (ui-ink (if selected-p :text :on-accent)))))
+  (declare (ignore label))
+  (let* ((top (+ +inventory-category-top+ (* index +inventory-category-pitch+)))
+         (selected-p (eq category (inventory-category frame)))
+         (block (luvcraft:block-kind-named
+                 (cdr (assoc category *inventory-category-icons*)) nil)))
+    (with-sheet-medium (medium pane)
+      (when (or selected-p (eq category (inventory-hovered-category frame)))
+        (draw-ui-surface medium 22 top 62 (+ top 29)
+                         :fill (if selected-p :selection-soft :accent)
+                         :edge (if selected-p :selection :accent) :radius 5)))
+    (when block (draw-block-icon pane block 29 (+ top 1) 27))))
 
 (defun draw-inventory-page-controls (frame pane)
-  (let ((page (inventory-page frame))
-        (count (inventory-page-count frame)))
+  (let ((page (inventory-page frame)) (count (inventory-page-count frame)))
     (with-sheet-medium (medium pane)
-      (dolist (left '(574 616))
-        (draw-analytic-rounded-rectangle*
-         medium left 12 (+ left 34) 43 :radius 4
-         :ink (ui-ink :hover))))
-    (draw-text* pane "‹" 591 27 :align-x :center :align-y :center
-                :text-size (ui-text-size :heading)
-                :ink (if (plusp page) (ui-ink :text) (ui-ink :muted)))
-    (draw-text* pane "›" 633 27 :align-x :center :align-y :center
-                :text-size (ui-text-size :heading)
-                :ink (if (< page (1- count)) (ui-ink :text) (ui-ink :muted)))
-    (draw-text* pane (format nil "~D materials   ·   ~D / ~D"
-                            (length (inventory-filtered-entries frame))
-                            (1+ page) count)
-                558 27 :align-x :right :align-y :center :text-size (ui-text-size :caption)
-                :ink (ui-ink :muted))))
+      (dolist (left '(706 784))
+        (draw-ui-surface medium left 17 (+ left 28) 43 :fill :inset :radius 5)))
+    (draw-text* pane "‹" 720 30 :align-x :center :align-y :center
+                :text-family :fix :text-size 20 :ink (ui-ink :text))
+    (draw-text* pane "›" 798 30 :align-x :center :align-y :center
+                :text-family :fix :text-size 20 :ink (ui-ink :text))
+    (draw-text* pane (format nil "~D / ~D" (1+ page) count) 759 30
+                :align-x :center :align-y :center :text-size (ui-text-size :body)
+                :ink (ui-ink :text))))
 
 (defun draw-inventory-entry
     (frame pane entry index left top width height)
@@ -214,36 +194,29 @@ on the bar wears the number key that selects it."
                     :ink (ui-ink :muted))))))
 
 (defun draw-inventory-quickbar (frame pane entries)
-  (draw-text* pane "Quickbar" +inventory-quickbar-left+
-              (- +inventory-quickbar-top+ 14)
-              :align-y :center :text-size (ui-text-size :caption) :ink (ui-ink :text))
-  (draw-text* pane "Hover a material + 1–9, 0 to assign" +inventory-quickbar-right+
-              (- +inventory-quickbar-top+ 14)
-              :align-x :right :align-y :center :text-size (ui-text-size :caption)
-              :ink (ui-ink :muted))
   (let ((slot-width
-          (/ (- +inventory-quickbar-right+ +inventory-quickbar-left+)
+          (/ (- +inventory-quickbar-right+ *inventory-quickbar-left*)
              (max 1 (length entries)))))
     (loop for entry in entries
           for index from 0
           for block = (luvcraft:block-inventory-entry-block entry)
-          for left = (+ +inventory-quickbar-left+ (* index slot-width))
+          for left = (+ *inventory-quickbar-left* (* index slot-width))
           for selected-p =
             (eq block
                 (luvcraft:player-selected-block
                  (inventory-session frame)))
           do (with-sheet-medium (medium pane)
                (draw-hotbar-slot
-                pane medium (+ left 3) +inventory-quickbar-top+
-                (- (+ left slot-width) 3) +inventory-quickbar-bottom+
+                pane medium (+ left 3) *inventory-quickbar-top*
+                (- (+ left slot-width) 3) *inventory-quickbar-bottom*
                 :selected-p selected-p))
              (draw-inventory-block-tile
               pane (inventory-atlas frame) block
               (+ left (/ (- slot-width 40) 2))
-              (+ +inventory-quickbar-top+ 10) :scale 5/2)
+              (+ *inventory-quickbar-top* 10) :scale 5/2)
              (with-sheet-medium (medium pane)
                (draw-ui-keycap medium (format nil "~D" (mod (1+ index) 10))
-                                (+ left 6) (+ +inventory-quickbar-top+ 3)
+                                (+ left 6) (+ *inventory-quickbar-top* 3)
                                 :width 16 :height 16)))))
 
 (defgeneric inventory-detail-rows (block entry)
@@ -275,22 +248,19 @@ on the bar wears the number key that selects it."
           (cons "Stack" (inventory-entry-quantity-label entry)))))
 
 (defun draw-inventory-details (frame pane selected entry)
-  (draw-text* pane (if (inventory-hovered-block frame) "Inspecting" "In hand")
-              674 78 :align-y :center :text-size (ui-text-size :caption)
-              :ink (ui-ink :muted))
-  (draw-inventory-block-tile pane (inventory-atlas frame) selected 710 94
-                             :scale 4)
-  (draw-text* pane (inventory-clipped-label (inventory-entry-label entry) 21)
-              746 182 :align-x :center :align-y :center :text-size (ui-text-size :caption)
-              :ink (ui-ink :text))
-  (draw-line* pane 674 202 818 202 :ink (ui-ink :border))
-  (loop for (label . value) in (inventory-detail-rows selected entry)
-        for y from 224 by 24
-        do (draw-text* pane label 668 y :align-y :center :text-size (ui-text-size :caption)
-                       :ink (ui-ink :muted))
-           (draw-text* pane (format nil "~A" value) 820 y
-                       :align-x :right :align-y :center :text-size (ui-text-size :caption)
-                       :ink (ui-ink :text))))
+  "A material portrait and one useful action, without renderer properties."
+  (declare (ignore frame))
+  (draw-block-icon pane selected 695 85 94)
+  (draw-text* pane (inventory-clipped-label (inventory-entry-label entry) 19)
+              744 210 :align-x :center :align-y :center
+              :text-face :bold :text-size (ui-text-size :body) :ink (ui-ink :text))
+  (draw-line* pane 680 232 808 232 :ink (ui-ink :border))
+  (draw-text* pane "Click to equip" 744 258 :align-x :center :align-y :center
+              :text-size (ui-text-size :caption) :ink (ui-ink :text))
+  (draw-text* pane "Hover + 1–9, 0" 744 284 :align-x :center :align-y :center
+              :text-size (ui-text-size :caption) :ink (ui-ink :muted))
+  (draw-text* pane "to choose a slot" 744 304 :align-x :center :align-y :center
+              :text-size (ui-text-size :caption) :ink (ui-ink :muted)))
 
 (defmethod handle-repaint ((pane inventory-pane) region)
   (declare (ignore region))
@@ -298,61 +268,41 @@ on the bar wears the number key that selects it."
          (session (inventory-session frame))
          (inventory (luvcraft:player-inventory session))
          (entries (inventory-visible-entries frame))
-         (all-entries (luvcraft:block-inventory-entries inventory))
-         (quickbar-entries (luvcraft:block-inventory-quickbar-entries inventory))
-         (selected (luvcraft:player-selected-block session))
-         (selected-entry (luvcraft:block-inventory-entry-for inventory selected))
-         (inspected (or (inventory-hovered-block frame) selected))
-         (inspected-entry
-           (luvcraft:block-inventory-entry-for inventory inspected))
-         (cell-width (/ (- +inventory-grid-right+ +inventory-grid-left+)
+         (inspected (or (inventory-hovered-block frame)
+                        (luvcraft:player-selected-block session)))
+         (inspected-entry (luvcraft:block-inventory-entry-for inventory inspected))
+         (cell-width (/ (- *inventory-grid-right* *inventory-grid-left*)
                         +inventory-grid-columns+))
-         (cell-height (/ (- +inventory-grid-bottom+ +inventory-grid-top+)
+         (cell-height (/ (- *inventory-grid-bottom* *inventory-grid-top*)
                          +inventory-grid-rows+)))
     (with-sheet-medium (medium pane)
-      (draw-ui-surface medium 0 0 +inventory-view-width+ +inventory-view-height+
+      (draw-ui-surface medium 0 0 +inventory-view-width+ *inventory-view-height*
                        :edge :forest :rim 3)
-      (draw-ui-surface medium 14 60 154 350 :fill :forest :edge :forest :radius 8)
-      (unless (inventory-preferences frame)
-        (draw-text* pane "Material library" 22 27
-                    :align-y :center :text-size (ui-text-size :body) :ink (ui-ink :text)))
-      (draw-line* pane 16 52 824 52 :ink (ui-ink :border))
-      (draw-line* pane 658 64 658 350 :ink (ui-ink :border))
+      (draw-text* pane "Materials" 28 30 :align-y :center :text-face :bold
+                  :text-size (ui-text-size :heading) :ink (ui-ink :text))
+      (let ((category (or (inventory-hovered-category frame) (inventory-category frame))))
+        (draw-text* pane (second (assoc category *inventory-categories*)) 176 30
+                    :align-y :center :text-size (ui-text-size :body) :ink (ui-ink :muted)))
+      (when (inventory-preferences frame)
+        (draw-text* pane (format nil "Player ~D · F2" (1+ (inventory-active-player frame)))
+                    680 30 :align-x :right :align-y :center
+                    :text-size (ui-text-size :caption) :ink (ui-ink :muted)))
+      (draw-ui-surface medium 16 58 68 350 :fill :forest :edge :forest :radius 10)
+      (draw-ui-surface medium 76 58 654 350 :fill :raised :radius 8)
+      (draw-ui-surface medium 662 58 824 350 :fill :raised :radius 8)
+      (draw-ui-surface medium 12 362 828 432 :fill :inset :radius 10)
       (draw-inventory-page-controls frame pane)
-      (loop for (category label) in *inventory-categories*
-            for index from 0
+      (loop for (category label) in *inventory-categories* for index from 0
             do (draw-inventory-category frame pane category label index))
-      (loop for entry in entries
-            for index from 0
+      (loop for entry in entries for index from 0
             for column = (mod index +inventory-grid-columns+)
             for row = (floor index +inventory-grid-columns+)
-            for number = (position entry all-entries :test #'eq)
-            do (draw-inventory-entry
-                frame pane entry number
-                (+ +inventory-grid-left+ (* column cell-width) 3)
-                (+ +inventory-grid-top+ (* row cell-height) 3)
-                (- cell-width 6) (- cell-height 6)))
-      (draw-inventory-quickbar frame pane quickbar-entries)
-      (when inspected-entry
-        (draw-inventory-details frame pane inspected inspected-entry))
-      (draw-line* pane 16 364 824 364 :ink (ui-ink :border))
-      (draw-text* pane "IN HAND" 24 378 :align-y :center
-                  :text-size (ui-text-size :caption) :ink (ui-ink :muted))
-      (when selected-entry
-        (draw-text* pane
-                    (inventory-clipped-label
-                     (inventory-entry-label selected-entry) 17)
-                    24 410 :align-y :center
-                    :text-size (ui-text-size :caption) :ink (ui-ink :text)))
-      (draw-text* pane "1–9, 0 to select" 24 430 :align-y :center
-                  :text-size (ui-text-size :caption) :ink (ui-ink :muted))
-      (draw-text* pane "I / Esc   Close" 24 477
-                  :align-y :center :text-size (ui-text-size :caption) :ink (ui-ink :muted))
-      (draw-text* pane "Click to equip · F6 creative" 166 477
-                  :align-y :center :text-size (ui-text-size :caption) :ink (ui-ink :muted))
-      (draw-text* pane "Arrow keys: pages" 824 477
-                  :align-x :right :align-y :center :text-size (ui-text-size :caption)
-                  :ink (ui-ink :muted)))))
+            do (draw-inventory-entry frame pane entry 10
+                                     (+ *inventory-grid-left* (* column cell-width) 3)
+                                     (+ *inventory-grid-top* (* row cell-height) 3)
+                                     (- cell-width 6) (- cell-height 6)))
+      (draw-inventory-quickbar frame pane (luvcraft:block-inventory-quickbar-entries inventory))
+      (when inspected-entry (draw-inventory-details frame pane inspected inspected-entry)))))
 
 (defun repaint-inventory (frame)
   (make-gpu-frame-background-transparent frame)
@@ -422,8 +372,8 @@ on the bar wears the number key that selects it."
 
 (defun inventory-category-at (u v)
   (let ((x (* u +inventory-view-width+))
-        (y (* v +inventory-view-height+)))
-    (when (and (<= 16 x) (< x 150) (<= +inventory-category-top+ y)
+        (y (* v *inventory-view-height*)))
+    (when (and (<= 16 x) (< x 68) (<= +inventory-category-top+ y)
                (< y (+ +inventory-category-top+
                        (* +inventory-category-pitch+
                           (length *inventory-categories*)))))
@@ -433,40 +383,40 @@ on the bar wears the number key that selects it."
 
 (defun inventory-page-direction-at (u v)
   (let ((x (* u +inventory-view-width+))
-        (y (* v +inventory-view-height+)))
-    (when (and (<= 12 y) (< y 43))
-      (cond ((and (<= 574 x) (< x 608)) -1)
-            ((and (<= 616 x) (< x 650)) 1)))))
+        (y (* v *inventory-view-height*)))
+    (when (and (<= 17 y) (< y 43))
+      (cond ((and (<= 706 x) (< x 734)) -1)
+            ((and (<= 784 x) (< x 812)) 1)))))
 
 (defun inventory-slot-at (u v entry-count)
   "Return the zero-based visible inventory slot at texture U,V."
   (let ((x (* u +inventory-view-width+))
-        (y (* v +inventory-view-height+)))
-    (when (and (<= +inventory-grid-left+ x)
-               (< x +inventory-grid-right+)
-               (<= +inventory-grid-top+ y)
-               (< y +inventory-grid-bottom+))
+        (y (* v *inventory-view-height*)))
+    (when (and (<= *inventory-grid-left* x)
+               (< x *inventory-grid-right*)
+               (<= *inventory-grid-top* y)
+               (< y *inventory-grid-bottom*))
       (let* ((column
-               (floor (* (- x +inventory-grid-left+)
+               (floor (* (- x *inventory-grid-left*)
                          +inventory-grid-columns+)
-                      (- +inventory-grid-right+ +inventory-grid-left+)))
+                      (- *inventory-grid-right* *inventory-grid-left*)))
              (row
-               (floor (* (- y +inventory-grid-top+) +inventory-grid-rows+)
-                      (- +inventory-grid-bottom+ +inventory-grid-top+)))
+               (floor (* (- y *inventory-grid-top*) +inventory-grid-rows+)
+                      (- *inventory-grid-bottom* *inventory-grid-top*)))
              (slot (+ column (* row +inventory-grid-columns+))))
         (and (< slot entry-count) slot)))))
 
 (defun inventory-quickbar-slot-at (u v entry-count)
   (let ((x (* u +inventory-view-width+))
-        (y (* v +inventory-view-height+)))
+        (y (* v *inventory-view-height*)))
     (when (and (plusp entry-count)
-               (<= +inventory-quickbar-left+ x)
+               (<= *inventory-quickbar-left* x)
                (< x +inventory-quickbar-right+)
-               (<= +inventory-quickbar-top+ y)
-               (< y +inventory-quickbar-bottom+))
+               (<= *inventory-quickbar-top* y)
+               (< y *inventory-quickbar-bottom*))
       (min (1- entry-count)
-           (floor (* (- x +inventory-quickbar-left+) entry-count)
-                  (- +inventory-quickbar-right+ +inventory-quickbar-left+))))))
+           (floor (* (- x *inventory-quickbar-left*) entry-count)
+                  (- +inventory-quickbar-right+ *inventory-quickbar-left*))))))
 
 (defun inventory-block-at (frame u v)
   "The block in the grid cell or quickbar slot at texture U,V, or NIL."
@@ -483,6 +433,7 @@ on the bar wears the number key that selects it."
     (and entry (luvcraft:block-inventory-entry-block entry))))
 
 (defun turn-inventory-page (frame direction)
+  (setf (inventory-hovered-block frame) nil)
   (setf (inventory-page frame)
         (max 0 (min (1- (inventory-page-count frame))
                     (+ (inventory-page frame) direction))))
@@ -507,10 +458,14 @@ on the bar wears the number key that selects it."
       (if (null uv)
           ;; Off the panel: nothing is under the pointer any more, and the
           ;; event belongs to whatever is.
-          (progn (hover-inventory-block frame nil) nil)
+          (progn
+            (setf (inventory-hovered-category frame) nil)
+            (hover-inventory-block frame nil)
+            nil)
           (destructuring-bind (u v) uv
             (typecase event
               (luv:canvas-pointer-motion-event
+               (setf (inventory-hovered-category frame) (inventory-category-at u v))
                (hover-inventory-block frame (inventory-block-at frame u v)))
               (luv:canvas-pointer-wheel-event
                (let ((notches (luv:canvas-pointer-event-scroll-y event)))
@@ -525,7 +480,8 @@ on the bar wears the number key that selects it."
                    (cond
                      (category
                       (setf (inventory-category frame) category
-                            (inventory-page frame) 0)
+                            (inventory-page frame) 0
+                            (inventory-hovered-block frame) nil)
                       (repaint-inventory frame))
                      (page-direction
                       (turn-inventory-page frame page-direction))
@@ -541,6 +497,16 @@ on the bar wears the number key that selects it."
     (alexandria:when-let
         ((digit (and (characterp character) (digit-char-p character))))
       (if (zerop digit) 10 digit))))
+
+(defun move-inventory-cursor (frame delta)
+  "Move keyboard focus through this page, keeping the preview in sync."
+  (setf (inventory-hovered-category frame) nil)
+  (let* ((entries (inventory-visible-entries frame))
+         (current (position (inventory-hovered-block frame) entries
+                            :key #'luvcraft:block-inventory-entry-block))
+         (index (max 0 (min (1- (length entries)) (+ (or current 0) delta)))))
+    (when entries
+      (hover-inventory-block frame (luvcraft:block-inventory-entry-block (nth index entries))))))
 
 (defmethod luvcraft:handle-luvcraft-focus-event
     ((overlay luvcraft-inventory-overlay) session canvas
@@ -566,11 +532,32 @@ on the bar wears the number key that selects it."
            (luvcraft:select-luvcraft-block session slot)))
        (repaint-inventory frame)
        t)
-      ((member (luv:canvas-key-event-key-name event) '(:page-down :right))
+      ((eq (luv:canvas-key-event-key-name event) :page-down)
        (turn-inventory-page frame 1)
        t)
-      ((member (luv:canvas-key-event-key-name event) '(:page-up :left))
+      ((eq (luv:canvas-key-event-key-name event) :page-up)
        (turn-inventory-page frame -1)
+       t)
+      ((member (luv:canvas-key-event-key-name event) '(:left :right :up :down))
+       (move-inventory-cursor frame
+                              (case (luv:canvas-key-event-key-name event)
+                                (:left -1) (:right 1)
+                                (:up (- +inventory-grid-columns+))
+                                (:down +inventory-grid-columns+)))
+       t)
+      ((member (luv:canvas-key-event-key-name event) '(:return :enter :space))
+       (when (inventory-hovered-block frame)
+         (luvcraft:put-luvcraft-block-on-quickbar session (inventory-hovered-block frame))
+         (repaint-inventory frame))
+       t)
+      ((eq (luv:canvas-key-event-key-name event) :tab)
+       (let* ((index (position (inventory-category frame) *inventory-categories* :key #'first))
+              (next (mod (1+ (or index -1)) (length *inventory-categories*))))
+         (setf (inventory-category frame) (first (nth next *inventory-categories*))
+               (inventory-page frame) 0
+               (inventory-hovered-block frame) nil
+               (inventory-hovered-category frame) nil)
+         (repaint-inventory frame))
        t)
       (t (call-next-method)))))
 

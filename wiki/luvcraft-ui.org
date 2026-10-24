@@ -192,3 +192,28 @@ FPS, PID, heap, worktree, coordinates, chunk counts and streaming queues are
 retained through =luvcraft.luft.game::*status-diagnostics-p*=, off by default.
 A future diagnostics drawer can expose this vocabulary without consuming
 the play HUD.
+
+* DONE One picture-led inventory for both player profiles
+:PROPERTIES:
+:ID: 6OND7O
+:END:
+
+The user's next Field Kit study replaces the simple/full distinction with
+one material browser. The 840 by 440 logical panel has a forest category
+rail, a forty-cell material tray, a large material portrait, and a full-width
+ten-slot quickbar. Category pictures use real material icons; their names
+appear in the header on hover. The portrait names the material and explains
+equipping, without renderer properties such as opacity or surface emission.
+All categories and catalog pages remain available.
+
+This replaces both old inventory presentations and their overlapping pointer
+handlers. Player profiles still round-trip their saved quickbars and legacy
+kit data; applying either profile selects the unified full catalog. F2
+switches player. F3 no longer switches presentation. The old six-card view,
+kit replacement dialog, and separate full-mode header are removed.
+
+Click equips a material; hovering and pressing 1–9 or 0 assigns its slot.
+Arrow keys move through the grid, Enter equips, Tab cycles categories,
+and Page Up/Down or the wheel changes pages. I or Escape closes the view.
+Rendering and pointer hit testing share the same layout dimensions. Native
+HUD composition and the capped scene resolution are unchanged (#LEEWJB).
