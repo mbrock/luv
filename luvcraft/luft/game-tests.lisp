@@ -330,3 +330,18 @@
     (setf (render:viewer-modal-focus viewer) nil
           (luvcraft.agent::gnome-said-at agent) (get-internal-real-time))
     (is equal "Old reply" (getf (luvcraft.agent::dialogue-view agent) :said))))
+
+(defclass gated-sdf-test-overlay (luvcraft.agent::sdf-agent-body-overlay) ())
+
+(defmethod render:encode-viewer-overlay
+    ((overlay gated-sdf-test-overlay) (viewer host:luvcraft-viewer) pass surface)
+  (declare (ignore overlay viewer pass surface))
+  :drawn)
+
+(define-test world-sdf-workaround-leaves-its-draw-path-disabled
+  (let ((body (make-instance 'gated-sdf-test-overlay))
+        (viewer (allocate-instance (find-class 'host:luvcraft-viewer))))
+    (let ((host::*companion-sdf-bodies-p* nil))
+      (true (null (render:encode-viewer-overlay body viewer nil nil))))
+    (let ((host::*companion-sdf-bodies-p* t))
+      (is eq :drawn (render:encode-viewer-overlay body viewer nil nil)))))

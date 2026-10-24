@@ -169,6 +169,15 @@
 (bridge-companion-overlay luvcraft.agent::sdf-agent-body-overlay)
 (bridge-companion-overlay luvcraft.agent:embodied-agent)
 
+(defparameter *companion-sdf-bodies-p* nil
+  "Temporary default while world SDF characters cause corrupt flashing tiles.
+Hands and triangle-based creatures use independent render paths. #O9H3CW")
+
+(defmethod render:encode-viewer-overlay :around
+    ((body luvcraft.agent::sdf-agent-body-overlay) (viewer luvcraft-viewer) pass surface)
+  (when *companion-sdf-bodies-p*
+    (call-next-method)))
+
 (defmethod render:viewer-focus-score
     ((overlay mcluv:luvcraft-widget-overlay) (viewer luvcraft-viewer))
   (luvcraft:luvcraft-focus-score overlay viewer))

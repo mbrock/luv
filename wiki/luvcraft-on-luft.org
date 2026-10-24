@@ -1681,3 +1681,28 @@ The text controls only gain the quantity annotations required to join the
 existing host knob contract; a broader quantity audit is not part of this
 pass. Tests cover source lifecycle and phase, terminal geometry and focus,
 help bindings and shared knob identity in addition to the native captures.
+
+* NEXT Diagnose corrupt pixels from world-companion SDF drawing
+:PROPERTIES:
+:ID: O9H3CW
+:END:
+
+On the Mac laptop, nearly stationary views produced isolated rectangular
+patches of arbitrary colour on otherwise stable terrain. The same scene
+showed this under MetalFX and the portable temporal resolve. Disabling sun
+shadow darkening and the normal-only terrain rims did not remove it.
+
+A live subtraction test removed scene/viewmodel overlays, figure draws,
+fixture bodies and fountain spray, and froze noon. The user reported that
+the large corrupt patches stopped, leaving the separate fine temporal
+shimmer. Restoring triangle-sphere fountain droplets was clean. Restoring
+the first-person SDF hands was also clean. Restoring world-companion SDF
+bodies brought the corrupt patches back.
+
+Until the draw-path fault is understood, Luvcraft defaults
+=luvcraft.luft.game::*companion-sdf-bodies-p*= to NIL. This gates only the
+world companion body overlays, not the hands or fountain drawing. It is a
+containment measure, not evidence of a shader/compiler or synchronization
+root cause. The targeted test checks that the gate suppresses those draws
+and can re-enable them. The remaining fine material shimmer is a separate
+observation, not claimed fixed by this workaround.
