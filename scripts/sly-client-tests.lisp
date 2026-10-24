@@ -17,6 +17,20 @@
       ((equal filters '("--event" "exited")) exited-events)
       (t (error "Unexpected test journal query: ~S" filters)))))
 
+(define-test play-default-and-explicit-legacy-target
+  (loop for (arguments expected fullscreen)
+          in '((nil :luvcraft nil)
+               (("--fullscreen") :luvcraft t)
+               (("luvcraft") :luvcraft nil)
+               (("luvcraft-on-luft" "--fullscreen") :luvcraft-on-luft t)
+               (("luvcraft-old") :luvcraft-old nil))
+        do (multiple-value-bind (target fullscreen-p)
+               (sly-client::parse-play-arguments arguments)
+             (true (eq expected target))
+             (true (eq fullscreen fullscreen-p))))
+  (fail (sly-client::parse-play-arguments '("luvcraft" "luvcraft-old")) 'error)
+  (fail (sly-client::parse-play-arguments '("--unknown")) 'error))
+
 (define-test stale-ready-lisps-are-not-running
   (let* ((endpoint-probed-p nil)
          (instance

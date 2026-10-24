@@ -38,7 +38,8 @@
    (next-gpu-sample-time :initform 0d0 :accessor renderer-next-gpu-sample-time)))
 
 (defun make-renderer (device color-format extent
-                      &key (terrain-factory 'make-terrain-drawing)
+                      &key (terrain-bevels-p *terrain-bevels-p*)
+                        (terrain-factory 'make-terrain-drawing)
                         (shadow-factory 'make-sun-shadow)
                         (lattice-factory 'make-lattice-drawing)
                         (reconstruction-factory 'make-reconstruction)
@@ -60,11 +61,13 @@ choices. Resident geometry and resized targets are published independently."
           (make-instance
            'renderer :device device
            :component-options
-           (list :terrain-factory terrain-factory :shadow-factory shadow-factory
+           (list :terrain-bevels-p terrain-bevels-p
+                 :terrain-factory terrain-factory :shadow-factory shadow-factory
                  :lattice-factory lattice-factory :reconstruction-factory reconstruction-factory
                  :finishing-factory finishing-factory :exposure-factory exposure-factory
                  :sky-factory sky-factory :figure-factory figure-factory :torch-factory torch-factory
                  :world-text-factory world-text-factory)))
+        (*terrain-bevels-p* terrain-bevels-p)
         (completed-p nil))
     (unwind-protect
          (labels ((component (factory type &rest arguments)

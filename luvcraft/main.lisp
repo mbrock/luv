@@ -60,6 +60,7 @@
   (format stream "       luvcraft [--help | --smoke-test PNG | --vulkan-smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO [DENSITY]]]]]~%")
   (format stream "~%")
   (format stream "With no arguments, resume the world using Metal 4 on macOS and Vulkan elsewhere.~%")
+  (format stream "The ordinary game uses Luft terrain, initially without bevels; Enter opens the metabar toggle.~%")
   (format stream "--metal and --vulkan explicitly select an interactive backend.~%")
   (format stream "--tracy exposes live frame and worker zones to Tracy 0.14.0.~%")
   (format stream "--fullscreen opens the game on the whole display instead of in a window.~%")
@@ -88,38 +89,32 @@
   ;; Start before START-LUVCRAFT creates the producer.  Tracy thread names are
   ;; emitted by the threads themselves as they begin, so attaching later would
   ;; leave an otherwise useful worker lane anonymous.
-  (if birthday-p
-      (progn
-        (when tracy-p
-          (start-luvcraft-tracy))
-        (luvcraft.birthday:celebrate-birthday
-         :provider (or provider luv:*gpu-provider*)
-         :fullscreen-p fullscreen-p))
-      (play :provider (or provider luv:*gpu-provider*)
-            :tracy-p tracy-p
-            :fullscreen-p fullscreen-p
-            :world-pathname world-pathname))
-  (unwind-protect
-       (let ((session *session*))
-         ;; Native close begins orderly teardown beside SDL's event loop; that
-         ;; teardown closes the canvas last.  Keep the executable alive until
-         ;; the native loop has observed that final close.
-         (loop until (eq :closed
-                         (luv:canvas-state
-                          (luvcraft-session-canvas session)))
-               do (sleep 0.05))
-         (let ((failure
-                 (luv::sdl-canvas-startup-error
-                  (luvcraft-session-canvas session))))
-           (when failure (error failure)))
-         ;; Native teardown reports through the controller rather than from
-         ;; its worker thread.  Surface that exact result in the executable.
-         (unless (eq :running
-                     (stop-controller-state
-                      (luvcraft-session-stop-controller session)))
-           (wait-for-controlled-stop
-            (luvcraft-session-stop-controller session))))
-    (stop-playing)))
+  (when tracy-p (start-luvcraft-tracy))
+  (let* ((viewer
+           (if birthday-p
+               (progn
+                 (luvcraft.birthday:celebrate-birthday
+                  :provider (or provider luv:*gpu-provider*)
+                  :fullscreen-p fullscreen-p)
+                 nil)
+               (luvcraft.luft.game:play
+                :provider (or provider luv:*gpu-provider*)
+                :fullscreen-p fullscreen-p :pathname world-pathname)))
+         (canvas (if viewer (luft.render:viewer-canvas viewer)
+                     (luvcraft-session-canvas *session*)))
+         (controller (if viewer (luft.render::viewer-stop-controller viewer)
+                         (luvcraft-session-stop-controller *session*))))
+    (unwind-protect
+         (progn
+           ;; Native close tears down beside SDL and closes the canvas last.
+           ;; Keep the executable alive through that final close.
+           (loop until (eq :closed (luv:canvas-state canvas)) do (sleep 0.05))
+           (let ((failure (luv::sdl-canvas-startup-error canvas)))
+             (when failure (error failure)))
+           ;; Report worker teardown failures in the executable too.
+           (unless (eq :running (stop-controller-state controller))
+             (wait-for-controlled-stop controller)))
+      (if viewer (luft.render:stop-viewer viewer) (stop-playing)))))
 
 (defun parse-interactive-options (arguments)
   (let ((provider nil)

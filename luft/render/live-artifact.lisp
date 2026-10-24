@@ -140,6 +140,7 @@ revisions immediately before and after the call."
                   (viewer-device viewer)
                   (canvas-format (viewer-context viewer))
                   (canvas-extent (viewer-context viewer))
+                  :terrain-bevels-p (viewer-terrain-bevels-p viewer)
                   (renderer-component-options old)))
            ;; Realized torch frames are mesh-owned derived data.  Reinstall the
            ;; entire immutable slot cohort in one transaction and explicitly

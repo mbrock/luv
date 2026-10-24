@@ -47,11 +47,17 @@ code, classes, shaders, and tools.
 ```sh
 ./sly start                             # boot without opening a game
 ./sly play luft                         # current experiment
-./sly play                              # Luvcraft instead
+./sly play                              # Luvcraft on Luft, plain cube faces
+./sly play luvcraft-old                 # original Luvcraft renderer
 ./sly status                            # image, game, and canvas health
 ./sly screenshot build/frame.png       # capture the GPU frame
 ./sly stop-playing                      # close the window, keep the Lisp
 ```
+
+Luvcraft starts without terrain bevels. Enter opens the metabar; its geometry
+group switches terrain bevels live without restarting streaming. Interactive
+Luft hosts use GPU-paced dynamic resolution (60 FPS target, 0.375–0.75 linear
+scene scale by default); captures use their explicit fixed scale instead.
 
 A cold start narrates compilation and ends with a useful summary. One real
 start in this checkout said:

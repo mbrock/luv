@@ -47,3 +47,52 @@
     (let ((origin (render::terminal-surface-origin surface)))
       (true (= 13 (vec3-x origin)))
       (true (< 6.0 (vec3-y origin) 6.1) "the screen floats north of y = 6"))))
+
+(define-test terminal-walls-join-exposed-cells-and-retire-when-covered
+  (let ((builder (render::make-world-scene-builder :horizontal-bits 6)))
+    (loop for x from 10 to 16 do
+      (loop for z from 4 to 7 do
+        (render::scene-builder-cell builder x 20 z
+                                    :material render::*terminal-material-placement*)))
+    ;; Neither a disconnected terminal nor an adjoining ordinary block is
+    ;; part of the shell's wall, even when they share its face plane.
+    (render::scene-builder-cell builder 8 20 4
+                                :material render::*terminal-material-placement*)
+    (render::scene-builder-cell builder 17 20 4)
+    (let* ((scene (render::finish-scene-builder builder :voxel-light-propagation-p nil))
+           (surface (render::find-terminal-surface scene 13 20 5 '(0 -1 0))))
+      (true surface)
+      (true (= 28 (length (render::terminal-surface-cells surface))))
+      (true (= 7 (render::terminal-surface-width surface)))
+      (true (= 4 (render::terminal-surface-height surface)))
+      (true (render::terminal-surface-standing-p scene surface))
+      (true (null (render::find-terminal-surface scene 13 20 5 '(0 0 1)))
+            "tops do not open shells")
+      (true (null (render::find-terminal-surface scene 13 20 5 '(0 0 -1)))
+            "bottoms do not open shells")
+      (render::scene-builder-cell builder 13 19 5)
+      (let ((covered (render::finish-scene-builder builder :voxel-light-propagation-p nil)))
+        (true (not (render::terminal-surface-standing-p covered surface)))
+        (true (null (render::find-terminal-surface covered 13 20 5 '(0 -1 0))))
+        (true (render::terminal-surface-standing-p scene surface)
+              "a successor scene does not mutate the original terminal wall")))))
+
+(define-test single-terminal-cells-have-a-usable-grid-on-every-wall-side
+  (let ((builder (render::make-world-scene-builder :horizontal-bits 6)))
+    (render::scene-builder-cell builder 10 20 4
+                                :material render::*terminal-material-placement*)
+    (let ((scene (render::finish-scene-builder builder :voxel-light-propagation-p nil)))
+      (zpb-ttf:with-font-loader (font render::*terminal-font-pathname*)
+        (dolist (normal '((1 0 0) (-1 0 0) (0 1 0) (0 -1 0)))
+          (let ((surface (render::find-terminal-surface scene 10 20 4 normal)))
+            (true surface)
+            (true (= 1 (render::terminal-surface-width surface)))
+            (true (= 1 (render::terminal-surface-height surface)))
+            (multiple-value-bind (columns rows) (render::terminal-grid-size surface font)
+              (true (plusp columns))
+              (true (= render::*terminal-rows-per-cell* rows))
+              (multiple-value-bind (scale left bottom)
+                  (render::terminal-grid-placement surface columns rows font)
+                (true (plusp scale))
+                (true (<= render::*terminal-margin* (+ left 1e-6)))
+                (true (<= render::*terminal-margin* (+ bottom 1e-6)))))))))))

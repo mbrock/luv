@@ -645,11 +645,9 @@ before the operation boundary, or it would encode through resources which the
             (/ luft:+mesh-cell-size+ divisor))))
 
 (defun viewer-bevel-label (viewer)
-  (bevel-width-label (viewer-bevel-width viewer)))
-
-(defun next-bevel-width (bevel-width)
-  (declare (ignore bevel-width))
-  1)
+  (if (viewer-terrain-bevels-p viewer)
+      (bevel-width-label (viewer-bevel-width viewer))
+      "off"))
 
 (defun display-site-inspector (viewer stream)
   "Draw VIEWER's current sparse ray hit as McCLIM presentations."
@@ -772,6 +770,8 @@ before the operation boundary, or it would encode through resources which the
                       :accessor viewer-production-system)
    (bevel-width :initarg :bevel-width :initform 1
                 :accessor viewer-bevel-width)
+   (terrain-bevels-p :initarg :terrain-bevels-p :initform *terrain-bevels-p*
+                     :accessor viewer-terrain-bevels-p)
    (fixed-exposure :initarg :fixed-exposure :initform nil
                    :reader viewer-fixed-exposure)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
@@ -1221,15 +1221,12 @@ A completed pair is spent, so a third quick press starts a new one."
 
 (clim:define-command (com-toggle-bevel-width
                       :command-table luft-atelier
-                      :name "Toggle Bevel Width"
+                      :name "Toggle Terrain Bevels"
                       :keystroke (:b))
     ()
   (let* ((viewer (viewer-command-viewer))
-         (bevel-width (viewer-bevel-width viewer)))
-    (declare (ignore bevel-width))
-    (refresh-viewer-renderer
-     viewer :solid (viewer-source viewer) :bevel-width 1)
-    (refresh-viewer-inspector viewer)))
+         (knob (knobs:find-knob 'terrain-bevels)))
+    (knobs:set-knob-value knob (not (knobs:knob-value knob viewer)) viewer)))
 
 (clim:define-command (com-release-pointer :command-table luft-window
                                           :name "Release Pointer"
@@ -1693,6 +1690,7 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
 (defun start-game-host (&key
                        solid
                        (bevel-width 1)
+                       (terrain-bevels-p *terrain-bevels-p*)
                        surface-mesh
                        surface-generation
                        fixed-exposure
@@ -1726,7 +1724,9 @@ SHADOW-FACTORY, RECONSTRUCTION-FACTORY, and FINISHING-FACTORY select the
 remaining owners; see MAKE-RENDERER for their interfaces. All choices survive
 renderer and shader refresh.
 
-BEVEL-WIDTH remains a compatibility input for inspection. SURFACE-MESH
+TERRAIN-BEVELS-P selects bevelled terrain or plain cube faces for this host;
+the metabar can switch it without changing the world. BEVEL-WIDTH remains
+a compatibility input for inspection. SURFACE-MESH
 supplies an already constructed diagnostic mesh
 while retaining SOLID as the semantic inspection source. SURFACE-GENERATION,
 when supplied with that mesh, preserves its exact immutable realized-light
@@ -1789,6 +1789,7 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
                       (created source-values before after)
                       (make-tracked-renderer
                        device* (canvas-format context) (canvas-extent context)
+                       :terrain-bevels-p terrain-bevels-p
                        :exposure-factory
                        (if fixed-exposure
                            (lambda (device)
@@ -1839,6 +1840,7 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
                                                 (make-scene-walking-character
                                                  solid))
                                    :bevel-width bevel-width
+                                   :terrain-bevels-p terrain-bevels-p
                                    :fixed-exposure fixed-exposure
                                    (append
                                     (when (subtypep frame-class 'viewer)
@@ -2578,6 +2580,7 @@ it makes no claim about which earlier render pass caused a discontinuity."
                                (viewer-device viewer)
                                (canvas-format context)
                                (canvas-extent context)
+                               :terrain-bevels-p (viewer-terrain-bevels-p viewer)
                                (renderer-component-options old))
                             (unless (= before after)
                               (when created (destroy-renderer created))
@@ -2744,7 +2747,7 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
 (defmethod knobs:unit-abbreviation ((unit (eql 'resident-chunk))) "chunks")
 (defmethod knobs:unit-abbreviation ((unit (eql 'pointer-pixel))) "px")
 
-(defclass bevel-knob (knobs:rebuild-knob) ())
+(defclass bevel-knob (knobs:switch-knob) ())
 (defclass construction-knob (knobs:switch-knob) ())
 (defclass walking-speed-knob (knobs:scalar-knob) ())
 (defclass walking-gravity-knob (knobs:scalar-knob) ())
@@ -2754,21 +2757,11 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
   ;; Retarget even while the player stays in the same chunk.
   (setf (luft.terrain::streaming-scene-focus (viewer-source session)) nil))
 
-(defmethod knobs:coerce-knob-value ((knob bevel-knob) value session)
-  (declare (ignore knob session))
-  (cond ((< value 1.5) 1) ((< value 3) 2) (t 4)))
-
-(defmethod knobs:step-knob
-    ((knob bevel-knob) session direction &optional (multiplier 1))
-  (let* ((widths '(1 2 4))
-         (index (position (knobs:knob-value knob session) widths)))
-    (knobs:set-knob-value
-     knob (nth (mod (+ index (* direction multiplier)) 3) widths) session)))
-
 (defmethod knobs:realize-knob progn ((knob bevel-knob) (session game-host))
   (when (viewer-renderer session)
-    (refresh-viewer-renderer session :solid (viewer-source session)
-                             :bevel-width (viewer-bevel-width session)))
+    ;; Only the atlas changes; retain the published world, lighting, and
+    ;; resident meshes rather than restarting streaming production.
+    (refresh-viewer-shaders session))
   (refresh-viewer-inspector session))
 
 (defun construction-lines-p () (plusp *wireframe*))
@@ -2807,11 +2800,10 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
     (setf (body-gravity (character-body (viewer-player session)))
           luft.terrain::*walking-gravity*)))
 
-(knobs:define-knob bevel-width
-    (:group :geometry :class 'bevel-knob :type integer
-     :quantity (:quantity quantities:world-distance :unit atlas-tick)
-     :minimum 1 :maximum 4 :step 1)
-  (viewer-bevel-width session))
+(knobs:define-knob terrain-bevels
+    (:group :geometry :class 'bevel-knob :type boolean
+     :quantity (:quantity :dimensionless :unit :one))
+  (viewer-terrain-bevels-p session))
 (knobs:define-knob construction-lines
     (:group :geometry :class 'construction-knob :type boolean
      :quantity (:quantity :dimensionless :unit :one))

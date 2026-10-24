@@ -750,7 +750,7 @@ and =spirv-val= must be on PATH for that full run. The game regression checks
 the exposure policy and that paper-only controls remain in the atelier.
 The [[https://ampcode.com/threads/T-01a16846-931d-74ec-be0d-975619917079][finishing evidence thread]] holds the inspected old/before/after comparisons.
 
-** NEXT Start Luvcraft as a game on the engine
+** DONE Start Luvcraft as a game on the engine
 :PROPERTIES:
 :ID: J3WZZS
 :END:
@@ -869,10 +869,54 @@ Old Luvcraft's meshing is not needed to show any of this: the frame is the
 Luft renderer's.  Its load requests are, as the generator.  Deleting the rest
 -- =mesher.lisp=, the mesh half of =streaming.lisp=, and the chunk passes of
 =render.lisp=, about 4,000 lines -- is not yet safe, because the old program is
-still the game a child starts and draws its phone, portals, critters, agents,
-and party through them.  It takes the old game's remaining features crossing
-first (#R1T4AY), the load half of =streaming.lisp= kept as Luvcraft's
-generator, and the mesh claims in =luvcraft/core/test= retired with it.
+still needed for its phone, portals, and party. It takes the old game's
+remaining features crossing first (#R1T4AY), the load half of =streaming.lisp=
+kept as Luvcraft's generator, and the mesh claims in =luvcraft/core/test=
+retired with it.
+
+*** DONE Make Luft the ordinary game, with optional bevels
+:PROPERTIES:
+:ID: P3TB6Z
+:END:
+
+Bare =./sly play=, =./sly play luvcraft=, and the standalone =build/luvcraft=
+now open Luvcraft on Luft. The explicit =luvcraft-on-luft= target remains an
+alias; =./sly play luvcraft-old= keeps the original renderer for comparison
+and features not yet crossed. The standalone birthday route is unchanged.
+The ordinary save format and pathname are unchanged.
+
+The game starts with plain cube faces. Enter opens the metabar; under
+=geometry=, =terrain bevels= switches the atlas on or off. The choice belongs
+to the viewer, not to a global that changes the atelier. A complete renderer
+cohort is rebuilt with the same resident mesh publications and realized-light
+generation; there is no remeshing or streaming restart. The obsolete width
+slider is replaced rather than implying that widths 1, 2, and 4 still work.
+
+Keep the existing GPU-paced dynamic resolution: 60 FPS or the display rate,
+whichever is lower, with 10% GPU headroom, eight-sample averaging, a quiet
+band, fast reductions and slower recovery. The ordinary 0.75 linear scene
+scale can fall to half of itself, 0.375, never below. Nothing reduces the
+resident radius or view distance. Fixed-scale captures do not steer it.
+This addresses GPU pressure, not arbitrary CPU or streaming stalls, and
+cannot guarantee the target frame rate once the floor is reached.
+
+Native Metal verification on yawl ran the actual standalone game against a
+disposable save, switched bevels both ways through the metabar control, and
+checked that resident keys and the publication's lighting generation survived.
+Twelve scene/shadow repetitions drove its 1650×1162 scene to the 824×582
+floor; restoring one repetition recovered 1650×1162. Canvas failures remained
+empty. This is a controller response check, not a claim of a new speedup.
+Flat and bevelled frames and the open metabar were inspected; existing
+diagonal shadow-map patterning remains visible in both terrain modes.
+
+A real Ghostty/Bash terminal wall, with the game's photographic factories
+and flat terrain, accepted Tab, typed ANSI-coloured =printf=, returned
+=TERMINAL TYPING OK=, and reported a 20×66 grid. Shift-Tab restored the camera
+within 0.000031 cells, and re-entry retained the same shell and output. A
+single-cell terminal also accepted and displayed =echo OK=. The inset
+cabinets do not occlude the activated full-wall screen; no terminal runtime
+or palette workaround was necessary. Surface/grid regressions and the full
+35-suite test run pass. The [[https://ampcode.com/threads/T-01a16a97-09d4-76c6-9fcf-75e9b42a2d08][default-game evidence thread]] holds the inspected captures.
 
 ** NEXT Stream voxel light in the terrain engine
 :PROPERTIES:

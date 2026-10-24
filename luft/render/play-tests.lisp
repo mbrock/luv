@@ -40,6 +40,15 @@
     (let ((knob (luv.knobs:find-knob 'render::movement-speed)))
       (mcluv:perform-metabar-control-set-fraction knob host 0.5)
       (true (= 6.5 (mcluv:metabar-control-value knob host))))
+    (let ((bevels (luv.knobs:find-knob 'render::terrain-bevels)))
+      (true (typep bevels 'luv.knobs:switch-knob))
+      (true (member bevels (luv.knobs:knobs-for-host host)))
+      (mcluv:perform-metabar-control-toggle bevels host)
+      (true (not (mcluv:metabar-control-value bevels host)))
+      ;; A game changes its own presentation, not the atelier or future hosts.
+      (true (mcluv:metabar-control-value bevels atelier))
+      (mcluv:perform-metabar-control-toggle bevels host)
+      (true (mcluv:metabar-control-value bevels host)))
     (dolist (mode '(render:isometric-walk-mode render:orbit-mode
                     render:free-camera-mode render:world-edit-mode))
       (true (not (render:viewer-allows-mode-p host (make-instance mode))))

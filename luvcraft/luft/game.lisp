@@ -372,6 +372,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
                             pathname-p)
                seed (relief :alpine)
                (world-height luvcraft::*little-world-height*)
+               (terrain-bevels-p nil)
              &allow-other-keys)
   "Play Luvcraft on Luft and return its viewer.
 
@@ -379,8 +380,9 @@ The world is the Luvcraft save at PATHNAME when it exists and no SEED is
 given, else a fresh little world of SEED, RELIEF, and WORLD-HEIGHT.  Edits
 and the player's pose are written back to PATHNAME in Luvcraft's own save
 format as the game plays and when it stops; a fresh SEED writes only to a
-PATHNAME given explicitly, never over the player's save.  Other keys go to
-LUFT.RENDER:START-GAME-HOST."
+PATHNAME given explicitly, never over the player's save. Terrain starts with
+plain cube faces; TERRAIN-BEVELS-P opts in, and the metabar switches it live.
+Other keys go to LUFT.RENDER:START-GAME-HOST."
   (let ((loaded-p (and pathname (null seed) (probe-file pathname))))
     (multiple-value-bind (world resume inhabitants)
         (if loaded-p
@@ -394,6 +396,7 @@ LUFT.RENDER:START-GAME-HOST."
                  :solid (game:make-luvcraft-streaming-scene
                          source :mesh-preparer render:+render-population-preparer+)
                  :title *title*
+                 :terrain-bevels-p terrain-bevels-p
                  :sky-factory 'make-luvcraft-sky-drawing
                  :terrain-factory 'make-luvcraft-terrain-drawing
                  :torch-factory 'make-luvcraft-torch-drawing
@@ -415,4 +418,5 @@ LUFT.RENDER:START-GAME-HOST."
                                           (luvcraft:block-kind-named name)))
                                        *starting-hotbar*))
                  (alexandria:remove-from-plist
-                  viewer-arguments :pathname :seed :relief :world-height)))))))
+                  viewer-arguments :pathname :seed :relief :world-height
+                  :terrain-bevels-p)))))))

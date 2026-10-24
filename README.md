@@ -43,6 +43,12 @@ out of. It has generated terrain, a day with a moving sun, shadows, fog, bloom
 and light shafts, blocks you can mine and place, simple physics, a world that
 is saved as you play, and a few inhabitants you can talk to.
 
+The ordinary game now runs on Luft's terrain renderer, with plain cube faces
+by default. Press `Enter` to open the metabar, expand **geometry**, and toggle
+**terrain bevels** while playing. Adaptive resolution targets 60 FPS without
+reducing view distance. `./sly play` and `build/luvcraft` use this host;
+`./sly play luvcraft-old` keeps the original renderer available.
+
 Press `I` for the picture-first inventory: arrow keys browse six large material
 cards, `Enter` adds to your six-block building kit, and `Esc` returns to play.
 Move up from the first row to choose a category, or use the wheel and page
