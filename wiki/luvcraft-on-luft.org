@@ -1706,3 +1706,30 @@ containment measure, not evidence of a shader/compiler or synchronization
 root cause. The targeted test checks that the gate suppresses those draws
 and can re-enable them. The remaining fine material shimmer is a separate
 observation, not claimed fixed by this workaround.
+
+* NEXT Filter the game's procedural detail at its raster footprint
+:PROPERTIES:
+:ID: GD2WYH
+:END:
+
+The laptop's capped scene resolution exposed constant fine crawling in the
+materials. Distance-only fading cannot account for changing render scale or
+a grazing surface. Luvcraft now also attenuates laid patterns, procedural
+relief and painted flecks by the fragment's world-position derivatives and
+the feature frequency. Detail fades before one feature occupies less than
+one input pixel; the atelier keeps its previous treatment. This is analytic
+band limiting toward each field's mean, not a new texture mip chain.
+
+The fixture screen's animated phosphor glyph placeholder is removed. An
+unconnected screen is quiet dark glass instead of scrolling invented text.
+Actual terminal overlays remain independent of that placeholder material.
+
+A separate fountain check found 936 physics bodies in the user's scene.
+Each sphere currently submits 3072 vertices, roughly 2.9 million vertices
+per pass at that count. Twenty fountain-on GPU samples had a median near
+11.3 ms at 514x322 internal resolution. No matching fountain-off samples
+arrived, so this is not a measured speedup or an isolated sphere cost.
+The live fountain rate was set to zero; a cheaper droplet representation
+remains a follow-up. These source changes compile in the live renderer and
+pass strict Parinfer checks; residual temporal shimmer still needs judging
+at interactive resolution.

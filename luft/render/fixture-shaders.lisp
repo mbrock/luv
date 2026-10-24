@@ -190,14 +190,12 @@
         (if (< (abs (- part 3.0)) 0.5) (* side 0.6) wood))))
 
 (define-shader-function fixture-object-tone (part local side top time)
-  "Object finishes; the clock advects fluid streaks and scrolls phosphor rows."
+  "Object finishes; only fluid streaks move with the clock."
   (if (< part 7.5) (* side 0.45)
       (if (< part 8.5)
-          (let* ((row (floor (+ (* (swizzle local :z) 24.0) (floor (* time 2.0)))))
-                 (mark (* (step 0.3 (fract (* (swizzle local :z) 24.0)))
-                          (step 0.35 (fract (+ (* (swizzle local :x) 31.0)
-                                               (* row 0.37)))))))
-            (+ (vec3 0.005 0.008 0.006) (* top mark)))
+          ;; A quiet unlit screen until its real terminal surface is present.
+          ;; Animated fake glyphs crawl badly when the world is reduced.
+          (vec3 0.012 0.016 0.018)
           (if (< part 9.5) (vec3 0.35 0.34 0.31)
               (if (< part 10.5) (vec3 0.035 0.022 0.014)
                   (if (< part 11.5) (* side 0.7)

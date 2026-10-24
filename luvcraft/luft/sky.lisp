@@ -110,7 +110,8 @@
          (cell (floor (+ (* world 12.0) (* normal 0.03))))
          (fleck (- (paper-hash cell) 0.5))
          (footprint (* distance 0.0015))
-         (detail (- 1.0 (smoothstep 0.025 0.09 footprint)))
+         (detail (* (- 1.0 (smoothstep 0.025 0.09 footprint))
+                    (material-detail-weight world 12.0)))
          (contrast (if snow 0.08 (mix 0.24 0.70 vegetation)))
          (tint (if grass (vec3 1.12 0.88 0.82)
                    (if leaves (vec3 1.35 0.93 0.80) (vec3 1.0 1.0 1.0)))))
@@ -248,7 +249,8 @@
   "Subtle normal-only rims on plain terrain; rebuild shaders after changing.")
 
 (defun make-luvcraft-terrain-drawing (device target-formats sample-count)
-  (let ((luft.render.shaders::*terrain-edge-shaping-p*
+  (let ((luft.render.shaders::*terrain-screen-filter-p* t)
+        (luft.render.shaders::*terrain-edge-shaping-p*
           (and *rounded-terrain-edges-p* (not render::*terrain-bevels-p*)))
         (luft.render.shaders::*terrain-material-character-function*
           'luft.render.shaders::luvcraft-material-character)

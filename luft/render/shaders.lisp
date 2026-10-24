@@ -423,9 +423,35 @@ Only arithmetic; no extra noise or texture samples in these laid shapes."
             (swizzle pattern :y))
         (swizzle pattern :y))))
 
+(defvar *terrain-screen-filter-p* nil
+  "Band-limit the game's procedural materials using actual raster footprints.")
+
+(define-shader-function material-pixel-footprint (world)
+  (let ((dx (derivative-x world)) (dy (derivative-y world)))
+    (sqrt (max (dot dx dx) (dot dy dy)))))
+
+(define-shader-function material-detail-weight (world frequency)
+  (- 1.0 (smoothstep 0.35 1.0 (* frequency (material-pixel-footprint world)))))
+
+(define-shader-abstraction filtered-material-detail (weight world frequency)
+  (if *terrain-screen-filter-p*
+      `(* ,weight (material-detail-weight ,world ,frequency))
+      weight))
+
+(define-shader-function material-relief-frequency (code)
+  (if (< code 1.5) 13.0
+      (if (< code 2.5) 7.0
+          (if (< code 3.5) 9.0
+              (if (< code 4.5) 5.5
+                  (if (< code 5.5) 14.0
+                      (if (< code 8.5) 4.0
+                          (if (< code 9.5) 8.0
+                              (if (< code 11.5) 19.0 24.0)))))))))
+
 (define-shader-function surface-height (code pattern point fade nap-fade laid)
   "The relief CODE at POINT, cut by PATTERN's elements, faded by FADE."
-  (let* ((raw (material-relief-height code point))
+  (let* ((raw (mix 0.5 (material-relief-height code point)
+                    (filtered-material-detail 1.0 point (material-relief-frequency code))))
          ;; Filter the woven nap and fine straw along with the laid joints.
          (relief (if (> code 8.5)
                      (if (< code 10.5) (mix 0.5 raw nap-fade) raw)
@@ -995,13 +1021,17 @@ NIL leaves the atelier's direct light unchanged.")
          ;; pixels; an orthographic view keeps it.
          (to-eye (- (swizzle eye :xyz) world))
          (distance (mix 20.0 (sqrt (dot to-eye to-eye)) divisor))
-         (fade (- 1.0 (smoothstep 40.0 120.0
+         (fade (filtered-material-detail
+                (- 1.0 (smoothstep 40.0 120.0
                                   (* distance
-                                     (/ (pattern-fineness (representation material-pattern)) 4.0)))))
+                                     (/ (pattern-fineness (representation material-pattern)) 4.0))))
+                world (pattern-fineness (representation material-pattern))))
          ;; Fine nap filters independently: a tapestry's large figure and a
          ;; bale's bindings must survive after individual fibers disappear.
-         (nap-fade (- 1.0 (smoothstep 12.0 40.0
-                                    (/ distance (max 0.2 (abs (dot normal (normalize to-eye))))))))
+         (nap-fade (filtered-material-detail
+                    (- 1.0 (smoothstep 12.0 40.0
+                                      (/ distance (max 0.2 (abs (dot normal (normalize to-eye)))))))
+                    world 24.0))
          (laid (laid-pattern (representation material-pattern) normal world))
          (height (surface-height relief (representation material-pattern) world fade nap-fade laid))
          (bent (terrain-edge-normal (relief-normal normal world strength height)
