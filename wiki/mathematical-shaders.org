@@ -218,8 +218,10 @@ At each call site the parser first parses the actual arguments, then parses the
 function's lexical =let*= against those typed values.  The result is an
 inspectable =shader-function-call= retaining its live definition, argument
 expressions, local binding objects, typed result, quantity meaning, and source
-call.  Local values are hoisted in deterministic dependency order for the
-single entry block.  SPIR-V and direct MSL lowering inline the result graph and
+call.  Source abstractions in the function body expand at each specialization,
+so replacing an abstraction changes fresh calls without redefining the function.
+Local values stay in the branch or loop that owns them, in dependency order.
+SPIR-V and direct MSL lowering inline the result graph and
 associate its emitted occurrences with both the inner expressions and the call.
 
 The definition macro is deliberately thin: it records the unevaluated body at
@@ -496,16 +498,24 @@ keep Common Lisp's names where Common Lisp has the meaning:
   (=(vec2 cell)=, =(ivec2 uv)=, =(bvec2 cell)= tests against zero).  Float to
   integer truncates; signed and unsigned reinterpret their 32 bits; a boolean
   becomes one or zero.
+- Scalar splats: =(vec3 shift)=, =(uvec2 (uint 0))=, =(ivec4 (int -7))=,
+  and =(bvec3 t)= repeat one scalar of the same kind.  The scalar expression
+  is evaluated once.  This is explicit construction, not implicit scalar/vector
+  arithmetic coercion; =(uvec3 1.0)= remains a type error.  SPIR-V repeats
+  the scalar value ID, MSL and WGSL use constructors, and HLSL uses a cast.
 - Arithmetic: =+=, =-=, =*= wrap; integer =/= truncates toward zero, =rem= is
   the truncated remainder and =mod= the floored modulus (the sign follows the
-  divisor, exactly =cl:mod=); division by zero is undefined.  =min=, =max=,
+  divisor, exactly =cl:mod=); division by zero and signed minimum divided by
+  minus one are undefined.  =min=, =max=,
   =clamp= order every kind; =abs= and =signum= take signed integers.  MSL has
   no integer =sign=, so it subtracts two comparisons.
 - The comparisons (~<~, ~<=~, ~>~, ~>=~, ~=~, and ~/=~) work on any numeric
   scalar or vector and return a =bool= or a =bvec= of the same width;
   equality and inequality also compare booleans.  =and=, =or=, =not=, =any=, =all= are the logic, and
   =(select condition then else)= chooses componentwise.  =if= stays a scalar
-  choice of whole values.
+  choice of whole values and evaluates only the chosen arm.  WGSL uses a
+  structured =if= even for expression-only arms: a buffer read or expensive
+  calculation need not produce local declarations to require guarding.
 - Bits: =logand=, =logior=, =logxor=, =lognot=; =(ash value count)= with a
   constant count, left when positive and right when negative;
   =shift-left= and =shift-right= with a run-time count.  Right shifts are
@@ -514,7 +524,9 @@ keep Common Lisp's names where Common Lisp has the meaning:
 
 The target spellings differ more than the meanings, which is why they are
 pinned by tests and by each target's own compiler: SPIR-V's =OpSMod= is
-already floored, while MSL, HLSL, and WGSL write =((a % b) + b) % b=; Metal's
+already floored, while MSL, HLSL, and WGSL compute =r = a % b= once and add
+the divisor only when =r= is nonzero and their signs differ.  The correction
+is selected /before/ addition; =((a % b) + b) % b= can overflow.  Metal's
 =select(f, t, c)= and WGSL's =select(f, t, c)= reverse the source order that
 SPIR-V's =OpSelect= and HLSL 2021's =select(c, t, f)= keep; HLSL 2021 forbids
 =&&= and =||= on vectors and spells them =and()= and =or()=; WGSL shifts only
@@ -523,6 +535,23 @@ by =u32= counts.  =hal/shader/tests.lisp= checks one probe through spirv-val,
 =hal/d3d12/hlsl/tests.lisp= through DXC.  Signed overflow wraps in SPIR-V,
 HLSL, and WGSL; MSL inherits C++'s undefined signed overflow, so a shader
 should not lean on it.
+
+** DONE Check arithmetic at the representable boundaries
+:PROPERTIES:
+:ID: BBTMO9
+:END:
+
+The October 2026 audit of Luv and Moppe reproduced the old signed =mod=
+lowering on the Apple M5: 16 failures in 155 nonzero-divisor boundary pairs.
+The corrected scalar lowering returned all 155 correctly; shaderc's retained
+Metal execution test covers scalar and vector =mod= alongside =rem= using a
+64-bit host reference.  Native compilation also checks the HLSL and WGSL
+forms.  This establishes arithmetic results, not a frame-time improvement.
+
+SPIR-V vector/scalar division now splats the divisor and emits =OpFDiv=.
+The earlier reciprocal multiplication could overflow or underflow the
+reciprocal before computing a representable quotient.  Relaxed-math choices
+belong to the target compiler, not an unconditional DSL rewrite.
 
 * Matrices are column-major values beside semantic maps
 :PROPERTIES:
@@ -671,3 +700,18 @@ The useful constraints for the next experiments are already visible:
 - a failed edit preserves the last known good pipeline and records why; and
 - a shader change is not accepted on pretty source alone: assemble it,
   validate it, and run the real renderer.
+
+** NEXT Specialize resource-taking helpers without source macros
+:PROPERTIES:
+:ID: EULNIW
+:END:
+
+Moppe's =vertex-word= and =height-at= helpers are source abstractions because
+buffer operands are declaration names, while =sample= and =texel-load=
+quantity inference assumes a direct resource reference.  Ordinary function
+parameters introduce binding chains instead.  The next slice should resolve
+resource identity through those chains at specialization, preserving access
+mode, sampled quantities, and reflection.  =shader-resource-target= already
+does part of this for newer texture operators; buffer references also need a
+first-class parsing contract.  Test nested calls and aliases before migrating
+the helpers.  This does not require runtime first-class resource values.

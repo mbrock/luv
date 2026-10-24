@@ -916,9 +916,22 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
                 (shader:shader-expression-type expression)))
       (destructuring-bind (left right)
           (mapcar #'msl-occurrence-text (lower-msl-operands context expression))
-        (note-msl-occurrence
-         context expression
-         (format nil "(((~A % ~A) + ~A) % ~A)" left right right right)))
+        (let* ((type (msl-type-name (shader:shader-expression-type expression)))
+               (divisor (msl-temporary-name context "mod_divisor"))
+               (remainder (msl-temporary-name context "mod_remainder"))
+               (zero (format nil "~A(0)" type)))
+          ;; Adding the divisor unconditionally can overflow. Select the
+          ;; correction first, then add; both operands are evaluated once.
+          (push-msl-pending
+           context
+           (msl-line expression "~A ~A = ~A;" type divisor right)
+           (msl-line expression "~A ~A = (~A % ~A);"
+                     type remainder left divisor))
+          (note-msl-occurrence
+           context expression
+           (format nil "(~A + select(~A, ~A, ((~A != ~A) & ((~A < ~A) != (~A < ~A)))))"
+                   remainder zero divisor remainder zero
+                   remainder zero divisor zero))))
       (lower-msl-infix-call context expression "%")))
 
 (defun lower-msl-prefix-call (context expression operator)

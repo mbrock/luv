@@ -749,7 +749,7 @@
             (spv:instruction-name (first constant-instructions)))
            "constant"))))
 
-(define-test vector-scalar-division-lowers-through-a-reciprocal
+(define-test vector-scalar-division-preserves-division
   (let* ((specification
            (shader:parse-shader-specification
             'vector-division
@@ -766,9 +766,12 @@
          (names (mapcar (lambda (instruction)
                           (symbol-name (spv:instruction-name instruction)))
                         instructions)))
-    (true (find "F-DIV" names :test #'string=))
-    (true (find "VECTOR-TIMES-SCALAR" names :test #'string=))
-    (true (> (length (spv:assemble-shader-specification specification)) 5))))
+    ;; A reciprocal can overflow even when the quotient is representable.
+    ;; Preserve division; relaxed-math optimization belongs to the driver.
+    (true (= 1 (count "F-DIV" names :test #'string=)))
+    (false (find "VECTOR-TIMES-SCALAR" names :test #'string=))
+    (true (> (length (spv:assemble-shader-specification specification)) 5))
+    (parachute:is eq nil (spir-v-validation-diagnostics specification))))
 
 (define-test a-first-use-vector-constructor-cannot-claim-its-type-id
   (let ((specification

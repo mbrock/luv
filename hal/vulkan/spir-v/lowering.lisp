@@ -1162,17 +1162,16 @@ scalar, so (* 2.0 (dot a b) v) multiplies two floats before scaling V."
                (scalar (second operands))
                (vector-id (lower-shader-expression context vector))
                (scalar-id (lower-shader-expression context scalar))
-               (float-type (find-shader-type :float))
-               (reciprocal-id (fresh-shader-id context 'reciprocal)))
-          (emit-shader-instruction
-           context expression
-           (list reciprocal-id 'f-div
-                 (ensure-shader-type-id context float-type)
-                 (ensure-shader-constant context 1.0) scalar-id))
-          (emit-binary-arithmetic
-           context expression '* (shader-expression-type vector)
-           vector-id (shader-expression-type vector)
-           reciprocal-id float-type))
+               (type (shader-expression-type vector))
+               (divisor
+                 (emit-value-instruction
+                  context expression type 'composite-construct
+                  (make-list (shader-type-component-count type)
+                             :initial-element scalar-id))))
+          ;; Preserve division. Multiplying by a reciprocal can overflow
+          ;; or underflow before an otherwise representable quotient.
+          (emit-value-instruction context expression type 'f-div
+                                  (list vector-id divisor)))
         (lower-chained-arithmetic context expression))))
 
 (defun comparison-instruction (operator operand-type)
@@ -1405,11 +1404,20 @@ booleans by comparison with zero."
       (emit-shader-conversion
        context expression (first (shader-call-operands expression))
        (shader-expression-type expression))
-      (emit-value-instruction
-       context expression (shader-expression-type expression)
-       'composite-construct
-       (mapcar (lambda (operand) (lower-shader-expression context operand))
-               (shader-call-operands expression)))))
+      (let* ((operands (shader-call-operands expression))
+             (values (mapcar (lambda (operand)
+                               (lower-shader-expression context operand))
+                             operands)))
+        (emit-value-instruction
+         context expression (shader-expression-type expression)
+         'composite-construct
+         (if (and (= 1 (length operands))
+                  (eql 1 (shader-type-component-count
+                          (shader-expression-type (first operands)))))
+             (make-list (shader-type-component-count
+                         (shader-expression-type expression))
+                        :initial-element (first values))
+             values)))))
 
 (defmethod lower-shader-call ((operator (eql 'vec2)) context expression)
   (lower-vector-constructor context expression))

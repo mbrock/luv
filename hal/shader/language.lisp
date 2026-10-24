@@ -2020,8 +2020,8 @@ is among KINDS (32-bit integers only, never the 64-bit unsigned type)."
 
 (defun infer-vector-constructor-type (type-name width operands source-form)
   "A vector constructor either converts one operand of its own width
-componentwise from another scalar kind, or assembles constituents of its own
-scalar kind whose widths sum to WIDTH."
+componentwise from another scalar kind, repeats one scalar of its own kind,
+or assembles constituents of its own kind whose widths sum to WIDTH."
   (let* ((type (find-shader-type type-name))
          (kind (shader-type-scalar-kind type)))
     (if (and (= 1 (length operands))
@@ -2036,7 +2036,10 @@ scalar kind whose widths sum to WIDTH."
                  :details (shader-type-name
                            (shader-expression-type (first operands)))))
         (progn
-          (unless (= width (vector-constructor-width operands source-form))
+          (unless (or (= width (vector-constructor-width operands source-form))
+                      (and (= 1 (length operands))
+                           (eql 1 (shader-type-component-count
+                                   (shader-expression-type (first operands))))))
             (error 'shader-language-error
                    :form source-form :reason :invalid-vector-width
                    :details width))
@@ -2135,7 +2138,7 @@ never collides with a standard symbol's function documentation:
 (define-shader-operator *
   "Chained multiplication of scalars, matching vectors, and vector-scalar pairs.")
 (define-shader-operator /
-  "Division of two matching values, or a vector scaled by a scalar's reciprocal.")
+  "Componentwise division of matching values, or a float vector by a scalar.")
 (define-shader-operator dot
   "The scalar inner product of two vectors of the same width.")
 (define-shader-operator sample
@@ -2170,29 +2173,32 @@ or name an unsigned integer literal.")
 (define-shader-operator mix
   "Linear interpolation from one value toward another by a scalar amount.")
 (define-shader-operator vec2
-  "Construct a two-component vector from scalars and vectors of total width 2.")
+  "Construct a float two-vector; one float scalar fills both components.")
 (define-shader-operator vec3
-  "Construct a three-component vector from scalars and vectors of total width 3.")
+  "Construct a float three-vector; one float scalar fills every component.")
 (define-shader-operator vec4
-  "Construct a four-component vector from scalars and vectors of total width 4.")
+  "Construct a float four-vector; one float scalar fills every component.")
 (define-shader-operator uvec2
-  "Construct a two-component unsigned vector from unsigned constituents.")
+  "Construct an unsigned two-vector; one uint scalar fills both components.")
 (define-shader-operator uvec3
-  "Construct a three-component unsigned vector from unsigned constituents.")
+  "Construct an unsigned three-vector; one uint scalar fills every component.")
 (define-shader-operator uvec4
-  "Construct a four-component unsigned vector from unsigned constituents.")
+  "Construct an unsigned four-vector; one uint scalar fills every component.")
 (define-shader-operator ivec2
-  "Construct a two-component signed vector, or convert a two-vector to one.")
+  "Construct or convert a signed two-vector; one int scalar fills both components.")
 (define-shader-operator ivec3
-  "Construct a three-component signed vector, or convert a three-vector.")
+  "Construct or convert a signed three-vector; one int scalar fills every component.")
 (define-shader-operator ivec4
-  "Construct a four-component signed vector, or convert a four-vector.")
+  "Construct or convert a signed four-vector; one int scalar fills every component.")
 (define-shader-operator bvec2
-  "Construct a two-component boolean vector, or test a two-vector against 0.")
+  "Construct a boolean two-vector or test a two-vector against zero;
+one boolean scalar fills both components.")
 (define-shader-operator bvec3
-  "Construct a three-component boolean vector, or test a three-vector.")
+  "Construct a boolean three-vector or test a three-vector against zero;
+one boolean scalar fills every component.")
 (define-shader-operator bvec4
-  "Construct a four-component boolean vector, or test a four-vector.")
+  "Construct a boolean four-vector or test a four-vector against zero;
+one boolean scalar fills every component.")
 (define-shader-operator swizzle
   "Select and reorder vector components by a designator such as :XYZ or :RGB.")
 (define-shader-operator min
@@ -3467,7 +3473,8 @@ rather than the language."
             (local-index 0))
         (multiple-value-bind (body-bindings result)
             (parse-shader-expression-body
-             (shader-function-body definition) function-environment
+             (mapcar #'expand-shader-source-form (shader-function-body definition))
+             function-environment
              :binding-name-function
              (lambda (local-name)
                (shader-function-binding-name

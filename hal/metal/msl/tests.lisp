@@ -626,7 +626,8 @@ on success or without the compiler, else its report."
     (true (search "int2 scaled = int2((stage_in.uv * 64.0f));" source))
     (true (search "int2 four = int2(4, (-4));" source))
     ;; MOD is floored (its sign follows the divisor), REM is C's %.
-    (true (search "int2 floored = (((offset % four) + four) % four);" source))
+    (true (search "int2 floored = (mod_remainder_" source))
+    (true (search "select(int2(0), mod_divisor_" source))
     (true (search "int2 truncated = (offset % four);" source))
     ;; Metal's sign is float-only; a signed SIGNUM compares instead.
     (true (search "(int2((min(floored, truncated)" source))

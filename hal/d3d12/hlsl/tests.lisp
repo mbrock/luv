@@ -500,8 +500,8 @@ Without DXC, return NIL: the text claims still hold."
     (true (search "RWStructuredBuffer<int2> cells" source))
     (true (search "int2 divisor = int2(4, (-4));" source))
     ;; MOD is floored (its sign follows the divisor), REM is C's %.
-    (true (search "int2 floored = (((cell % divisor) + divisor) % divisor);"
-                  source))
+    (true (search "int2 floored = (mod_remainder_" source))
+    (true (search "select(and((mod_remainder_" source))
     (true (search "int2 truncated = (cell % divisor);" source))
     ;; Vector logic is and()/or() in HLSL 2021; scalar logic stays &&/||.
     (true (search "bool2 both = and(near, far);" source))

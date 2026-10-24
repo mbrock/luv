@@ -931,3 +931,145 @@ bind COMPILED to it, and run BODY."
           (is eq nil (run-tool
                       (list "spirv-val" "--target-env" "vulkan1.0"
                             (uiop:native-namestring path)))))))))
+
+(define-test scalar-splats-compile-for-each-kind-and-width
+  (stage-probe 'splat-vertex :vertex
+               :outputs '((position :vec4 :built-in :position))
+               :body '(shader:set-output position (shader:vec4 1.0)))
+  (loop for (constructors scalar)
+          in '(((shader:vec2 shader:vec3 shader:vec4) (sin (shader:swizzle x :x)))
+               ((shader:ivec2 shader:ivec3 shader:ivec4) (shader:int -7))
+               ((shader:uvec2 shader:uvec3 shader:uvec4) (shader:uint #xffffffff))
+               ((shader:bvec2 shader:bvec3 shader:bvec4) (> (shader:swizzle x :x) 0.0)))
+        do (loop for constructor in constructors
+                 for width from 2
+                 for specification =
+                   (stage-probe
+                    'splat-fragment :fragment
+                    :resources '((frame :uniform-block :binding 0
+                                  :members ((x :vec4))))
+                    :outputs '((color :vec4 :location 0))
+                    :body `(shader:set-output color
+                            (shader:vec4
+                             (float (shader:swizzle (,constructor ,scalar) :x)))))
+                 for compiled =
+                   (shaderc:compile-shader-program
+                    (probe-program :vertex 'splat-vertex :fragment 'splat-fragment))
+                 do
+                    (let* ((instructions
+                             (spv:lower-spir-v (spv:shader-module specification)))
+                           (constructs
+                             (remove-if-not
+                              (lambda (instruction)
+                                (eq 'spv::composite-construct
+                                    (spv:instruction-name instruction)))
+                              instructions)))
+                      ;; The scalar's value ID is reused, not evaluated once
+                      ;; per lane. This also catches missing splat operands.
+                      (true
+                       (some (lambda (instruction)
+                               (let ((ids (cdddr (spv:instruction-form instruction))))
+                                 (and (= width (length ids))
+                                      (every (lambda (id) (eq id (first ids))) ids))))
+                             constructs)))
+                    (with-scratch-directory (directory)
+                      (shaderc:write-compiled-program compiled directory)
+                      (is equal nil (native-diagnostics directory "probe_program"
+                                                        "fragment"))
+                      (is eq nil (wgsl-program-diagnostics directory))
+                      (when (tool-available-p "spirv-val" "--version")
+                        (is eq nil
+                            (run-tool
+                             (list "spirv-val"
+                                   (uiop:native-namestring
+                                    (merge-pathnames "probe_program.fragment.spv"
+                                                     directory)))))))))
+  ;; Splat syntax does not silently convert kinds or truncate a vector.
+  (loop for (type form) in '((:uvec3 (shader:uvec3 1.0))
+                             (:vec3 (shader:vec3 (shader:int 1)))
+                             (:vec3 (shader:vec3 (shader:vec2 1.0))))
+        do (true (failure-reason
+                  (lambda ()
+                    (stage-probe 'bad-splat :fragment
+                                 :outputs `((color ,type :location 0))
+                                 :body `(shader:set-output color ,form)))))))
+
+(define-test shader-functions-expand-current-abstractions
+  (shader:define-shader-abstraction squared-offset (x)
+    `(let* ((shifted (+ ,x 1.25))) (* shifted shifted)))
+  (shader:define-shader-function abstracted-square (x)
+    (squared-offset x))
+  (flet ((source ()
+           (luv.msl:msl-document-source
+            (luv.msl:compile-msl
+             (stage-probe 'abstracted-fragment :fragment
+                          :inputs '((x :float :location 0))
+                          :outputs '((color :float :location 0))
+                          :body '(shader:set-output color (abstracted-square x)))))))
+    (true (search "1.25f" (source)))
+    ;; Expand at specialization, not at the function's definition: live
+    ;; replacement of a source abstraction changes its callers too.
+    (shader:define-shader-abstraction squared-offset (x)
+      `(let* ((shifted (+ ,x 2.75))) (* shifted shifted)))
+    (true (search "2.75f" (source)))
+    (false (search "1.25f" (source)))))
+
+(define-test wgsl-if-guards-expression-only-memory-reads
+  (let* ((specification
+           (stage-probe
+            'guarded-read :fragment
+            :inputs '((index :uint :location 0 :interpolation :flat))
+            :resources '((words :storage-buffer :binding 0 :element :uint))
+            :outputs '((color :uint :location 0))
+            :body '(shader:set-output color
+                    (if (< index (shader:uint 8))
+                        (shader:buffer-element words index)
+                        (shader:uint 0)))))
+         (source (wgsl:wgsl-document-source (wgsl:compile-wgsl specification)))
+         (branch (search "if (" source))
+         (load (search "words[" source))
+         (alternative (search "else" source)))
+    (true (and branch load alternative (< branch load alternative)))
+    (false (search "select(" source))))
+
+(shader:define-shader signed-mod-compute
+    (:stage :compute :workgroup-size (1 1 1)
+     :inputs ((id :uvec3 :built-in :global-invocation-id))
+     :resources ((inputs :storage-buffer :binding 0 :element :ivec2)
+                 (outputs :storage-buffer :binding 1 :element :ivec4
+                          :access :read-write)))
+  (let* ((i (shader:swizzle id :x))
+         (pair (shader:buffer-element inputs i))
+         (a (shader:swizzle pair :x))
+         (b (shader:swizzle pair :y)))
+    (shader:set-buffer-element
+     outputs i
+     (shader:ivec4 (mod a b) (rem a b)
+                   (mod pair (shader:ivec2 b (if (> b (shader:int 0))
+                                               (shader:int -7)
+                                               (shader:int 7))))))))
+
+(define-test signed-mod-does-not-overflow-its-correction
+  (let ((compiled
+          (shaderc:compile-shader-program
+           (shader:make-shader-program 'signed-mod '(:compute signed-mod-compute)))))
+    (with-scratch-directory (directory)
+      (shaderc:write-compiled-program compiled directory)
+      (is equal nil (native-diagnostics directory "signed_mod" "compute"))
+      (is eq nil (wgsl-program-diagnostics directory))
+      (when (apply #'tool-available-p (xcrun-command "--find" "swiftc"))
+        (let ((runner (uiop:native-namestring (merge-pathnames "signed-mod" directory))))
+          (is eq nil
+              (run-tool
+               (xcrun-command
+                "swiftc" (uiop:native-namestring
+                          (merge-pathnames "hal/shaderc/fixtures/signed-mod.swift" *root*))
+                "-o" runner)))
+          (multiple-value-bind (output errors status)
+              (uiop:run-program
+               (list runner (uiop:native-namestring
+                             (merge-pathnames "signed_mod.compute.metal" directory)))
+               :output :string :error-output :string :ignore-error-status t)
+            (if (= status 77)
+                (format t "~&Skipping signed MOD execution: no Metal device.~%")
+                (is equal '(0 "") (list status errors) "~A" output))))))))

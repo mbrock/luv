@@ -819,19 +819,32 @@ Parent values remain visible; names and provenance stay document-wide."
              sin "sin"
              cos "cos"
              exp "exp"
-             log "log"
-             shader:vec2 "float2"
-             shader:vec3 "float3"
-             shader:vec4 "float4"
-             shader:uvec2 "uint2"
-             shader:uvec3 "uint3"
-             shader:uvec4 "uint4"
-             shader:ivec2 "int2"
-             shader:ivec3 "int3"
-             shader:ivec4 "int4"
-             shader:bvec2 "bool2"
-             shader:bvec3 "bool3"
-             shader:bvec4 "bool4"))
+             log "log"))
+
+(defun lower-hlsl-vector-constructor (context expression)
+  (let ((operands (shader:shader-call-operands expression))
+        (values (lower-hlsl-operands context expression))
+        (type (hlsl-type-name (shader:shader-expression-type expression))))
+    (note-hlsl-occurrence
+     context expression
+     ;; Unlike Metal and WGSL constructors, HLSL constructors require all
+     ;; lanes. A scalar-to-vector cast is its single-evaluation splat.
+     (if (and (= 1 (length operands))
+              (eql 1 (shader:shader-type-component-count
+                      (shader:shader-expression-type (first operands)))))
+         (format nil "((~A)(~A))" type (first values))
+         (format nil "~A(~{~A~^, ~})" type values)))))
+
+(macrolet ((constructors (&rest operators)
+             `(progn
+                ,@(loop for operator in operators
+                        collect
+                        `(define-hlsl-operator ,operator (context expression)
+                           (lower-hlsl-vector-constructor context expression))))))
+  (constructors shader:vec2 shader:vec3 shader:vec4
+                shader:uvec2 shader:uvec3 shader:uvec4
+                shader:ivec2 shader:ivec3 shader:ivec4
+                shader:bvec2 shader:bvec3 shader:bvec4))
 
 (define-hlsl-operator mod (context expression)
   ;; Unsigned MOD is %; signed MOD is floored, its sign following the
@@ -839,9 +852,22 @@ Parent values remain visible; names and provenance stay document-wide."
   (if (eq :int (shader:shader-type-scalar-kind
                 (shader:shader-expression-type expression)))
       (destructuring-bind (left right) (lower-hlsl-operands context expression)
-        (note-hlsl-occurrence
-         context expression
-         (format nil "(((~A % ~A) + ~A) % ~A)" left right right right)))
+        (let* ((type (hlsl-type-name (shader:shader-expression-type expression)))
+               (divisor (hlsl-temporary-name context "mod_divisor"))
+               (remainder (hlsl-temporary-name context "mod_remainder"))
+               (zero (format nil "((~A)0)" type)))
+          ;; Select the correction before adding: r + divisor can overflow
+          ;; when both have the same sign. Evaluate each operand only once.
+          (push-hlsl-pending
+           context
+           (hlsl-line expression "~A ~A = ~A;" type divisor right)
+           (hlsl-line expression "~A ~A = (~A % ~A);"
+                      type remainder left divisor))
+          (note-hlsl-occurrence
+           context expression
+           (format nil "(~A + select(and((~A != ~A), ((~A < ~A) != (~A < ~A))), ~A, ~A))"
+                   remainder remainder zero remainder zero divisor zero
+                   divisor zero))))
       (lower-hlsl-infix-call context expression "%")))
 
 ;;; HLSL 2021 keeps && and || for scalars, where they short-circuit, and

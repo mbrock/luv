@@ -652,27 +652,20 @@ Parent values remain visible; names and provenance stay document-wide."
       (multiple-value-bind (alternative alternative-statements)
           (lower-wgsl-conditional-arm
            context (lang:arithmetic-conditional-alternative expression))
-        (note-wgsl-occurrence
-         context expression
-         (if (or consequent-statements alternative-statements)
-             (let ((name (wgsl-temporary-name context "conditional_value")))
-               (push-wgsl-pending
-                context
-                (make-instance
-                 'wgsl-conditional-value-statement
-                 :type (wgsl-type-name
-                        (shader:shader-expression-type expression))
-                 :name name :condition condition
-                 :consequent consequent :alternative alternative
-                 :consequent-statements consequent-statements
-                 :alternative-statements alternative-statements
-                 :origin expression))
-               name)
-             ;; Pure scalar/vector arms need no structured control flow.
-             (format nil "select(~A, ~A, ~A)"
-                     (wgsl-occurrence-text alternative)
-                     (wgsl-occurrence-text consequent)
-                     (wgsl-occurrence-text condition))))))))
+        ;; An expression without pending statements can still load memory,
+        ;; divide, or sample. SELECT evaluates both arms; source IF must not.
+        (let ((name (wgsl-temporary-name context "conditional_value")))
+          (push-wgsl-pending
+           context
+           (make-instance
+            'wgsl-conditional-value-statement
+            :type (wgsl-type-name (shader:shader-expression-type expression))
+            :name name :condition condition
+            :consequent consequent :alternative alternative
+            :consequent-statements consequent-statements
+            :alternative-statements alternative-statements
+            :origin expression))
+          (note-wgsl-occurrence context expression name))))))
 
 (defmethod lower-wgsl-expression
     ((context wgsl-lowering-context) (expression shader:shader-counted-fold))
@@ -900,9 +893,22 @@ Parent values remain visible; names and provenance stay document-wide."
   (if (eq :int (shader:shader-type-scalar-kind
                 (shader:shader-expression-type expression)))
       (destructuring-bind (left right) (lower-wgsl-operands context expression)
-        (note-wgsl-occurrence
-         context expression
-         (format nil "(((~A % ~A) + ~A) % ~A)" left right right right)))
+        (let* ((type (wgsl-type-name (shader:shader-expression-type expression)))
+               (divisor (wgsl-temporary-name context "mod_divisor"))
+               (remainder (wgsl-temporary-name context "mod_remainder"))
+               (zero (format nil "~A(0i)" type)))
+          ;; Select the correction before adding: r + divisor can overflow
+          ;; when both have the same sign. Evaluate each operand only once.
+          (push-wgsl-pending
+           context
+           (wgsl-line "let ~A: ~A = ~A;" divisor type right)
+           (wgsl-line "let ~A: ~A = (~A % ~A);"
+                      remainder type left divisor))
+          (note-wgsl-occurrence
+           context expression
+           (format nil "(~A + select(~A, ~A, ((~A != ~A) & ((~A < ~A) != (~A < ~A)))))"
+                   remainder zero divisor remainder zero
+                   remainder zero divisor zero))))
       (lower-wgsl-infix-call context expression "%")))
 
 ;;; WGSL's && and || are scalar; & and | combine boolean vectors.

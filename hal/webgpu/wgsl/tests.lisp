@@ -175,8 +175,8 @@
                  (wgsl:compile-wgsl (integer-bits-fragment-probe)))))
     (true (search "@location(1) @interpolate(flat) cell: vec2<i32>," source))
     (true (search "vec2<i32>(4i, (-4i))" source))
-    (true (search "let floored: vec2<i32> = (((offset % four) + four) % four);"
-                  source))
+    (true (search "let floored: vec2<i32> = (mod_remainder_" source))
+    (true (search "select(vec2<i32>(0i), mod_divisor_" source))
     (true (search "bitcast<u32>(stage_in.uv.x)" source))
     ;; WGSL shifts by u32 counts, one per component.
     (true (search "(offset >> vec2<u32>(u32(2i)))" source))

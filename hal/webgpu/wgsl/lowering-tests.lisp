@@ -275,9 +275,11 @@ fn wgsl_pulling_vertex_probe(stage_in: WgslPullingVertexProbeInput) -> WgslPulli
     (true (search "exp((-log(" source))
     ;; A WGSL scalar has no components to swizzle.
     (true (search "let spread: vec3<f32> = vec3<f32>(ripple);" source))
-    ;; WGSL has no conditional expression; select takes the false value first.
-    (true (search "select(dot(base.rgb, vec3<f32>(0.2f, 0.7f, 0.1f)), (wrap + depth.x), (sign_ < 0.0f))"
-                  source))
+    ;; A value IF still guards its expression-only arms.
+    (let ((branch (search "if ((sign_ < 0.0f))" source))
+          (consequent (search "(wrap + depth.x)" source))
+          (alternative (search "dot(base.rgb, vec3<f32>(0.2f, 0.7f, 0.1f))" source)))
+      (true (and branch consequent alternative (< branch consequent alternative))))
     (true (search "if ((lit > 0.5f)) {" source))
     ;; The fragment input repeats the vertex output's flat interpolation.
     (true (search "@location(0) @interpolate(flat) tile: u32," source))
@@ -323,8 +325,9 @@ fn wgsl_pulling_vertex_probe(stage_in: WgslPullingVertexProbeInput) -> WgslPulli
     (true (search "var fold_state_1: f32 = 0.0f;" source))
     (true (search "for (var fold_index_1: f32 = 0.0f;" source))
     (true (search "if ((fold_state_1 > stage_in.limit)) { break; }" source))
-    (true (search "select(fold_state_1, (fold_state_1 + fold_index_1), (fold_index_1 < stage_in.limit))"
-                  source))
+    (let ((branch (search "if ((fold_index_1 < stage_in.limit))" source))
+          (update (search "(fold_state_1 + fold_index_1)" source)))
+      (true (and branch update (< branch update))))
     (compiles document)))
 
 (define-test entry-point-names-and-occurrences-are-retained
@@ -557,8 +560,8 @@ fn wgsl_compute_probe(stage_in: WgslComputeProbeInput) {" source))
     (true (search "var<storage, read_write> cells: array<vec2<i32>>;" source))
     (true (search "let divisor: vec2<i32> = vec2<i32>(4i, (-4i));" source))
     ;; MOD is floored (its sign follows the divisor), REM is the truncated %.
-    (true (search "let floored: vec2<i32> = (((cell % divisor) + divisor) % divisor);"
-                  source))
+    (true (search "let floored: vec2<i32> = (mod_remainder_" source))
+    (true (search "select(vec2<i32>(0i), mod_divisor_" source))
     (true (search "let truncated: vec2<i32> = (cell % divisor);" source))
     ;; && and || are scalar in WGSL; & and | combine boolean vectors.
     (true (search "let both: vec2<bool> = (near & far);" source))
