@@ -178,6 +178,7 @@
     (is = 3 (length (host::viewer-agents viewer)))
     (let* ((gnome (find :gnome (host::viewer-agents viewer) :key #'host::inhabitant-kind))
            (position (host::inhabitant-position gnome)))
+      (is equal "Yes" (host::inhabitant-notified gnome))
       ;; Move in Luft's horizontal Y and save in old Luvcraft's horizontal Z.
       (incf (luv.arithmetic.lisp.vec3:vec3-y position) 2)
       (let* ((saved (host::agent-inhabitant-descriptions viewer descriptions))
@@ -313,3 +314,19 @@
       (true (< (render::light-cloudiness (sample 1.0)) 0.5)))
     (let ((host::*daylight-look-strength* 0.0))
       (is equalp #(1.0 1.0 1.0 1.0) (render::light-sun-color (sample 1.0))))))
+
+(define-test restored-companion-dialogue-is-history-not-a-fresh-subtitle
+  (let* ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
+         (inhabitant (make-instance 'host::inhabitant :asked "Old question" :said "Old reply"))
+         (agent (make-instance 'luvcraft.agent:gnome :session viewer)))
+    (setf (render:viewer-modal-focus viewer) nil)
+    (host::restore-companion-dialogue agent inhabitant)
+    (true (null (luvcraft.agent::dialogue-view agent)))
+    ;; Deliberately opening the conversation still reveals its saved history.
+    (setf (render:viewer-modal-focus viewer) agent)
+    (is equal "Old reply" (getf (luvcraft.agent::dialogue-view agent) :said))
+    (is equal "Old question" (getf (luvcraft.agent::dialogue-view agent) :asked))
+    ;; A new line gets the ordinary subtitle behavior, even if text repeats.
+    (setf (render:viewer-modal-focus viewer) nil
+          (luvcraft.agent::gnome-said-at agent) (get-internal-real-time))
+    (is equal "Old reply" (getf (luvcraft.agent::dialogue-view agent) :said))))

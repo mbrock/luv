@@ -22,7 +22,7 @@
    (retired-p :initform nil :accessor inhabitant-retired-p)
    (presentation :initform nil :accessor inhabitant-presentation)
    (presentation-observer :initform nil :accessor inhabitant-presentation-observer)
-   (notified :initform nil :accessor inhabitant-notified)))
+   (notified :initarg :notified :initform nil :accessor inhabitant-notified)))
 
 (defclass inhabitant-agent (luv.application-agent:application-agent)
   ((inhabitant :initarg :inhabitant :reader agent-inhabitant)))
@@ -52,7 +52,9 @@
          (simulation (terrain:make-world-simulation (render:viewer-source viewer))))
     (terrain:add-simulation-character simulation character)
     (make-instance 'inhabitant :kind kind :character character :simulation simulation :description description
-                              :conversation conversation :asked asked :said said)))
+                              :conversation conversation :asked asked :said said
+                              ;; Saved dialogue is history, not a newly completed turn.
+                              :notified said)))
 
 (defun initialize-viewer-agents (viewer)
   (unless (viewer-agents-initialized-p viewer)

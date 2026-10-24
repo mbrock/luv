@@ -235,6 +235,17 @@
 (defclass luft-cat (luft-companion luvcraft.agent:cat) ())
 (defclass luft-fantus (luft-companion luvcraft.agent:fantus) ())
 
+(defun restore-companion-dialogue (agent inhabitant)
+  "Retain saved conversation for focused reading without replaying subtitles."
+  (let ((expired (- (get-internal-real-time)
+                    (* (1+ luvcraft.agent::*dialogue-linger-seconds*)
+                       internal-time-units-per-second))))
+    (setf (luvcraft.agent::gnome-asked agent) (inhabitant-asked inhabitant)
+          (luvcraft.agent::gnome-said agent) (inhabitant-said inhabitant)
+          (luvcraft.agent::gnome-asked-at agent) expired
+          (luvcraft.agent::gnome-said-at agent) expired))
+  agent)
+
 (defun ensure-inhabitant-presentation (viewer inhabitant)
   (or (inhabitant-presentation inhabitant)
       (let* ((p (presentation-position viewer (inhabitant-position inhabitant)))
@@ -244,10 +255,8 @@
                                    :x (floor (vec3:vec3-x p)) :y (floor (vec3:vec3-y p))
                                    :z (floor (vec3:vec3-z p)))))
         (companion-presentation viewer)
-        (setf (inhabitant-presentation inhabitant) agent
-              (luvcraft.agent::gnome-asked agent) (inhabitant-asked inhabitant)
-              (luvcraft.agent::gnome-said agent) (inhabitant-said inhabitant)
-              (luvcraft.agent::gnome-said-at agent) (get-internal-real-time))
+        (setf (inhabitant-presentation inhabitant) agent)
+        (restore-companion-dialogue agent inhabitant)
         (render:add-viewer-overlay viewer agent)
         (luvcraft.agent::ensure-embodied-agent-body agent)
         (when (inhabitant-provider inhabitant)
