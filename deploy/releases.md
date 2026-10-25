@@ -88,6 +88,9 @@ Slynk endpoint file goes in the user's temporary directory.
 The moved ZIP was tested on temple (M2 Pro, macOS 27.2, Metal 4) with Nix,
 Homebrew, the checkout, and builder caches denied: real terrain and HUD,
 all companions, save/reload, clean shutdown, and Finder launch passed.
+The hosted ZIP was also tested on yawl (M5, macOS 27.2), including native
+rendering and save/relaunch. That cross-machine check caught saved native
+Objective-C addresses; the runtime now rebinds them when restoring an image.
 The unavailable source-update panel explains why a packaged copy cannot
 update a development checkout. Hosted `macos-26` CI builds and checks
 signatures, dependency relocation, help, and error exits with `--cli-only`;
@@ -131,11 +134,16 @@ nix build --impure --expr 'import ./scripts/windows-sources.nix {}' \
 Transfer `lisp-sources.tar.gz` to the same checkout revision on Windows.
 In an updated MSYS2 UCRT64 shell run
 `bash scripts/windows-bootstrap.sh --with-mesa`, then in PowerShell with
-native Python 3.12 or newer:
+native Python 3.12 or newer, without administrator elevation:
 
 ```powershell
 python scripts/windows-build.py --sources lisp-sources.tar.gz --software-smoke-test
 ```
+
+Vulkan ignores driver-path environment overrides in elevated processes.
+On GitHub's disposable administrator runner, the test temporarily registers
+only its private relocated lavapipe manifest, then removes that registry
+value in cleanup. Neither the software driver nor its registration ships.
 
 References: [ASDF program-op](https://asdf.common-lisp.dev/asdf.html#Building-programs),
 [SBCL executable delivery](https://www.sbcl.org/manual/index.html#Saving-a-Core-Image),

@@ -11,6 +11,7 @@ lavapipe in a relocated copy. Mesa and the compiler are never shipped.
 """
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -164,6 +165,31 @@ int main(void) {
     run([helper], env=env)
 
 
+@contextmanager
+def software_driver_registration(manifest):
+    """Let elevated CI discover the private ICD without retaining registry state."""
+    import ctypes
+    import winreg
+
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        yield  # Unelevated Vulkan honors VK_DRIVER_FILES.
+        return
+    # Vulkan deliberately ignores driver-path environment variables in an
+    # elevated process. Hosted Windows runners are administrators; register
+    # only this disposable test copy, never an MSYS2 or shipping driver path.
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError("Run the software smoke test from an unelevated shell")
+    print("Temporarily registering private lavapipe ICD for elevated CI", flush=True)
+    with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE,
+                            r"SOFTWARE\Khronos\Vulkan\Drivers", 0,
+                            winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as key:
+        winreg.SetValueEx(key, str(manifest), 0, winreg.REG_DWORD, 0)
+        try:
+            yield
+        finally:
+            winreg.DeleteValue(key, str(manifest))
+
+
 def relocated_smoke(stage, system_root, prefix, build_env, software):
     # The Lisp dependency tree is already gone. The boot resource checks and
     # optional render use only the moved bundle; PATH contains no build tools.
@@ -204,22 +230,24 @@ def relocated_smoke(stage, system_root, prefix, build_env, software):
             private_icd = root / "lavapipe.json"
             private_icd.write_text(json.dumps(icd))
             env["VK_DRIVER_FILES"] = str(private_icd)
+            env["VK_LOADER_DEBUG"] = "error,warn"
             image = root / "frame.png"
             # A GUI-subsystem EXE has no attached console. Explicit pipes
             # preserve its Lisp/native diagnostics on both success and failure.
-            print(run([moved / "luvcraft.exe", "--vulkan-smoke-test", image],
-                      cwd=root, env=env, timeout=600, text=True,
-                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout,
-                  end="")
-            if not image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
-                raise ValueError("Vulkan smoke did not produce a PNG")
-            image.unlink()
-            print(run([moved / "luvcraft.exe", "--game-smoke-test", image],
-                      cwd=root, env=env, timeout=600, text=True,
-                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout,
-                  end="")
-            if not image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
-                raise ValueError("Game save/reload smoke did not produce a PNG")
+            with software_driver_registration(private_icd):
+                print(run([moved / "luvcraft.exe", "--vulkan-smoke-test", image],
+                          cwd=root, env=env, timeout=600, text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout,
+                      end="")
+                if not image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError("Vulkan smoke did not produce a PNG")
+                image.unlink()
+                print(run([moved / "luvcraft.exe", "--game-smoke-test", image],
+                          cwd=root, env=env, timeout=600, text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout,
+                      end="")
+                if not image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError("Game save/reload smoke did not produce a PNG")
             shutil.copy2(image, Path(str(stage) + "-smoke.png"))
 
 

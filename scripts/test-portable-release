@@ -17,9 +17,14 @@ chmod +x "$temporary/moved download/Luvcraft.run"
 # Hide both the real store and checkout, and remove the development shell's
 # environment. These mounts exist only in this short-lived private namespace.
 # A fresh HOME also prevents a successful earlier extraction masking a bug.
+# Keep the display server on the host, as it is on a player's desktop.
+# SDL's D-Bus probe can briefly be its only client; do not reset the server
+# when that probe disconnects while SDL is opening its own connection.
 # shellcheck disable=SC2016 # Expand in the isolated child shell, not here.
-if ! unshare --user --map-root-user --mount --fork \
-  env -i PATH=/usr/bin:/bin HOME="$temporary/home" \
+if ! env -i PATH=/usr/bin:/bin HOME="$temporary/home" \
+  xvfb-run -a -s '-screen 0 1280x1024x24 -nolisten tcp -noreset' \
+  -e "$temporary/xvfb.log" \
+  unshare --user --map-root-user --mount --fork \
   /bin/sh -eu -c '
     mount --make-rprivate /
     mount -t tmpfs tmpfs /nix
@@ -41,17 +46,17 @@ if ! unshare --user --map-root-user --mount --fork \
     export SDL_VIDEODRIVER=x11
     export VK_DRIVER_FILES="/usr/share/vulkan/icd.d/lvp_icd.$(uname -m).json"
     test -r "$VK_DRIVER_FILES"
-    timeout 300 xvfb-run -a "$bundle" --vulkan-smoke-test "$2/frame.png"
+    timeout 300 "$bundle" --vulkan-smoke-test "$2/frame.png"
     test -s frame.png
     test "$(od -An -tx1 -N8 frame.png | tr -d " \n")" = 89504e470d0a1a0a
     rm frame.png
-    timeout 300 xvfb-run -a "$bundle" --game-smoke-test "$2/frame.png"
+    timeout 300 "$bundle" --game-smoke-test "$2/frame.png"
     test -s frame.png
     test "$(od -An -tx1 -N8 frame.png | tr -d " \n")" = 89504e470d0a1a0a
     echo "Portable release: relocated launch, argument errors, Vulkan frames, and game save/reload passed without host Nix or checkout."
   ' sh "$source_root" "$temporary" > "$temporary/check.log" 2>&1; then
   cat "$temporary/check.log"
-  for log in "$temporary/help.log" "$temporary/invalid.log"; do
+  for log in "$temporary/help.log" "$temporary/invalid.log" "$temporary/xvfb.log"; do
     if [ -f "$log" ]; then cat "$log"; fi
   done
   exit 1
