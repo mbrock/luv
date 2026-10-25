@@ -75,10 +75,12 @@ environment still takes precedence.")
 
 (defun library-sonames (stem major)
   "Return the names to try for libSTEM at major version MAJOR, most exact first."
+  #+win32
+  (list (format nil "~A-~D.dll" stem major))
   #+darwin
   (list (format nil "lib~A.~D.dylib" stem major)
         (format nil "lib~A.dylib" stem))
-  #-darwin
+  #-(or darwin win32)
   (list (format nil "lib~A.so.~D" stem major)
         (format nil "lib~A.so" stem)))
 

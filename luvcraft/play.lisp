@@ -10,7 +10,8 @@
   "Return the pathname of the ordinary persistent luvcraft world."
   (merge-pathnames
    #P"luvcraft/worlds/default.sexp"
-   (let ((data-home (uiop:getenv "XDG_DATA_HOME")))
+   (let ((data-home (or (uiop:getenv "XDG_DATA_HOME")
+                        #+win32 (uiop:getenv "LOCALAPPDATA"))))
      (if data-home
          (uiop:ensure-directory-pathname (pathname data-home))
          (merge-pathnames #P".local/share/" (user-homedir-pathname))))))

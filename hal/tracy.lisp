@@ -49,6 +49,8 @@
 
 (defun load-tracy-client ()
   "Load the Tracy client library, preferring the one LUV_TRACY_CLIENT names."
+  #+win32
+  (error "Tracy is not included in the Windows game.")
   (or *tracy-client*
       (let* ((override (tracy-client-override))
              (client

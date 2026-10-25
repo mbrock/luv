@@ -1,0 +1,48 @@
+diff --git a/src/lib.lisp b/src/lib.lisp
+--- a/src/lib.lisp
++++ b/src/lib.lisp
+@@ -8,11 +8,7 @@
+ (cffi:define-foreign-library libsdl3
+   (:darwin (:or (:framework "SDL3") (:default "libSDL3")))
+   (:unix (:or "libSDL3.so" "libSDL3.so.0" "libSDL3.so.0.1.11"))
+-  #+(or x86 x86-64)
+-  (:windows #.(system-relative-namestring
+-               :sdl3
+-               #+x86 "lib/windows/x86/SDL3.dll"
+-               #+x86-64 "lib/windows/x86-64/SDL3.dll"))
++  (:windows "SDL3.dll")
+   (t (:default "libSDL3")))
+ 
+ (cffi:use-foreign-library libsdl3)
+diff --git a/src/extr/sdl-image/lib.lisp b/src/extr/sdl-image/lib.lisp
+--- a/src/extr/sdl-image/lib.lisp
++++ b/src/extr/sdl-image/lib.lisp
+@@ -8,11 +8,7 @@
+ (cffi:define-foreign-library libsdl3-image
+   (:darwin (:or (:framework "SDL3_image") (:default "libSDL3_image")))
+   (:unix (:or "libSDL3_image.so" "libSDL3_image.so.0" "libSDL3_image.so.0.2.1"))
+-  #+(or x86 x86-64)
+-  (:windows #.(system-relative-namestring
+-               :sdl3
+-               #+x86 "src/extr/sdl-image/lib/windows/x86/SDL3_image.dll"
+-               #+x86-64 "src/extr/sdl-image/lib/windows/x86-64/SDL3_image.dll"))
++  (:windows "SDL3_image.dll")
+   (t (:default "libSDL3")))
+ 
+ (cffi:use-foreign-library libsdl3-image)
+diff --git a/src/extr/sdl-ttf/lib.lisp b/src/extr/sdl-ttf/lib.lisp
+--- a/src/extr/sdl-ttf/lib.lisp
++++ b/src/extr/sdl-ttf/lib.lisp
+@@ -8,11 +8,7 @@
+ (cffi:define-foreign-library libsdl3-ttf
+   (:darwin (:or (:framework "SDL3_ttf") (:default "libSDL3_ttf")))
+   (:unix (:or "libSDL3_ttf.so" "libSDL3_ttf.so.0" "libSDL3_ttf.so.0.1.1"))
+-  #+(or x86 x86-64)
+-  (:windows #.(system-relative-namestring
+-               :sdl3
+-               #+x86 "src/extr/sdl-ttf/lib/windows/x86/SDL3_ttf.dll"
+-               #+x86-64 "src/extr/sdl-ttf/lib/windows/x86-64/SDL3_ttf.dll"))
++  (:windows "SDL3_ttf.dll")
+   (t (:default "libSDL3")))
+ 
+ (cffi:use-foreign-library libsdl3-ttf)

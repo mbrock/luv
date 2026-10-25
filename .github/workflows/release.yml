@@ -15,8 +15,72 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
+  windows-sources:
+    # Export the locked Lisp sources on Linux; compile them natively below.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+      - uses: cachix/install-nix-action@v31
+      - name: Export pinned Lisp sources
+        run: |
+          mkdir -p build
+          nix build --impure --expr 'import ./scripts/windows-sources.nix {}' --out-link build/windows-sources
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-lisp-sources
+          path: build/windows-sources/lisp-sources.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  windows:
+    needs: windows-sources
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-lisp-sources
+          path: build/windows-sources
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+      - name: Install native build and software-rendering dependencies
+        id: bootstrap
+        shell: msys2 {0}
+        run: bash scripts/windows-bootstrap.sh --with-mesa
+      - name: Build and test relocated Windows game
+        run: |
+          python scripts/windows-build-tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/windows-build.py --sources build/windows-sources/lisp-sources.tar.gz --msys-root '${{ steps.bootstrap.outputs.msys_root }}' --output build/luvcraft-windows-x86_64 --software-smoke-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash build/luvcraft-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  luvcraft-windows-x86_64.zip" | Set-Content build/luvcraft-windows-x86_64.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luvcraft-windows-x86_64
+          path: |
+            build/luvcraft-windows-x86_64.zip
+            build/luvcraft-windows-x86_64.sha256
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-smoke-frame
+          path: build/luvcraft-windows-x86_64-smoke.png
+          if-no-files-found: error
+
   linux:
-    # Windows needs a game-only build without Unix tools; macOS needs a .app.
     # Do not publish bare SBCL images that still depend on the CI Nix store.
     runs-on: ubuntu-22.04
     timeout-minutes: 90
@@ -59,7 +123,7 @@ jobs:
 
   publish:
     if: github.event_name == 'release'
-    needs: linux
+    needs: [linux, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -67,6 +131,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: luvcraft-linux-x86_64
+          path: downloads
+      - uses: actions/download-artifact@v4
+        with:
+          name: luvcraft-windows-x86_64
           path: downloads
       - name: Attach verified downloads to the existing release
         env:

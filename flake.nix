@@ -728,7 +728,13 @@
             ''}
             # The dumped image contains the Lisp program. Keep only the files
             # it opens at runtime, not a second copy of the whole repository.
-            find . -mindepth 1 -maxdepth 1 ! -name fonts ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "! -name build ! -name objective-c"} -exec rm -rf {} +
+            find . -mindepth 1 -maxdepth 1 ! -name fonts ${lib.optionalString (name == "luvcraft") "! -name luvcraft"} ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "! -name build ! -name objective-c"} -exec rm -rf {} +
+            ${lib.optionalString (name == "luvcraft") ''
+              # Companion meshes and IK rigs are loaded on demand, not baked
+              # into the saved image. Preserve their ASDF-relative paths.
+              find luvcraft -type f ! -name '*.fmesh' ! -name '*.rig' -delete
+              find luvcraft -depth -type d -empty -delete
+            ''}
             # These private wiki fonts are git-annex links, not game resources.
             rm -rf fonts/equity
 

@@ -19,8 +19,8 @@ chmod +x luvcraft-linux-x86_64.run
 ./luvcraft-linux-x86_64.run
 ```
 
-The file contains the SBCL image, native libraries, fonts, Bash, and the
-other runtime dependencies. It extracts into `~/.cache` and uses a private
+The file contains the SBCL image, native libraries, fonts, companion meshes,
+Bash, and the other runtime dependencies. It extracts into `~/.cache` and uses a private
 Linux user/mount namespace to give those files their original paths. This
 is a single-file **distribution**, not a statically linked executable.
 First launch needs extraction time and additional disk space. It does not
@@ -50,11 +50,13 @@ sh scripts/test-portable-release build/portable build/release-smoke.png
 The test copies the download into a path containing spaces, gives it a
 fresh home, hides the builder's `/nix` and source checkout, removes the
 development environment, checks `--help` and failure exit status, and
-renders the existing hidden Vulkan smoke scene with host lavapipe. This
-checks packaging and one rendering path, not interactive gameplay on every
-GPU or distribution. Hardware-driver testing remains necessary.
+renders the existing hidden Vulkan smoke scene with host lavapipe. It also
+loads every companion mesh/rig and starts the current game twice with a
+temporary save, checking its frame loop, capture, and save/reload path.
+This is not interactive gameplay testing on every GPU or distribution.
+Hardware-driver testing remains necessary.
 
-## macOS and Windows are not downloadable releases yet
+## macOS: app packaging in progress
 
 ASDF's `program-op` already creates the native SBCL executables; it does
 not bundle their dynamic libraries or relocate their resource paths.
@@ -71,17 +73,48 @@ signing and notarization need Apple credentials; an unsigned test build
 is not equivalent to a frictionless public download. The existing Nix
 package supports Apple Silicon, not Intel Macs.
 
-For **Windows x86-64**, SBCL can produce an EXE and the existing SDL/Vulkan
-renderer is the intended backend. The agreed first-release scope is the
-playable game without terminal walls or developer tools such as Tracy
-capture; a ConPTY port is not required. Those systems still load
-unconditionally today, so the build must exclude them and disable their
-entry points rather than merely omit their DLLs. HarfBuzz also needs a
-Windows library definition. If media playback stays enabled, FFmpeg needs
-Windows DLL names, a native C toolchain for ABI groveling, and matching
-headers/DLLs. Merely adding `windows-latest` to the matrix cannot resolve
-these issues. Start with an EXE plus DLLs/resources in a ZIP; single-file
-extraction or an installer can follow a working native build.
+## Windows x86-64: native build qualification
+
+The Windows job builds with native SBCL and MSYS2 UCRT64, using the same
+locked Lisp sources as the Nix build. Linux exports sources only; it does
+not cross-compile Lisp images or copy Unix ABI layouts into Windows.
+FFmpeg is groveled against the native headers and checked against the DLLs
+from the same MSYS2 installation.
+
+The intended download is `luvcraft-windows-x86_64.zip`: extract the entire
+directory and run `luvcraft.exe`. DLLs, fonts, and companion meshes must
+stay beside the EXE. This is not yet a single-file Windows distribution.
+The executable is unsigned; there is no Authenticode certificate configured.
+
+The Windows player excludes the Unix PTY backend, Luft terminal overlays,
+the Slynk listener, and Tracy/source-update commands. It retains the
+SDL/Vulkan game renderer. Saves use `%LOCALAPPDATA%/luvcraft/worlds` unless
+`XDG_DATA_HOME` or `--world` overrides that location.
+
+The job must successfully launch a moved copy with a clean environment,
+check CLI failure behavior, and render with Mesa's software Vulkan driver
+before uploading a download. Both the dependency sources and temporary game
+checkout are removed first. The current game's companion assets, frame
+loop, and save/reload are checked too. This is build qualification, not a claim of
+interactive hardware-driver testing on Windows. Native verification is
+still in progress; use the job's result and artifacts, not the presence of
+build scripts, to decide whether a particular revision has a usable build.
+
+To reproduce the native build, export the source archive on Linux:
+
+```sh
+nix build --impure --expr 'import ./scripts/windows-sources.nix {}' \
+  --out-link build/windows-sources
+```
+
+Transfer `lisp-sources.tar.gz` to the same checkout revision on Windows.
+In an updated MSYS2 UCRT64 shell run
+`bash scripts/windows-bootstrap.sh --with-mesa`, then in PowerShell with
+native Python 3.12 or newer:
+
+```powershell
+python scripts/windows-build.py --sources lisp-sources.tar.gz --software-smoke-test
+```
 
 References: [ASDF program-op](https://asdf.common-lisp.dev/asdf.html#Building-programs),
 [SBCL executable delivery](https://www.sbcl.org/manual/index.html#Saving-a-Core-Image),

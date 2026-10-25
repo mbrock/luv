@@ -371,7 +371,7 @@
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/luft/game" "sb-posix" "slynk")
+  :depends-on ("luvcraft/luft/game" "sb-posix" #-win32 "slynk")
   :components ((:file "luvcraft/main"))
   :build-operation "program-op"
   :build-pathname "build/luvcraft"

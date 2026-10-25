@@ -375,7 +375,9 @@ offsets and of headers."
   ((:module "terminal"
     :serial t
     :components ((:file "package")
-                 (:file "pty"))))
+                 ;; The Windows game keeps the vocabulary used by the old
+                 ;; renderer, but does not load or offer a Unix shell backend.
+                 (:file "pty" :if-feature (:not :win32)))))
   :in-order-to ((test-op (test-op "luv/terminal/test"))))
 
 (defsystem "luv/terminal/canvas"

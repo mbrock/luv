@@ -58,16 +58,20 @@
 
 ;;; Give the original safe-viewport framing solver a wall in its own axes.
 ;;; This is only a geometric view, not a second terminal or block world.
+#-win32
 (defclass terminal-framing-surface (luvcraft::terminal-surface)
   ((surface :initarg :surface :reader framing-surface)
    (viewer :initarg :viewer :reader framing-viewer)))
 
+#-win32
 (defmethod luvcraft::terminal-surface-physical-width ((surface terminal-framing-surface))
   (render::terminal-surface-width (framing-surface surface)))
 
+#-win32
 (defmethod luvcraft::terminal-surface-physical-height ((surface terminal-framing-surface))
   (render::terminal-surface-height (framing-surface surface)))
 
+#-win32
 (defmethod luvcraft::terminal-surface-lower-left-point
     ((surface terminal-framing-surface) &optional (offset 0.006))
   (presentation-position
@@ -75,6 +79,8 @@
    (render::terminal-surface-point
     (framing-surface surface) 0 0 (- offset render::*terminal-surface-offset*))))
 
+;; Windows does not load the atelier's terminal overlay or its focus class.
+#-win32
 (defmethod render:viewer-focus-camera-pose
     ((state render::viewer-terminals) (viewer luvcraft-viewer))
   (let ((terminal (render::viewer-terminals-focus state)))

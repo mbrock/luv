@@ -44,7 +44,11 @@ if ! unshare --user --map-root-user --mount --fork \
     timeout 300 xvfb-run -a "$bundle" --vulkan-smoke-test "$2/frame.png"
     test -s frame.png
     test "$(od -An -tx1 -N8 frame.png | tr -d " \n")" = 89504e470d0a1a0a
-    echo "Portable release: relocated launch, argument errors, and Vulkan frame passed without host Nix or checkout."
+    rm frame.png
+    timeout 300 xvfb-run -a "$bundle" --game-smoke-test "$2/frame.png"
+    test -s frame.png
+    test "$(od -An -tx1 -N8 frame.png | tr -d " \n")" = 89504e470d0a1a0a
+    echo "Portable release: relocated launch, argument errors, Vulkan frames, and game save/reload passed without host Nix or checkout."
   ' sh "$source_root" "$temporary" > "$temporary/check.log" 2>&1; then
   cat "$temporary/check.log"
   for log in "$temporary/help.log" "$temporary/invalid.log"; do

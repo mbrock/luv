@@ -22,6 +22,7 @@
       ((workbench (luv.workbench:application-workbench viewer)))
     (luv.workbench:close-workbench-source-update workbench)))
 
+#-win32
 (clim:define-command (com-review-source-update
                       :command-table luft-play
                       :name "Review Source Update")

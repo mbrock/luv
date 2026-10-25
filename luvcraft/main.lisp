@@ -37,7 +37,13 @@
     (format stream "~D ~D~%" pid port)))
 
 (defun call-with-slynk (function)
+  ;; The Windows download is a player, without a development listener or
+  ;; writes beside a potentially read-only installed executable.
+  #+win32
+  (return-from call-with-slynk (funcall function))
+  #-win32
   (setf slynk:*log-output* (make-broadcast-stream))
+  #-win32
   (let* ((pid (sb-posix:getpid))
          (port (slynk:create-server
                 :interface "127.0.0.1"
@@ -66,6 +72,7 @@
   (format stream "--fullscreen opens the game on the whole display instead of in a window.~%")
   (format stream "--world loads or creates the named persistent world.~%")
   (format stream "--birthday opens directly into the persistent birthday party.~%")
+  (format stream "--game-smoke-test PNG opens a temporary game, captures it, and checks save/reload.~%")
   (format stream "--smoke-test renders one hidden frame with the platform default and exits.~%")
   (format stream "--vulkan-smoke-test renders one hidden Vulkan frame and exits.~%")
   (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
@@ -153,6 +160,41 @@
    pathname :provider (or provider luv:*gpu-provider*))
   (format t "Wrote ~A~%" (truename pathname)))
 
+(defun run-game-smoke-test (pathname)
+  "Exercise the shipped game's startup, lazy assets, frame loop, and save."
+  ;; These meshes are normally loaded only when a companion appears. A bare
+  ;; terrain frame would not detect a package that accidentally omitted them.
+  (dolist (kind '(:cat :gnome :fantus))
+    (luvcraft.agent::load-companion-mesh kind))
+  (uiop:with-temporary-file (:pathname world :type "world")
+    (delete-file world)
+    (dotimes (pass 2)
+      (let* ((viewer (luvcraft.luft.game:play :pathname world :width 640 :height 480))
+             (canvas (luft.render:viewer-canvas viewer))
+             (scene (luft.render:viewer-source viewer))
+             (deadline (+ (get-internal-real-time)
+                          (* 120 internal-time-units-per-second))))
+        (unwind-protect
+             (progn
+               (loop
+                 (when (or (luv::sdl-canvas-startup-error canvas)
+                           (luv:canvas-failures canvas)
+                           (luft.terrain:streaming-scene-production-errors scene))
+                   (error "Game smoke failed: ~S" (luv:canvas-health canvas)))
+                 (when (and (> (luv::sdl-canvas-frame-count canvas) 5)
+                            (luft.terrain:streaming-scene-mesh-cache scene))
+                   (return))
+                 (when (> (get-internal-real-time) deadline)
+                   (error "Game smoke timed out: ~S" (luv:canvas-health canvas)))
+                 (sleep 0.1))
+               (when (= pass 1)
+                 (luft.render:capture-viewer-frame pathname viewer)))
+          (luft.render:stop-viewer viewer))
+        (unless (probe-file world)
+          (error "Game smoke did not save its temporary world.")))))
+  (format t "Game startup, companion assets, frames, and save/reload passed: ~A~%"
+          (truename pathname)))
+
 (defun run-metal-text-closeup (pathname)
   (format t "Rendering Slug text close-up ~A~%" pathname)
   (capture-hidden-luvcraft-text-closeup
@@ -195,6 +237,9 @@
     ((and (= (length arguments) 1)
           (member (first arguments) '("--help" "-h") :test #'string=))
      (usage))
+    ((and (= (length arguments) 2)
+          (string= (first arguments) "--game-smoke-test"))
+     (run-game-smoke-test (pathname (second arguments))))
     ((and (= (length arguments) 2)
           (string= (first arguments) "--smoke-test"))
      (run-smoke-test (pathname (second arguments))))

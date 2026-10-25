@@ -204,7 +204,7 @@
   :serial t
   :components ((:file "luft/render/atelier-world")
                (:file "luft/render/studio")
-               (:file "luft/render/terminal")
+               (:file "luft/render/terminal" :if-feature (:not :win32))
                (:file "luft/render/persistence")
                (:file "luft/render/live-artifact")
                (:file "luft/render/workbench")

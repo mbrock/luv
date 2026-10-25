@@ -16,7 +16,8 @@
   "The ordinary persistent LUFT world, beside Luvcraft's under XDG data."
   (merge-pathnames
    #P"luft/worlds/default.sexp"
-   (let ((data-home (uiop:getenv "XDG_DATA_HOME")))
+   (let ((data-home (or (uiop:getenv "XDG_DATA_HOME")
+                        #+win32 (uiop:getenv "LOCALAPPDATA"))))
      (if (and data-home (plusp (length data-home)))
          (uiop:ensure-directory-pathname (pathname data-home))
          (merge-pathnames #P".local/share/" (user-homedir-pathname))))))

@@ -142,6 +142,9 @@ than another graceful request would."))
   (declare (ignore runtime))
   (sb-ext:process-alive-p process))
 
+;; Windows releases do not offer capture: SBCL's Windows PROCESS-KILL
+;; terminates rather than delivering Tracy's graceful-save SIGINT.
+#-win32
 (defmethod interrupt-tracy-process
     ((runtime native-tracy-capture-runtime) process)
   (declare (ignore runtime))
@@ -150,6 +153,7 @@ than another graceful request would."))
     (sb-ext:process-kill process sb-posix:sigint))
   t)
 
+#-win32
 (defmethod terminate-tracy-process
     ((runtime native-tracy-capture-runtime) process)
   (declare (ignore runtime))

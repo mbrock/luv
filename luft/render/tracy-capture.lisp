@@ -94,6 +94,7 @@
   (when-let ((controller (viewer-tracy-capture viewer)))
     (luv.tracy.capture:reveal-tracy-capture controller pathname)))
 
+#-win32
 (clim:define-command (com-toggle-tracy-capture
                       :command-table luft-window
                       :name "Toggle Tracy Capture"
@@ -101,24 +102,28 @@
     ()
   (toggle-viewer-tracy-capture (viewer-command-viewer)))
 
+#-win32
 (clim:define-command (com-start-tracy-capture
                       :command-table luft-window
                       :name "Start Tracy Capture")
     ()
   (start-viewer-tracy-capture (viewer-command-viewer)))
 
+#-win32
 (clim:define-command (com-stop-tracy-capture
                       :command-table luft-window
                       :name "Stop Tracy Capture")
     ()
   (stop-viewer-tracy-capture (viewer-command-viewer)))
 
+#-win32
 (clim:define-command (com-open-last-tracy-capture
                       :command-table luft-window
                       :name "Open Last Tracy Capture")
     ()
   (open-viewer-tracy-capture (viewer-command-viewer)))
 
+#-win32
 (clim:define-command (com-reveal-last-tracy-capture
                       :command-table luft-window
                       :name "Reveal Last Tracy Capture")

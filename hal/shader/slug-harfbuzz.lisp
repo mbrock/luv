@@ -3,6 +3,7 @@
 (in-package #:luv.slug)
 
 (cffi:define-foreign-library harfbuzz
+  (:windows (:or "libharfbuzz-0.dll" "harfbuzz.dll"))
   (:darwin (:or "libharfbuzz.dylib" "libharfbuzz.0.dylib"))
   (:unix (:or "libharfbuzz.so" "libharfbuzz.so.0")))
 
