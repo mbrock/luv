@@ -182,7 +182,15 @@
                            (luft.terrain:streaming-scene-production-errors scene))
                    (error "Game smoke failed: ~S" (luv:canvas-health canvas)))
                  (when (and (> (luv::sdl-canvas-frame-count canvas) 5)
-                            (luft.terrain:streaming-scene-mesh-cache scene))
+                            (luv::call-on-sdl-canvas-thread
+                             canvas
+                             (lambda ()
+                               ;; A running HUD alone does not prove that the
+                               ;; terrain underneath the player is usable.
+                               (and (plusp (hash-table-count
+                                            (luft.terrain:streaming-scene-loaded scene)))
+                                    (null (luft.terrain:streaming-scene-replacement scene))
+                                    (luft.render::viewer-player-ground-resident-p viewer)))))
                    (return))
                  (when (> (get-internal-real-time) deadline)
                    (error "Game smoke timed out: ~S" (luv:canvas-health canvas)))

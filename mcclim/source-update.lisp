@@ -25,7 +25,7 @@
   target)
 
 (defgeneric source-update-root-for (owner)
-  (:documentation "Return OWNER's managed source checkout directory."))
+  (:documentation "Return OWNER's managed source checkout directory, or NIL in a release."))
 
 (defmethod source-update-root-for ((owner t))
   (declare (ignore owner))
@@ -562,13 +562,22 @@
 
 (defun make-source-update-session
     (root systems &key loader (start-p t))
-  "Create a source update session, optionally starting its first fetch."
+  "Create a source update session, or an unavailable session when ROOT is NIL."
   (let ((session
           (make-instance
            'source-update-session
-           :root (uiop:ensure-directory-pathname (truename root))
+           :root (and root (uiop:ensure-directory-pathname (truename root)))
            :systems (mapcar #'string systems)
            :loader loader)))
+    (unless root
+      (setf (source-update-accepting-p session) nil)
+      (publish-source-update
+       session
+       (make-source-update-snapshot
+        :state :unavailable :heading "This is a packaged application"
+        :lines '("Source updates require a development checkout."
+                 "Download a newer application build to update this copy.")
+        :footer "Esc closes")))
     (when start-p (request-source-update-fetch session))
     session))
 
@@ -649,6 +658,7 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
 (defun source-update-state-label (state)
   (ecase state
     (:idle "idle")
+    (:unavailable "unavailable")
     (:fetching "fetching")
     (:current "current")
     (:review "review")
@@ -659,6 +669,7 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
 
 (defun source-update-action-label (snapshot)
   (case (source-update-snapshot-state snapshot)
+    (:unavailable "Source update unavailable")
     (:review "Apply reviewed update")
     ((:fetching :applying :loading) "Working…")
     (:failed
@@ -669,7 +680,7 @@ Merge and ASDF assimilation are never interrupted; callers wait for them."
 
 (defun source-update-action-enabled-p (snapshot)
   (not (member (source-update-snapshot-state snapshot)
-               '(:fetching :applying :loading))))
+               '(:unavailable :fetching :applying :loading))))
 
 (defun source-update-build-progress-lines (snapshot)
   (when snapshot

@@ -1,5 +1,15 @@
 (in-package #:mcluv.tests)
 
+(define-test source-update-without-a-checkout-is-unavailable
+  (let ((session (mcluv:make-source-update-session nil '("luvcraft"))))
+    (mcluv:request-source-update-fetch session)
+    (mcluv:request-source-update-apply session)
+    (mcluv:request-source-update-retry session)
+    (let ((snapshot (mcluv:wait-source-update-session session)))
+      (true (eq :unavailable (mcluv:source-update-snapshot-state snapshot)))
+      (false (mcluv::source-update-action-enabled-p snapshot)))
+    (mcluv:quiesce-source-update-session session)))
+
 (defun source-update-test-directory ()
   (let ((directory
           (merge-pathnames

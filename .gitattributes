@@ -1,0 +1,4 @@
+# SBCL reads literal CR characters in FORMAT's ~newline directives on Windows.
+*.lisp text eol=lf
+*.asd text eol=lf
+*.sh text eol=lf
