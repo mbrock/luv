@@ -19,6 +19,46 @@
   (true (not (cffi:null-pointer-p objc::*objective-c-message-send-pointer*)))
   (true (not (fboundp 'objc::objective-c-message-send-pointer))))
 
+#+sbcl
+(define-test declared-messages-survive-image-restoration
+  (uiop:with-temporary-file (:pathname image :suffix ".core")
+    (uiop:with-temporary-file
+        (:stream source :pathname script :suffix ".lisp")
+      (dolist (form
+                `((require :asdf)
+                  (asdf:load-system "luv/objective-c")
+                  ;; Model a different host's native addresses, even when
+                  ;; this test's two processes share a dyld cache mapping.
+                  (setf objc::*objective-c-message-send-pointer*
+                        (cffi:make-pointer 1))
+                  (maphash
+                   (lambda (name definition)
+                     (declare (ignore name))
+                     (setf (objc::objective-c-message-definition-selector-pointer
+                            definition)
+                           (cffi:make-pointer 2)))
+                   objc::*objective-c-message-definitions*)
+                  (setf uiop:*image-entry-point*
+                        (lambda ()
+                          (objc:with-autorelease-pool ()
+                            (assert
+                             (string= "restored native messages"
+                                      (objc:objective-c-string
+                                       (objc:lisp-string-to-objective-c
+                                        "restored native messages")))))
+                          (write-line "RESTORED-OBJECTIVE-C-PASSED")))
+                  (uiop:dump-image ,(namestring image) :executable t)))
+        (write form :stream source :readably t)
+        (terpri source))
+      :close-stream
+      (uiop:run-program
+       (list (namestring sb-ext:*runtime-pathname*) "--noinform"
+             "--non-interactive" "--load" (namestring script))
+       :output :string :error-output :output)
+      (true (search "RESTORED-OBJECTIVE-C-PASSED"
+                    (uiop:run-program (list (namestring image))
+                                      :output :string :error-output :output))))))
+
 (define-test message-definitions-retain-selector-abi-and-ownership
   (let ((description
           (objc:objective-c-message-description 'metal:device-name)))

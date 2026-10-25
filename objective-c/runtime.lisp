@@ -339,10 +339,25 @@ the native NSInvocation exception bridge for an explicit diagnostic scope.")
 (defvar *objective-c-message-send-pointer*
   (cffi:foreign-symbol-pointer "objc_msgSend"
                                :library 'objective-c-runtime-library)
-  "The stable libobjc dispatch entry, resolved once when this runtime loads.
+  "The libobjc dispatch entry, resolved on load and image restoration.
 
 Resolving this symbol for every declared message used to put dlsym on the
 per-frame path hundreds of times.  #WEE1DX")
+
+(defun restore-objective-c-runtime ()
+  "Rebind native addresses after restoring an image on another host or boot."
+  (setf *objective-c-message-send-pointer*
+        (cffi:foreign-symbol-pointer "objc_msgSend"
+                                     :library 'objective-c-runtime-library))
+  (maphash
+   (lambda (name definition)
+     (declare (ignore name))
+     (setf (objective-c-message-definition-selector-pointer definition)
+           (%sel-register-name
+            (objective-c-message-definition-selector definition))))
+   *objective-c-message-definitions*))
+
+(uiop:register-image-restore-hook 'restore-objective-c-runtime)
 
 (defgeneric check-consumable-objective-c-receiver (receiver)
   (:documentation "Validate that RECEIVER owns the retain a message consumes."))
