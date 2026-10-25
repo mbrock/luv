@@ -569,6 +569,35 @@ identical retained turn in both hosts; it is a visual comparison, not a
 claim to capture private model reasoning. The cassette HUD was not ported;
 Luft keeps its simple Y/N/T approval controls.
 
+* DONE Give the gnome and cat the same editable mesh path
+:PROPERTIES:
+:ID: 7KTIFB
+:END:
+
+=luvcraft/companions/build-companions.py= authors a red-hatted, bearded gnome
+and an orange tabby quadruped. The gnome's two boots and the cat's four paws
+have editable foot targets, two-bone IK and knee/elbow poles. Both export an
+idle pose and cyclic skeletal walk through the same =FNT1= contract as
+Fantus (#JGEQ4U), with editable Blender and baked GLB versions alongside.
+
+One =companion-mesh= renderer owns loading, skinning and frame-local GPU
+resources for all three kinds. Actual horizontal travel advances each
+asset's stride; stopping blends to standing idle. The cat uses a four-beat
+walk and an articulated tail, rather than translating its old seated pose.
+The two native hosts share stature-scaled walking speeds and body heights,
+while conversation, tools and save identity remain unchanged (#9AONMH).
+
+The historical browser fields and the birthday party's separate SDF dance
+troupe remain analytic. Their silhouette knobs do not reshape native meshes;
+native proportions and weights belong to Blender. Foot IK is baked, not a
+runtime terrain-contact solver.
+
+The saved Blender scenes are reopened and checked against both exports.
+Native recordings exercise travel and stopping; conversation captures cover
+the original host. The shared companion proof retains tools, approval and
+denial, inventory, save/reopen, and provider cleanup. The existing Fantus
+remains a rendering and gait control.
+
 * Fantus is a third body, sewn from felt
 :PROPERTIES:
 :ID: JGEQ4U
@@ -583,7 +612,7 @@ mesh, felt materials, weighted armature and foot-target/knee-pole IK in
 Blender. The editable =fantus.blend= and portable =fantus.glb= accompany a
 small =FNT1= runtime export: bind vertices, four bone influences, triangles,
 an idle pose and sampled IK-solved skin matrices. Both native games draw
-=:fantus-mesh= with real surface depth, rather than marching the old field.
+=:companion-mesh= with real surface depth, rather than marching the old field.
 The cycle advances by actual horizontal travel divided by the scaled stride;
 stopping blends back to idle. Fantus walks at one figure unit per second.
 Scale and rim light remain live Lisp values; proportions live in Blender.

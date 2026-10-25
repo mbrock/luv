@@ -151,7 +151,7 @@ continues from, until its provider opens and takes it over (#9AONMH).")
    "One embodied agent at a discrete cell: its thread, figure, and voice."))
 
 (defclass gnome (embodied-agent) ()
-  (:documentation "A small SDF-rendered garden gnome carrying a WORLD-AGENT."))
+  (:documentation "A rigged garden gnome carrying a WORLD-AGENT."))
 
 (defmethod embodied-agent-name ((gnome gnome))
   (declare (ignore gnome))
@@ -191,13 +191,14 @@ winner, attaches its observer, and releases candidates that lose to teardown."))
 
 (defgeneric embodied-agent-body-sphere (agent)
   (:documentation
-   "Return AGENT's conservative SDF proxy as world-space X, Y, Z, RADIUS."))
+   "Return AGENT's interaction sphere as world-space X, Y, Z, RADIUS."))
 
 ;;; The visible conversational figures are full block-world bodies.  Their
 ;;; behavior is destinational, but contact is the same open body protocol the
 ;;; player and critters use.
 
-(defparameter *embodied-agent-walk-speed* 2.35d0)
+(defparameter *embodied-agent-walk-speed* 1d0
+  "Figure units per second, scaled to each companion's stature.")
 (defparameter *embodied-agent-ground-acceleration* 28d0)
 (defparameter *embodied-agent-air-acceleration* 9d0)
 (defparameter *embodied-agent-gravity* 24d0)
@@ -227,8 +228,7 @@ winner, attaches its observer, and releases candidates that lose to teardown."))
   (setf (embodied-agent-grounded-p agent) grounded-p))
 
 (defmethod luvcraft:body-walk-speed ((agent embodied-agent))
-  (declare (ignore agent))
-  *embodied-agent-walk-speed*)
+  (companion-walk-speed (embodied-agent-save-kind agent)))
 
 (defmethod luvcraft:body-ground-acceleration ((agent embodied-agent))
   (declare (ignore agent))
@@ -306,11 +306,8 @@ When MAKE-P is true, create and attach one if the cell is unoccupied."
            (attach-embodied-agent 'gnome session x y z))))
 
 (defun gnome-body-height ()
-  "The height of the hat's tip above his feet, in figure units.
-
-What is above a gnome -- his speech bubbles -- is measured from here, so a
-taller hat pushes them up rather than growing through them."
-  (float luvcraft.shaders::*gnome-hat-height* 1.0))
+  "The Blender mesh's hat-tip height above its feet, in figure units."
+  1.56)
 
 (defmethod embodied-agent-body-height ((gnome gnome))
   (declare (ignore gnome))
@@ -368,7 +365,7 @@ taller hat pushes them up rather than growing through them."
   (let* ((near 0d0)
          (far (coerce max-distance 'double-float))
          (stature (coerce (gnome-stature) 'double-float))
-         (half-width (* 0.36d0 stature)))
+         (half-width (* 0.55d0 stature)))
     (flet ((slab (origin direction minimum maximum)
              (let ((origin (coerce origin 'double-float))
                    (direction (coerce direction 'double-float)))
@@ -1158,15 +1155,12 @@ candidate that loses to release or another publication is detached and closed."
   (list (gnome-body-pipeline overlay)))
 
 (defmethod embodied-agent-body-sphere ((gnome gnome))
-  "The gnome's current conservative proxy, including his visual bob."
-  (let* ((phase (/ (get-internal-real-time)
-                   (float internal-time-units-per-second 1.0)))
-         (bob (* 0.025 (sin (* phase 2.2))))
-         (stature (gnome-stature)))
+  "Interaction bounds for the mesh; no clock-driven SDF bob."
+  (let ((stature (gnome-stature)))
     (values (luvcraft::body-x gnome)
-            (+ (luvcraft::body-y gnome) (* *gnome-body-centre* stature) bob)
+            (+ (luvcraft::body-y gnome) (* *gnome-body-centre* stature))
             (luvcraft::body-z gnome)
-            (* (gnome-figure-radius) stature))))
+            (* 1.05 stature))))
 
 (defun place-gnome-body (overlay)
   "Pack OVERLAY's conservative sphere and retained forward direction."
@@ -1289,8 +1283,7 @@ candidate that loses to release or another publication is detached and closed."
 
 (defun ensure-gnome-body (gnome)
   (or (gnome-body gnome)
-      (make-sdf-agent-body gnome :gnome-sdf "gnome SDF"
-                          :class 'gnome-body-overlay)))
+      (make-companion-mesh-body gnome)))
 
 (defmethod ensure-embodied-agent-body ((gnome gnome))
   (ensure-gnome-body gnome))

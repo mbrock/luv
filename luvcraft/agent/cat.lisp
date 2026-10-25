@@ -3,37 +3,28 @@
 ;;; A cat is another embodied agent, sharing the gnome's conversation surface
 ;;; without pretending to be a kind of gnome.  Its authored state is the same
 ;;; small boundary object -- session, cell, WORLD-AGENT, transcript surfaces --
-;;; while :CAT-SDF supplies a wholly separate dense fragment program.
+;;; while its Blender mesh supplies a four-legged IK walk.
 
 (defparameter *cat-name* "cat")
-(defparameter *cat-body-centre* 0.64)
-(defparameter *cat-face-height* 0.94)
+(defparameter *cat-body-centre* 0.52)
+(defparameter *cat-face-height* 0.78)
 (defparameter *cat-audience-distance* 2.75)
 
 (defclass cat (embodied-agent) ()
   (:documentation
-   "A sitting SDF-rendered cat carrying the shared embodied WORLD-AGENT surface."))
-
-(defclass cat-body-overlay (sdf-agent-body-overlay) ()
-  (:documentation "The cat's :CAT-SDF body overlay."))
+   "A rigged quadruped cat carrying the shared embodied WORLD-AGENT surface."))
 
 (defun cat-stature ()
   "How many world cells one cat figure unit occupies."
   (float luvcraft.shaders::*cat-stature* 1.0))
 
 (defun cat-figure-height ()
-  "The current top of the cat in figure space."
-  (max (float luvcraft.shaders::*cat-ear-height* 1.0)
-       (+ 0.94 (* (float luvcraft.shaders::*cat-head-size* 1.0)
-                  0.8947368))))
+  "The standing Blender mesh's ear-tip height, in figure units."
+  1.05)
 
 (defun cat-figure-radius ()
-  "A conservative sphere following the cat's silhouette knobs."
-  (+ 0.05
-     (max *cat-body-centre*
-          (- (cat-figure-height) *cat-body-centre*)
-          (+ (float luvcraft.shaders::*cat-tail-reach* 1.0) 0.08)
-          (+ (float luvcraft.shaders::*cat-head-size* 1.0) 0.10))))
+  "Conservative interaction radius including the articulated tail."
+  1.4)
 
 (defmethod embodied-agent-name ((cat cat))
   (declare (ignore cat))
@@ -66,12 +57,7 @@
   (let* ((near 0d0)
          (far (coerce max-distance 'double-float))
          (stature (coerce (cat-stature) 'double-float))
-         (half-width
-           (* (coerce (max 0.62
-                           (+ luvcraft.shaders::*cat-tail-reach* 0.08)
-                           (+ luvcraft.shaders::*cat-head-size* 0.10))
-                      'double-float)
-              stature)))
+         (half-width (* (coerce (cat-figure-radius) 'double-float) stature)))
     (flet ((slab (origin direction minimum maximum)
              (let ((origin (coerce origin 'double-float))
                    (direction (coerce direction 'double-float)))
@@ -97,20 +83,16 @@
              near)))))
 
 (defmethod embodied-agent-body-sphere ((cat cat))
-  "The cat's conservative proxy, breathing almost imperceptibly."
-  (let* ((phase (/ (get-internal-real-time)
-                   (float internal-time-units-per-second 1.0)))
-         (breath (* 0.008 (sin (* phase 1.7))))
-         (stature (cat-stature)))
+  "Interaction bounds only; the mesh writes its actual surface depth."
+  (let ((stature (cat-stature)))
     (values (luvcraft::body-x cat)
-            (+ (luvcraft::body-y cat) (* *cat-body-centre* stature) breath)
+            (+ (luvcraft::body-y cat) (* *cat-body-centre* stature))
             (luvcraft::body-z cat)
             (* (cat-figure-radius) stature))))
 
 (defun ensure-cat-body (cat)
   (or (gnome-body cat)
-      (make-sdf-agent-body cat :cat-sdf "cat SDF"
-                           :class 'cat-body-overlay)))
+      (make-companion-mesh-body cat)))
 
 (defmethod ensure-embodied-agent-body ((cat cat))
   (ensure-cat-body cat))
@@ -119,7 +101,7 @@
   "You are a cat: observant, compact, mischievous, and embodied in luvcraft,
 a block world running inside a live Common Lisp image.  A player is talking
 to you.  Your tools are the game's own commands.  Coordinates are integer
-block cells: x and z are horizontal, y is up; you sit at the cell given below.
+block cells: x and z are horizontal, y is up; you stand at the cell given below.
 To talk to the player you MUST use the say tool -- only what you say is heard;
 your final message is not shown.  Keep what you say short, feline, and useful.
 Results may mention #ABCD handles; pass one back to describe-handle to inspect
@@ -130,7 +112,7 @@ the thing it names.")
    :session (gnome-session cat)
    :commands *gnome-tools*
    :instructions
-   (format nil "~A~%~%You sit at x=~D y=~D z=~D."
+   (format nil "~A~%~%You stand at x=~D y=~D z=~D."
            *cat-instructions*
            (gnome-x cat) (gnome-y cat) (gnome-z cat))))
 
@@ -148,5 +130,5 @@ the thing it names.")
 (define-command (com-spawn-cat :command-table luvcraft.clim::luvcraft-world
                                 :name "Spawn Cat")
     ()
-  "Spawn a visible SDF cat agent a few discrete cells ahead of the player."
+  "Spawn a rigged cat agent a few discrete cells ahead of the player."
   (spawn-cat :session (luvcraft.clim::luvcraft-command-session)))

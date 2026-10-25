@@ -1,0 +1,163 @@
+{
+  "format": "FNT1",
+  "model": "gnome",
+  "runtime_vertices": 21162,
+  "editable_vertices": 21162,
+  "triangles": 41368,
+  "indices": 124104,
+  "deform_bones": 17,
+  "total_bones": 22,
+  "bone_order": [
+    "hips",
+    "chest",
+    "head",
+    "beard",
+    "hat",
+    "arm.L",
+    "forearm.L",
+    "hand.L",
+    "arm.R",
+    "forearm.R",
+    "hand.R",
+    "upper.L",
+    "lower.L",
+    "foot.L",
+    "upper.R",
+    "lower.R",
+    "foot.R"
+  ],
+  "materials": 17,
+  "walk_frames": 48,
+  "fps": 60,
+  "stride_length": 0.800000011920929,
+  "cycle_seconds": 0.8,
+  "target_speed_figure_units_per_second": 1,
+  "stance_fraction": 0.58,
+  "bind_bounds_xyz": [
+    [
+      -0.4054933190345764,
+      0.0,
+      -0.2290000021457672
+    ],
+    [
+      0.4053139090538025,
+      1.559999942779541,
+      0.30711251497268677
+    ]
+  ],
+  "idle_bounds_xyz": [
+    [
+      -0.4054933190345764,
+      -1.638683144733477e-08,
+      -0.22899998724460602
+    ],
+    [
+      0.4053139090538025,
+      1.5440001487731934,
+      0.3071124851703644
+    ]
+  ],
+  "animated_bounds_xyz": [
+    [
+      -0.4456341047706087,
+      -3.128799373159248e-08,
+      -0.3506924096341773
+    ],
+    [
+      0.44565387422515484,
+      1.5440001487731934,
+      0.48027528756899707
+    ]
+  ],
+  "dimensions": [
+    0.8108072280883789,
+    1.559999942779541,
+    0.5361125469207764
+  ],
+  "face_height": 0.92,
+  "idle_face_height": 0.904,
+  "recommended_interaction_sphere": {
+    "center": [
+      0.0,
+      0.78,
+      0.0
+    ],
+    "radius": 0.9819994202080242
+  },
+  "skinning_checks": [
+    {
+      "action": "Idle",
+      "frame": 1,
+      "max_position_error": 2.1510850223048226e-07
+    },
+    {
+      "action": "Walk",
+      "frame": 4,
+      "max_position_error": 3.5683917959109294e-07
+    },
+    {
+      "action": "Walk",
+      "frame": 11,
+      "max_position_error": 3.2952854981857655e-07
+    },
+    {
+      "action": "Walk",
+      "frame": 19,
+      "max_position_error": 3.1514354475209865e-07
+    },
+    {
+      "action": "Walk",
+      "frame": 28,
+      "max_position_error": 3.6016097952361853e-07
+    },
+    {
+      "action": "Walk",
+      "frame": 37,
+      "max_position_error": 2.987733538904174e-07
+    },
+    {
+      "action": "Walk",
+      "frame": 45,
+      "max_position_error": 3.5060175258653244e-07
+    }
+  ],
+  "negative_control_wrong_pose_max_error": 0.21830614792190542,
+  "ik": {
+    "target": 0,
+    "chain": 1.1033904879071357e-06,
+    "ground": 2.890786099385423e-08,
+    "slide": 1.2636184681946716e-08,
+    "level": 7.346634628547369e-07,
+    "orthonormality": 9.59634780883789e-06,
+    "minimum_floor": -2.890786099385423e-08,
+    "swing": 0.07798787206411362
+  },
+  "limbs": {
+    "L": {
+      "chain": 1.1033904879071357e-06,
+      "swing": 0.07798787206411362,
+      "stance_samples": 108
+    },
+    "R": {
+      "chain": 1.0784536466731156e-06,
+      "swing": 0.07798787206411362,
+      "stance_samples": 108
+    }
+  },
+  "gait_phase_offsets": {
+    "L": 0,
+    "R": 0.5
+  },
+  "runtime_minimum_vertex_height": -3.128799373159248e-08,
+  "runtime_contact_max_error": 3.128799373159248e-08,
+  "runtime_stance_slide_max_error": 1.3365197404358042e-07,
+  "runtime_contact_vertices": {
+    "L": 6,
+    "R": 5
+  },
+  "loop_matrix_max_error": 6.1232346765161455e-18,
+  "file_bytes": 1975440,
+  "saved_blend_reopened": true,
+  "glb_baked_skin_matrix_max_error": 5.245208740234375e-06,
+  "glb_baked_skin_pose_checks": 16
+}

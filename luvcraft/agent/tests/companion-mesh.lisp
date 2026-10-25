@@ -26,25 +26,33 @@
       (agent::skin-companion-mesh mesh 0.25d0 0.0 palette output)
       (true (equalp output #(1.0 2.0 3.0  0.0 1.0 0.0  0.2 0.4 0.8  1.0 2.0 3.0))))))
 
-(define-test fantus-export-is-grounded-and-fits-its-interaction-bounds
-  (let* ((mesh (agent::load-companion-mesh))
-         (palette (make-array (* 12 (agent::companion-mesh-bone-count mesh))
-                              :element-type 'single-float))
-         (output (make-array (* 12 (/ (length (agent::companion-mesh-vertices mesh)) 9))
-                             :element-type 'single-float))
-         (lowest 100.0) (highest 0.0) (radius 0.0))
-    ;; Include the idle pose and every baked frame, not just a symmetric rest.
-    (loop for frame from -1 below (agent::companion-mesh-frame-count mesh)
-          do (agent::skin-companion-mesh mesh
-                                     (/ (max 0 frame) (agent::companion-mesh-frame-count mesh))
-                                     (if (minusp frame) 0.0 1.0) palette output)
-             (loop for v from 0 below (length output) by 12
-                   for x = (aref output v) for y = (aref output (+ v 1))
-                   for z = (aref output (+ v 2))
-                   do (setf lowest (min lowest y) highest (max highest y)
-                            radius (max radius (sqrt (+ (* x x) (* z z)
-                                                        (expt (- y agent::*fantus-body-centre*) 2)))))))
-    (true (> lowest -0.02))
-    (true (< lowest 0.02))
-    (true (< (abs (- highest (agent::fantus-figure-height))) 0.10))
-    (true (< radius (agent::fantus-figure-radius)))))
+(define-test companion-exports-are-grounded-and-fit-their-interaction-bounds
+  (dolist (class '(agent:gnome agent:cat agent:fantus))
+    (let* ((body (make-instance class :session nil :x 0 :y 0 :z 0
+                                     :position (luvcraft::make-vec3 0d0 0d0 0d0)))
+           (kind (agent::embodied-agent-save-kind body))
+           (scale (agent::companion-stature kind))
+           (mesh (agent::load-companion-mesh kind))
+           (palette (make-array (* 12 (agent::companion-mesh-bone-count mesh))
+                                :element-type 'single-float))
+           (output (make-array (* 12 (/ (length (agent::companion-mesh-vertices mesh)) 9))
+                               :element-type 'single-float))
+           (highest 0.0) (radius 0.0))
+      (multiple-value-bind (cx cy cz bound) (agent::embodied-agent-body-sphere body)
+        ;; Every baked pose must retain a grounded foot, not just the idle pose.
+        (loop for frame from -1 below (agent::companion-mesh-frame-count mesh)
+              do (agent::skin-companion-mesh
+                  mesh (/ (max 0 frame) (agent::companion-mesh-frame-count mesh))
+                  (if (minusp frame) 0.0 1.0) palette output)
+                 (let ((lowest 100.0))
+                   (loop for v from 0 below (length output) by 12
+                         for x = (* scale (aref output v))
+                         for y = (* scale (aref output (+ v 1)))
+                         for z = (* scale (aref output (+ v 2)))
+                         do (setf lowest (min lowest y) highest (max highest y)
+                                  radius (max radius (sqrt (+ (expt (- x cx) 2)
+                                                              (expt (- y cy) 2)
+                                                              (expt (- z cz) 2))))))
+                   (true (< (abs lowest) 0.02))))
+        (true (< (abs (- highest (luvcraft:body-height body))) 0.10))
+        (true (< radius bound))))))

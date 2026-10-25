@@ -310,7 +310,7 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
             (atan (terrain:character-heading-x character) (terrain:character-heading-y character))))))
 
 (defmethod render:advance-viewer-overlay :after
-    ((agent luft-fantus) (viewer luvcraft-viewer) seconds)
+    ((agent luft-companion) (viewer luvcraft-viewer) seconds)
   (luvcraft.agent::update-companion-gait agent seconds))
 
 (defmethod render:advance-viewer-game :before ((viewer luvcraft-viewer) seconds)

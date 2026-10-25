@@ -107,7 +107,7 @@
   :components ((:file "luvcraft/light-reference")))
 
 (defsystem "luvcraft/agent-bodies"
-  :description "Companion body shaders: analytic gnome and cat, rigged Fantus, and the SDF gallery."
+  :description "Shared rigged companion mesh shaders and the historical SDF gallery."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/core")

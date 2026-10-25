@@ -37,11 +37,6 @@
   (declare (ignore fantus))
   (* (fantus-figure-height) (fantus-stature)))
 
-(defmethod luvcraft:body-walk-speed ((fantus fantus))
-  (declare (ignore fantus))
-  ;; One figure unit per second: short toddler steps, not the adult motor.
-  (coerce (fantus-stature) 'double-float))
-
 (defmethod embodied-agent-head-position ((fantus fantus) &optional (lift 0.0))
   (luvcraft::make-vec3 (luvcraft::body-x fantus)
                        (+ (luvcraft::body-y fantus)

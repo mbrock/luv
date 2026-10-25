@@ -10,6 +10,14 @@
 (defun companion-stature (kind)
   (ecase kind (:gnome (gnome-stature)) (:cat (cat-stature)) (:fantus (fantus-stature))))
 
+(defun companion-body-height (kind)
+  (* (companion-stature kind)
+     (ecase kind
+       (:gnome (gnome-body-height)) (:cat (cat-figure-height)) (:fantus (fantus-figure-height)))))
+
+(defun companion-walk-speed (kind)
+  (coerce (* *embodied-agent-walk-speed* (companion-stature kind)) 'double-float))
+
 (defun companion-rim-light (kind)
   (float (ecase kind
            (:gnome luvcraft.shaders::*gnome-rim-light*)
@@ -86,7 +94,7 @@
           (companion-walk-blend agent) (+ blend (* amount (- (if moving 1.0 0.0) blend)))))
   agent)
 
-(defmethod luvcraft:advance-luvcraft-overlay :after ((agent fantus) session seconds)
+(defmethod luvcraft:advance-luvcraft-overlay :after ((agent embodied-agent) session seconds)
   (declare (ignore session))
   (update-companion-gait agent seconds))
 
