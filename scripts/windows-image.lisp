@@ -72,8 +72,9 @@
 ;; AttachConsole/UTF-16 conversion. Python changes just the PE subsystem to
 ;; GUI after dumping, preserving the appended SBCL core and avoiding a console
 ;; window on double-click. Deploy still closes/reopens CFFI libraries.
-(deploy:deploy 'deploy:deploy-console-op
-               :system "luvcraft/program"
-               :output-file
-               (merge-pathnames "luvcraft.exe"
-                                (windows-build-directory "LUV_WINDOWS_OUTPUT")))
+(let ((operation (asdf:make-operation 'deploy:deploy-console-op)))
+  (setf (deploy:output-file operation)
+        (merge-pathnames "luvcraft.exe"
+                         (windows-build-directory "LUV_WINDOWS_OUTPUT"))
+        (deploy:entry-point operation) #'luvcraft:main)
+  (deploy:deploy operation))
