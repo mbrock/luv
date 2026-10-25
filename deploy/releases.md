@@ -158,7 +158,12 @@ Objective-C addresses; the runtime now rebinds them when restoring an image.
 The Developer ID-signed, hardened-runtime ZIP also passed the full moved-app
 check on yawl: Metal smoke frame, terrain/companions, screenshots, clean shutdown,
 and saved-world relaunch. This required the core-mapping executable-memory
-entitlement described above; notarization remains a separate qualification.
+entitlement described above. Apple accepted notarization on 2026-10-25 with
+no reported issues (submission `f6d6bc2c-9db9-4a72-a35b-2e34a75b6b86`).
+The final ZIP includes the stapled ticket and passed extraction into a moved
+path, ticket validation, Gatekeeper assessment, signature verification, and
+isolated CLI boot/error checks. CI still requires the repository secrets above;
+a local Keychain profile does not provision credentials on GitHub runners.
 The unavailable source-update panel explains why a packaged copy cannot
 update a development checkout. Hosted `macos-26` CI builds and checks
 signatures, dependency relocation, help, and error exits with `--cli-only`;
