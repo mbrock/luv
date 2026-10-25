@@ -162,8 +162,10 @@ entitlement described above. Apple accepted notarization on 2026-10-25 with
 no reported issues (submission `f6d6bc2c-9db9-4a72-a35b-2e34a75b6b86`).
 The final ZIP includes the stapled ticket and passed extraction into a moved
 path, ticket validation, Gatekeeper assessment, signature verification, and
-isolated CLI boot/error checks. CI still requires the repository secrets above;
-a local Keychain profile does not provision credentials on GitHub runners.
+isolated CLI boot/error checks. The `mbrock/luv` repository secrets above are configured; a clean hosted Mac
+successfully imported the identity and validated the notarization credentials
+in [the manual qualification run](https://github.com/mbrock/luv/actions/runs/40234134979).
+A local Keychain profile alone does not provision credentials on GitHub runners.
 The unavailable source-update panel explains why a packaged copy cannot
 update a development checkout. Hosted `macos-26` CI builds and checks
 signatures, dependency relocation, help, and error exits with `--cli-only`;
