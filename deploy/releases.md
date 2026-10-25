@@ -88,6 +88,12 @@ create a **Developer ID Application** certificate. An Apple Development or
 Apple Distribution certificate cannot sign this download. Keep a secure backup
 of its private key; importing the public certificate alone is insufficient.
 
+The currently configured certificate expires on 2027-02-01. Replace it with a
+certificate from Apple's current G2 Developer ID authority before then, and
+update both certificate secrets together. The timestamped, notarized downloads
+already produced remain valid; certificate renewal is needed for future builds.
+See [Apple's replacement guidance](https://developer.apple.com/help/account/certificates/replace-developer-id-certificates).
+
 For local notarization, create an app-specific password at
 [Apple Account](https://account.apple.com/), then store it in Keychain using
 `notarytool`'s interactive prompt (do not put the password in shell history):
@@ -164,9 +170,17 @@ entitlement described above. Apple accepted notarization on 2026-10-25 with
 no reported issues (submission `f6d6bc2c-9db9-4a72-a35b-2e34a75b6b86`).
 The final ZIP includes the stapled ticket and passed extraction into a moved
 path, ticket validation, Gatekeeper assessment, signature verification, and
-isolated CLI boot/error checks. The `mbrock/luv` repository secrets above are configured; a clean hosted Mac
-successfully imported the identity and validated the notarization credentials
-in [the manual qualification run](https://github.com/mbrock/luv/actions/runs/40234134979).
+isolated CLI boot/error checks.
+
+The `mbrock/luv` repository secrets above are configured. The
+[Mac-only CI qualification](https://github.com/mbrock/luv/actions/runs/40234994737)
+passed Developer ID signing, Apple notarization (`Accepted`, no issues;
+submission `994c43bd-595b-4c00-ba0b-17adcd690f69`), stapling, Gatekeeper,
+and extracted-archive CLI checks. The notarized download and diagnostics were
+uploaded as artifacts. The initial CI attempt imported the leaf/private key
+but could not find a usable signing identity. Importing Apple's Developer ID
+intermediates and adding the temporary keychain to the user search list fixed
+that failure; a signed executable probe now checks this before the full build.
 A local Keychain profile alone does not provision credentials on GitHub runners.
 The unavailable source-update panel explains why a packaged copy cannot
 update a development checkout. Hosted `macos-26` CI builds and checks
