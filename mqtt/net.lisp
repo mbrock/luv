@@ -311,8 +311,8 @@ reader needed for one key."
 
 (defun discover-lobby-host ()
   "Find the lobby on the local tailnet: the service name under this tailnet's
-MagicDNS suffix, or the bare service name (MagicDNS search domains usually
-resolve it) when the suffix cannot be learned.  Cached in
+MagicDNS suffix, or on Unix the bare service name (MagicDNS search domains
+usually resolve it) when the suffix cannot be learned.  Cached in
 *DISCOVERED-LOBBY-HOST*; set that to NIL to look again."
   (or *discovered-lobby-host*
       (let ((suffix (tailnet-magic-dns-suffix)))
@@ -322,6 +322,12 @@ resolve it) when the suffix cannot be learned.  Cached in
         (if suffix
             (setf *discovered-lobby-host*
                   (format nil "~A.~A" *lobby-service-name* suffix))
+            ;; Windows may spend seconds resolving a bare name outside the
+            ;; tailnet, inside a foreign call WITH-TIMEOUT cannot interrupt.
+            ;; A player without Tailscale must remain offline and stoppable.
+            #+win32
+            (error "No Tailscale lobby discovered; configure LUV_LOBBY_HOST to connect.")
+            #-win32
             *lobby-service-name*))))
 
 (defun lobby-host ()

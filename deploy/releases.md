@@ -114,15 +114,18 @@ The Windows player excludes the Unix PTY backend, Luft terminal overlays,
 the Slynk listener, and Tracy/source-update commands. It retains the
 SDL/Vulkan game renderer. Saves use `%LOCALAPPDATA%/luvcraft/worlds` unless
 `XDG_DATA_HOME` or `--world` overrides that location.
+The optional lobby stays offline unless Tailscale discovery succeeds or
+`LUV_LOBBY_HOST` explicitly names a broker; Windows does not try the bare
+tailnet service name on an unconfigured network.
 
 The job must successfully launch a moved copy with a clean environment,
 check CLI failure behavior, and render with Mesa's software Vulkan driver
 before uploading a download. Both the dependency sources and temporary game
 checkout are removed first. The current game's companion assets, frame
 loop, and save/reload are checked too. This is build qualification, not a claim of
-interactive hardware-driver testing on Windows. Native verification is
-still in progress; use the job's result and artifacts, not the presence of
-build scripts, to decide whether a particular revision has a usable build.
+interactive hardware-driver testing on Windows. Use the job's result and
+artifacts, not the presence of build scripts, to decide whether a particular
+revision has a usable build.
 
 To reproduce the native build, export the source archive on Linux:
 
