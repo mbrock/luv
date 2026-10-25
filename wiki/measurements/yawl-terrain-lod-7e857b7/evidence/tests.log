@@ -1,0 +1,120 @@
+make[1]: Entering directory '/Users/mbrock/luv'
+Building cached ./sly client core...
+Cached ./sly client at /Users/mbrock/luv/build/sly-client
+....
+----------------------------------------------------------------------
+Ran 4 tests in 0.164s
+
+OK
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.815s
+
+OK
+;;; Checking for wide character support... WARNING: Lisp implementation doesn't use UTF-16, but accepts surrogate code points.
+ yes, using code points.
+;;; Checking for wide character support... WARNING: Lisp implementation doesn't use UTF-16, but accepts surrogate code points.
+ yes, using code points.
+;;; Building Closure with CHARACTER RUNES
+parinfer: strict check passed.
+Preparing 35 test suites for parallel execution...
+;; make test prepares :test-suites
+;; logs ./build/logs/UXB4RC
+
+
+;; Built :test-suites in 3.1s.
+;;
+;; 0 files compiled, 549 loaded, 108 systems.
+;; Spent 0s compiling and 3.1s loading.
+;;
+;; Logs are in build/logs/UXB4RC/.
+;;
+;; Note: Build logs take 370.1 MB of the 2.3 GB build directory.
+
+Starting 10 prepared SBCL workers for 38 test tasks...
+001.0s       START  luv/shaderc/test (worker 1)
+002.2s       START  luv/mcclim/test (worker 2)
+003.4s       START  luvcraft/core/test [1/2] (worker 3)
+003.6s       START  luv/hlsl/test (worker 6)
+003.7s       START  luvcraft/core/test [2/2] (worker 4)
+003.7s       START  luft/render/test [2/2] (worker 8)
+003.8s       START  luvcraft/shader-validation/test (worker 5)
+005.3s       START  luv/test (worker 9)
+005.4s       START  luft/render/test [1/2] (worker 7)
+006.5s       START  luft/web/test (worker 10)
+011.3s  1/38  PASS   luft/render/test [1/2] (5.9s, worker 7)
+011.3s       START  telegram/test [2/2] (worker 7)
+012.5s  2/38  PASS   luv/test (7.3s, worker 9)
+012.5s       START  telegram/test [1/2] (worker 9)
+013.6s  3/38  PASS   luft/web/test (7.1s, worker 10)
+013.6s       START  luvcraft/luft/test (worker 10)
+014.1s  4/38  PASS   luv/hlsl/test (10.6s, worker 6)
+014.1s       START  sly-client/test (worker 6)
+014.7s  5/38  PASS   luft/render/test [2/2] (11.0s, worker 8)
+014.7s       START  luv/terminal/test (worker 8)
+014.7s  6/38  PASS   sly-client/test (0.5s, worker 6)
+014.7s       START  luvcraft/mcclim/test (worker 6)
+015.3s  7/38  PASS   luvcraft/mcclim/test (0.6s, worker 6)
+015.3s       START  luv/ghostty/test (worker 6)
+015.5s  8/38  PASS   telegram/test [2/2] (4.2s, worker 7)
+015.5s       START  luft/test (worker 7)
+015.7s  9/38  PASS   luv/ghostty/test (0.4s, worker 6)
+015.7s       START  openai/test (worker 6)
+015.9s 10/38  PASS   openai/test (0.2s, worker 6)
+016.1s 11/38  PASS   telegram/test [1/2] (3.5s, worker 9)
+016.1s       START  luvcraft/agent/test (worker 9)
+016.2s 12/38  PASS   luvcraft/core/test [2/2] (12.6s, worker 4)
+016.6s 13/38  PASS   luvcraft/luft/test (3.0s, worker 10)
+016.6s       START  luvcraft/luft/game/test (worker 10)
+016.7s 14/38  PASS   luft/test (1.2s, worker 7)
+016.7s       START  luv/wgsl/test (worker 7)
+016.8s 15/38  PASS   luvcraft/shader-validation/test (13.1s, worker 5)
+017.1s 16/38  PASS   luv/terminal/test (2.4s, worker 8)
+017.1s       START  luft/terrain/test (worker 8)
+017.3s 17/38  PASS   luv/wgsl/test (0.5s, worker 7)
+017.3s       START  luvcraft/test (worker 7)
+017.3s 18/38  PASS   luvcraft/agent/test (1.3s, worker 9)
+017.3s       START  luv/libav/test (worker 9)
+017.6s 19/38  PASS   luvcraft/test (0.3s, worker 7)
+017.6s       START  luvland/test (worker 7)
+017.6s 20/38  PASS   luvcraft/luft/game/test (1.0s, worker 10)
+017.6s       START  luft/atlas/test (worker 10)
+017.7s 21/38  PASS   luvland/test (0.2s, worker 7)
+018.1s 22/38  PASS   luft/atlas/test (0.5s, worker 10)
+018.1s       START  luv/application-agent/test (worker 10)
+018.3s 23/38  PASS   luft/terrain/test (1.2s, worker 8)
+018.3s       START  luv/tracy-capture/test (worker 8)
+018.4s 24/38  PASS   luv/application-agent/test (0.3s, worker 10)
+018.4s       START  luv/workbench/test (worker 10)
+018.5s 25/38  PASS   luv/libav/test (1.2s, worker 9)
+018.5s       START  luv-wiki/test (worker 9)
+018.7s 26/38  PASS   luv/workbench/test (0.3s, worker 10)
+018.7s       START  luv/lobby/mcclim/test (worker 10)
+018.7s 27/38  PASS   luv/tracy-capture/test (0.5s, worker 8)
+018.7s       START  luv/lobby/test (worker 8)
+018.8s 28/38  PASS   luv/lobby/mcclim/test (0.1s, worker 10)
+018.9s 29/38  PASS   luv-wiki/test (0.3s, worker 9)
+018.9s       START  mqtt/test (worker 9)
+019.0s 30/38  PASS   mqtt/test (0.2s, worker 9)
+019.0s       START  luv/wayland/test (worker 9)
+019.1s 31/38  PASS   luv/wayland/test (0.0s, worker 9)
+019.1s 32/38  PASS   luv/lobby/test (0.3s, worker 8)
+019.1s       START  luft/wizard/test (worker 8)
+019.3s 33/38  PASS   luft/wizard/test (0.2s, worker 8)
+019.3s       START  chrome-cdp/test (worker 8)
+019.4s 34/38  PASS   chrome-cdp/test (0.0s, worker 8)
+019.4s       START  luv/build/test (worker 8)
+019.4s 35/38  PASS   luv/build/test (0.0s, worker 8)
+020.9s 36/38  PASS   luvcraft/core/test [1/2] (17.5s, worker 3)
+026.0s       RUN    luv/shaderc/test (25.0s, worker 1), luv/mcclim/test (23.8s, worker 2)
+026.6s 37/38  PASS   luv/mcclim/test (24.4s, worker 2)
+030.5s 38/38  PASS   luv/shaderc/test (29.5s, worker 1)
+
+;; Tested 35 suites in 35.6s with 10 SBCL workers.
+;; Slowest test tasks:
+;;   29.5s  luv/shaderc/test
+;;   24.4s  luv/mcclim/test
+;;   17.5s  luvcraft/core/test [1/2]
+;;   13.1s  luvcraft/shader-validation/test
+;;   12.6s  luvcraft/core/test [2/2]
+make[1]: Leaving directory '/Users/mbrock/luv'

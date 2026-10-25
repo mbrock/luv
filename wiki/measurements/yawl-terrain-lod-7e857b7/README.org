@@ -1,0 +1,192 @@
+#+title: Visibility-first shading wins on real beveled terrain
+
+Apple M5 / Metal 4, macOS 27.2, 2026-10-25. Base revision
+[[https://github.com/mbrock/luv/commit/7e857b770c732fd097c532aabee56c437b46caa4][7e857b7]]; =source-hashes.json= pins the final experimental sources.
+Thread: https://ampcode.com/threads/T-01a1725e-3226-740f-a884-eaa984f5905a
+Campaign: #EKK3FS; follow-up: #EAWKSG. Production defaults are unchanged.
+
+* Keep visibility-first shading; do not require geometric merging
+
+The earlier bounded analytic proxy loses to triangulated patches (#ETRAG8).
+This experiment tests a different execution path on actual generated terrain:
+rasterize exact triangles into a cheap triangle-ID buffer with hardware depth,
+then reconstruct the winning triangle's material inputs and shade its pixels.
+The expensive production material no longer runs on every tiny triangle's
+partially covered fragment quads. All triangle processing still happens; this
+is not a software rasterizer, hierarchical LOD, or integrated pixel footprint.
+
+Native 1920x1080 GPU milliseconds, means from 100 samples per variant per
+world/order. Each cell is initial/reversed variant order. Complete frames
+include the unchanged shadow pass, sky, scene extras and presentation pass.
+
+| Variant                         | Live alpine     | Live meadow     |
+|---------------------------------+-----------------+-----------------|
+| Production packed shared atlas  | 15.982 / 15.570 | 15.992 / 17.097 |
+| Predecoded indexed mesh         | 12.971 / 12.613 | 13.211 / 14.133 |
+| Predecoded merged mesh          | 13.243 / 12.884 | 12.893 / 13.816 |
+| Exact merged, production decode | 14.221 / 13.968 | 13.518 / 14.464 |
+| Visibility-first, original mesh |  8.864 /  8.767 |  9.396 /  9.903 |
+| Visibility-first, merged mesh   |  8.008 /  7.858 |  8.421 /  8.791 |
+
+Mean within-cycle GPU ratios are 0.555/0.565 alpine and 0.589/0.591 meadow
+for original-mesh visibility, and 0.501/0.506 and 0.527/0.524 for merged
+visibility. Thus most of the gain does not require changed triangulation.
+The simpler predecoded control also helps, but does not explain away the
+visibility-first advantage. Merging the predecoded alpine control actually
+slows it slightly: fewer triangles are not sufficient evidence of a win.
+
+Frequency varies during these runs. Adjacent symmetric cycles and reversed
+order make the ratios more useful than isolated absolute times. These are
+serialized offscreen measurements, NOT displayed FPS or fixed-clock costs.
+No profiler or other GPU test ran concurrently. No new Xcode shader profile,
+helper invocation counters, or GPU-unit attribution was collected: the causal
+description above is the algorithm, not a measured breakdown of its gain.
+
+* Original-mesh visibility preserves depth; merging has rare failures
+
+At both static 1080p views, original-mesh visibility has bit-identical depth
+and coverage to production. Scene-linear RGB MAE is 0.002817 alpine and
+0.002111 meadow; shading is not identical. Reconstructed interpolation and
+derivatives over neighboring surfaces differ from triangle-local derivatives.
+Do not interpret mean error as a bound on every pixel.
+
+Two 96-pose camera flights at 640x360 cover 27,202,799 reference-covered
+samples. All variants receive identical camera uniforms at every pose.
+
+| Variant                    | Coverage differences | Common-hit depth errors >1 cell |
+|----------------------------+----------------------+---------------------------------|
+| Visibility, original mesh  |                    0 |                               0 |
+| Visibility, merged mesh    |                    1 |                              41 |
+| Merged + appearance, 3 px  |                    1 |                              41 |
+
+Original-mesh depth is bit-identical throughout both flights. The merged
+maximum view-depth disagreement is 10.02 cells alpine / 13.09 cells meadow.
+These are hundreds to thousands of depth-buffer ULPs, not just inverse-depth
+quantization. Integer surface/boundary checks establish the CPU merge's
+geometric contract, but do not establish identical GPU raster edge ownership.
+The precise GPU cause of these rare wrong-depth samples remains unresolved.
+The merger must not be called raster-exact or accepted silently.
+
+Across the motion frames, mean scene-linear RGB MAE is 0.00000837/0.00000614
+for original-mesh visibility and 0.00001020/0.00000763 for merged visibility.
+These differ from the 1080p errors: resolution changes procedural filtering.
+Residual changes between adjacent frames are recorded, but are not an
+antialiasing metric or a claim of eliminating temporal shimmer.
+
+Both four-way videos and the 1080p candidate/control stills were inspected.
+No large candidate-only hole, terrain disappearance or switching pop was
+visible. Blue-gray recessed cliff bands and sand/grass discontinuities also
+exist in the matched original controls. The rare depth failures are retained
+numerically even though they are not apparent in the overview videos.
+
+=live-alpine-motion.mp4= and =live-meadow-motion.mp4= show production at
+top-left, original-mesh visibility at top-right, merged visibility bottom-left,
+and merged visibility plus 3-pixel appearance retirement bottom-right.
+Playback is deliberately 12 fps for inspection, not real-time throughput.
+
+* Appearance retirement is not yet a clear winner
+
+The appearance-only candidate retains bevel geometry/normals and the real
+lighting, roughness/specular, material character, blocklight, shadow and
+atmosphere hooks. It substitutes approximate unresolved material detail below
+a projected bevel-radius threshold, blends to production by twice that size,
+and does no normal or front/back depth averaging. The threshold is in actual
+render-target pixels, not output-window pixels. These approximations are not
+energy-preserving integrals. Optional world-anchored pigment exists in the
+generator but was not enabled in these GPU comparisons.
+
+At 1280x720, limit 1 increases atlas GPU time from 16.068 to 17.303 ms alpine
+and 13.220 to 15.545 ms meadow. It also increases merged visibility time from
+6.539 to 6.685 and 5.836 to 6.003 ms. The independently rebuilt unmodified
+shader control is pixel-identical to production in both worlds.
+
+At 640x360, limit 3 gives small exploratory savings over merged visibility:
+2.834 to 2.666 ms alpine, 2.676 to 2.625 ms meadow. This threshold has no
+reversed-order confirmation. Its motion RGB MAE rises to 0.0000762/0.0000487.
+Near-path derivatives remain inside dynamically selected branches; quads at
+retirement boundaries are not portable without an explicit footprint design.
+Neither this branch nor the pigment option is ready for production.
+
+* Representation and preparation costs remain substantial
+
+All geometry uses the production bevel-T atlas and fixed eighth-cell bevels.
+Merging retains ordered material lanes, mask counts, packed light, normals,
+normal-selected site-W edge bytes and resident seams. Varying-light triangles
+retain their original references; hole/ambiguous groups fall back. Shadows
+keep the production representation. Scene residency and culling are unchanged.
+
+| Resident geometry                | Alpine    | Meadow    |
+|----------------------------------+-----------+-----------|
+| Renderer residents               |        16 |        16 |
+| Source triangles                 | 3,375,886 | 2,584,040 |
+| Merged triangles                 | 1,943,002 | 1,261,114 |
+| Source sites/appearance/light MB  |      8.58 |      6.17 |
+| Expanded visibility payload MB   |     89.72 |     68.31 |
+| Merged visibility payload MB     |     55.33 |     36.56 |
+| Predecoded indexed payload MB    |     83.19 |     57.68 |
+| Predecoded merged payload MB     |     53.15 |     30.54 |
+| CPU expand + merge seconds       |     14.56 |     12.69 |
+| Additional predecode seconds     |      7.00 |      4.68 |
+
+Decimal MB, numeric payloads rather than heap high-water marks. Visibility
+totals include the shared vertex/normal atlas; they exclude common descriptor,
+camera, shadow and target resources. At 1080p the extra RGBA8 ID target is
+8,294,400 bytes. Direct forward variants additionally need their u32 index
+streams. The harness retains multiple candidates and original resources
+simultaneously; the table is per-representation, not total process memory.
+The 16 renderer residents differ from the benchmark's 9 loaded source chunks.
+Triangle counts include all residents, not only this camera's submitted ones.
+
+The CPU implementation is intentionally allocation-heavy and immutable.
+Uploads, program construction, edits and publication are excluded from frame
+timings. No streaming/edit throughput claim is warranted. A useful next step
+is compact primitive identification against the shared atlas, not shipping
+these expanded references or the current multi-second merger.
+
+* Reproduce the matched-world experiment
+
+Use a disposable SBCL process, never load =run.lisp= into the managed game.
+The harness uses =scripts/bench-gpu-fps.lisp='s seed-7 live alpine/meadow
+worlds, camera (1009,1000,45), yaw .9, pitch -.55, field of view .85, fixed
+exposure .45 and frozen sky clock. Residency settles before measurement.
+Temporal reconstruction, MSAA and dynamic resolution are off. Timed frames
+have no readbacks. All shader/resource construction precedes warmup.
+
+The host =play= function defaults its explicit bevel argument to NIL, even
+when the renderer special is T. An initial live cohort therefore had a flat
+control and was rejected. =run.lisp= now explicitly passes T and asserts the
+realized renderer option. No rejected-cohort numbers appear in this result.
+
+#+begin_src sh
+BENCH_LIBRARY=1 BENCH_MODE=native-1x BENCH_SIZES=1920x1080 \
+BENCH_SCENES=live-alpine,live-meadow BENCH_REPEATS=1 \
+BENCH_WARMUP=120 BENCH_FRAMES=600 \
+LOD_MODES=control,baked,baked-merged,merged,visibility,visibility-merged \
+LOD_OUTPUT=build/terrain-lod/focused BENCH_OUTPUT=build/terrain-lod/focused.sexp \
+./env sbcl --dynamic-space-size 12000 \
+  --script wiki/measurements/yawl-terrain-lod-7e857b7/run.lisp
+
+uv run --no-project --with numpy \
+  python wiki/measurements/yawl-terrain-lod-7e857b7/analyze.py build/terrain-lod/focused
+
+./env sbcl --script wiki/measurements/yawl-terrain-lod-7e857b7/check.lisp
+make test
+#+end_src
+
+For the reversed cohort, reverse =LOD_MODES= and use a fresh output root.
+For 720p exploratory appearance, use 96 warmup / 480 timed frames and modes
+=control,copy,direct,merged,visibility,visibility-merged,atlas-lod,visibility-merged-lod=.
+For motion, use 640x360, 48 warmup / 240 timed frames, =LOD_LIMIT=3=,
+=LOD_MOTION=96=, and =control,visibility,visibility-merged,visibility-merged-lod=.
+Warmup and timed counts must be divisible by twice the mode count.
+The motion path travels 24 cells, rises 65, and turns sinusoidally; it does
+not update residency, simulate the world, or measure streaming.
+
+Evidence folders retain raw timings, geometry/baked statistics, benchmark
+metadata and full analysis. Large readbacks remain locally excluded under
+=.amp/in/artifacts/terrain-lod/=. Inspection videos and selected native stills
+are retained here. =check.lisp= passes 140 geometry comparisons and 6,656
+edge-byte checks with deliberate broken-merge controls. =make test= passes
+all 35 suites including strict Parinfer. Final resource-table cleanup was
+rerun on GPU; control/baked/baked-merged HDR and depth match the earlier
+smoke images bit-for-bit. No production renderer or DSL change was needed.

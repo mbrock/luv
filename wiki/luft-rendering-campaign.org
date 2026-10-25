@@ -510,28 +510,58 @@ partition as a candidate, and reject this proxy rasterizer as its default
 consumer. A tiny HAL change enables RGBA16F readback for the diagnostics;
 production rendering remains unchanged. All 35 suites pass.
 
-** NEXT Price exact patches against the production shared atlas
+** DONE Visibility-first shading wins on real beveled terrain
 :PROPERTIES:
 :ID: EKK3FS
 :END:
 
-Use #ETRAG8's triangulated exact patches as the next small candidate, with
-production material/light interpolation and the packed shared atlas as the
-control. The simplified fixture benchmark has not priced those contracts.
-Preserve merged shadows, resident coverage and fixed bevels; charge build,
-edit/publication, selection, uploads and memory before escalating to the
-fixed-resident hilltop and adjacent-frame runtime/Xcode-counter workflow.
+The [[file:measurements/yawl-terrain-lod-7e857b7/README.org][production-material trial]] compares the packed shared atlas with exact
+coplanar merging, predecoded conventional meshes, cheap triangle visibility
+followed by pixel-owned material evaluation, and projected appearance
+retirement. Both actual seed-7 alpine/meadow worlds retain their resident
+coverage, fixed bevels, original shadows, sky, materials and presentation.
+An initially flat live control was rejected; valid runs explicitly enable
+the host's bevel option and assert the realized renderer configuration.
 
-If revisiting analytic evaluation, choose a genuinely different workload:
-larger nonconvex domains, pixel-owned/tile-local evaluation, or visibility-aware
-footprint integration. Eight fragment halfspaces around mostly quadrilateral
-patches did not win. Masked planes remain a separate approximation, with
-their known rare wrong-sheet errors rather than an assumed exact fallback.
+At native 1080p, original-mesh visibility uses 55–59% of production GPU time
+in adjacent symmetric/reversed runs; merged visibility uses 50–53%.
+Predecoded conventional meshes use 81–83%, so decoding alone does not explain
+the win. These are offscreen complete-frame runtime costs, not displayed FPS
+or a new Xcode counter attribution. #ETRAG8's clipped analytic proxy is not
+used. Most of the gain does not require changed triangulation.
 
-Keep filtered directional response and world-stable artistic marks independent
-of that visibility choice. A known normal distribution is not a visibility
-solution; a slow crossfade is not a correspondence solution. The existing DSL
-already has buffers, bounded loops, discard and fragment depth for a first
-probe. Extend it for explicit material footprints or other demonstrated needs,
-not a speculative Nanite clone. Reusing screen derivatives across different
-selected surfaces needs separate validation.
+Original-mesh visibility preserves bit-identical depth and coverage across
+192 moving-camera poses, containing 27.2 million covered samples. Shading is
+not identical: reconstructed interpolation and cross-surface derivatives
+change procedural filtering. Exact CPU merging does not guarantee GPU raster
+equivalence: the merged flights retain one coverage disagreement and 41
+common-hit depth errors above one cell, with a 13.09-cell maximum. Overview
+videos look intact, but those rare failures remain a gate, not an omission.
+
+Appearance retirement at a one-pixel threshold loses time at 720p. A three-
+pixel threshold at 360p has only small, unreversed savings and divergent-
+derivative limitations. Do not yet accept it as the far-field solution.
+The immutable merger takes 13–15 seconds, and expanded visibility payloads
+use 55–90 MB alpine versus 8.6 MB of source site/appearance/light streams.
+Builds, uploads, edits and streaming are outside frame timings. All 35 test
+suites pass; experiment code and evidence do not change production defaults.
+
+** NEXT Make visibility-first terrain compact and footprint-aware
+:PROPERTIES:
+:ID: EAWKSG
+:END:
+
+Start with #EKK3FS's original triangles: it retains depth exactly in the tested
+views and captures most of the gain. Encode a compact primitive identity into
+the production shared atlas rather than retaining per-corner references.
+Make resident lifetime, edits, publication and buffer replacement explicit;
+charge their CPU time, uploads and memory. Recheck with temporal rendering,
+moving light, natural apertures, close surfaces and both backend lowerings.
+
+Give material evaluation explicit surface footprints rather than assuming
+neighbor pixels belong to the same plane. This is a demonstrated DSL need:
+the fullscreen pass and retirement branches change derivative semantics.
+Separate geometric visibility from filtered directional response and artistic
+marks. Keep the merged path optional until rare raster depth disagreements
+are understood; do not trade the unmerged path's stronger depth evidence for
+its last few percent of frame time without a deliberate quality decision.

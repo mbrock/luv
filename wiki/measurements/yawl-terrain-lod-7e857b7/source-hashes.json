@@ -1,0 +1,18 @@
+{
+  "base_revision": "7e857b770c732fd097c532aabee56c437b46caa4",
+  "note": "Final source. After measured cohorts, baked buffers moved from the texture-target table to the buffer table; no shaders or draw arguments changed. Final GPU smoke verified earlier control/baked/baked-merged HDR/depth bit-for-bit. Motion analysis gained camera-equality and view-depth checks after capture.",
+  "sha256": {
+    "luft/render/frame.lisp": "ff1fb70959f3255ac84fe0e5b609070c9619b55866b9ea60592870fd5036b1b2",
+    "luft/render/shaders.lisp": "dac6f73388fe45dff7617c0211faed65905f2ddb009cff989f81a713fdc8f650",
+    "luft/render/terrain-drawing.lisp": "adf76647aea0e8100ea3f154947876b125300ed3ae920e7e49c52102ec945f78",
+    "luvcraft/luft/sky.lisp": "5fcf2cca4016c71e9add19e2b3af7c9ad8568cc550d0bdf417fbcaf683e42045",
+    "scripts/bench-gpu-fps.lisp": "c4cc8c0a140f540dd62124ed01a289f34354a1ca379e072432b66b1bbf6023ea",
+    "wiki/measurements/yawl-terrain-lod-7e857b7/analyze.py": "59d4ce66c720c684fe9928592acea83843466d6c802b092ce72f968937c49a4f",
+    "wiki/measurements/yawl-terrain-lod-7e857b7/appearance.lisp": "3b1c3169a711d1f83795b179624276956ff44cb5abdd5a723f0203225c867be5",
+    "wiki/measurements/yawl-terrain-lod-7e857b7/baked.lisp": "dc054dae082369cb95649a286a59a3ba619023dec466d141aaf501cf7209c91f",
+    "wiki/measurements/yawl-terrain-lod-7e857b7/check.lisp": "a3951bc347e763d9917f8b3bcd9f02b56a253c24be94ec0f77ce6ac2151f26a0",
+    "wiki/measurements/yawl-terrain-lod-7e857b7/geometry.lisp": "35473cfdc8a74c989e3594d5ea688a35d721f0ae4a50e5051f241c1bc3f1f63c",
+    "wiki/measurements/yawl-terrain-lod-7e857b7/run.lisp": "345258ee933f551e6172c631ff981a9360798e8fe5e401c5e79df9fc9470c3d5",
+    "wiki/measurements/yawl-terrain-lod-7e857b7/shaders.lisp": "97ee8020505773f0ef3d0108e6ae7b2d7c3aba80399ad73d14fa43421cf22448"
+  }
+}
