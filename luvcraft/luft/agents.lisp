@@ -44,11 +44,14 @@
                         (terrain:streaming-scene-store (render:viewer-source viewer)))))
 
 (defun make-inhabitant (viewer kind position &key description conversation asked said (yaw 0.0))
-  (let* ((height (ecase kind (:gnome 1.5) (:cat 0.6) (:fantus 1.8)))
+  (let* ((height (ecase kind (:gnome 1.5) (:cat 0.6)
+                  (:fantus (* (luvcraft.agent::fantus-figure-height)
+                              (luvcraft.agent::fantus-stature)))))
          (character (terrain:make-walking-character
                      :body (make-instance 'terrain:physical-body :position position
                                           :radius 0.28 :height height)
-                     :heading-x (sin yaw) :heading-y (cos yaw) :speed 3.0))
+                     :heading-x (sin yaw) :heading-y (cos yaw)
+                     :speed (if (eq kind :fantus) (luvcraft.agent::fantus-stature) 3.0)))
          (simulation (terrain:make-world-simulation (render:viewer-source viewer))))
     (terrain:add-simulation-character simulation character)
     (make-instance 'inhabitant :kind kind :character character :simulation simulation :description description
@@ -118,7 +121,9 @@
               (when (and face (terrain::body-clear-at-p
                               (terrain::inspection-source-solid scene)
                               (vec3:vec3-x point) (vec3:vec3-y point) (vec3:vec3-z point)
-                              (ecase kind (:gnome 1.5) (:cat 0.6) (:fantus 1.8)) 0.28)
+                              (ecase kind (:gnome 1.5) (:cat 0.6)
+                                (:fantus (* (luvcraft.agent::fantus-figure-height)
+                                            (luvcraft.agent::fantus-stature)))) 0.28)
                          (notany (lambda (other)
                                    (< (companion-distance (inhabitant-position other) point) 1.0))
                                  (viewer-agents viewer)))

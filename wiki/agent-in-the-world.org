@@ -576,9 +576,24 @@ Luft keeps its simple Y/N/T approval controls.
 
 =fantus= is NRK's purple felt toddler, Fantorangen's little sibling, as a
 third embodied kind beside the gnome and the cat (#V9DHV5).  It shares their
-conversation, travel, and save surface (#9AONMH, as =:fantus=) and brings its
-own fragment program, =:fantus-sdf=.  Every part is an ellipsoid, capsule,
-round cone, or ring, so an SDF suits it better than a loaded mesh would.
+conversation, travel, and save surface (#9AONMH, as =:fantus=).
+
+/Current native body./ =luvcraft/fantus/build-fantus.py= authors the standing
+mesh, felt materials, weighted armature and foot-target/knee-pole IK in
+Blender. The editable =fantus.blend= and portable =fantus.glb= accompany a
+small =FNT1= runtime export: bind vertices, four bone influences, triangles,
+an idle pose and sampled IK-solved skin matrices. Both native games draw
+=:fantus-mesh= with real surface depth, rather than marching the old field.
+The cycle advances by actual horizontal travel divided by the scaled stride;
+stopping blends back to idle. Fantus walks at one figure unit per second.
+Scale and rim light remain live Lisp values; proportions live in Blender.
+This is baked foot IK, not runtime terrain-adaptive foot placement: uneven
+ground still belongs to the existing body locomotion system.
+
+/Earlier analytic body./ The browser shader gallery retains =:fantus-sdf=.
+The reference measurements and captures below document that earlier seated
+model, whose ellipsoids, capsules, round cones and rings supplied the first
+proportion study for the mesh.
 
 /References./  The character exists as a felt TV puppet, a licensed plush,
 and NRK's 3D animated figure.  The first model followed the puppet photos on

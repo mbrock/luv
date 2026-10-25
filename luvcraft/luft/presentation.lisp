@@ -167,6 +167,7 @@
 
 (bridge-companion-overlay mcluv:luvcraft-widget-overlay)
 (bridge-companion-overlay luvcraft.agent::sdf-agent-body-overlay)
+(bridge-companion-overlay luvcraft.agent::fantus-body-overlay)
 (bridge-companion-overlay luvcraft.agent:embodied-agent)
 
 (defparameter *companion-sdf-bodies-p* nil
@@ -307,6 +308,10 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
     (when (inhabitant-journey inhabitant)
       (setf (luvcraft.agent::embodied-agent-facing-yaw agent)
             (atan (terrain:character-heading-x character) (terrain:character-heading-y character))))))
+
+(defmethod render:advance-viewer-overlay :after
+    ((agent luft-fantus) (viewer luvcraft-viewer) seconds)
+  (luvcraft.agent::update-fantus-gait agent seconds))
 
 (defmethod render:advance-viewer-game :before ((viewer luvcraft-viewer) seconds)
   (declare (ignore seconds))
