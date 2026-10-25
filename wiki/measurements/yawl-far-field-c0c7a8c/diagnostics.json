@@ -1,0 +1,27 @@
+{
+  "view": {
+    "angle_degrees": -12,
+    "elevation": 0.22,
+    "extent": [
+      192,
+      144
+    ]
+  },
+  "reference_covered_samples": 15235,
+  "missing_samples": 3420,
+  "extra_samples": 9,
+  "wrong_layer_samples_over_one_cell": 52,
+  "cache_bytes": 756216,
+  "switch": {
+    "angles_degrees": [
+      12.499,
+      12.501
+    ],
+    "cache_views": [
+      1,
+      2
+    ],
+    "exact_coverage_changes": 0,
+    "cache_coverage_changes": 3435
+  }
+}

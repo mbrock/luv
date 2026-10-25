@@ -172,6 +172,14 @@ appearance, not just a coloured occupancy cloud. The choice between analytic
 evaluation, filtered lookups, spatial bricks, or another representation is
 still open. Keep the world-space shape fixed while studying the rendering.
 
+The first three CPU attempts are now recorded in #HHAVYA: exact plane domains,
+masked surface bricks, and a directional appearance cache. The first retains
+the sampled surface exactly, the second exposes quantization/depth tradeoffs,
+and the third loses newly visible surfaces and pops at directional switches.
+This does not choose a GPU renderer or reject softness. #EKK3FS takes forward
+the distinction between a reliable visibility carrier and its filtered or
+painterly response; the two need not be the same experiment.
+
 Look under moving light and a moving camera, head-on, at grazing angles, and
 across silhouettes. Judge both a stationary image and the experience of
 approaching it. Include pleasing intentional departures as well as errors.

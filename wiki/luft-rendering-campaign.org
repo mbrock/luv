@@ -431,3 +431,64 @@ view and streaming. Check sharpness and pointer/HUD alignment at reduced
 output. If growth still hitches, prepare or cache scaler generations rather
 than repeatedly compiling them on the presentation thread. Do not infer a
 shader optimization from this resolution reduction.
+
+* DONE Compare three fixed-surface far-field representations
+:PROPERTIES:
+:ID: HHAVYA
+:END:
+
+The [[file:measurements/yawl-far-field-c0c7a8c/README.org][first fixed-surface comparison]] follows #BBFT2Q with three independently
+built CPU probes: exact plane domains, spatial surface-plane masks in 4³
+bricks, and a relightable directional normal/material cache. It reads actual
+owned atlas geometry, keeps a deliberately thick bevel fixed, and compares
+six fixtures including a cave, checkerboard sheets and an edited aperture.
+Moppe's current code and the Sheaf research supply matching conditions, not
+a cave-safe representation to transplant.
+
+Analytic domains match all 22 equal-sample still cases: zero coverage/material
+disagreement and at most 7.11e-14 cells depth difference. The ridge's 776
+triangles become 26 plane domains; the cave's 3,624 become 84. This preserves
+bevel light and openings, but is not a performance result or analytic
+antialiasing. Proxy overdraw, winding tests and depth writes remain costs.
+
+Half-cell bricks with 8² surface masks stay close in these views: maximum
+hit disagreement is 0.083% of union-covered samples. Nevertheless, a rare
+wrong-sheet selection has 2.09 cells depth error. Full-cell/8² masks match
+half-cell/4² colour error in the selected cave sweep while using 14,580
+rather than 39,176 packed-array bytes. Mask pitch and spatial partition are
+different tradeoffs; blindly shrinking cells duplicates records.
+
+The nine-view cache fails at visibility before its softness can be accepted.
+One off-bake cave view loses 22.4% of reference-covered samples. A 0.002°
+turn across a view-selection boundary changes 3,435 coverage samples where
+exact triangles change none. Raising spatial resolution quadruples payload
+without fixing missing angular visibility. World-fixed marks do not repair
+holes, and are not an accepted artistic treatment. This is a rejection of
+the tested cache, not of painterly appearance or distribution-based shading.
+
+The bundle retains source, raw metrics, convergence checks, diagnostic images
+and a slowed orbit. =make test= passes all 35 suites. No shader/HAL/default
+renderer change, GPU timing, new Xcode profile, or large-horizon speedup is
+claimed. The current indexed atlas remains the production control.
+
+** NEXT Price visibility separately from filtered appearance
+:PROPERTIES:
+:ID: EKK3FS
+:END:
+
+Test one bounded M5 scene replacement with exact domains as the correctness
+control and masked planes as the spatial approximation. Compare both against
+the original indexed path, not just against one another or expanded CPU
+triangles. Use a pixel-owned/tile-local evaluator or bounded proxies only
+after pricing the actual domain/mask work; fewer primitives alone are not
+the goal. Preserve the merged shadow path and charge selection, uploads and
+memory. If the small case wins, take it to the fixed-resident hilltop and
+the established adjacent-frame runtime/Xcode-counter workflow.
+
+Keep filtered directional response and world-stable artistic marks independent
+of that visibility choice. A known normal distribution is not a visibility
+solution; a slow crossfade is not a correspondence solution. The existing DSL
+already has buffers, bounded loops, discard and fragment depth for a first
+probe. Extend it for explicit material footprints or other demonstrated needs,
+not a speculative Nanite clone. Reusing screen derivatives across different
+selected surfaces needs separate validation.
