@@ -427,7 +427,7 @@ Only arithmetic; no extra noise or texture samples in these laid shapes."
   "Band-limit the game's procedural materials using actual raster footprints.")
 
 (define-shader-function material-pixel-footprint (world)
-  (let ((dx (derivative-x world)) (dy (derivative-y world)))
+  (let* ((dx (derivative-x world)) (dy (derivative-y world)))
     (sqrt (max (dot dx dx) (dot dy dy)))))
 
 (define-shader-function material-detail-weight (world frequency)
