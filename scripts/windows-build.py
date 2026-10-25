@@ -205,13 +205,19 @@ def relocated_smoke(stage, system_root, prefix, build_env, software):
             private_icd.write_text(json.dumps(icd))
             env["VK_DRIVER_FILES"] = str(private_icd)
             image = root / "frame.png"
-            run([moved / "luvcraft.exe", "--vulkan-smoke-test", image],
-                cwd=root, env=env, timeout=600)
+            # A GUI-subsystem EXE has no attached console. Explicit pipes
+            # preserve its Lisp/native diagnostics on both success and failure.
+            print(run([moved / "luvcraft.exe", "--vulkan-smoke-test", image],
+                      cwd=root, env=env, timeout=600, text=True,
+                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout,
+                  end="")
             if not image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
                 raise ValueError("Vulkan smoke did not produce a PNG")
             image.unlink()
-            run([moved / "luvcraft.exe", "--game-smoke-test", image],
-                cwd=root, env=env, timeout=600)
+            print(run([moved / "luvcraft.exe", "--game-smoke-test", image],
+                      cwd=root, env=env, timeout=600, text=True,
+                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout,
+                  end="")
             if not image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
                 raise ValueError("Game save/reload smoke did not produce a PNG")
             shutil.copy2(image, Path(str(stage) + "-smoke.png"))
