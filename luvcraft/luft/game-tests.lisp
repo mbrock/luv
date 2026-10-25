@@ -345,3 +345,30 @@
       (true (null (render:encode-viewer-overlay body viewer nil nil))))
     (let ((host::*companion-sdf-bodies-p* t))
       (is eq :drawn (render:encode-viewer-overlay body viewer nil nil)))))
+
+(define-test companion-foot-probes-agree-between-y-up-and-offset-z-up-hosts
+  (let* ((world (luvcraft:make-empty-little-block-world :chunk-height 16))
+         (source (game:luvcraft-world-luft-source world))
+         (offset (game:luvcraft-world-source-offset source))
+         (placement (game:block-placement luvcraft::*stone-block*))
+         (builder (luft.terrain:make-scene-builder
+                   :horizontal-bits 11
+                   :material-vocabulary (game:luvcraft-palette-vocabulary game:*luvcraft-palette*))))
+    (luvcraft.world:ensure-world-chunk world 0 0 0)
+    ;; Asymmetric coordinates distinguish an accidental Y/Z exchange and a
+    ;; missing offset. A neighboring taller support needs a different ray.
+    (setf (luvcraft.world:world-block-at world 3 4 7) luvcraft::*stone-block*
+          (luvcraft.world:world-block-at world 4 5 7) luvcraft::*stone-block*)
+    (luft.terrain:scene-builder-cell builder (+ offset 3) (+ offset 7) 4 :material placement)
+    (luft.terrain:scene-builder-cell builder (+ offset 4) (+ offset 7) 5 :material placement)
+    (let* ((scene (luft.terrain:make-streaming-scene (luft.terrain:finish-scene-builder builder)))
+           (viewer (make-instance 'host:luvcraft-viewer :source scene :luvcraft-world world
+                                                      :hotbar (list placement)))
+           (old (make-instance 'luvcraft:luvcraft-session :world world)))
+      (setf (slot-value scene 'luft.terrain::source) source)
+      (dolist (session (list old viewer))
+        (is = 5 (luvcraft.agent::companion-ground-height session 3.4d0 7.2d0 5.5d0 3d0))
+        (is = 6 (luvcraft.agent::companion-ground-height session 4.4d0 7.2d0 6.5d0 3d0))
+        (true (null (luvcraft.agent::companion-ground-height session 3.4d0 7.2d0 4.5d0 3d0)))
+        (true (null (luvcraft.agent::companion-ground-height session 3.4d0 8.2d0 5.5d0 3d0)))
+        (true (null (luvcraft.agent::companion-ground-height session 300.4d0 7.2d0 5.5d0 3d0)))))))

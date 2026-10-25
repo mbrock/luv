@@ -245,6 +245,15 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
 (defclass luft-cat (luft-companion luvcraft.agent:cat) ())
 (defclass luft-fantus (luft-companion luvcraft.agent:fantus) ())
 
+(defmethod luvcraft.agent::companion-ground-height ((viewer luvcraft-viewer) x z ceiling floor)
+  (multiple-value-bind (face cx cy cz point)
+      (terrain:raycast-face (render:viewer-source viewer)
+                            (host-position viewer (vec3:make-vec3 x ceiling z))
+                            (vec3:make-vec3 0 0 -1) :max-distance (- ceiling floor))
+    (declare (ignore cx cy cz))
+    (when (and face (= (luft:site-extent face) luft:+xy-face-extent+) (luft:site-positive-p face))
+      (vec3:vec3-z point))))
+
 (defun restore-companion-dialogue (agent inhabitant)
   "Retain saved conversation for focused reading without replaying subtitles."
   (let ((expired (- (get-internal-real-time)
@@ -290,6 +299,8 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
          (p (presentation-position viewer (inhabitant-position inhabitant)))
          (player (terrain:body-position (terrain:character-body (render:viewer-player viewer)))))
     (setf (luvcraft.agent::embodied-agent-position agent) p
+          (luvcraft.agent::embodied-agent-grounded-p agent)
+          (terrain:body-grounded-p (terrain:character-body character))
           (luvcraft.agent::gnome-x agent) (floor (vec3:vec3-x p))
           (luvcraft.agent::gnome-y agent) (floor (vec3:vec3-y p))
           (luvcraft.agent::gnome-z agent) (floor (vec3:vec3-z p))
@@ -311,7 +322,7 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
 
 (defmethod render:advance-viewer-overlay :after
     ((agent luft-companion) (viewer luvcraft-viewer) seconds)
-  (luvcraft.agent::update-companion-gait agent seconds))
+  (luvcraft.agent::update-companion-gait agent seconds viewer))
 
 (defmethod render:advance-viewer-game :before ((viewer luvcraft-viewer) seconds)
   (declare (ignore seconds))

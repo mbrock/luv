@@ -301,7 +301,7 @@
   :depends-on ("luvcraft" "luvcraft/agent-bodies"
                "luv/application-agent"
                "openai" "alexandria" "sb-concurrency" "sb-introspect"
-               "closer-mop")
+               "closer-mop" "sb-md5")
   :serial t
   :components ((:module "luvcraft/agent"
                 :serial t
@@ -316,6 +316,7 @@
                              (:file "cat")
                              (:file "fantus")
                              (:file "companion-mesh")
+                             (:file "companion-kinematics")
                              (:file "residence")
                              (:file "surroundings"))))
   :in-order-to ((test-op (test-op "luvcraft/agent/test"))))

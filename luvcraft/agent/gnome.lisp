@@ -105,6 +105,7 @@ GPU medium spells as a fully transparent fill.")
    (walk-phase :initform 0d0 :accessor companion-walk-phase)
    (walk-blend :initform 0.0 :accessor companion-walk-blend)
    (previous-position :initform nil :accessor companion-previous-position)
+   (kinematics :initform nil :accessor companion-kinematics)
    (pending-approval :initform nil :accessor embodied-agent-pending-approval
                      :documentation
                      "The one possible-world tool effect awaiting the player.")

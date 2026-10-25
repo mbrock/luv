@@ -1,9 +1,14 @@
 (in-package #:luvcraft.agent)
 
 ;;; FNT1 is the small, versioned runtime export of the Blender companion rigs.
-;;; The editable armature and IK constraints stay in Blender. Its evaluated
-;;; skin matrices are sampled by distance here, not by a free-running clock.
-(defstruct companion-mesh vertices joints weights indices poses bone-count frame-count stride)
+;;; Authored skin matrices supply secondary motion. Rest chains in the .rig
+;;; sidecar let the game solve its own legs against the actual terrain.
+(defstruct companion-mesh vertices joints weights indices poses bone-count frame-count stride rig)
+(defstruct companion-leg name bones hip knee ankle pole phase)
+(defstruct companion-rig stance legs)
+(defstruct companion-foot point heading from from-heading target target-heading
+           (progress 1d0) swing-p distance-driven-p supported-p (stance-p t))
+(defstruct companion-pose mesh palette feet position (pelvis 0d0) moving-p scale)
 
 (defvar *companion-meshes* (make-hash-table))
 
@@ -24,13 +29,37 @@
            (:cat luvcraft.shaders::*cat-rim-light*)
            (:fantus luvcraft.shaders::*fantus-rim-light*)) 1.0))
 
+(defun companion-mesh-path (kind)
+  (asdf:system-relative-pathname
+   :luvcraft (ecase kind
+               (:fantus "luvcraft/fantus/fantus.fmesh")
+               (:gnome "luvcraft/companions/gnome.fmesh")
+               (:cat "luvcraft/companions/cat.fmesh"))))
+
+(defun load-companion-rig (mesh-path bone-count)
+  (let* ((*read-eval* nil)
+         (path (make-pathname :type "rig" :defaults mesh-path))
+         (data (with-open-file (stream path) (read stream)))
+         (digest (format nil "~(~{~2,'0X~}~)" (coerce (sb-md5:md5sum-file mesh-path) 'list))))
+    (assert (and (= 1 (getf data :version))
+                 (= bone-count (getf data :bone-count))
+                 (string= digest (getf data :mesh-md5))) ()
+            "Stale IK rig ~A. Re-run luvcraft/agent/export-rig.py on its .blend." path)
+    (make-companion-rig
+     :stance (getf data :stance)
+     :legs (mapcar
+            (lambda (leg)
+              (assert (every (lambda (i) (<= 0 i (1- bone-count))) (getf leg :bones)))
+              (make-companion-leg
+               :name (getf leg :name) :bones (getf leg :bones) :phase (getf leg :phase)
+               :hip (apply #'make-vec3 (getf leg :hip))
+               :knee (apply #'make-vec3 (getf leg :knee))
+               :ankle (apply #'make-vec3 (getf leg :ankle))
+               :pole (apply #'make-vec3 (getf leg :pole))))
+            (getf data :legs)))))
+
 (defun load-companion-mesh (&optional (kind :fantus))
-  (with-open-file (stream (asdf:system-relative-pathname
-                          :luvcraft
-                          (ecase kind
-                            (:fantus "luvcraft/fantus/fantus.fmesh")
-                            (:gnome "luvcraft/companions/gnome.fmesh")
-                            (:cat "luvcraft/companions/cat.fmesh")))
+  (with-open-file (stream (companion-mesh-path kind)
                          :element-type '(unsigned-byte 8))
     (labels ((word ()
                (loop for shift from 0 below 32 by 8
@@ -68,13 +97,14 @@
           (assert (null (read-byte stream nil nil)))
           (make-companion-mesh :vertices vertices :joints joints :weights weights
                                :indices indices :poses poses :bone-count bone-count
-                               :frame-count frame-count :stride stride))))))
+                               :frame-count frame-count :stride stride
+                               :rig (load-companion-rig (companion-mesh-path kind) bone-count)))))))
 
 (defun companion-mesh (kind)
   (or (gethash kind *companion-meshes*)
       (setf (gethash kind *companion-meshes*) (load-companion-mesh kind))))
 
-(defun update-companion-gait (agent seconds)
+(defun update-companion-gait (agent seconds &optional (session (gnome-session agent)))
   "Advance the IK cycle only for actual horizontal travel; blend to rest at stops."
   (let* ((x (luvcraft::body-x agent)) (z (luvcraft::body-z agent))
          (kind (embodied-agent-save-kind agent))
@@ -91,36 +121,46 @@
           (mod (+ (companion-walk-phase agent)
                   (/ travel (* (companion-stature kind)
                                (companion-mesh-stride (companion-mesh kind))))) 1d0)
-          (companion-walk-blend agent) (+ blend (* amount (- (if moving 1.0 0.0) blend)))))
+          (companion-walk-blend agent) (+ blend (* amount (- (if moving 1.0 0.0) blend))))
+    (advance-companion-kinematics
+     agent session seconds travel
+     (if moving (make-vec3 (/ (- x (car previous)) travel) 0 (/ (- z (cdr previous)) travel))
+         (make-vec3 0 0 1)) moving))
   agent)
 
 (defmethod luvcraft:advance-luvcraft-overlay :after ((agent embodied-agent) session seconds)
-  (declare (ignore session))
-  (update-companion-gait agent seconds))
+  (update-companion-gait agent seconds session))
 
-(defun skin-companion-mesh (mesh phase blend palette output)
-  "Write interleaved position, normal, colour and bind point into OUTPUT.
-PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
+(defun sample-companion-palette (mesh phase blend palette)
+  "Sample the authored animation; live IK may replace legs before skinning."
   (declare (optimize (speed 3))
            (type single-float blend)
-           (type (simple-array single-float (*)) palette output))
+           (type (simple-array single-float (*)) palette))
   (let* ((poses (companion-mesh-poses mesh))
-         (vertices (companion-mesh-vertices mesh))
-         (joints (companion-mesh-joints mesh))
-         (weights (companion-mesh-weights mesh))
          (size (* 12 (companion-mesh-bone-count mesh)))
          (frame (* (mod phase 1d0) (companion-mesh-frame-count mesh)))
          (first (floor frame)) (fraction (coerce (- frame first) 'single-float))
          (a (* size (1+ first)))
          (b (* size (1+ (mod (1+ first) (companion-mesh-frame-count mesh))))))
-    (declare (type (simple-array single-float (*)) poses vertices weights)
-             (type (simple-array (unsigned-byte 32) (*)) joints))
+    (declare (type (simple-array single-float (*)) poses))
     ;; Closely sampled rigid matrices interpolate smoothly, including the seam.
     (dotimes (i size)
       (let* ((idle (aref poses i))
              (walk (+ (aref poses (+ a i))
                       (* fraction (- (aref poses (+ b i)) (aref poses (+ a i)))))))
-        (setf (aref palette i) (+ idle (* blend (- walk idle))))))
+        (setf (aref palette i) (+ idle (* blend (- walk idle)))))))
+  palette)
+
+(defun skin-companion-palette (mesh palette output)
+  "Write interleaved position, normal, colour and bind point into OUTPUT.
+PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
+  (declare (optimize (speed 3))
+           (type (simple-array single-float (*)) palette output))
+  (let ((vertices (companion-mesh-vertices mesh))
+        (joints (companion-mesh-joints mesh))
+        (weights (companion-mesh-weights mesh)))
+    (declare (type (simple-array single-float (*)) vertices weights)
+             (type (simple-array (unsigned-byte 32) (*)) joints))
     (loop for v fixnum below (truncate (length vertices) 9)
           for source fixnum = (* v 9) for target fixnum = (* v 12)
           do (dotimes (axis 3)
@@ -142,6 +182,11 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
                        (aref output (+ target 6 axis)) (aref vertices (+ source 6 axis))
                        (aref output (+ target 9 axis)) (aref vertices (+ source axis)))))))
   output)
+
+(defun skin-companion-mesh (mesh phase blend palette output)
+  "Preview authored poses without world contacts (also used by asset checks)."
+  (sample-companion-palette mesh phase blend palette)
+  (skin-companion-palette mesh palette output))
 
 (defclass companion-body-overlay ()
   ((agent :initarg :agent :reader companion-body-agent)
@@ -185,8 +230,11 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
                                   (luv:make-buffer-descriptor
                                    :label "Companion frame-local skin" :size (* 4 count)
                                    :usage '(:vertex :copy-dst))))))))
-    (skin-companion-mesh mesh (companion-walk-phase agent) (companion-walk-blend agent)
-                         (companion-body-palette overlay) vertices)
+    (let ((pose (companion-kinematics agent)))
+      (if (and pose (eq mesh (companion-pose-mesh pose)))
+          (skin-companion-palette mesh (companion-pose-palette pose) vertices)
+          (skin-companion-mesh mesh (companion-walk-phase agent) (companion-walk-blend agent)
+                               (companion-body-palette overlay) vertices)))
     (setf (aref instance 0) (coerce (luvcraft::body-x agent) 'single-float)
           (aref instance 1) (coerce (luvcraft::body-y agent) 'single-float)
           (aref instance 2) (coerce (luvcraft::body-z agent) 'single-float)

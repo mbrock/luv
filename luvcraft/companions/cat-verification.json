@@ -1,10 +1,10 @@
 {
   "format": "FNT1",
   "model": "cat",
-  "runtime_vertices": 33738,
-  "editable_vertices": 28020,
-  "triangles": 55334,
-  "indices": 166002,
+  "runtime_vertices": 34305,
+  "editable_vertices": 29309,
+  "triangles": 57634,
+  "indices": 172902,
   "deform_bones": 19,
   "total_bones": 28,
   "bone_order": [
@@ -37,44 +37,44 @@
   "stance_fraction": 0.66,
   "bind_bounds_xyz": [
     [
-      -0.3601468503475189,
+      -0.32507947087287903,
       0.0,
-      -1.2979902029037476
+      -1.169787049293518
     ],
     [
-      0.3601468503475189,
-      1.0459797382354736,
-      0.7419999837875366
+      0.32507947087287903,
+      1.1162431240081787,
+      0.7239999771118164
     ]
   ],
   "idle_bounds_xyz": [
     [
-      -0.3601468503475189,
-      -1.5965950339591473e-08,
-      -1.2979909181594849
+      -0.32507947087287903,
+      -1.1183667680825238e-07,
+      -1.1697872877120972
     ],
     [
-      0.3601468503475189,
-      1.029979944229126,
-      0.7420000433921814
+      0.32507947087287903,
+      1.100243330001831,
+      0.7240000367164612
     ]
   ],
   "animated_bounds_xyz": [
     [
-      -0.3714503913949644,
-      -3.086711553933592e-08,
-      -1.3209886726869065
+      -0.33581698264496795,
+      -1.2673783976341336e-07,
+      -1.1850177499747239
     ],
     [
-      0.3714503913949644,
-      1.029979944229126,
-      0.8067109892704518
+      0.33581698264496795,
+      1.100243330001831,
+      0.7240001536905734
     ]
   ],
   "dimensions": [
-    0.7202937006950378,
-    1.0459797382354736,
-    2.039990186691284
+    0.6501589417457581,
+    1.1162431240081787,
+    1.8937870264053345
   ],
   "face_height": 0.78,
   "idle_face_height": 0.764,
@@ -84,75 +84,75 @@
       0.53,
       -0.25
     ],
-    "radius": 1.2463582481585167
+    "radius": 1.1506314714428842
   },
   "skinning_checks": [
     {
       "action": "Idle",
       "frame": 1,
-      "max_position_error": 2.0661583849001634e-07
+      "max_position_error": 2.974636482016878e-07
     },
     {
       "action": "Walk",
       "frame": 4,
-      "max_position_error": 2.880610020782512e-07
+      "max_position_error": 2.397168482648334e-07
     },
     {
       "action": "Walk",
       "frame": 11,
-      "max_position_error": 2.3150888698783478e-07
+      "max_position_error": 2.3180730213868641e-07
     },
     {
       "action": "Walk",
       "frame": 19,
-      "max_position_error": 2.81442132372712e-07
+      "max_position_error": 2.48174250418008e-07
     },
     {
       "action": "Walk",
       "frame": 28,
-      "max_position_error": 2.515437173364486e-07
+      "max_position_error": 2.4783879292037153e-07
     },
     {
       "action": "Walk",
       "frame": 37,
-      "max_position_error": 2.7052284512361065e-07
+      "max_position_error": 3.080019170596029e-07
     },
     {
       "action": "Walk",
       "frame": 45,
-      "max_position_error": 3.2084230070731824e-07
+      "max_position_error": 2.1402525558925783e-07
     }
   ],
-  "negative_control_wrong_pose_max_error": 0.268422836633351,
+  "negative_control_wrong_pose_max_error": 0.2691354074807115,
   "ik": {
     "target": 0,
-    "chain": 3.335331273913293e-07,
-    "ground": 1.892447443196943e-08,
-    "slide": 4.704793299392662e-08,
-    "level": 3.758411692098309e-07,
-    "orthonormality": 2.5033950805664062e-06,
-    "minimum_floor": -1.892447443196943e-08,
-    "swing": 0.074928879737854
+    "chain": 7.195949558393041e-06,
+    "ground": 1.2208550970171927e-07,
+    "slide": 4.5140584270519923e-08,
+    "level": 5.640529038997229e-07,
+    "orthonormality": 2.0265579223632812e-06,
+    "minimum_floor": -1.2208550970171927e-07,
+    "swing": 0.07492882758378983
   },
   "limbs": {
     "front.L": {
-      "chain": 3.332000937312528e-07,
-      "swing": 0.07492887228727341,
+      "chain": 7.195949558393041e-06,
+      "swing": 0.07492882758378983,
       "stance_samples": 123
     },
     "hind.L": {
-      "chain": 2.796698269117394e-07,
-      "swing": 0.074928879737854,
+      "chain": 1.7943374184954607e-07,
+      "swing": 0.07492877542972565,
       "stance_samples": 123
     },
     "front.R": {
-      "chain": 3.335331273913293e-07,
-      "swing": 0.07492887228727341,
+      "chain": 7.195949558393041e-06,
+      "swing": 0.07492882758378983,
       "stance_samples": 123
     },
     "hind.R": {
-      "chain": 3.0538293021796936e-07,
-      "swing": 0.074928879737854,
+      "chain": 1.769414855098414e-07,
+      "swing": 0.07492876797914505,
       "stance_samples": 123
     }
   },
@@ -162,18 +162,18 @@
     "front.R": 0.25,
     "hind.R": 0.5
   },
-  "runtime_minimum_vertex_height": -3.086711553933592e-08,
-  "runtime_contact_max_error": 1.0608470606571359e-07,
-  "runtime_stance_slide_max_error": 9.592055671969746e-08,
+  "runtime_minimum_vertex_height": -1.2673783976341336e-07,
+  "runtime_contact_max_error": 1.2673783976341336e-07,
+  "runtime_stance_slide_max_error": 1.0771467517933786e-07,
   "runtime_contact_vertices": {
-    "front.L": 56,
-    "hind.L": 79,
-    "front.R": 65,
-    "hind.R": 71
+    "front.L": 62,
+    "hind.L": 62,
+    "front.R": 62,
+    "hind.R": 62
   },
   "loop_matrix_max_error": 2.9382785050718222e-18,
-  "file_bytes": 3002904,
+  "file_bytes": 3069060,
   "saved_blend_reopened": true,
-  "glb_baked_skin_matrix_max_error": 1.1920928955078125e-06,
+  "glb_baked_skin_matrix_max_error": 1.1026859283447266e-06,
   "glb_baked_skin_pose_checks": 16
 }

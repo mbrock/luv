@@ -1,9 +1,9 @@
 {
   "format": "FNT1",
-  "runtime_vertices": 22087,
-  "editable_vertices": 21647,
-  "indices": 125580,
-  "triangles": 41860,
+  "runtime_vertices": 31019,
+  "editable_vertices": 30547,
+  "indices": 178500,
+  "triangles": 59500,
   "deform_bones": 21,
   "total_bones": 26,
   "bone_order": [
@@ -29,68 +29,68 @@
     "shin.R",
     "foot.R"
   ],
-  "materials": 16,
+  "materials": 17,
   "walk_frames": 48,
   "fps": 60,
   "stride_length": 0.800000011920929,
   "stance_fraction": 0.58,
   "bind_bounds_xyz": [
     [
-      -0.7025576233863831,
+      -0.7336093783378601,
       0.0,
-      -0.3029080331325531
+      -0.31888875365257263
     ],
     [
-      0.7025576233863831,
+      0.7336093783378601,
       1.600000023841858,
-      0.5041050910949707
+      0.43962162733078003
     ]
   ],
   "skinning_checks": [
     {
       "action": "idle",
       "frame": 1,
-      "max_position_error": 2.5411529379691816e-07,
-      "rms_position_error": 4.517304470494665e-08
+      "max_position_error": 1.8927346655079599e-07,
+      "rms_position_error": 4.443496995642673e-08
     },
     {
       "action": "walk",
       "frame": 4,
-      "max_position_error": 3.6911459371939184e-07,
-      "rms_position_error": 7.470379640942701e-08
+      "max_position_error": 3.2031706088150976e-07,
+      "rms_position_error": 6.195854601176115e-08
     },
     {
       "action": "walk",
       "frame": 11,
-      "max_position_error": 2.875021847491845e-07,
-      "rms_position_error": 6.439730963687763e-08
+      "max_position_error": 2.9221535769469343e-07,
+      "rms_position_error": 6.482503959909817e-08
     },
     {
       "action": "walk",
       "frame": 19,
-      "max_position_error": 3.1805156104421704e-07,
-      "rms_position_error": 6.751279737105648e-08
+      "max_position_error": 2.948455863277956e-07,
+      "rms_position_error": 6.303333654853627e-08
     },
     {
       "action": "walk",
       "frame": 28,
-      "max_position_error": 3.0712154816212345e-07,
-      "rms_position_error": 6.50350122069154e-08
+      "max_position_error": 2.764287105403813e-07,
+      "rms_position_error": 6.353744834856894e-08
     },
     {
       "action": "walk",
       "frame": 37,
-      "max_position_error": 3.1530332471705125e-07,
-      "rms_position_error": 6.328783033209918e-08
+      "max_position_error": 2.8252131651848133e-07,
+      "rms_position_error": 5.977020277677648e-08
     },
     {
       "action": "walk",
       "frame": 45,
-      "max_position_error": 2.381671297944157e-07,
-      "rms_position_error": 5.19817477253466e-08
+      "max_position_error": 2.584234656472699e-07,
+      "rms_position_error": 5.702509775375298e-08
     }
   ],
-  "negative_control_wrong_pose_max_error": 0.22165838915373182,
+  "negative_control_wrong_pose_max_error": 0.2287001197837608,
   "ik_foot_target_max_error": 0,
   "stance_ground_max_error": 2.095382711786442e-07,
   "ik_shin_tail_max_error": 4.0560882075898744e-05,
@@ -101,7 +101,7 @@
   "stance_subframe_samples": 216,
   "bone_orthonormality_max_error": 8.940696716308594e-06,
   "loop_matrix_max_error": 8.549647821480713e-18,
-  "file_bytes": 2053652,
+  "file_bytes": 2872708,
   "glb_baked_skin_matrix_max_error": 4.6156346797943115e-06,
   "glb_baked_skin_pose_checks": 16
 }

@@ -580,6 +580,14 @@ have editable foot targets, two-bone IK and knee/elbow poles. Both export an
 idle pose and cyclic skeletal walk through the same =FNT1= contract as
 Fantus (#JGEQ4U), with editable Blender and baked GLB versions alongside.
 
+The next sculpting pass used Painter comparisons of both studio and native
+captures as references, then changed the actual weighted surfaces. The gnome
+gained a flowing ivory beard, folded cap, tailored sleeves and lined boots.
+The cat gained a tucked waist, sloping shoulders, smaller paws and almond
+eyes. Its leg construction and weights now share the same rest joints;
+lower-shin vertices must not inherit torso weights. Extreme bends still
+show some volume loss from the deliberately simple two-bone linear skin.
+
 One =companion-mesh= renderer owns loading, skinning and frame-local GPU
 resources for all three kinds. Actual horizontal travel advances each
 asset's stride; stopping blends to standing idle. The cat uses a four-beat
@@ -589,14 +597,61 @@ while conversation, tools and save identity remain unchanged (#9AONMH).
 
 The historical browser fields and the birthday party's separate SDF dance
 troupe remain analytic. Their silhouette knobs do not reshape native meshes;
-native proportions and weights belong to Blender. Foot IK is baked, not a
-runtime terrain-contact solver.
+native proportions and weights belong to Blender. The initial foot IK was
+baked; #XGSPU4 replaces the native leg animation with world contacts.
 
 The saved Blender scenes are reopened and checked against both exports.
 Native recordings exercise travel and stopping; conversation captures cover
 the original host. The shared companion proof retains tools, approval and
-denial, inventory, save/reopen, and provider cleanup. The existing Fantus
-remains a rendering and gait control.
+denial, inventory, save/reopen, and provider cleanup. Authored poses remain
+controls for judging the native gait independently of mesh deformation.
+
+* DONE Let the game own the companions' foot contacts
+:PROPERTIES:
+:ID: XGSPU4
+:END:
+
+The native =companion-kinematics= solver uses the rest chains exported from
+each Blender armature, not its evaluated leg animation. A =.rig= sidecar
+records joints, poles, bone indices and gait offsets; its mesh digest rejects
+stale geometry/rig combinations. Rebuild it with Blender in background mode,
+opening the saved model and running =luvcraft/agent/export-rig.py=.
+
+Moppe's articulated walker supplied the two-bone and distance-driven gait
+ideas. Its planted foot emerges from forward travel canceling a local foot
+path against one ground plane. Here the plant is a retained world point and
+heading, with an independent resident-terrain query under each boot or paw.
+The two native hosts adapt their Y-up and offset Z-up coordinates at that
+query boundary. Unknown cells never become invented footholds.
+
+Swing targets predict continued travel; stopping retargets the unfinished
+step toward home and finishes it in time. Turning in place requests small
+repositioning steps. The common pelvis lowers to maintain reach, while
+upper-body, ears, beard and tail keep their authored secondary motion.
+An analytic solve preserves both segment lengths, including unequal lengths,
+coincident targets and parallel poles. Airborne bodies and discontinuous
+placement release their contacts. A full one-cell climb is larger than the
+default toy legs can span: jumps and large steps still belong to locomotion,
+not stretched limbs or an IK-driven physical body.
+
+CPU checks cover actual skin palettes under travel, stopping, turning,
+asymmetric footholds, teleporting, absent ground and flight, plus both native
+terrain-query adapters. Curved travel and stop/turn checks run at 15, 30, 60
+and 144 Hz. Temple's offscreen Metal fixture exercises real Luft inhabitants
+through route walking, cancellation and turning, with planted ankle/toe drift
+below 6e-8 world units and no canvas failures. The final combined capture
+uses all three refined meshes, not only the earlier models.
+
+The unequal-support capture found a real scheduling error: the reach trigger
+used the unlowered rest hip, so Fantus repeatedly lifted a reachable foot.
+Scheduling now uses the current authored hip and the same downward pelvis
+allowance and reach margin as posing. With the root at 1.08 and supports at
+1.00/1.08, the original model changed from 17 repeated steps in four seconds
+to zero, with both feet planted for all 240 ticks and constant ankle height.
+Repeating this check on all three refined models kept all eight feet planted
+for 240/240 ticks, without repeated steps or measured ankle-height oscillation.
+Those raised pads use a synthetic height sampler, not voxel locomotion;
+the capture does not establish full-block climbing or legacy-host gameplay.
 
 * Fantus is a third body, sewn from felt
 :PROPERTIES:
@@ -616,8 +671,15 @@ an idle pose and sampled IK-solved skin matrices. Both native games draw
 The cycle advances by actual horizontal travel divided by the scaled stride;
 stopping blends back to idle. Fantus walks at one figure unit per second.
 Scale and rim light remain live Lisp values; proportions live in Blender.
-This is baked foot IK, not runtime terrain-adaptive foot placement: uneven
-ground still belongs to the existing body locomotion system.
+The initial baked foot animation now supplies a preview/control; #XGSPU4
+gives native legs terrain contacts while retaining authored secondary motion.
+
+The refined standing sculpt keeps fuller toddler proportions. Painter's
+silhouette/eye studies supplied candidates, then the user's final reference
+set the lower tan ears, golden face and belly, short upturned trunk, broad
+smile, sage nappy trim and grey divided toes. Cloth bindings follow the
+subdivided openings; tabs stay with the hips while hems follow the legs.
+All 21 deform-bone names and both leg rest chains remain unchanged.
 
 /Earlier analytic body./ The browser shader gallery retains =:fantus-sdf=.
 The reference measurements and captures below document that earlier seated

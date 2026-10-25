@@ -9,8 +9,8 @@ image textures, or external Python packages are required.
 
 | Model | Editable source | Baked skeletal interchange | Native runtime | Numerical evidence |
 |---|---|---|---|---|
-| Gnome | `gnome.blend` | `gnome.glb` | `gnome.fmesh` | `gnome-verification.json` |
-| Cat | `cat.blend` | `cat.glb` | `cat.fmesh` | `cat-verification.json` |
+| Gnome | `gnome.blend` | `gnome.glb` | `gnome.fmesh`, `gnome.rig` | `gnome-verification.json` |
+| Cat | `cat.blend` | `cat.glb` | `cat.fmesh`, `cat.rig` | `cat-verification.json` |
 
 `build-companions.py` constructs both. It imports construction primitives and
 the actual FNT1/GLB exporters and GLB verifier from `../fantus/build-fantus.py`,
@@ -21,12 +21,12 @@ shared where useful.
 
 | Budget | Gnome | Cat |
 |---|---:|---:|
-| Editable vertices | 21,162 | 28,020 |
-| Runtime vertices | 21,162 | 33,738 |
-| Triangles | 41,368 | 55,334 |
+| Editable vertices | 35,122 | 29,309 |
+| Runtime vertices | 35,122 | 34,305 |
+| Triangles | 68,214 | 57,634 |
 | Deform / total bones | 17 / 22 | 19 / 28 |
-| Linear material colors | 17 | 10 |
-| FNT1 bytes | 1,975,440 | 3,002,904 |
+| Linear material colors | 18 | 10 |
+| FNT1 bytes | 3,246,872 | 3,069,060 |
 
 The cat's additional runtime vertices preserve genuine material boundaries
 without textures. The continuous sculpt has its budget reduction **before**
@@ -56,6 +56,17 @@ only to `.amp/in/artifacts/gnome-*` and `cat-*`. The build generates and verifie
 the exports, saves the Blender source, **reopens that saved source**, and
 repeats FNT1, IK and GLB checks against it. Rendering uses the reopened scene.
 No Lisp integration or Git operation is performed by the builder.
+
+After rebuilding either model, regenerate its mesh-matched rest chains with
+the engine exporter. This does not modify the blend or extend FNT1; `.rig`
+records the mesh MD5, bone IDs, rest joints, poles and phase offsets. The
+runtime rejects stale metadata. For example:
+
+```sh
+/Applications/Blender.app/Contents/MacOS/Blender --background \
+  luvcraft/companions/cat.blend --python-exit-code 1 \
+  --python luvcraft/agent/export-rig.py
+```
 
 Encode the preview as a repeating GIF and four-cycle MP4:
 
@@ -96,22 +107,59 @@ than hidden behind the exact foot control. Bone scale is never animated.
 
 ### Gnome
 
-The short slate-blue coat leaves real room for trousered legs and leather
-boots. The pelvis, crotch and both trouser legs are a single continuous sculpt;
-sleeves and mittens are softened joined forms. The head/nose is sculpted,
-the cream beard and swept moustache have shallow combed details, and the eye
-lenses follow the face instead of exposing spherical eyeballs. The scarlet
-cap bends sideways and forward. Walk includes arm counter-swing, weight shift,
-and delayed beard and hat motion. Controls use suffixes `L` and `R`.
+The refined gardener keeps the original stature, blue coat, red cap and leg
+placement. A Painter comparison, made from both the original studio render and
+native screenshot, informed the folded felt tip, flowing ivory beard and more
+carefully tailored clothing. These are actual editable geometry, not painted
+overlays or reference images substituted for the model.
+
+Lifted cheeks, tapered brows, lower eyelids and a small smile soften the face.
+Conformal eye lenses stop behind the nose. Broad swept beard locks are united
+into one continuous sculpt, with shallow comb grooves cut into its surface.
+The moustache lifts at its tips; the cap's sections follow its curved centerline
+through the folded tip. The old exposed straight hat seam is gone.
+
+The short coat leaves room for the original continuous trousers and crotch.
+Smooth tapered sleeves, a standing collar, shaped pocket panels with brass
+closures, fine hem stitches, distinct mitten thumbs and saddle stitches give it
+a handmade finish. Boot uppers are shaped over a shoe last, with open lined
+shafts, stitched welts and flat soles. All important details survive the
+linear-color native export. Materials are overridden only within `build_gnome`;
+shared helpers and cat output are unchanged. The additional geometry costs
+about 1.66× the original vertex budget.
+
+Controls still use suffixes `L` and `R`. The 17 deform bones, rest chains,
+48 walk samples and in-place gait are unchanged. Walk includes arm
+counter-swing, weight shift, and delayed beard and hat motion. The separate
+`gnome.rig` native-IK sidecar is generated from the final saved source using the
+integration owner's `luvcraft/agent/export-rig.py`; its mesh MD5 binds it to the
+matching FNT1. Regenerate that sidecar after rebuilding the model.
 
 ### Cat
 
-The standing tabby has a continuous head/chest/ribcage/shoulder/haunch/four-leg
-sculpt, four distinct cream paws, conformal green slit-pupil eyes, pink pinnae
-and nose, six tapered whiskers, and a four-bone expressive ringed tail.
-Controls use `front.L`, `front.R`, `hind.L`, and `hind.R`. Foreleg elbow poles
-point backward; hind knee poles point forward. The upper-leg weighting fades
-into the correct shoulder/haunch, without assigning the belly to a fifth leg.
+The tabby is a lean young-adult quadruped: a deep narrow thorax, tucked lumbar
+waist, sloping scapulae and forward-folded thighs. These forms and all four
+legs are one continuous sculpt. Slender pasterns meet small oval cream paws
+with three rounded toe lobes. The smaller cheekbone-shaped head has a paired
+cream muzzle, conformal almond green eyes, pink pinnae and nose, flat tabby
+facial markings and six tapered whiskers. The lifted tail has a rounded tip.
+
+Controls retain `front.L`, `front.R`, `hind.L`, and `hind.R`, all 19 deform bone
+names/order, four two-bone nonstretching IK chains and the original gait phases.
+Foreleg elbow poles point backward; hind knee poles point forward. `CAT_LIMBS`
+is the common source for rest joints, leg construction and distance-based
+weights. Shoulder/thigh weights fade into the torso without assigning the
+midline abdomen to a leg. Tail weights interpolate around the actual four
+rest segments, including a blend into the pelvis at the root.
+The preserved two-bone linear-skinning rig still loses some joint volume at
+extreme flexion; no extra hock bones, corrective shapes or animated scale are
+required by these exports.
+
+Painter's young-adult direction guided the proportions; generated imagery is
+not mesh evidence. Review artifacts contain matched-camera before/after
+portraits, profiles, face closeups and actual Blender walking captures. The
+revised model was rendered on Cycles CPU with two threads; the native game
+was left untouched while another task measured its rendering stability.
 
 ## Coordinate system, dimensions and interaction
 
@@ -126,36 +174,39 @@ Bind-space bounds in figure units (full precision is in verification JSON):
 
 | Axis | Gnome minimum … maximum | Cat minimum … maximum |
 |---|---|---|
-| X | −0.405493319 … +0.405313909 | −0.360146850 … +0.360146850 |
-| Y | 0 … 1.559999943 | 0 … 1.045979738 |
-| Z | −0.229000002 … +0.307112515 | −1.297990203 … +0.741999984 |
+| X | −0.404043972 … +0.404000014 | −0.325079471 … +0.325079471 |
+| Y | 0 … 1.527324200 | 0 … 1.116243124 |
+| Z | −0.229000002 … +0.311712712 | −1.169787049 … +0.723999977 |
 
-Gnome dimensions are **0.810807228 × 1.559999943 × 0.536112547**. Its idle
-hat height is **1.544000149**; nominal face target is **0.92** in bind pose,
+Gnome dimensions are **0.808043957 × 1.527324200 × 0.540712714**. Its idle
+hat height is **1.511324406**; nominal face target is **0.92** in bind pose,
 **0.904** in idle. The asset verifier's alternate tighter sphere is centered at
 **(0, 0.78, 0)**, radius **1.00** (animated requirement including margin:
-0.981999421); this is **not the sphere selected by native integration**.
+0.980320014); this is **not the sphere selected by native integration**.
 This is separate from the original SDF birthday troupe's center/radius helper;
 do not change that helper to match this mesh.
 
-Cat dimensions are **0.720293701 × 1.045979738 × 2.039990187** including
-whiskers and tail. Idle ear-tip height is **1.029979944**; nominal face target
-is **0.78** in bind pose, **0.764** in idle. The asset verifier's alternate sphere
-is centered at **(0, 0.53, −0.25)**, radius **1.25** (animated requirement including
-margin: 1.246358249); its rearward offset makes it tighter, but it is **not used
-by native integration**. The complete idle/walk envelope remains under 2.2 units
-in forward/back length. All these bounds exclude the game's stature multiplier.
+Cat dimensions are **0.650158942 × 1.116243124 × 1.893787026** including
+whiskers and tail. Its highest idle point is now the lifted tail, at
+**1.100243330**; nominal face target remains **0.78** in bind pose, **0.764**
+in idle. The asset verifier's alternate sphere is centered at
+**(0, 0.53, −0.25)**, with animated requirement including margin **1.150631471**;
+its rearward offset makes it tighter, but it is **not used by native integration**.
+The complete authored idle/walk envelope remains under 2.0 units in
+forward/back length. All these bounds exclude the game's stature multiplier.
 
 Native integration deliberately retains horizontally origin-centered spheres:
 
-| Model | Actual native sphere center | Native radius | Runtime-measured maximum radius |
+| Model | Actual native sphere center | Native radius | CPU-measured maximum radius |
 |---|---|---:|---:|
-| Gnome | (0, 0.85, 0) | 1.05 | 0.9711 |
-| Cat | (0, 0.52, 0) | 1.40 | 1.3756 |
+| Gnome | (0, 0.85, 0) | 1.05 | 0.969724 |
+| Cat | (0, 0.52, 0) | 1.40 | 1.2942 |
 
-The runtime integration owner verified both native walks, arrival, and blending
-back to idle, and measured 0.2266 figure units of lateral cat tail-tip motion.
-Those are separate runtime results, not measurements made by this asset builder.
+These values evaluate all exported vertices at idle and 192 interpolated walk
+poses. Gnome idle/walk palettes remain byte-identical to the original asset.
+Earlier native walk/arrival/idle verification and the 0.2266 cat tail-tip motion
+measurement predate these visual refinements. Live runtime IK is verified
+separately from the Blender asset checks.
 
 ## Cadence and unchanged FNT1 contract
 
@@ -170,8 +221,10 @@ The clips are **in place**. Backward motion of a stance foot is intentional:
 it cancels the separately applied forward actor displacement. An in-place
 studio preview consequently shows feet moving backward relative to its fixed
 floor; the numerical world-cancellation checks include the actor displacement.
-Native phase advances by `distance / (stature * stride)`. Blend the sampled
-skin matrices to idle when stopped. Do not add a second root translation.
+A baked-clip player advances phase by `distance / (stature * stride)` and
+blends sampled skin matrices to idle when stopped. Do not add a second root
+translation. A live-IK player instead uses the rest chains in `.rig` for
+world-space foot contacts; this does not change the FNT1 mesh layout.
 
 FNT1 is exactly the [Fantus contract](../fantus/README.md#fnt1-layout):
 
@@ -197,21 +250,23 @@ Every build parses the actual FNT1 bytes. CPU weighted skinning is compared
 to Blender's evaluated mesh at idle plus asymmetric walk frames
 4, 11, 19, 28, 37 and 45. The GLB hierarchy, inverse binds and baked tracks
 are independently evaluated at sixteen poses. Solver checks run at 192
-quarter-frame samples; runtime checks apply the same matrix interpolation
-used by the game to **all exported vertices** and every identified sole vertex.
+quarter-frame samples; baked-clip runtime checks apply matrix interpolation
+to **all exported vertices** and every identified sole vertex.
 Contact/liftoff-straddling intervals are excluded from stance-velocity checks.
+The cat also checks that lower-leg and toe vertices have no torso influence:
+that regression can distort paws while leaving the sole-contact tests green.
 
 | Maximum error / measurement | Gnome | Cat |
 |---|---:|---:|
-| FNT1 vs evaluated mesh | 3.61e−7 | 3.21e−7 |
+| FNT1 vs evaluated mesh | 3.502e−7 | 3.08e−7 |
 | Wrong-pose negative control (idle instead of walk) | 0.2183 | 0.2684 |
-| Independent IK lower-tail residual | 1.104e−6 | 3.336e−7 |
+| Independent IK lower-tail residual | 1.104e−6 | 7.196e−6 |
 | Foot target error | 0 | 0 |
-| Interpolated runtime sole ground error | 3.13e−8 | 1.061e−7 |
-| Interpolated runtime stance world slide | 1.337e−7 | 9.593e−8 |
-| Minimum runtime vertex height | −3.13e−8 | −3.09e−8 |
+| Interpolated runtime sole ground error | 3.556e−8 | 1.267e−7 |
+| Interpolated runtime stance world slide | 1.656e−7 | 1.077e−7 |
+| Minimum runtime vertex height | −3.556e−8 | −1.267e−7 |
 | Swing clearance | 0.077988 | 0.074929 |
-| GLB skin matrix element error | 5.246e−6 | 1.193e−6 |
+| GLB skin matrix element error | 5.246e−6 | 1.103e−6 |
 | Loop endpoint matrix error | 6.13e−18 | 2.94e−18 |
 
 Both saved `.blend` files were reopened and passed the same checks. The

@@ -18,6 +18,7 @@ import bmesh
 import bpy
 import numpy as np
 from mathutils import Matrix, Quaternion, Vector
+from mathutils.bvhtree import BVHTree
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -29,12 +30,12 @@ STANCE = 0.58
 # Blender (X right, Z up, -Y forward) -> runtime (X right, Y up, Z forward).
 C = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, -1, 0, 0), (0, 0, 0, 1)))
 PALETTE = {
-    "felt": "794699", "ear": "B59AC7", "seam": "70458E",
-    "cream": "F3DDB0", "peach": "E9BB94", "cloth": "F6F3E9",
-    "green": "73A343", "green_dark": "46783A", "mouth": "46263F",
-    "lip": "9866AA", "white": "FFF9E7", "hazel": "948445",
-    "iris_dark": "51472D", "iris_gold": "BBA75D", "pupil": "231C22",
-    "catch": "FFFFFF", "sole": "C7ABC8", "yellow": "EEC34B",
+    "felt": "78369A", "ear": "E4B478", "seam": "653581",
+    "cream": "EAC086", "peach": "E9BC71", "cloth": "F6F3E9",
+    "green": "8D9C70", "green_dark": "63744E", "mouth": "46263F",
+    "lip": "87519B", "white": "FFF9E7", "hazel": "80733F",
+    "iris_dark": "51472D", "iris_gold": "A39452", "pupil": "231C22",
+    "catch": "FFFFFF", "sole": "9A8B94", "yellow": "EEC34B",
 }
 MATS = {}
 PARTS = []
@@ -220,11 +221,11 @@ def union(name, objects, voxel, weight):
 def body_weights(p):
     x, y, z = p
     torso = smooth(.58, .80, z)
-    arm = smooth(.16, .245, abs(x)) * (1 - smooth(.94, 1.02, z))
+    arm = smooth(.22, .30, abs(x)) * (1 - smooth(.94, 1.02, z))
     if arm < .001:
         return {"hips": 1-torso, "chest": torso}
     side = "L" if x > 0 else "R"
-    wrist = 1 - smooth(.405, .49, z)
+    wrist = 1 - smooth(.46, .54, z)
     elbow = 1 - smooth(.64, .76, z)
     # Shoulder vertices meet the chest; wrist and elbow never overlap.
     if wrist > 0:
@@ -237,8 +238,8 @@ def body_weights(p):
 def leg_weights(side):
     def fn(p):
         z = p.z
-        foot = 1 - smooth(.105, .275, z)
-        thigh = smooth(.275, .385, z)
+        foot = 1 - smooth(.105, .24, z)
+        thigh = smooth(.24, .41, z)
         hip = smooth(.51, .62, z)
         if foot > 0:
             return {"foot."+side: foot, "shin."+side: 1-foot}
@@ -247,46 +248,59 @@ def leg_weights(side):
 
 
 def build_body():
-    pieces = [ellipsoid("Torso sculpt", (0, .025, .755), (.228, .168, .285), "felt"),
+    pieces = [ellipsoid("Torso sculpt", (0, .025, .755), (.255, .194, .285), "felt"),
               ellipsoid("Neck sculpt", (0, .025, .995), (.115, .115, .13), "felt")]
     for s, side in ((1, "L"), (-1, "R")):
-        path = catmull([(s*.155, .018, .95), (s*.23, .006, .87),
-                        (s*.30, -.006, .70), (s*.355, -.027, .51),
-                        (s*.38, -.045, .41)], 5)
-        pieces.append(tube("Arm sculpt", path, lambda t: .066-.017*t,
+        path = catmull([(s*.18, .018, .95), (s*.26, .006, .87),
+                        (s*.34, -.006, .70), (s*.39, -.027, .56),
+                        (s*.405, -.045, .46)], 5)
+        pieces.append(tube("Arm sculpt", path, lambda t: .080-.016*t,
                            "felt", None, sides=16))
-        pieces.append(ellipsoid("Mitten sculpt", (s*.388, -.05, .397),
-                                (.063, .050, .078), "felt", segments=20, rings=12))
+        pieces.append(ellipsoid("Mitten sculpt", (s*.413, -.05, .447),
+                                (.075, .059, .081), "felt", segments=24, rings=16))
         for j in range(3):
-            x = s*(.353+.034*j)
-            pieces.append(ellipsoid("Finger sculpt", (x, -.061, .343+.008*abs(j-1)),
-                                    (.020, .032, .048), "felt", segments=12, rings=10))
-    union("Body · continuous sewn felt", pieces, .013, body_weights)
+            x = s*(.375+.038*j)
+            pieces.append(ellipsoid("Finger sculpt", (x, -.061, .391+.008*abs(j-1)),
+                                    (.025, .038, .046), "felt", segments=16, rings=12))
+    union("Body · continuous sewn felt", pieces, .010, body_weights)
     # Belly is a tailored inset following the pear-shaped chest, not a ball.
     def belly_y(x, z):
-        q = max(.03, 1 - (x/.228)**2 - ((z-.755)/.285)**2)
-        return .025 - .168*math.sqrt(q) - .002
-    oval_patch("Belly applique", (0, .792), (.127, .18), belly_y, "cream", body_weights)
+        q = max(.03, 1 - (x/.255)**2 - ((z-.755)/.285)**2)
+        return .025 - .194*math.sqrt(q) - .003
+    oval_patch("Belly applique", (0, .792), (.148, .184), belly_y, "cream", body_weights)
     for s, side in ((1, "L"), (-1, "R")):
         pieces = [tube("Leg sculpt", catmull([(s*.135, .01, .55),
                                               (s*.155, -.035, .33),
                                               (s*.17, 0, .115)], 8),
-                       lambda t: .092-.024*t, "felt", None, sides=20),
-                  ellipsoid("Foot sculpt", (s*.17, -.055, .087),
-                            (.108, .169, .089), "felt", segments=32, rings=18)]
-        obj = union("Leg and soft foot."+side, pieces, .010, leg_weights(side))
-        # Squash the bottom into an actual level contact patch.
+                       lambda t: .108-.023*t-.020*math.exp(-((t-.52)/.22)**2),
+                       "felt", None, sides=24),
+                  ellipsoid("Foot sculpt", (s*.17, -.063, .087),
+                            (.126, .177, .093), "felt", segments=40, rings=24)]
+        obj = union("Leg and soft foot."+side, pieces, .008, leg_weights(side))
+        # Ease the plush into a level sole without a sharp ankle/sole crease.
         for v in obj.data.vertices:
-            if v.co.z < .031:
-                v.co.z = max(0, (v.co.z-.018) * .35)
+            if v.co.z < .045:
+                v.co.z *= smooth(.009, .045, v.co.z)
         obj.data.update()
-        # Palm felt and a pair of finger stitching lines.
-        ellipsoid("Palm patch."+side, (s*.389, -.091, .403),
-                  (.043, .008, .047), "cream", "hand."+side, segments=24, rings=12)
+        # Two soft grey toe panels echo the reference's cloven slipper fronts.
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        foot_surface = BVHTree.FromBMesh(bm)
+        bm.free()
+        def toe_y(x, z):
+            hit, _, _, _ = foot_surface.ray_cast(Vector((x, -1, z)), Vector((0, 1, 0)))
+            assert hit is not None, ("Toe applique must sit on the soft foot", x, z)
+            return hit.y-.002
         for j in (-1, 1):
-            tube("Mitten stitch."+side, [(s*.388+j*.017, -.087, .335),
-                                          (s*.388+j*.017, -.094, .358),
-                                          (s*.388+j*.017, -.097, .377)],
+            oval_patch("Soft cloven toe."+side, (s*.17+j*.051, .061), (.050, .054),
+                       toe_y, "sole", leg_weights(side), sectors=40, rings=8)
+        # Palm felt and a pair of finger stitching lines.
+        ellipsoid("Palm patch."+side, (s*.413, -.104, .453),
+                  (.051, .008, .053), "cream", "hand."+side, segments=32, rings=16)
+        for j in (-1, 1):
+            tube("Mitten stitch."+side, [(s*.413+j*.019, -.087, .385),
+                                          (s*.413+j*.019, -.101, .408),
+                                          (s*.413+j*.019, -.107, .427)],
                  .0013, "seam", "hand."+side, sides=6)
         # Cream cloven applique on the underside, visible during a lifted step.
         for j in (-1, 1):
@@ -314,14 +328,15 @@ def oval_patch(name, center, radii, y_fn, mat, weight, sectors=48, rings=9):
 
 
 def head_radii(z):
-    h = max(-.99999, min(.99999, (z-1.265)/.335))
+    h = max(-.99999, min(.99999, (z-1.24)/.36))
     c = math.sqrt(1-h*h)
-    return .383*c**.80*(.94+.06*h), .276*c**.80
+    return .418*c**.72*(.98+.02*h), .292*c**.76
 
 
 def face_y(x, z):
     rx, ry = head_radii(z)
-    return .025 - ry*math.sqrt(max(.001, 1-(x/rx)**2))
+    cheek = .013*math.exp(-((abs(x)-.225)/.10)**2-((z-1.14)/.10)**2)
+    return .025 - ry*math.sqrt(max(.001, 1-(x/rx)**2)) - cheek
 
 
 def build_head():
@@ -329,13 +344,15 @@ def build_head():
     n, m = 48, 32
     for j in range(m+1):
         lat = -math.pi/2 + math.pi*j/m
-        z = 1.265+.335*math.sin(lat)
+        z = 1.24+.36*math.sin(lat)
         rx, ry = head_radii(z)
         if j in (0, m):
             rx = ry = 0
         for i in range(n):
             a = TAU*i/n
-            verts.append((rx*math.cos(a), .025+ry*math.sin(a), z))
+            x = rx*math.cos(a)
+            y = face_y(x, z) if math.sin(a) < 0 and j not in (0, m) else .025+ry*math.sin(a)
+            verts.append((x, y, z))
     for j in range(m):
         for i in range(n):
             faces.append((j*n+i, j*n+(i+1)%n, (j+1)*n+(i+1)%n, (j+1)*n+i))
@@ -351,6 +368,7 @@ def build_head():
                        (.059, 1.305), (0, 1.323), (-.059, 1.305),
                        (-.100, 1.248), (-.176, 1.225), (-.258, 1.253)],
                       5, closed=True)
+    outline = [Vector((x*1.09, z)) for x, z in outline]
     # This notched outline is not star-convex: a radial fan overlaps itself
     # above the trunk. Ear-clip the real boundary, refine, then drape it.
     mask = mesh("Mask · one shaped cream felt panel", [(x, 0, z) for x, z in outline],
@@ -387,10 +405,10 @@ def build_head():
     # Parted smile, with corners lifted; a dark recessed-looking ribbon and lips.
     verts, faces, upper, lower = [], [], [], []
     for j in range(49):
-        x = -.185+.370*j/48
-        t = x/.185
-        mid = 1.075+.062*t*t
-        width = .002+.010*(1-t*t)
+        x = -.25+.50*j/48
+        t = x/.25
+        mid = 1.045+.10*t*t
+        width = .001+.016*(1-t*t)
         for z in (mid-width, mid+width):
             verts.append((x, face_y(x, z)-.003, z))
         upper.append((x, face_y(x, mid+width)-.004, mid+width))
@@ -398,20 +416,20 @@ def build_head():
         if j:
             faces.append((2*j-2, 2*j-1, 2*j+1, 2*j))
     mesh("Gentle parted smile", verts, faces, "mouth", "head")
-    tube("Soft lower lip", lower, .0032, "lip", "head", sides=8)
-    tube("Upper smile seam", upper, .0019, "seam", "head", sides=6)
+    tube("Soft lower lip", lower, lambda t: .002+.004*math.sin(math.pi*t), "lip", "head", sides=8)
+    tube("Upper smile seam", upper, .0014, "seam", "head", sides=6)
 
 
 def build_eyes():
     for s, side in ((1, "L"), (-1, "R")):
-        cx, cz = s*.17, 1.342
-        rx, ry, rz = .083, .027, .065
+        cx, cz = s*.182, 1.332
+        rx, ry, rz = .098, .020, .077
         def surface(x, z):
             return face_y(x, z)-.011-ry*math.sqrt(max(0, 1-((x-cx)/rx)**2-((z-cz)/rz)**2))
         # Shallow lenses drape onto the face. Their outer edges are embedded in
         # the mask instead of exposing the sides of protruding spherical eyeballs.
-        oval_patch("Eye felt socket."+side, (cx, cz), (rx+.0025, rz+.0025),
-                   lambda x, z: face_y(x, z)-.009, "seam", "head", sectors=40, rings=5)
+        oval_patch("Eye felt socket."+side, (cx, cz), (rx+.0015, rz+.0015),
+                   lambda x, z: face_y(x, z)-.009, "peach", "head", sectors=40, rings=5)
         oval_patch("Wide oval sclera."+side, (cx, cz), (rx, rz),
                    surface, "white", "head", sectors=48, rings=12)
         # Radially tessellated iris follows the sclera, with a restrained gold ring.
@@ -421,8 +439,8 @@ def build_eyes():
         for j in range(1, rings+1):
             for i in range(sectors):
                 a = TAU*i/sectors
-                x = cx+.045*j/rings*math.cos(a)
-                z = cz+.037*j/rings*math.sin(a)
+                x = cx+.072*j/rings*math.cos(a)
+                z = cz+.065*j/rings*math.sin(a)
                 verts.append((x, surface(x, z)-.001, z))
         faces = [(0, i+1, (i+1)%sectors+1) for i in range(sectors)]
         ids.extend([0]*sectors)
@@ -433,20 +451,21 @@ def build_eyes():
                 ids.append(1 if j == rings-2 else (2 if (i*7)%11 < 3 else 0))
         mesh("Hazel iris."+side, verts, faces,
              ["hazel", "iris_dark", "iris_gold"], "head", ids)
-        oval_patch("Pupil."+side, (cx, cz), (.0255, .025),
+        oval_patch("Pupil."+side, (cx, cz), (.049, .049),
                    lambda x, z: surface(x, z)-.002, "pupil", "head", sectors=32, rings=4)
-        for dx, dz, r in ((-.014, .018, .0085), (.012, -.011, .0032)):
+        for dx, dz, r in ((-.018, .024, .009), (.018, -.014, .0032)):
             x, z = cx+dx, cz+dz
             ellipsoid("Eye catch."+side, (x, surface(x, z)-.003, z),
                       (r, .0025, r), "catch", "head", segments=16, rings=10)
-        # Actual upper-lid shell, with its edge above the pupil, never a visor.
+        # An arched lid hugs the lens at both corners, opening above the pupil.
+        # The old horizontal edge made the soft character look sleepy.
         verts, faces, edge = [], [], []
         for j in range(8):
             t = j/7
-            z = cz+.044+(.0658-.044)*t
-            half_width = rx*math.sqrt(max(0, 1-((z-cz)/.066)**2))
             for i in range(33):
-                x = cx+half_width*(2*i/32-1)
+                angle = math.pi*(1-i/32)
+                x = cx+rx*math.cos(angle)
+                z = cz+rz*math.sin(angle)*(.82+.18*t)
                 y = surface(x, z)-.0018
                 verts.append((x, y, z))
                 if j == 0:
@@ -460,11 +479,11 @@ def build_eyes():
 
 
 def trunk_point(t):
-    return Vector((0, -.225-.265*t, 1.264-.195*t+.063*t*t))
+    return Vector((0, -.235-.165*t, 1.25-.17*t+.15*t*t))
 
 
 def trunk_weights(p):
-    t = max(0, min(1, (-p.y-.225)/.265))
+    t = max(0, min(1, (-p.y-.235)/.165))
     a, b = smooth(.08, .32, t), smooth(.49, .78, t)
     return {"head": 1-a, "trunk.01": a*(1-b), "trunk.02": a*b}
 
@@ -472,14 +491,14 @@ def trunk_weights(p):
 def build_trunk():
     pts = [trunk_point(t) for t in np.linspace(0, 1, 49)]
     def radius(t):
-        return .103-.048*t + .0028*math.sin(7*TAU*t)*math.sin(math.pi*t)**.5
-    tube("Trunk · curved seven-ring felt", pts, radius, "felt", trunk_weights, sides=24)
+        return .106-.041*t + .003*math.sin(5*TAU*t)*math.sin(math.pi*t)**.5
+    tube("Trunk · softly upturned ringed felt", pts, radius, "felt", trunk_weights, sides=32)
     tip, tangent = pts[-1], (pts[-1]-pts[-2]).normalized()
     u, v = Vector((1, 0, 0)), tangent.cross(Vector((1, 0, 0)))
     verts = [tip+tangent*.001]
     n, m = 40, 6
     for j in range(1, m+1):
-        r = .042*j/m
+        r = .026*j/m
         for i in range(n):
             a = TAU*i/n
             verts.append(tip + r*(u*math.cos(a)+v*math.sin(a))
@@ -490,21 +509,18 @@ def build_trunk():
             a, b = 1+j*n+i, 1+j*n+(i+1)%n
             faces.append((a, b, b+n, a+n))
     mesh("Peach trunk end inset", verts, faces, "peach", "trunk.02")
-    for s in (-1, 1):
-        center = tip+u*s*.014+v*.004+tangent*.003
-        ellipsoid("Trunk tip stitch dimple", center, (.004, .0017, .003),
-                  "cream", "trunk.02", segments=12, rings=8)
 
 
 def ear_point(s, r, a, back=False):
     # Paddle: narrow lower attachment, broad top; cupped rather than a flat disk.
     q = math.sin(a)
-    u = .177*r*math.cos(a)*(.91+.18*q*r)
-    v = .295*r*q
-    angle = math.radians(28)
-    x = s*(.49 + u*math.cos(angle)+v*math.sin(angle))
-    z = 1.30 - u*math.sin(angle)+v*math.cos(angle)
-    depth = (.028+.031*(1-r*r)) if back else (-.008-.052*r*r)
+    u = .205*r*math.cos(a)*(.98+.05*q*r)
+    v = .275*r*q
+    angle = math.radians(-15)
+    x = s*(.53 + u*math.cos(angle)+v*math.sin(angle))
+    z = 1.22 - u*math.sin(angle)+v*math.cos(angle)
+    # The concave inner felt turns into a padded, rounded outer rim.
+    depth = (.026+.031*(1-r*r)) if back else (-.006-.065*r*r+.075*smooth(.80, 1, r))
     y = .037 + depth + .20*u
     return Vector((x, y, z))
 
@@ -517,7 +533,7 @@ def ear_weights(side):
 
 
 def build_ears():
-    n, rings = 48, 10
+    n, rings = 64, 16
     for s, side in ((1, "L"), (-1, "R")):
         verts, faces, ids = [], [], []
         for back in (False, True):
@@ -533,7 +549,7 @@ def build_ears():
                 for i in range(n):
                     a, b = offset+1+j*n+i, offset+1+j*n+(i+1)%n
                     faces.append((a, b, b+n, a+n))
-                    ids.append(0 if back or j >= rings-3 else 1)
+                    ids.append(0 if back or j >= 12 else 1)
         back_start = 1+rings*n
         front_outer = 1+(rings-1)*n
         for i in range(n):
@@ -542,14 +558,14 @@ def build_ears():
             ids.append(0)
         mesh("Cupped paddle ear."+side, verts, faces, ["felt", "ear"], ear_weights(side), ids)
         tube("Ear rolled binding."+side,
-             [ear_point(s, .855, TAU*i/72) - Vector((0, .001, 0)) for i in range(72)],
-             .0027, "lip", ear_weights(side), sides=6, closed=True)
+             [ear_point(s, .8125, TAU*i/96) - Vector((0, .001, 0)) for i in range(96)],
+             .0018, "lip", ear_weights(side), sides=6, closed=True)
         # Tiny broken running stitches, not a heavy decorative outline.
         for i in range(28):
             a = TAU*i/28
             tube("Ear stitch."+side,
                  [ear_point(s, .91, a+d)-Vector((0, .003, 0)) for d in (0, .035)],
-                 .0009, "ear", ear_weights(side), sides=5)
+                 .0007, "lip", ear_weights(side), sides=5)
 
 
 def build_nappy():
@@ -560,8 +576,8 @@ def build_nappy():
         t = j/(rings-1)
         for i in range(n):
             a = TAU*i/n
-            x = (.235+.028*math.sin(math.pi*t*.8))*math.cos(a)
-            y = .018+(.166+.015*math.sin(math.pi*t))*math.sin(a)
+            x = (.255+.028*math.sin(math.pi*t*.8))*math.cos(a)
+            y = .018+(.190+.015*math.sin(math.pi*t))*math.sin(a)
             bottom = .385+.132*abs(math.cos(a))**1.3
             z = .665*(1-t)+bottom*t
             # A restrained soft gathered fold under the elastic waistband.
@@ -591,42 +607,58 @@ def build_nappy():
     mod = obj.modifiers.new("Soft tailored cloth", "SUBSURF")
     mod.levels = 1
     apply(obj, mod)
+    # Bindings follow the FINAL smoothed openings, not the coarse control cage.
+    # Otherwise the bridge corners leave little green spikes and exposed cloth.
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    cloth_surface = BVHTree.FromBMesh(bm)
+    remaining = {e for e in bm.edges if e.is_boundary}
+    boundaries = []
+    while remaining:
+        edge = min(remaining, key=lambda e: e.index)
+        start, current = edge.verts
+        loop = [start.co.copy()]
+        remaining.remove(edge)
+        while current != start:
+            loop.append(current.co.copy())
+            edge, = [e for e in current.link_edges if e in remaining]
+            remaining.remove(edge)
+            current = edge.other_vert(current)
+        boundaries.append(loop)
+    bm.free()
+    assert len(boundaries) == 3, "Nappy must have a waist and two leg openings"
+    for loop in boundaries:
+        waist = min(p.z for p in loop) > .60
+        side = "L" if sum(p.x for p in loop) > 0 else "R"
+        tube("Green elastic waistband" if waist else "Green leg binding."+side,
+             loop, .009 if waist else .007, "green", "hips", sides=10, closed=True)
     mod = obj.modifiers.new("Fabric thickness", "SOLIDIFY")
     mod.thickness = .004
     mod.offset = 0
     apply(obj, mod)
-    waist = [Vector(verts[i])+Vector((0, 0, .001)) for i in range(n)]
-    tube("Green elastic waistband", waist, .010, "green", "hips", sides=10, closed=True)
     for s, side in ((1, "L"), (-1, "R")):
-        # Existing lower-ring arcs plus the bridge edge give an exact leg hem.
-        indices = (list(range(50, 64))+list(range(0, 15))) if s == 1 else list(range(18, 47))
-        hem = [Vector(verts[last+i]) for i in indices]
-        edge_col = 0 if s == 1 else 4
-        bridge = [Vector(verts[row[edge_col]]) for row in rows[1:-1]]
-        if s == 1:
-            hem.extend(bridge)
-        else:
-            hem.extend(reversed(bridge))
-        tube("Green leg binding."+side, hem, .006, "green", "hips", sides=8, closed=True)
-        cx, zc = s*.176, .627
+        cx, zc = s*.182, .606
         def tab_y(x, z):
-            return .018-.180*math.sqrt(max(.05, 1-(x/.267)**2))-.014
-        oval_patch("Nappy fastening tab."+side, (cx, zc), (.063, .023),
+            hit, _, _, _ = cloth_surface.ray_cast(Vector((x, -1, z)), Vector((0, 1, 0)))
+            assert hit is not None, "Fastening tab must sit on the tailored cloth"
+            return hit.y-.004
+        oval_patch("Nappy fastening tab."+side, (cx, zc), (.069, .049),
                    tab_y, "cloth", "hips", sectors=32, rings=5)
         border = []
         for a in np.linspace(0, TAU, 48, endpoint=False):
-            x, z = cx+.063*math.cos(a), zc+.023*math.sin(a)
+            x, z = cx+.069*math.cos(a), zc+.049*math.sin(a)
             border.append((x, tab_y(x, z)-.001, z))
-        tube("Tab green binding."+side, border, .0045, "green", "hips", closed=True)
+        tube("Tab green binding."+side, border, .003, "green", "hips", closed=True)
         x = s*.153
         ellipsoid("Nappy green button."+side, (x, tab_y(x, zc)-.007, zc),
-                  (.014, .006, .014), "green_dark", "hips", segments=24, rings=10)
+                  (.018, .006, .018), "green_dark", "hips", segments=24, rings=10)
         for dx in (-.004, .004):
             ellipsoid("Button stitch", (x+dx, tab_y(x, zc)-.013, zc),
                       (.0015, .001, .003), "green", "hips", segments=8, rings=6)
     def cloth_weights(p):
         side = "L" if p.x > 0 else "R"
-        follow = (1-smooth(.49, .625, p.z))*smooth(.025, .090, abs(p.x))
+        # Keep the tabs and waistband together; only the leg hems follow a step.
+        follow = (1-smooth(.44, .56, p.z))*smooth(.025, .090, abs(p.x))
         return {"hips": 1-follow, "thigh."+side: follow}
     for obj in PARTS[first_part:]:
         assign_weights(obj, cloth_weights)
@@ -653,14 +685,14 @@ def build_rig():
     bone("trunk.01", trunk_point(.02), trunk_point(.5), "head")
     bone("trunk.02", trunk_point(.5), trunk_point(1), "trunk.01")
     for s, side in ((1, "L"), (-1, "R")):
-        bone("upper_arm."+side, (s*.175, .012, .945), (s*.30, -.006, .70), "chest")
-        bone("forearm."+side, (s*.30, -.006, .70), (s*.37, -.04, .43), "upper_arm."+side)
-        bone("hand."+side, (s*.37, -.04, .43), (s*.39, -.06, .34), "forearm."+side)
+        bone("upper_arm."+side, (s*.19, .012, .945), (s*.34, -.006, .70), "chest")
+        bone("forearm."+side, (s*.34, -.006, .70), (s*.40, -.04, .48), "upper_arm."+side)
+        bone("hand."+side, (s*.40, -.04, .48), (s*.415, -.06, .39), "forearm."+side)
         bone("thigh."+side, (s*.135, 0, .55), (s*.155, -.035, .325), "hips")
         bone("shin."+side, (s*.155, -.035, .325), (s*.17, 0, .115), "thigh."+side)
         bone("foot."+side, (s*.17, 0, .115), (s*.17, -.17, .115), "shin."+side)
-        bone("ear_base."+side, (s*.30, .035, 1.23), (s*.49, .035, 1.34), "head")
-        bone("ear_tip."+side, (s*.49, .035, 1.34), (s*.66, .045, 1.51), "ear_base."+side)
+        bone("ear_base."+side, (s*.34, .035, 1.30), (s*.53, .035, 1.26), "head")
+        bone("ear_tip."+side, (s*.53, .035, 1.26), (s*.68, .045, 1.08), "ear_base."+side)
         bone("CTRL_foot."+side, (s*.17, 0, .115), (s*.17, -.17, .115), "ROOT", False)
         bone("CTRL_knee."+side, (s*.17, -.60, .32), (s*.17, -.60, .40), "ROOT", False)
     bpy.ops.object.mode_set(mode="OBJECT")
@@ -786,7 +818,7 @@ def join_skin(arm):
     print("PART_VERTICES", sorted([(o.name, len(o.data.vertices)) for o in PARTS], key=lambda x: -x[1])[:16], flush=True)
     # Keep the carefully tessellated face panels intact; collapse only less
     # sensitive cloth/body surfaces. In particular, don't turn irises into hexagons.
-    protected = ("Mask", "Eye", "Wide oval", "Hazel", "Pupil", "Upper felt", "Lid")
+    protected = ("Mask", "Eye", "Wide oval", "Hazel", "Pupil", "Upper felt", "Lid", "Soft cloven")
     for part in PARTS:
         if not part.name.startswith(protected) and len(part.data.vertices) > 100:
             active(part)
@@ -1170,6 +1202,14 @@ def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.context.scene.render.fps = 60
     materials()
+    # Fantus-specific felt finish; companion builders share materials() unchanged.
+    for name in ("felt", "ear", "cream", "cloth", "lip"):
+        nodes = MATS[name].node_tree.nodes
+        nodes.get("Principled BSDF").inputs["Sheen Weight"].default_value = .22
+        nodes.get("Principled BSDF").inputs["Sheen Tint"].default_value = MATS[name].diffuse_color
+        nodes.get("Noise Texture").inputs["Scale"].default_value = 125
+        nodes.get("Bump").inputs["Strength"].default_value = .42
+        nodes.get("Bump").inputs["Distance"].default_value = .004
     build_body()
     build_head()
     build_ears()
@@ -1177,9 +1217,6 @@ def main():
     arm = build_rig()
     idle, walk = animate(arm)
     obj = join_skin(arm)
-    names, source = export_fmesh(obj, arm, idle, walk)
-    verify(obj, arm, idle, walk, names, source)
-    export_glb(obj, arm, idle, walk)
     cam, aim = stage()
     arm.animation_data.action = idle
     bpy.context.scene.frame_set(1)
@@ -1192,6 +1229,16 @@ def main():
                 area.spaces.active.region_3d.view_location = (0, 0, .8)
                 area.spaces.active.shading.type = "MATERIAL"
     bpy.ops.wm.save_as_mainfile(filepath=str(HERE/"fantus.blend"))
+    # Export and verify the persisted editable rig, not only the construction state.
+    bpy.ops.wm.open_mainfile(filepath=str(HERE/"fantus.blend"))
+    arm = bpy.data.objects["FantusRig"]
+    obj = bpy.data.objects["Fantus · felt, face and tailored cloth"]
+    idle = bpy.data.actions["Idle · grounded rest"]
+    walk = bpy.data.actions["Walk · foot IK · 0.80 units"]
+    cam = bpy.context.scene.camera
+    names, source = export_fmesh(obj, arm, idle, walk)
+    verify(obj, arm, idle, walk, names, source)
+    export_glb(obj, arm, idle, walk)
     if args.render or args.preview:
         render(arm, idle, walk, cam, aim, args.preview)
 

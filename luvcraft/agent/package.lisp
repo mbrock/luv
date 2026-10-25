@@ -17,6 +17,9 @@
                     (#:luvcraft.clim #:luvcraft.clim)
                     (#:world #:luvcraft.world)
                     (#:openai #:openai))
+  (:import-from #:luv.arithmetic.lisp.vec3
+                #:make-vec3 #:vec3-x #:vec3-y #:vec3-z #:vec3-component
+                #:vec3-dot #:vec3-cross #:vec3-length #:vec3-normalize #:vec3-scale)
   ;; Preserve Luvcraft's public vocabulary while making these names the exact
   ;; shared objects.  Remaining game files specialize and consume the common
   ;; protocols without wrappers or a duplicate compatibility layer.
