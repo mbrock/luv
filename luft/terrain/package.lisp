@@ -246,8 +246,10 @@ this package draws; the renderer and the ateliers use it.")
            #:set-character-flying
            #:set-character-movement
            #:set-character-vertical-urge
+           #:reset-simulation-interpolation
            #:simulation-accumulator
            #:simulation-bodies
+           #:simulation-body-position
            #:simulation-characters
            #:simulation-clock
            #:simulation-source

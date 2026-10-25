@@ -679,6 +679,8 @@
     (true (render::intent-jump-requested-p (render::character-controller player)))
     (true (equalp position (render::body-previous-position body)))
     (true (zerop (render::simulation-clock simulation)))
+    (true (zerop (terrain:simulation-accumulator simulation)))
+    (true (equalp position (terrain:simulation-body-position simulation body)))
     (render::rebuild-authored-world-resident-values scene (list key))
     (render::set-character-movement player 0.0 0.0)
     (render::advance-world-simulation simulation 0.1)
@@ -806,6 +808,7 @@
          (canvas (luv:make-sdl-canvas :width 800 :height 600))
          (render::*projection* :perspective))
     (setf (slot-value viewer 'render::player) player
+          (slot-value viewer 'render::simulation) (render:make-world-simulation nil)
           (slot-value viewer 'render::camera) camera
           (slot-value viewer 'render::canvas) canvas
           (slot-value viewer 'render::mode)
@@ -982,6 +985,99 @@
     (true (equalp (render::body-velocity (render::character-body ca))
                   (render::body-velocity (render::character-body cb))))
     (true (= (render::character-gait ca) (render::character-gait cb)))))
+
+(define-test simulation-render-position-uses-tick-not-frame-endpoints
+  (let* ((simulation (terrain:make-world-simulation (make-body-collision-fixture)))
+         (body (make-instance 'terrain:physical-body :position (make-vec3 10d0 10d0 30d0)
+                              :velocity (make-vec3 12d0 0d0 0d0) :gravity 0d0)))
+    (terrain:add-simulation-body simulation body)
+    (true (= 10d0 (vec3-x (terrain:simulation-body-position simulation body))))
+    ;; Two ticks and half a tick left: last-tick endpoints are 10.1 and 10.2,
+    ;; not the frame's initial 10.0 and final 10.2.
+    (terrain:advance-world-simulation simulation 5/240)
+    (true (< (abs (- 10.2d0 (vec3-x (terrain:body-position body)))) 1d-10))
+    (true (= 10d0 (vec3-x (terrain:body-previous-position body))))
+    (true (< (abs (- 10.15d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    ;; Registration is idempotent; observing an existing body cannot cut it.
+    (terrain:add-simulation-body simulation body)
+    (true (< (abs (- 10.15d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    ;; A zero-tick frame updates frame history but must retain both tick poses.
+    (terrain:advance-world-simulation simulation 1/480)
+    (true (= 1/60 (terrain:simulation-clock simulation)))
+    (true (equalp (terrain:body-position body) (terrain:body-previous-position body)))
+    (true (< (abs (- 10.175d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    (terrain:advance-world-simulation simulation 0)
+    (true (< (abs (- 10.175d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    (terrain:advance-world-simulation simulation 1/480)
+    (true (= 1/40 (terrain:simulation-clock simulation)))
+    (true (< (abs (- 10.2d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    ;; The public result is not a borrowed mutable physical or history vector.
+    (setf (vec3-x (terrain:simulation-body-position simulation body)) -50d0)
+    (true (< (abs (- 10.3d0 (vec3-x (terrain:body-position body)))) 1d-10))
+    (true (< (abs (- 10.2d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))))
+
+(define-test simulation-render-position-cuts-edits-pauses-and-live-slot-updates
+  (let* ((simulation (terrain:make-world-simulation (make-body-collision-fixture)))
+         (body (make-instance 'terrain:physical-body :position (make-vec3 10d0 10d0 30d0)
+                              :velocity (make-vec3 12d0 0d0 0d0) :gravity 0d0)))
+    (terrain:add-simulation-body simulation body)
+    (terrain:advance-world-simulation simulation 5/240)
+    ;; Both supported ways of moving an inspectable body are cuts, including
+    ;; a restore/teleport followed by rendering without any simulation tick.
+    (setf (terrain:body-position body) (make-vec3 20d0 10d0 30d0))
+    (true (= 20d0 (vec3-x (terrain:simulation-body-position simulation body))))
+    (setf (vec3-x (terrain:body-position body)) 21d0)
+    (terrain:advance-world-simulation simulation 0)
+    (true (= 21d0 (vec3-x (terrain:simulation-body-position simulation body))))
+    (terrain:advance-world-simulation simulation 1/60)
+    (let ((clock (terrain:simulation-clock simulation))
+          (history-x (vec3-x (terrain:body-previous-position body))))
+      (terrain:reset-simulation-interpolation simulation)
+      (true (= clock (terrain:simulation-clock simulation)))
+      (true (= history-x (vec3-x (terrain:body-previous-position body))))
+      (true (zerop (terrain:simulation-accumulator simulation)))
+      (true (equalp (terrain:body-position body) (terrain:simulation-body-position simulation body)))
+      (terrain:advance-world-simulation simulation 1/480)
+      (true (equalp (terrain:body-position body) (terrain:simulation-body-position simulation body))))
+    ;; Exercise the same migration hook used by existing live instances when
+    ;; the two new slots appear; no class redefinition leaks out of the test.
+    (slot-makunbound body 'terrain::previous-tick-position)
+    (slot-makunbound body 'terrain::tick-position)
+    (update-instance-for-redefined-class
+     body '(terrain::previous-tick-position terrain::tick-position) nil nil)
+    (true (equalp (terrain:body-position body) (terrain:simulation-body-position simulation body)))
+    (terrain:advance-world-simulation simulation 1/60)
+    (true (< (vec3-x (terrain:simulation-body-position simulation body))
+             (vec3-x (terrain:body-position body))))))
+
+(define-test first-person-interpolation-preserves-physical-pose-and-direct-look
+  (let* ((body (make-instance 'terrain:physical-body :position (make-vec3 10d0 10d0 30d0)
+                              :velocity (make-vec3 12d0 0d0 0d0) :gravity 0d0))
+         (player (terrain:make-walking-character :body body :controller nil))
+         (viewer (make-instance 'render:game-host :source (make-body-collision-fixture) :player player))
+         (camera (render:viewer-camera viewer))
+         (simulation (render:viewer-simulation viewer)))
+    (setf (render:camera-yaw camera) 0.7d0
+          (render:camera-pitch camera) 0.2d0)
+    (terrain:advance-world-simulation simulation 5/240)
+    (render::place-viewer-at-player-eyes viewer)
+    (true (< (abs (- 10.15d0 (vec3-x (render:camera-position camera)))) 1d-10))
+    (true (< (abs (- 10.2d0 (vec3-x (terrain:body-position body)))) 1d-10))
+    (true (= 10d0 (vec3-x (terrain:body-previous-position body))))
+    (true (= 0.7d0 (render:camera-yaw camera)))
+    (true (= 0.2d0 (render:camera-pitch camera)))
+    (setf (render:viewer-pointer-captured-p viewer) t)
+    (luv:handle-canvas-event
+     viewer nil (make-instance 'luv:canvas-pointer-motion-event :timestamp 0 :x 0 :y 0
+                              :delta-x 10 :delta-y 5))
+    (let ((yaw (render:camera-yaw camera)) (pitch (render:camera-pitch camera)))
+      (true (< yaw 0.7d0))
+      (true (< pitch 0.2d0))
+      (terrain:advance-world-simulation simulation 1/480)
+      (render::advance-viewer-camera viewer 1/480 nil)
+      (true (< (abs (- 10.175d0 (vec3-x (render:camera-position camera)))) 1d-10))
+      (true (= yaw (render:camera-yaw camera)))
+      (true (= pitch (render:camera-pitch camera))))))
 
 (define-test character-controller-replacement-and-idle-physics
   (let* ((store (make-body-collision-fixture))

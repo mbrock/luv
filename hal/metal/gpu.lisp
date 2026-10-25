@@ -1748,7 +1748,8 @@ compiler boundary of #58IDSR."
                           (<= 1 (length formats) 8)
                           (every #'identity formats)
                           (every (lambda (blend)
-                                   (member blend '(nil :premultiplied-alpha)))
+                                   (member blend
+                                           '(nil :premultiplied-alpha :multiply)))
                                  blends))
                      (and (null fragment-module) (null formats) depth-stencil))
                  (member topology '(:triangle-list :triangle-strip))
@@ -1902,7 +1903,8 @@ compiler boundary of #58IDSR."
                           (<= 1 (length formats) 8)
                           (every #'identity formats)
                           (every (lambda (blend)
-                                   (member blend '(nil :premultiplied-alpha)))
+                                   (member blend
+                                           '(nil :premultiplied-alpha :multiply)))
                                  blends))
                      (and (null fragment-module) (null targets) depth-stencil))
                  (typep max-mesh-workgroups '(integer 1 #.most-positive-fixnum))

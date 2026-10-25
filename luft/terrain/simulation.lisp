@@ -401,6 +401,8 @@ Called only on fixed simulation ticks. NIL means no steering, not braking."))
           (incf (character-gait character) (max (- change) (min change difference))))))
   (trim-character-route character))
 
+(defconstant +simulation-step-seconds+ 1/120)
+
 (defclass world-simulation ()
   ((source :initarg :source :accessor simulation-source)
    (bodies :initform nil :reader simulation-bodies)
@@ -417,8 +419,32 @@ Characters supply locomotion; bodies without characters are equally physical."))
 (defun make-world-simulation (source)
   (make-instance 'world-simulation :source source))
 
+(defun simulation-body-position (simulation body)
+  "Return a fresh interpolated pose one tick behind the simulation's elapsed time.
+Frame motion history and physical collision positions remain untouched. External
+pose changes, including in-place edits, are cuts rather than simulated travel."
+  (unless (equalp (body-position body) (body-tick-position body))
+    (reset-body-interpolation body))
+  (let ((previous (body-previous-tick-position body))
+        (current (body-tick-position body))
+        (fraction (max 0d0 (min 1d0 (/ (simulation-accumulator simulation)
+                                      +simulation-step-seconds+)))))
+    (flet ((blend (a b) (+ a (* fraction (- b a)))))
+      (make-vec3 (blend (vec3-x previous) (vec3-x current))
+                 (blend (vec3-y previous) (vec3-y current))
+                 (blend (vec3-z previous) (vec3-z current))))))
+
+(defun reset-simulation-interpolation (simulation)
+  "Discard paused time and cut render poses to their physical positions.
+Do not advance the simulation clock or overwrite previous-frame motion history."
+  (setf (slot-value simulation 'accumulator) 0d0)
+  (mapc #'reset-body-interpolation (simulation-bodies simulation))
+  simulation)
+
 (defun add-simulation-body (simulation body)
-  (pushnew body (slot-value simulation 'bodies) :test #'eq)
+  (unless (member body (simulation-bodies simulation) :test #'eq)
+    (reset-body-interpolation body)
+    (push body (slot-value simulation 'bodies)))
   body)
 
 (defun add-simulation-character (simulation character)
@@ -444,6 +470,8 @@ Characters supply locomotion; bodies without characters are equally physical."))
 Unspent time is retained; initial authored collision loading time is discarded."
   (check-type seconds (real 0 *))
   (dolist (body (simulation-bodies simulation))
+    (unless (equalp (body-position body) (body-tick-position body))
+      (reset-body-interpolation body))
     (let ((position (body-position body)) (previous (body-previous-position body)))
       (setf (vec3-x previous) (vec3-x position)
             (vec3-y previous) (vec3-y position)
@@ -453,14 +481,18 @@ Unspent time is retained; initial authored collision loading time is discarded."
     (when (and (typep source 'streaming-scene)
                (streaming-scene-source source)
                (zerop (luft:fiber-store-count (scene-solid source))))
-      (setf (slot-value simulation 'accumulator) 0d0)
+      (reset-simulation-interpolation simulation)
       (return-from advance-world-simulation simulation))
     (incf (slot-value simulation 'accumulator) (coerce seconds 'double-float))
-    (let ((solid (inspection-source-solid source)) (dt (/ 1d0 120)))
+    (let ((solid (inspection-source-solid source))
+          (dt (coerce +simulation-step-seconds+ 'double-float)))
       ;; Tolerate only floating-point dust at exact tick boundaries, not a
       ;; partial physics step. Keep arbitrary frame durations in bounded
       ;; double storage rather than accumulating unbounded rational products.
       (loop while (>= (+ (simulation-accumulator simulation) 1d-12) dt) do
+        (dolist (body (simulation-bodies simulation))
+          (rotatef (slot-value body 'previous-tick-position)
+                   (slot-value body 'tick-position)))
         (let ((poses (mapcar (lambda (character)
                               (let ((p (body-position (character-body character))))
                                 (list character (vec3-x p) (vec3-y p))))
@@ -472,8 +504,13 @@ Unspent time is retained; initial authored collision loading time is discarded."
             (unless (find body (simulation-characters simulation) :key #'character-body)
               (integrate-body body solid dt)))
           (dolist (pose poses) (apply #'update-character-travel (append pose (list dt)))))
+        (dolist (body (simulation-bodies simulation))
+          (let ((position (body-position body)) (current (body-tick-position body)))
+            (setf (vec3-x current) (vec3-x position)
+                  (vec3-y current) (vec3-y position)
+                  (vec3-z current) (vec3-z position))))
         (decf (slot-value simulation 'accumulator) dt)
-        (incf (slot-value simulation 'clock) 1/120))
+        (incf (slot-value simulation 'clock) +simulation-step-seconds+))
       (when (< (abs (simulation-accumulator simulation)) 1d-12)
         (setf (slot-value simulation 'accumulator) 0d0))))
   simulation)

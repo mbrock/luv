@@ -1567,7 +1567,7 @@ is accepted for callers predating multiple render targets."
                             (every #'identity formats)
                             (every (lambda (blend)
                                      (member blend
-                                             '(nil :premultiplied-alpha)))
+                                             '(nil :premultiplied-alpha :multiply)))
                                    blends))
                        (and (null fragment-module)
                             (null targets)
@@ -1695,7 +1695,7 @@ render-pass compatibility need no separate vocabulary."
                             (every #'identity formats)
                             (every (lambda (blend)
                                      (member blend
-                                             '(nil :premultiplied-alpha)))
+                                             '(nil :premultiplied-alpha :multiply)))
                                    blends))
                        (and (null fragment-module)
                             (null targets)

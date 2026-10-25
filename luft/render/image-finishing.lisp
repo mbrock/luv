@@ -1,12 +1,13 @@
 (in-package #:luft.render)
 
-;;; Copy reconstructed radiance into the HDR composite, run the lens chain
-;;; over it, then grade that composite for the display after flames and
-;;; exposure. The frame specifies that order. Target generations own images
-;;; and their borrowed bindings.
+;;; Apply depth-based shading before reconstruction, then copy reconstructed
+;;; radiance into the HDR composite and run the lens and display grade after
+;;; flames and exposure. The frame specifies that order. Target generations
+;;; own images and their borrowed bindings.
 
 (defclass image-finishing (gpu-resource-owner)
   ((output-format :initarg :output-format :reader finishing-output-format)
+   (occlusion-program :accessor finishing-occlusion-program)
    (display-program :accessor finishing-display-program)
    (composite-program :accessor finishing-composite-program)
    (bloom-bright-program :accessor finishing-bloom-bright-program)
@@ -81,7 +82,15 @@ to its SOURCE view and the frame's CAMERA uniform."))
                  :vertex (shaders:present-vertex-specification)
                  :fragment fragment
                  :targets `((:format ,format))))))
-        (setf (finishing-sampler finishing)
+        (setf (finishing-occlusion-program finishing)
+              (own-gpu-object
+               finishing
+               (make-drawing-program
+                device :label "luft scene ambient occlusion"
+                :vertex (shaders:present-vertex-specification)
+                :fragment (shaders::ambient-occlusion-fragment-specification)
+                :targets '((:format :rgba16-float :blend :multiply))))
+              (finishing-sampler finishing)
               (own-gpu-resource finishing device
                                 (make-sampler-descriptor :label "luft image filtering"
                                                          :mag-filter :linear :min-filter :linear))

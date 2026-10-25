@@ -982,10 +982,11 @@ before the operation boundary, or it would encode through resources which the
                        (if (viewer-control-active-p viewer :down) 1.0 0.0)))))))
     ;; A free camera leaves the character waiting, and no character moves
     ;; until the ground under it is resident again.
-    (unless (or (typep (viewer-mode viewer) 'free-camera-mode)
-                (viewer-focus-carries-player-p (viewer-modal-focus viewer))
-                (not (viewer-player-ground-resident-p viewer)))
-      (advance-world-simulation (viewer-simulation viewer) dt))
+    (if (or (typep (viewer-mode viewer) 'free-camera-mode)
+            (viewer-focus-carries-player-p (viewer-modal-focus viewer))
+            (not (viewer-player-ground-resident-p viewer)))
+        (reset-simulation-interpolation (viewer-simulation viewer))
+        (advance-world-simulation (viewer-simulation viewer) dt))
     (advance-viewer-game viewer dt)
     (dolist (overlay (copy-list (viewer-overlays viewer)))
       (advance-viewer-overlay overlay viewer dt))
@@ -1303,7 +1304,8 @@ A completed pair is spent, so a third quick press starts a new one."
 
 (defmethod place-viewer-at-player-eyes (viewer)
   (when (viewer-player viewer)
-    (let ((position (body-position (character-body (viewer-player viewer)))))
+    (let ((position (simulation-body-position
+                     (viewer-simulation viewer) (character-body (viewer-player viewer)))))
       (setf (camera-position (viewer-camera viewer))
             (make-vec3 (vec3-x position) (vec3-y position)
                        (+ (vec3-z position) *first-person-eye-height*))))))

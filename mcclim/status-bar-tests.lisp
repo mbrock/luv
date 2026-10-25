@@ -213,6 +213,41 @@
   (declare (ignore owner))
   :chip)
 
+(define-test game-status-is-matched-shadowed-monospace-without-a-clock-pill
+  (dolist (channels '((:fps :daytime) (:fps) (:daytime) nil))
+    (let* ((bar (make-status-bar-test-frame (make-instance 'chip-status-bar-test-owner)))
+           (medium (fresh-gpu-medium))
+           (pane (make-instance 'mcluv::status-bar-pane :frame bar
+                                :region (clim:make-bounding-rectangle 0 0 900 64)))
+           (font (mcluv::gpu-text-font-pathname (clim:make-text-style :fix :roman 16))))
+      ;; A retained CPU command stream: no port, native window or device.
+      (setf (slot-value pane 'clim:medium) medium
+            (mcluv:status-bar-visible-fields bar)
+            (loop for channel in channels
+                  collect (mcluv::make-status-bar-field
+                           :channel channel :value (if (eq channel :fps) "60" "06:45"))))
+      (clim:with-output-recording-options (pane :record nil)
+        (clim:handle-repaint pane clim:+everywhere+))
+      (let ((commands (coerce (mcluv::gpu-medium-commands medium) 'list)))
+        (true (= (* 2 (length channels)) (length commands)))
+        (true (every (lambda (command) (typep command 'mcluv::gpu-text-command)) commands))
+        (loop for (shadow foreground) on commands by #'cddr
+              for fps-p = (string= "60 fps" (mcluv::gpu-text-command-string foreground))
+              do (true (equal font (mcluv::gpu-text-command-font-pathname foreground)))
+                 (true (equal font (mcluv::gpu-text-command-font-pathname shadow)))
+                 (true (= 16 (mcluv::gpu-text-command-size foreground)
+                          (mcluv::gpu-text-command-size shadow)))
+                 (true (= 34 (mcluv::gpu-text-command-y foreground)))
+                 (true (eq :baseline (mcluv::gpu-text-command-align-y foreground)))
+                 (true (eq (if fps-p :left :right)
+                           (mcluv::gpu-text-command-align-x foreground)))
+                 (true (= (if fps-p 20 880) (mcluv::gpu-text-command-x foreground)))
+                 (true (= (1+ (mcluv::gpu-text-command-x foreground))
+                          (mcluv::gpu-text-command-x shadow)))
+                 (true (= 35 (mcluv::gpu-text-command-y shadow)))
+                 (true (equalp '(0 0 0 0.45) (mcluv::gpu-text-command-color shadow)))
+                 (true (equalp '(1 1 1 0.92) (mcluv::gpu-text-command-color foreground))))))))
+
 (define-test compact-status-keeps-its-margins-without-shrinking-type
   (let* ((bar (make-status-bar-test-frame (make-instance 'chip-status-bar-test-owner)))
          (medium (fresh-gpu-medium))

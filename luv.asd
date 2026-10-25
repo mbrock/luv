@@ -536,6 +536,7 @@ offsets and of headers."
    (:file "arithmetic/lisp/tests")
    (:file "objective-c/tests" :if-feature :darwin)
    (:file "hal/gpu-tests")
+   (:file "hal/blend-tests")
    (:file "hal/live-artifact-tests")
    (:file "hal/application-lifecycle-tests")
    (:file "hal/application-capture-tests")

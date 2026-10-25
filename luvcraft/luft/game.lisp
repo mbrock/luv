@@ -382,6 +382,8 @@ and the player's pose are written back to PATHNAME in Luvcraft's own save
 format as the game plays and when it stops; a fresh SEED writes only to a
 PATHNAME given explicitly, never over the player's save. Terrain starts with
 plain cube faces; TERRAIN-BEVELS-P opts in, and the metabar switches it live.
+The resident window spans seven 64-cell chunks per side; the streaming
+metabar can adjust its radius without changing the world's collision rules.
 Other keys go to LUFT.RENDER:START-GAME-HOST."
   (let ((loaded-p (and pathname (null seed) (probe-file pathname))))
     (multiple-value-bind (world resume inhabitants)
@@ -394,7 +396,8 @@ Other keys go to LUFT.RENDER:START-GAME-HOST."
             (and resume (game:luvcraft-resume-luft-pose source resume))
           (apply #'render:start-game-host
                  :solid (game:make-luvcraft-streaming-scene
-                         source :mesh-preparer render:+render-population-preparer+)
+                         source :residency-radius 3
+                         :mesh-preparer render:+render-population-preparer+)
                  :title *title*
                  :terrain-bevels-p terrain-bevels-p
                  :sky-factory 'make-luvcraft-sky-drawing

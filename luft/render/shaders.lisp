@@ -1662,31 +1662,17 @@ NIL leaves the atelier's direct light unchanged.")
     ;; Alpha is current-frame focus metadata, never temporal colour history.
     (set-output color-output (vec4 resolved (swizzle fresh :w)))))
 
-(define-live-shader present-fragment-specification
+(define-live-shader ambient-occlusion-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
      :outputs ((color-output :vec4 :location 0))
-     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity)
+     :resources ((scene-depth :depth-texture-2d :binding 0)
                  (scene-sampler :sampler :binding 1)
-                 (scene-depth :depth-texture-2d :binding 2)
-                 (camera-state :uniform-block :binding 3
-                  :members #.(scene-uniform-prefix 31))
-                 (bloom :texture-2d :binding 4 :sample-transfer :identity)
-                 (shafts :texture-2d :binding 5 :sample-transfer :identity)
-                 (panel-color :texture-2d :binding 6 :sample-transfer :identity)
-                 (panel-depth :depth-texture-2d :binding 7)
-                 (viewmodel :texture-2d :binding 8 :sample-transfer :identity)))
-  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
-         (value (sample scene scene-sampler uv))
-         (auto-exposure (swizzle sky-color-vector :w))
-         (texel
-           (representation (swizzle inspection-parameters :zw)))
-         ;; Geometry depth carries the subpixel projection jitter consumed by
-         ;; MetalFX; presentation UVs do not.  Sample depth at the same current
-         ;; geometry location so the AO does not crawl across a resolved edge.
-         (depth-uv
-           (+ uv
-              (* (representation (swizzle temporal-parameters :xy)) 0.5)))
+                 (camera-state :uniform-block :binding 2
+                  :members #.(scene-uniform-prefix 31))))
+  ;; Color and depth still share the jittered scene grid. Multiply this
+  ;; shading into scene radiance before either temporal resolver sees it.
+  (let* ((depth-uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
          (depth (swizzle (sample scene-depth scene-sampler depth-uv) :x))
          (divisor (swizzle (representation render-parameters) :z))
          (centre (view-depth depth camera-projection divisor))
@@ -1820,16 +1806,42 @@ NIL leaves the atelier's direct light unchanged.")
                          (min 1.0 (* occlusion 1.6))))
                1.0))
          (pooling
-           (* #.*ambient-pigment-strength*
-              (min 1.0 (* occlusion 1.6))))
+           (if (< depth 0.9999)
+               (* #.*ambient-pigment-strength*
+                  (min 1.0 (* occlusion 1.6)))
+               0.0))
          ;; A common cool shadow pigment makes the depth signal read as an
          ;; illustrated wash rather than neutral post-process darkening.
          (shadow-pigment (vec3 0.76 0.88 1.03))
-         (shadowed (* (swizzle value :xyz) accessibility))
-         (pigmented (* shadowed
-                       (mix (vec3 1.0 1.0 1.0)
-                            shadow-pigment pooling)))
-         (surface-color (presentation-medium pigmented shadowed))
+         (neutral (vec3 accessibility accessibility accessibility))
+         (pigmented (* neutral (mix (vec3 1.0 1.0 1.0) shadow-pigment pooling)))
+         (factor (presentation-medium pigmented neutral)))
+    (set-output color-output (vec4 factor 1.0))))
+
+(define-live-shader present-fragment-specification
+    (:stage :fragment
+     :inputs ((ndc :vec2 :location 0))
+     :outputs ((color-output :vec4 :location 0))
+     :resources ((scene :texture-2d :binding 0 :sample-transfer :identity)
+                 (scene-sampler :sampler :binding 1)
+                 (scene-depth :depth-texture-2d :binding 2)
+                 (camera-state :uniform-block :binding 3
+                  :members #.(scene-uniform-prefix 31))
+                 (bloom :texture-2d :binding 4 :sample-transfer :identity)
+                 (shafts :texture-2d :binding 5 :sample-transfer :identity)
+                 (panel-color :texture-2d :binding 6 :sample-transfer :identity)
+                 (panel-depth :depth-texture-2d :binding 7)
+                 (viewmodel :texture-2d :binding 8 :sample-transfer :identity)))
+  (let* ((uv (+ (* ndc 0.5) (vec2 0.5 0.5)))
+         (value (sample scene scene-sampler uv))
+         (auto-exposure (swizzle sky-color-vector :w))
+         (texel (representation (swizzle inspection-parameters :zw)))
+         ;; Only the native panel-depth test still reads the jittered scene
+         ;; depth. AO is already part of the temporally reconstructed color.
+         (depth-uv (+ uv (* (representation (swizzle temporal-parameters :xy)) 0.5)))
+         (depth (swizzle (sample scene-depth scene-sampler depth-uv) :x))
+         (divisor (swizzle (representation render-parameters) :z))
+         (surface-color (swizzle value :xyz))
          ;; A gentle screen-space tilt shift holds the player's projected
          ;; height crisp and gives the near/far route a miniature depth cue.
          ;; It is deliberately only a five-tap gather after MetalFX resolves.
@@ -1838,9 +1850,7 @@ NIL leaves the atelier's direct light unchanged.")
                            camera-position camera-right camera-up
                            camera-forward camera-projection divisor))
          (focus-y
-           (+ (representation
-               (swizzle (mesh-clip-uv player-clip) :y))
-              (* (swizzle (representation temporal-parameters) :y) 0.5)))
+           (representation (swizzle (mesh-clip-uv player-clip) :y)))
          (tilt
            (smoothstep 0.16 0.52 (abs (- (swizzle uv :y) focus-y))))
          (blur-radius (* texel 2.6))
@@ -1869,8 +1879,8 @@ NIL leaves the atelier's direct light unchanged.")
                 (assume-quantity (if (< divisor 0.5) (* tilt 0.52) 0.0) :unit :one)))
          ;; MetalFX has already reconstructed GLOWING at this point.  Sky is
          ;; HDR scene radiance too, so it participates in metering and gets
-         ;; the same exposure and grade as geometry; only the geometry-only AO
-         ;; and tilt-shift stay out of background pixels.
+         ;; the same exposure and grade as geometry; only tilt-shift stays
+         ;; out of background pixels.
          (radiance
            (if (< depth 0.9999) glowing
                (assume-quantity

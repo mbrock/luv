@@ -76,6 +76,16 @@ box and fall through nothing they cannot see."
                       :quantity (:quantity quantities:world-position
                                  :unit quantities:cell :tensor-order 1)
                       :accessor body-previous-position)
+   ;; Tick endpoints are not the previous rendered frame's motion history.
+   ;; Keep the current endpoint too, to recognize out-of-band pose edits.
+   (previous-tick-position :type vec3
+                           :quantity (:quantity quantities:world-position
+                                      :unit quantities:cell :tensor-order 1)
+                           :reader body-previous-tick-position)
+   (tick-position :type vec3
+                  :quantity (:quantity quantities:world-position
+                             :unit quantities:cell :tensor-order 1)
+                  :reader body-tick-position)
    (velocity :initarg :velocity :initform (make-vec3 0.0 0.0 0.0) :type vec3
              :quantity (:quantity quantities:world-velocity
                         :unit ((quantities:cell 1) (:second -1)) :tensor-order 1)
@@ -101,12 +111,32 @@ box and fall through nothing they cannot see."
          (< cell-z (+ base-z (body-height body)))
          (< base-z (1+ cell-z)))))
 
+(defun reset-body-interpolation (body)
+  "Cut both tick endpoints to BODY's physical pose, without changing frame history."
+  (let ((position (body-position body)))
+    (dolist (slot '(previous-tick-position tick-position))
+      (unless (slot-boundp body slot)
+        (setf (slot-value body slot) (make-vec3 0.0 0.0 0.0)))
+      (let ((sample (slot-value body slot)))
+        (setf (vec3-x sample) (vec3-x position)
+              (vec3-y sample) (vec3-y position)
+              (vec3-z sample) (vec3-z position)))))
+  body)
+
 (defmethod initialize-instance :after ((body physical-body) &key)
   ;; INITARG sharing above names the semantic initial value.  Temporal state
   ;; must own a distinct vector before either side is mutated.
   (let ((position (body-position body)))
     (setf (body-previous-position body)
-          (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position)))))
+          (make-vec3 (vec3-x position) (vec3-y position) (vec3-z position))))
+  (reset-body-interpolation body))
+
+(defmethod update-instance-for-redefined-class :after
+    ((body physical-body) added-slots discarded-slots property-list &rest initargs)
+  (declare (ignore added-slots discarded-slots property-list initargs))
+  (unless (and (slot-boundp body 'previous-tick-position)
+               (slot-boundp body 'tick-position))
+    (reset-body-interpolation body)))
 
 (defun body-clear-at-p
     (solid x y base-z &optional (height +body-default-height+)

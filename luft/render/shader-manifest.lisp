@@ -18,6 +18,7 @@
     lattice-point-vertex-specification
     lattice-point-fragment-specification
     present-vertex-specification
+    ambient-occlusion-fragment-specification
     present-fragment-specification
     sky-fragment-specification
     sky-temporal-fragment-specification

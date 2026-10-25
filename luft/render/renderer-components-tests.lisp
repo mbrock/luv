@@ -313,6 +313,7 @@
            (true (member :copy-src (luv::texture-descriptor-usage
                                    (test-gpu-descriptor (render::renderer-scene-texture renderer)))))
            (render::encode-renderer-scene renderer frame pass nil nil)
+           (render::encode-renderer-occlusion renderer frame pass)
            (render::encode-renderer-reconstruction renderer frame pass #(0.1 -0.2) :view)
            (render::encode-renderer-composite renderer frame pass)
            (let* ((commands (reverse (test-gpu-commands pass)))
@@ -351,6 +352,7 @@
              (dotimes (index 3)
                (let ((pass (make-instance 'gpu-test-encoder)))
                  (render::encode-renderer-scene renderer frame pass nil nil)
+                 (render::encode-renderer-occlusion renderer frame pass)
                  (render::encode-renderer-reconstruction renderer frame pass #(0.1 -0.2) :view)
                  (render::encode-renderer-composite renderer frame pass)
                  (let ((commands (reverse (test-gpu-commands pass))))
@@ -369,6 +371,36 @@
              (true (eq (first outputs) (third outputs)))
              (true (eq (first outputs) (second histories))))
         (render:destroy-renderer renderer)))))
+
+(define-test scene-resolution-does-not-change-the-camera-projection
+  (let* ((render::*temporal-reconstruction* :shader)
+         (render::*dynamic-resolution-frame-rate* nil)
+         (render::*render-scale* 0.4921875)
+         (device (make-instance 'gpu-test-device))
+         (context (make-instance 'gpu-test-context))
+         (renderer (render:make-renderer device :bgra8-unorm '(1292 810)))
+         (camera (make-instance 'render:fly-camera :position (make-vec3 19.0 31.0 7.0)
+                                                   :yaw 0.7 :pitch -0.2 :field-of-view 0.96)))
+    (unwind-protect
+         (dolist (projection '(:perspective :isometric))
+           (let* ((render::*projection* projection)
+                  (expected (render::capture-frame-view camera 1292 810 #(0.0 0.0))))
+             (dolist (scale '(0.4921875 0.5859375 0.75))
+               (let ((render::*render-scale* scale))
+                 (render::encode-renderer-view
+                  renderer context (make-instance 'gpu-test-encoder)
+                  :surface :view '(1292 810) camera :projection projection)
+                 (let* ((view (render::renderer-previous-view renderer))
+                        (jitter (render::frame-view-jitter view))
+                        (input (render::renderer-render-extent renderer)))
+                   (true (equalp (render::frame-view-projection expected)
+                                 (render::frame-view-projection view)))
+                   ;; Sampling still moves by fractions of the INPUT pixel.
+                   (true (equalp jitter
+                                 (render::temporal-jitter
+                                  (1- (render::renderer-frame-index renderer))
+                                  (first input) (second input)))))))))
+      (render:destroy-renderer renderer))))
 
 (defclass resolution-test-canvas (luv:canvas)
   ((offscreen-p :initarg :offscreen-p :reader luv:canvas-offscreen-p)))

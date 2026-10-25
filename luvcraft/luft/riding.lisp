@@ -139,8 +139,10 @@
 
 (defmethod render:encode-viewer-overlay :around
     ((body luvcraft::player-body) (viewer luvcraft-viewer) pass surface)
-  (when (viewer-body-visible-p viewer)
-    (call-next-method)))
+  ;; Hide only the SDF hands. The body still animates camera bob and the
+  ;; separately drawn held ball still uses VIEWER-BODY-VISIBLE-P.
+  (declare (ignore body viewer pass surface))
+  nil)
 
 (defmethod render:refresh-viewer-overlay ((body luvcraft::player-body) (viewer luvcraft-viewer))
   (luv:refresh-live-shader-pipeline (luvcraft::player-body-sdf-pipeline body)))
@@ -180,5 +182,5 @@
       (let* ((camera (render:viewer-camera viewer))
              (p (render:camera-position camera)) (yaw (render:camera-yaw camera)))
         (incf (vec3:vec3-x p) (* sway (sin yaw)))
-        (incf (vec3:vec3-y p) (* sway (cos yaw)))
+        (decf (vec3:vec3-y p) (* sway (cos yaw)))
         (incf (vec3:vec3-z p) lift)))))

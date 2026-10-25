@@ -1229,13 +1229,20 @@ drew."
                    index)
                   'pipeline-color-blend-attachment-state
                   :blend-enable (if blend 1 0)
-                  :src-color-blend-factor :one
+                  :src-color-blend-factor
+                  (ecase blend
+                    ((nil :premultiplied-alpha) :one)
+                    (:multiply :dst-color))
                   :dst-color-blend-factor
-                  (if blend :one-minus-src-alpha :zero)
+                  (if (eq blend :premultiplied-alpha) :one-minus-src-alpha :zero)
                   :color-blend-op :add
-                  :src-alpha-blend-factor :one
+                  :src-alpha-blend-factor
+                  (if (eq blend :multiply) :zero :one)
                   :dst-alpha-blend-factor
-                  (if blend :one-minus-src-alpha :zero)
+                  (ecase blend
+                    ((nil) :zero)
+                    (:premultiplied-alpha :one-minus-src-alpha)
+                    (:multiply :one))
                   :alpha-blend-op :add
                   :color-write-mask '(:r :g :b :a)))
         (funcall function (length blends) attachments))))

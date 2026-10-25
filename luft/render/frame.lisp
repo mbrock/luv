@@ -1,9 +1,9 @@
 (in-package #:luft.render)
 
-;;; A frame is an ordered composition. Shadows feed scene lighting; temporal
-;;; reconstruction consumes geometry depth and motion; flames enter the HDR
-;;; image afterward; exposure measures that image; presentation grades it and
-;;; places the application overlay last. Helpers below follow that same order.
+;;; A frame is an ordered composition. Shadows feed scene lighting; ambient
+;;; occlusion shades the scene before temporal reconstruction consumes color,
+;;; depth and motion; flames enter the HDR image afterward; exposure measures
+;;; that image; presentation grades it and places the application overlay last.
 ;;; Resource ownership and replacement live in render.lisp. See #I4PRMD.
 
 ;;; Chunk culling.  The frame's own uniform data names both clip volumes: the
@@ -124,7 +124,8 @@ final pass."
                      (temporal-jitter (renderer-frame-index renderer)
                                       width height)
                      #(0.0 0.0)))
-         (view (capture-frame-view camera width height jitter))
+         ;; Resolution changes choose samples, never a different camera lens.
+         (view (capture-frame-view camera (first extent) (second extent) jitter))
          (previous (or (renderer-previous-view renderer) view))
          (exposure
            (* *exposure-gain*
@@ -176,9 +177,8 @@ final pass."
               `(:view ,(renderer-depth-view renderer)
                 :depth-load-op :load :depth-store-op :store)))))
       (funcall *renderer-scene-overlay-encoder* pass)
-      (when (renderer-metalfx-temporal-p renderer)
-        (signal-temporal-scaler-inputs pass (renderer-temporal-scaler renderer)))
       (end-pass pass)))
+  (encode-renderer-occlusion renderer frame encoder)
   (encode-renderer-reconstruction renderer frame encoder jitter view)
   (encode-renderer-composite renderer frame encoder)
   (encode-exposure (renderer-exposure-control renderer) encoder
@@ -333,6 +333,7 @@ final pass."
 
 (defun encode-renderer-scene-drawings
     (renderer frame pass player-p construction-p &optional repetition-p visibility-p)
+  (declare (ignore repetition-p))
   ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
   ;; the selected temporal implementation reconstructs it, and the exposure
   ;; probe meters the same pixels presentation will grade.
@@ -386,12 +387,26 @@ final pass."
                           (renderer-frame-lattice-bind-group renderer frame slot)
                           (make-gpu-draw-command :vertex-count 6
                                                  :instance-count (mesh-slot-lattice-point-count slot)))))))
-  ;; A benchmark repetition is not this frame's input to the scaler.
-  (when (and (renderer-metalfx-temporal-p renderer) (not repetition-p)
-             (not *renderer-scene-overlay-encoder*))
-    (signal-temporal-scaler-inputs pass
-                                   (renderer-temporal-scaler renderer)))
   (end-pass pass))
+
+(defun encode-renderer-occlusion (renderer frame encoder)
+  ;; Sample depth without attaching it. Multiplicative blending shades the
+  ;; existing scene color without sampling it or allocating a color copy.
+  (prepare-texture encoder (renderer-depth-texture renderer) :texture-binding)
+  (let ((pass (begin-render-pass
+               encoder
+               (make-render-pass-descriptor
+                :label "luft scene ambient occlusion"
+                :color-attachments
+                `((:view ,(renderer-scene-view renderer)
+                   :load-op :load :store-op :store))))))
+    (encode-program (finishing-occlusion-program (renderer-finishing renderer))
+                    pass (renderer-frame-occlusion-bind-group renderer frame)
+                    (make-gpu-draw-command :vertex-count 3))
+    ;; This is the last writer of the scaler's color input, including overlays.
+    (when (renderer-metalfx-temporal-p renderer)
+      (signal-temporal-scaler-inputs pass (renderer-temporal-scaler renderer)))
+    (end-pass pass)))
 
 (defun encode-renderer-reconstruction (renderer frame encoder jitter view)
   (when (renderer-metalfx-temporal-p renderer)

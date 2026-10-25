@@ -248,6 +248,7 @@
 (cffi:defcenum (blend-factor :uint32)
   (:zero 0)
   (:one 1)
+  (:dst-color 4)
   (:one-minus-src-alpha 7))
 
 (cffi:defcenum (blend-op :uint32)

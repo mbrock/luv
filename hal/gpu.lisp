@@ -1046,7 +1046,9 @@ linear for the sRGB formats; the transfer names their RGB-channel behavior."
 
 (defstruct (render-pipeline-descriptor (:include gpu-descriptor))
   "A render pipeline.  Each fragment target may name :BLEND
-:PREMULTIPLIED-ALPHA; omitted blending retains opaque replacement semantics.
+:PREMULTIPLIED-ALPHA or :MULTIPLY; NIL retains opaque replacement semantics.
+:MULTIPLY produces RGB_dst * RGB_src and preserves alpha_dst, ignoring
+source alpha.
 SAMPLE-COUNT must match every attachment in the render pass."
   layout vertex fragment (primitive '(:topology :triangle-list)) depth-stencil
   (sample-count 1))
@@ -1054,6 +1056,7 @@ SAMPLE-COUNT must match every attachment in the render pass."
 (defstruct (mesh-render-pipeline-descriptor (:include gpu-descriptor))
   "A task/mesh render pipeline.
 
+Fragment targets use the same :BLEND modes as RENDER-PIPELINE-DESCRIPTOR.
 TASK may be NIL for a direct mesh dispatch.  MAX-MESH-WORKGROUPS states the
 largest task-to-mesh amplification admitted by one task workgroup."
   layout task mesh fragment (max-mesh-workgroups 1) depth-stencil

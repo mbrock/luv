@@ -18,6 +18,98 @@
           (render:camera-pitch (render:viewer-camera viewer)) 0.0)
     viewer))
 
+(define-test first-person-hands-are-hidden-without-hiding-the-held-ball
+  (let* ((viewer (riding-test-viewer))
+         (body (host::viewer-body viewer))
+         (ball (host::viewer-ball-hand viewer))
+         (environment (make-instance 'luvcraft:luvcraft-session
+                                     :camera (make-instance 'luvcraft:fly-camera)))
+         (ride (luvcraft::activate-luvcraft-critter
+                (make-instance 'luvcraft::turtle :seed 3) viewer)))
+    ;; Supply the camera adapter as data; never construct its GPU layout.
+    (push (make-instance 'host::companion-presentation :environment environment :layout nil)
+          (render:viewer-overlays viewer))
+    (setf (luvcraft::player-body-hand-item body) ball
+          (luvcraft::player-body-equip-amount body) 1d0)
+    (dolist (focus (list nil ride))
+      (setf (render:viewer-modal-focus viewer) focus)
+      (true (host::viewer-body-visible-p viewer))
+      ;; The primary bridge returns BODY even without a pipeline. NIL proves
+      ;; the hands' around method stops it before any draw or resource work.
+      (true (null (render:encode-viewer-overlay body viewer nil nil)))
+      (true (plusp (length (luvcraft::player-body-vertices viewer))))
+      (is eq ball (luvcraft::player-body-hand-item body)))
+    (setf (render:viewer-modal-focus viewer) nil
+          (luvcraft::player-body-hand-item body) nil)
+    (true (zerop (length (luvcraft::player-body-vertices viewer))))))
+
+(define-test walking-eye-interpolates-irregular-frames-before-sideways-bob
+  (let* ((viewer (riding-test-viewer))
+         (player (render:viewer-player viewer))
+         (body (luft.terrain:character-body player))
+         (simulation (render:viewer-simulation viewer))
+         (camera (render:viewer-camera viewer))
+         (animation (host::viewer-body viewer))
+         (luvcraft::*player-view-bob-sway* 0.035d0)
+         (luvcraft::*player-view-bob-lift* 0.07d0))
+    (setf (luft.terrain:character-speed player) 7d0)
+    (luft.terrain:set-character-movement player 1d0 0d0)
+    (dotimes (frame 60)
+      (luft.terrain:advance-world-simulation simulation (/ 1d0 60))
+      (render::place-viewer-at-player-eyes viewer))
+    (dotimes (frame 120)
+      (let ((old-x (luv.arithmetic.lisp.vec3:vec3-x (render:camera-position camera)))
+            (dt (+ (/ 1d0 60) (if (evenp frame) -0.0001d0 0.0001d0))))
+        (luft.terrain:advance-world-simulation simulation dt)
+        (render::place-viewer-at-player-eyes viewer)
+        (true (< (abs (- (luv.arithmetic.lisp.vec3:vec3-x (render:camera-position camera))
+                         old-x (* 7 dt))) 1d-9))
+        (true (= 7d0 (luv.arithmetic.lisp.vec3:vec3-x (luft.terrain:body-velocity body))))
+        (true (= 2d0 (luv.arithmetic.lisp.vec3:vec3-z (luft.terrain:body-position body))))))
+    (setf (luvcraft::player-body-bob-phase animation) (/ pi 2)
+          (luvcraft::player-body-bob-amount animation) 1d0)
+    (dolist (yaw (list 0d0 (/ pi 4) (/ pi 2) (* 3/4 pi)))
+      (setf (render:camera-yaw camera) yaw)
+      (render::place-viewer-at-player-eyes viewer)
+      (let* ((base (luft.terrain:simulation-body-position simulation body))
+             (p (render:camera-position camera))
+             (dx (- (luv.arithmetic.lisp.vec3:vec3-x p) (luv.arithmetic.lisp.vec3:vec3-x base)))
+             (dy (- (luv.arithmetic.lisp.vec3:vec3-y p) (luv.arithmetic.lisp.vec3:vec3-y base))))
+        (true (< (abs (+ (* dx (cos yaw)) (* dy (sin yaw)))) 1d-10)
+              "bob has no forward component at any yaw")
+        (true (< (abs (- (* dx (sin yaw)) (* dy (cos yaw)) 0.035d0)) 1d-10))
+        (true (< (abs (- (luv.arithmetic.lisp.vec3:vec3-z p)
+                         (luv.arithmetic.lisp.vec3:vec3-z base)
+                         render::*first-person-eye-height* 0.035d0)) 1d-6))))))
+
+(define-test walking-eye-cuts-stale-tick-history-while-ground-is-nonresident
+  (let* ((viewer (riding-test-viewer))
+         (simulation (render:viewer-simulation viewer))
+         (player (render:viewer-player viewer))
+         (body (luft.terrain:character-body player))
+         (store (luft.terrain:streaming-scene-store (render:viewer-source viewer)))
+         (key (luft:chunk-key-at 1032 1029))
+         (resident (gethash key store)))
+    (luft.terrain:set-character-movement player 1d0 0d0)
+    (luft.terrain:advance-world-simulation simulation 5/240)
+    (let ((clock (luft.terrain:simulation-clock simulation))
+          (x (luv.arithmetic.lisp.vec3:vec3-x (luft.terrain:body-position body))))
+      (unwind-protect
+           (progn
+             (remhash key store)
+             (render::advance-viewer-world viewer 1d0)
+             (render::place-viewer-at-player-eyes viewer)
+             (true (= clock (luft.terrain:simulation-clock simulation)))
+             (true (zerop (luft.terrain:simulation-accumulator simulation)))
+             (true (= x (luv.arithmetic.lisp.vec3:vec3-x
+                         (render:camera-position (render:viewer-camera viewer))))))
+        (setf (gethash key store) resident))
+      (render::advance-viewer-world viewer (+ 1d0 (/ 1d0 480)))
+      (render::place-viewer-at-player-eyes viewer)
+      (true (= clock (luft.terrain:simulation-clock simulation)))
+      (true (= x (luv.arithmetic.lisp.vec3:vec3-x
+                  (render:camera-position (render:viewer-camera viewer))))))))
+
 (defun ride-key (viewer name &optional release modifiers)
   (luv:handle-canvas-event
    viewer nil (make-instance (if release 'luv:canvas-key-release-event 'luv:canvas-key-press-event)

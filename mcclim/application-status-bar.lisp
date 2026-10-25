@@ -27,7 +27,7 @@
   "The application-neutral status vocabulary, in presentation order.")
 
 (defgeneric status-bar-presentation (owner)
-  (:documentation "Choose :STRIP for workbench telemetry or :CHIP for a quiet game HUD."))
+  (:documentation "Choose :STRIP for workbench telemetry or :CHIP for unboxed game HUD text."))
 
 (defmethod status-bar-presentation ((owner t))
   (declare (ignore owner))
@@ -339,29 +339,26 @@ semantic repaint."
       (if chip-p
           (let* ((fields (status-bar-visible-fields bar))
                  (clock (find :daytime fields :key #'status-bar-field-channel))
-                 (fps (find :fps fields :key #'status-bar-field-channel))
-                 (right (- width 18))
-                 (left (- right 112)))
-            (when clock
-              (draw-ui-surface medium left 16 right 52 :radius 18
-                               :fill :forest :edge :forest)
-              (draw-analytic-rounded-rectangle* medium (+ left 13) 25 (+ left 31) 43
-                                                :radius 9 :ink (ui-ink :on-accent))
-              (draw-analytic-rounded-rectangle* medium (+ left 14.5) 26.5 (+ left 29.5) 41.5
-                                                :radius 7.5 :ink (ui-ink :forest))
-              (draw-analytic-rounded-rectangle* medium (+ left 21) 29 (+ left 22.5) 35
-                                                :radius 0.7 :ink (ui-ink :on-accent))
-              (draw-analytic-rounded-rectangle* medium (+ left 21) 34 (+ left 26) 35.5
-                                                :radius 0.7 :ink (ui-ink :on-accent))
-              (draw-text* medium (status-bar-field-value clock) (+ left 42) 34
-                          :align-y :center :text-size (ui-text-size :body)
-                          :ink (ui-ink :on-accent)))
-            (when fps
-              (let ((text (format nil "~A fps" (status-bar-field-value fps))))
-                (draw-text* medium text 20 35 :align-y :center
-                            :text-size (ui-text-size :caption) :ink (ui-ink :forest))
-                (draw-text* medium text 19 34 :align-y :center
-                            :text-size (ui-text-size :caption) :ink (ui-ink :on-accent)))))
+                 (fps (find :fps fields :key #'status-bar-field-channel)))
+            ;; CLIM's supported :FIX family resolves through the GPU font
+            ;; mapping. Both corners share its size, baseline and inset.
+            (loop for field in (list fps clock)
+                  for x in (list 20 (- width 20))
+                  for align-x in '(:left :right)
+                  when field
+                    do (let ((text (if (eq field fps)
+                                       (format nil "~A fps" (status-bar-field-value field))
+                                       (status-bar-field-value field))))
+                         (draw-text* medium text (1+ x) 35
+                                     :align-x align-x :align-y :baseline
+                                     :text-family :fix :text-face :roman
+                                     :text-size +status-bar-text-size+
+                                     :ink (status-bar-alpha-ink 0 0 0 0.45))
+                         (draw-text* medium text x 34
+                                     :align-x align-x :align-y :baseline
+                                     :text-family :fix :text-face :roman
+                                     :text-size +status-bar-text-size+
+                                     :ink (status-bar-alpha-ink 1 1 1 0.92)))))
           (progn
             (draw-analytic-rounded-rectangle*
              medium 0 0 width +status-bar-height+

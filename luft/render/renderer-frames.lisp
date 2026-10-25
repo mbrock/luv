@@ -125,6 +125,14 @@ Publication and resize invalidate these bindings with all other frame joins."
    (renderer-lattice renderer) :lattice-points (mesh-slot-lattice-point-buffer slot)
    :camera-state (renderer-frame-state-camera-buffer frame)))
 
+(defun renderer-frame-occlusion-bind-group (renderer frame)
+  (renderer-frame-program-binding
+   renderer frame (list :occlusion (renderer-depth-view renderer))
+   (finishing-occlusion-program (renderer-finishing renderer))
+   :scene-depth (renderer-depth-view renderer)
+   :scene-sampler (renderer-sampler renderer)
+   :camera-state (renderer-frame-state-camera-buffer frame)))
+
 (defun renderer-frame-neighbourhood-bind-group (renderer frame)
   (renderer-frame-component-binding
    frame (list :temporal-neighbourhood (renderer-scene-view renderer)

@@ -101,7 +101,7 @@
 (in-package #:luft.render.shaders)
 
 (define-shader-function luvcraft-material-character (tone relief world normal distance)
-  "Coarse painted flecks and olive foliage, fading before they become shimmer."
+  "World-locked painted flecks, with broader vegetation marks beyond fine detail."
   (let* ((grass (< (abs (- relief 1.0)) 0.5))
          (leaves (< (abs (- relief 5.0)) 0.5))
          (snow (< (abs (- relief 7.0)) 0.5))
@@ -109,16 +109,23 @@
          ;; A fixed world grid, like the old atlas texels, not screen-space grain.
          (cell (floor (+ (* world 12.0) (* normal 0.03))))
          (fleck (- (paper-hash cell) 0.5))
-         (footprint (* distance 0.0015))
-         (detail (* (- 1.0 (smoothstep 0.025 0.09 footprint))
-                    (material-detail-weight world 12.0)))
+         (detail (material-detail-weight world 12.0))
+         ;; Filter each scale separately. Grazing grass used to lose every
+         ;; mark as soon as its finest texels became subpixel; a distance fade
+         ;; then suppressed even detail that the raster could still resolve.
+         (tuft (- (paper-hash (floor (+ (* world 3.0) (* normal 0.03)))) 0.5))
+         (patch (- (paper-hash (floor (+ (* world 0.75) (* normal 0.03)))) 0.5))
+         (tuft-detail (material-detail-weight world 3.0))
+         (patch-detail (material-detail-weight world 0.75))
+         (broad (mix (* 0.55 patch patch-detail) (* 0.8 tuft) tuft-detail))
+         (marks (mix (* vegetation broad) fleck detail))
          (contrast (if snow 0.08 (mix 0.24 0.70 vegetation)))
          (tint (if grass (vec3 1.12 0.88 0.82)
                    (if leaves (vec3 1.35 0.93 0.80) (vec3 1.0 1.0 1.0)))))
     (let* ((paint (* tone tint))
            (luma (dot paint (vec3 0.2126 0.7152 0.0722)))
            (natural (mix paint (vec3 luma luma luma) (* vegetation 0.12))))
-      (* natural (+ 1.0 (* contrast (* fleck detail)))))))
+      (* natural (+ 1.0 (* contrast marks))))))
 
 (define-shader-function luvcraft-blocklight (light gain)
   "The original scalar light's warm radiance, with the shared gain knob."

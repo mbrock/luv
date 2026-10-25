@@ -83,6 +83,68 @@
            (true (typep (mcluv::hotbar-material-ink block 0 80)
                         'mcluv:linear-gradient))))
 
+(define-test hotbar-keeps-ten-icons-on-one-glass-strip-with-a-selected-underline
+  (dolist (finite-p '(nil t))
+    (let* ((inventory (luvcraft:make-block-inventory :quantity (when finite-p 17)))
+           (session (make-instance 'luvcraft:luvcraft-session :inventory inventory))
+           (blocks (luvcraft:block-inventory-quickbar-blocks inventory))
+           (frame (clim:make-application-frame 'mcluv::luvcraft-hotbar :session session)))
+      (true (= 10 (length blocks)))
+      (loop for selected in blocks
+            for index from 0
+            do (let* ((medium (make-instance 'mcluv:luv-gpu-medium))
+                      (pane (make-instance 'mcluv::hotbar-pane :frame frame
+                                           :region (clim:make-bounding-rectangle
+                                                    0 0 mcluv::+hotbar-width+
+                                                    mcluv::*hotbar-height*))))
+                 (setf (slot-value pane 'clim:medium) medium
+                       (luvcraft:player-selected-block session) selected)
+                 (clim:with-output-recording-options (pane :record nil)
+                   (clim:handle-repaint pane clim:+everywhere+))
+                 (let* ((commands (coerce (mcluv::gpu-medium-commands medium) 'list))
+                        (text (remove-if-not
+                               (lambda (command) (typep command 'mcluv::gpu-text-command))
+                               commands))
+                        (vertices (mcluv::gpu-medium-analytic-vertices medium)))
+                   (true (= 2 (count-if
+                               (lambda (command) (typep command 'mcluv::gpu-analytic-command))
+                               commands)))
+                   (true (= 10 (count-if
+                                (lambda (command) (typep command 'mcluv::gpu-image-command))
+                                commands)))
+                   (true (= (if finite-p 20 10) (length text)))
+                   (true (equal '("1" "2" "3" "4" "5" "6" "7" "8" "9" "0")
+                                (remove "17" (mapcar #'mcluv::gpu-text-command-string text)
+                                        :test #'string=)))
+                   ;; A low-opacity neutral fill and one opaque thin underline.
+                   (true (= 0.28 (aref vertices 2)))
+                   (true (= (aref vertices 9) (aref vertices 10) (aref vertices 11)))
+                   (true (< (aref vertices 9) 0.02))
+                   (true (= 1.0 (aref vertices (+ 72 2))))
+                   (true (= 1.0 (aref vertices (+ 72 7))))
+                   (true (null (mcluv:gpu-medium-fallback-report medium)))
+                   (multiple-value-bind (left top right bottom)
+                       (mcluv::hotbar-slot-geometry 10 index)
+                     (declare (ignore top bottom))
+                     (true (= index (mcluv::hotbar-slot-at
+                                     10 (/ (+ left right) 2 mcluv::+hotbar-width+)))))))))))
+
+(define-test inventory-tiles-remain-opaque-and-hotbar-gaps-remain-unselected
+  (let ((medium (make-instance 'mcluv:luv-gpu-medium)))
+    (mcluv::draw-hotbar-shell nil medium :width 400 :height 200)
+    (mcluv::draw-hotbar-slot nil medium 10 10 60 64 :selected-p t)
+    (true (= 4 (length (mcluv::gpu-medium-commands medium))))
+    (loop with vertices = (mcluv::gpu-medium-analytic-vertices medium)
+          for offset from 0 below (length vertices) by 72
+          do (true (= 1.0 (aref vertices (+ offset 2))))))
+  (dolist (count '(6 10))
+    (loop for index below count
+          do (multiple-value-bind (left top right bottom)
+                 (mcluv::hotbar-slot-geometry count index)
+               (declare (ignore left top bottom))
+               (true (null (mcluv::hotbar-slot-at
+                            count (/ (+ right 1) mcluv::+hotbar-width+))))))))
+
 (define-test hotbar-is-composited-after-scene-postprocessing
   (true (eq :hud
             (luvcraft:luvcraft-overlay-stage

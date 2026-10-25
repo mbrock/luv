@@ -91,8 +91,10 @@
 (defconstant +index-type-uint16+ 0)
 (defconstant +index-type-uint32+ 1)
 (defconstant +blend-state-enabled+ 1)
+(defconstant +blend-factor-zero+ 0)
 (defconstant +blend-factor-one+ 1)
 (defconstant +blend-factor-one-minus-source-alpha+ 5)
+(defconstant +blend-factor-destination-color+ 6)
 (defconstant +blend-operation-add+ 0)
 (defconstant +render-stage-vertex+ (ash 1 0))
 (defconstant +render-stage-fragment+ (ash 1 1))
@@ -928,6 +930,30 @@ rejection.  Source and names cross only as in-memory NSString objects."
             (%set-vertex-attribute-buffer-index native-attribute binding))))))
   descriptor)
 
+(defun configure-metal-color-attachment-blend (attachment blend)
+  "Lower a HAL blend mode onto a fresh Metal 4 color attachment descriptor."
+  (when blend
+    (%set-render-pipeline-blending-state attachment +blend-state-enabled+)
+    (%set-source-rgb-blend-factor
+     attachment
+     (ecase blend
+       (:premultiplied-alpha +blend-factor-one+)
+       (:multiply +blend-factor-destination-color+)))
+    (%set-destination-rgb-blend-factor
+     attachment
+     (ecase blend
+       (:premultiplied-alpha +blend-factor-one-minus-source-alpha+)
+       (:multiply +blend-factor-zero+)))
+    (%set-rgb-blend-operation attachment +blend-operation-add+)
+    ;; Multiply modulates only RGB; source alpha must not affect destination.
+    (%set-source-alpha-blend-factor
+     attachment (if (eq blend :multiply) +blend-factor-zero+ +blend-factor-one+))
+    (%set-destination-alpha-blend-factor
+     attachment (if (eq blend :multiply)
+                    +blend-factor-one+
+                    +blend-factor-one-minus-source-alpha+))
+    (%set-alpha-blend-operation attachment +blend-operation-add+)))
+
 (defun compile-metal-4-render-pipeline
     (compiler vertex-library vertex-name fragment-library fragment-name
      vertex-buffers color-formats topology
@@ -987,21 +1013,8 @@ rejection.  Source and names cross only as in-memory NSString objects."
                             attachments index)
                          do (%set-render-pipeline-pixel-format
                              attachment color-format)
-                            (when blend
-                              (%set-render-pipeline-blending-state
-                               attachment +blend-state-enabled+)
-                              (%set-source-rgb-blend-factor
-                               attachment +blend-factor-one+)
-                              (%set-destination-rgb-blend-factor
-                               attachment +blend-factor-one-minus-source-alpha+)
-                              (%set-rgb-blend-operation
-                               attachment +blend-operation-add+)
-                              (%set-source-alpha-blend-factor
-                               attachment +blend-factor-one+)
-                              (%set-destination-alpha-blend-factor
-                               attachment +blend-factor-one-minus-source-alpha+)
-                              (%set-alpha-blend-operation
-                               attachment +blend-operation-add+)))
+                            (configure-metal-color-attachment-blend
+                             attachment blend))
                    (cffi:with-foreign-object (error :pointer)
                      (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
                      (let ((pipeline
@@ -1081,21 +1094,8 @@ entry per color attachment, as for COMPILE-METAL-4-RENDER-PIPELINE."
                        (%render-pipeline-color-attachment-at attachments index)
                      do (%set-render-pipeline-pixel-format
                          attachment color-format)
-                        (when blend
-                          (%set-render-pipeline-blending-state
-                           attachment +blend-state-enabled+)
-                          (%set-source-rgb-blend-factor
-                           attachment +blend-factor-one+)
-                          (%set-destination-rgb-blend-factor
-                           attachment +blend-factor-one-minus-source-alpha+)
-                          (%set-rgb-blend-operation
-                           attachment +blend-operation-add+)
-                          (%set-source-alpha-blend-factor
-                           attachment +blend-factor-one+)
-                          (%set-destination-alpha-blend-factor
-                           attachment +blend-factor-one-minus-source-alpha+)
-                          (%set-alpha-blend-operation
-                           attachment +blend-operation-add+)))
+                        (configure-metal-color-attachment-blend
+                         attachment blend))
                (cffi:with-foreign-object (error :pointer)
                  (setf (cffi:mem-ref error :pointer) (cffi:null-pointer))
                  (let ((pipeline

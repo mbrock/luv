@@ -42,7 +42,7 @@
 ;;;; One function decides where a slot is, so painting and hit-testing cannot
 ;;;; disagree about which one the player clicked.
 
-(defconstant +hotbar-width+ 612)
+(defconstant +hotbar-width+ 500)
 (defparameter *hotbar-height* 68)
 (defconstant +hotbar-pad+ 12)
 (defconstant +hotbar-gap+ 6)
@@ -70,7 +70,7 @@
 
 (defun draw-hotbar-shell (pane medium &key (width +hotbar-width+)
                                           (height *hotbar-height*))
-  "Inventory and quickbar share the workshop's bone surface."
+  "The inventory's workshop surface; the HUD paints its own glass strip."
   (declare (ignore pane))
   (draw-ui-surface medium 0 0 width height))
 
@@ -89,21 +89,26 @@
            (luvcraft:block-inventory-quickbar-blocks
             (luvcraft:player-inventory session))))
     (with-sheet-medium (medium pane)
-      (draw-hotbar-shell pane medium)
+      ;; One neutral translucent strip, never ten opaque inventory tiles.
+      (draw-analytic-rounded-rectangle*
+       medium 0 0 +hotbar-width+ *hotbar-height* :radius 12
+       :ink (compose-in (make-gray-color 0.012) (make-opacity 0.28)))
       (let ((count (max 1 (length blocks))))
         (loop for block in blocks
               for index from 0
               for selected-p = (eq block selected)
               do (multiple-value-bind (left top right bottom)
                      (hotbar-slot-geometry count index)
-                   (draw-hotbar-slot pane medium left top right bottom
-                                     :selected-p selected-p)
+                   (when selected-p
+                     (draw-analytic-rounded-rectangle*
+                      medium (+ left 5) (- bottom 2) (- right 5) bottom
+                      :radius 1 :ink +white+))
                    ;; The cube is the material: the same procedural faces the
                    ;; world is built from, not a swatch of its average colour.
                    (draw-block-icon pane block
-                                    (- (/ (+ left right) 2.0) 20)
-                                    (- (/ (+ top bottom) 2.0) 20)
-                                    40)
+                                    (- (/ (+ left right) 2.0) 16)
+                                    (- bottom 36)
+                                    32)
                    (let ((quantity
                            (luvcraft:block-inventory-entry-quantity
                             (luvcraft:block-inventory-entry-for
@@ -115,10 +120,15 @@
                         (format nil "~D" quantity)
                         (- right 5) (- bottom 4)
                         :align-x :right :align-y :bottom :text-size (ui-text-size :caption)
-                        :ink (ui-ink :muted))))
+                        :text-family :fix :text-face :roman :ink +white+)))
                    ;; The tenth slot's key is 0, at the end of the number row.
-                   (draw-ui-keycap medium (format nil "~D" (mod (1+ index) 10))
-                                   (+ left 3) (+ top 3) :width 16 :height 16)))))))
+                   (draw-text* medium (format nil "~D" (mod (1+ index) 10))
+                               (/ (+ left right) 2.0) (+ top 11)
+                               :align-x :center :align-y :baseline
+                               :text-family :fix :text-face :roman
+                               :text-size (ui-text-size :key)
+                               :ink (compose-in +white+
+                                                (make-opacity (if selected-p 1.0 0.7))))))))))
 
 (define-application-frame luvcraft-hotbar ()
   ((session :initarg :session :reader hotbar-session)
