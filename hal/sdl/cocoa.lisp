@@ -16,6 +16,10 @@
   (receiver :pointer)
   (selector :pointer))
 
+(cffi:defcfun ("objc_msgSend" %objc-send-integer) :long
+  (receiver :pointer)
+  (selector :pointer))
+
 (cffi:defcfun ("objc_msgSend" %objc-send-void) :void
   (receiver :pointer)
   (selector :pointer))
@@ -64,9 +68,13 @@
                      (%objc-selector "sharedApplication")))
 
 (defun set-cocoa-activation-policy (application policy)
-  (unless (%objc-send-policy application
-                             (%objc-selector "setActivationPolicy:")
-                             policy)
+  ;; Cocoa can return NO for a no-op. A bundled app may already have regular
+  ;; activation policy before SDL shows its initially hidden game window.
+  (unless (or (= policy (%objc-send-integer
+                         application (%objc-selector "activationPolicy")))
+              (%objc-send-policy application
+                                 (%objc-selector "setActivationPolicy:")
+                                 policy))
     (error "Cocoa refused application activation policy ~D." policy)))
 
 (defmethod prepare-sdl-canvas-host ((canvas sdl-canvas))

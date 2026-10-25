@@ -56,22 +56,43 @@ temporary save, checking its frame loop, capture, and save/reload path.
 This is not interactive gameplay testing on every GPU or distribution.
 Hardware-driver testing remains necessary.
 
-## macOS: app packaging in progress
+## macOS Apple Silicon: a relocatable app
 
-ASDF's `program-op` already creates the native SBCL executables; it does
-not bundle their dynamic libraries or relocate their resource paths.
-Uploading `build/luvcraft` directly would therefore be misleading.
+Extract `luvcraft-macos-arm64.zip` and move `Luvcraft.app` wherever you keep
+applications. A `.app` is a directory bundle presented as one application
+by Finder. It includes SBCL, a compressed Lisp core, native libraries,
+Objective-C helpers, fonts, and companion meshes; Nix and a checkout are
+not needed to play. Intel Macs are not supported. The native Metal 4
+backend requires macOS 26 or later and compatible Apple Silicon hardware.
 
-For **macOS**, the next package should be an Apple Silicon `Luvcraft.app`
-distributed as a ZIP or DMG. A `.app` is a directory bundle presented as
-one application by Finder. Use [Deploy](https://shinmera.com/docs/deploy/)
-to close/reopen CFFI libraries at relocated paths, include the fonts and
-generated Objective-C helpers, recursively relocate non-system dylibs,
-and test after moving the app away from Nix and the checkout. The native
-Metal 4 backend requires macOS 26 and compatible hardware. Developer ID
-signing and notarization need Apple credentials; an unsigned test build
-is not equivalent to a frictionless public download. The existing Nix
-package supports Apple Silicon, not Intel Macs.
+The app is **ad-hoc signed, not notarized**. Gatekeeper rejects it as an
+untrusted download; it is an experimental build, not a frictionless public
+release. Developer ID signing and notarization need Apple credentials and
+are not configured. Do not disable system-wide Gatekeeper protection.
+
+Build on an Apple Silicon Mac with Nix and Xcode:
+
+```sh
+scripts/build-macos-release
+# Use a temporary directory outside the checkout for the isolation test.
+TMPDIR=/tmp python3 scripts/test-macos-release.py \
+  build/macos-release/luvcraft-macos-arm64.zip build/macos-smoke
+```
+
+[Deploy](https://shinmera.com/docs/deploy/) closes/reopens CFFI libraries.
+The packager recursively relocates dylibs and signs the SBCL runtime
+separately from its core, so signing cannot truncate an appended image.
+Worlds remain in the user's data directory, outside the app; the local
+Slynk endpoint file goes in the user's temporary directory.
+
+The moved ZIP was tested on temple (M2 Pro, macOS 27.2, Metal 4) with Nix,
+Homebrew, the checkout, and builder caches denied: real terrain and HUD,
+all companions, save/reload, clean shutdown, and Finder launch passed.
+The unavailable source-update panel explains why a packaged copy cannot
+update a development checkout. Hosted `macos-26` CI builds and checks
+signatures, dependency relocation, help, and error exits with `--cli-only`;
+it does **not** claim a Metal rendering pass. The full test needs a
+graphical session and a Metal 4 device.
 
 ## Windows x86-64: native build qualification
 

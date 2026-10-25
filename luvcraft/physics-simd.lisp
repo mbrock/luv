@@ -46,25 +46,20 @@ and :and-or where SSE2's U32.4 comparison masks select the float lane bits."
               (:and-or
                (let ((wand (sym "U32.4-AND")) (wandc1 (sym "U32.4-ANDC1"))
                      (wor (sym "U32.4-OR")) (cast (sym "U32.4!"))
-                     (make (sym "MAKE-F32.4")))
+                     (retag (sym "F32.4!-FROM-P128")))
                  (lambda (mask then else)
-                   (let ((m (gensym "MASK")) (bits (gensym "BITS"))
-                         (m0 (gensym "M0")) (m1 (gensym "M1"))
-                         (m2 (gensym "M2")) (m3 (gensym "M3")))
+                   (let ((m (gensym "MASK")) (bits (gensym "BITS")))
                      ;; SSE2 comparisons produce U32.4 masks, while SBCL's
                      ;; SSE F32.4! cast cannot reinterpret a P128 value.  Do
-                     ;; the bit selection in the integer view, then retag its
-                     ;; four lanes as floats.  In a compiled kernel the casts
-                     ;; into U32.4 are register moves; only this final retag is
-                     ;; expanded lane by lane.
+                     ;; the bit selection in the integer view, then use the
+                     ;; explicit SSE2 bitcast. This preserves every lane's
+                     ;; bits without the removed %SIMD-PACK-SINGLES helper.
                      `(let* ((,m ,mask)
                              (,bits
                               (,wor
                                (,wand ,m (,cast ,then))
                                (,wandc1 ,m (,cast ,else)))))
-                        (multiple-value-bind (,m0 ,m1 ,m2 ,m3)
-                            (sb-ext:%simd-pack-singles ,bits)
-                          (,make ,m0 ,m1 ,m2 ,m3))))))))))
+                        (,retag ,bits)))))))))
       `(macrolet ((%wide-physics-warm-start (&rest args)
                     (list* ',(intern (format nil "%~A-PHYSICS-WARM-START" family)) args))
                   (%wide-physics-solve-contacts (&rest args)

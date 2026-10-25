@@ -331,6 +331,7 @@
               lispPackages.websocket-driver-client
             ] ++ mcclimDependencies
               ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+                lispPackages.deploy
                 lispPackages.float-features
                 lispPackages.trivial-main-thread
               ];

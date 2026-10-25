@@ -1,0 +1,36 @@
+#!/bin/sh
+# Native arm64 build; no signing identity, notarization, or publication.
+set -eu
+project_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+if [ "$(uname -sm)" != 'Darwin arm64' ]; then
+  echo 'This package requires an Apple Silicon Mac running macOS 26 or newer.' >&2
+  exit 1
+fi
+if [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 26 ]; then
+  echo 'Metal 4 requires macOS 26 or newer.' >&2
+  exit 1
+fi
+. "$project_root/scripts/require-dev-environment"
+
+output=${1:-"$project_root/build/macos-release"}
+# Never replace someone else's app, nor silently reuse a partially built one.
+mkdir -p "$output"
+output=$(CDPATH='' cd -- "$output" && pwd)
+app="$output/Luvcraft.app"
+if [ -e "$app" ]; then
+  echo "Refusing to overwrite $app; choose an empty output directory." >&2
+  exit 1
+fi
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/fonts"
+export LUV_RELEASE_RESOURCES="$app/Contents/Resources/"
+for font in "$project_root"/fonts/*; do
+  # equity is a private git-annex directory, not a game asset.
+  [ "$(basename "$font")" = equity ] || cp -R "$font" "$LUV_RELEASE_RESOURCES/fonts/"
+done
+sbcl --script "$project_root/scripts/build-macos-release.lisp"
+python3 "$project_root/scripts/macos-bundle.py" "$app"
+
+# Use Apple's archive tool to preserve the bundle and executable permissions.
+/usr/bin/ditto -c -k --keepParent "$app" "$output/luvcraft-macos-arm64.zip"
+(cd "$output" && /usr/bin/shasum -a 256 luvcraft-macos-arm64.zip > SHA256SUMS)
+printf 'Built %s\n' "$output/luvcraft-macos-arm64.zip"

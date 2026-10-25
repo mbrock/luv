@@ -15,6 +15,35 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://luv.swa.sh/nix-cache?priority=30
+            extra-trusted-public-keys = luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG18Bw=
+      - name: Build relocated Apple Silicon app
+        run: scripts/build-macos-release
+      - name: Test moved app without builder paths
+        # Standard hosted runners do not promise a Metal 4 GPU. Full render
+        # and save/reload checks use the same script on a graphical Mac.
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: python3 scripts/test-macos-release.py build/macos-release/luvcraft-macos-arm64.zip build/macos-smoke --cli-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luvcraft-macos-arm64
+          path: |
+            build/macos-release/luvcraft-macos-arm64.zip
+            build/macos-release/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+
   windows-sources:
     # Export the locked Lisp sources on Linux; compile them natively below.
     runs-on: ubuntu-22.04
@@ -123,7 +152,7 @@ jobs:
 
   publish:
     if: github.event_name == 'release'
-    needs: [linux, windows]
+    needs: [linux, macos, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -136,6 +165,14 @@ jobs:
         with:
           name: luvcraft-windows-x86_64
           path: downloads
+      - uses: actions/download-artifact@v4
+        with:
+          name: luvcraft-macos-arm64
+          path: macos-downloads
+      - name: Keep platform checksum files distinct
+        run: |
+          mv macos-downloads/SHA256SUMS downloads/luvcraft-macos-arm64.sha256
+          mv macos-downloads/luvcraft-macos-arm64.zip downloads/
       - name: Attach verified downloads to the existing release
         env:
           GH_TOKEN: ${{ github.token }}
