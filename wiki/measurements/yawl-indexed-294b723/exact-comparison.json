@@ -1,0 +1,14 @@
+{
+  "production-default": {
+    "identical_full_byte_channels": 102,
+    "bytes_per_side": 276664320
+  },
+  "production-reverse": {
+    "identical_full_byte_channels": 6,
+    "bytes_per_side": 16128000
+  },
+  "production-native": {
+    "identical_full_byte_channels": 5,
+    "bytes_per_side": 12441600
+  }
+}

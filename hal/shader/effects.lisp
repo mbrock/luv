@@ -75,6 +75,7 @@ Return the bindings and the environment that sees them."
   '((:frag-coord :input (:fragment) :vec4)
     (:front-facing :input (:fragment) :bool)
     (:sample-index :input (:fragment) :uint)
+    (:primitive-index :input (:fragment) :uint)
     (:frag-depth :output (:fragment) :float)
     (:wave-lane-index :input (:fragment :compute) :uint)
     (:wave-lane-count :input (:fragment :compute) :uint))
@@ -85,7 +86,16 @@ the top-left corner, at pixel centres (0.5, 0.5 for the first), z its depth,
 and w the reciprocal of its clip w -- Vulkan's FragCoord, Metal's
 [[position]], and Direct3D's SV_Position with w inverted.  :FRONT-FACING is
 true for a front face under the pipeline's winding.  :SAMPLE-INDEX runs the
-stage once per sample.  :FRAG-DEPTH replaces the fragment's depth.")
+stage once per sample.  :FRAG-DEPTH replaces the fragment's depth.
+
+:PRIMITIVE-INDEX is the raster primitive's unsigned 32-bit identifier.  In
+ordinary vertex draws it starts at zero for each draw and instance, advancing
+per assembled point, line, or triangle, not per vertex or index-buffer value.
+It lowers to Metal's [[primitive_id]] (macOS MSL 2.2, iOS MSL 2.3), Direct3D's
+SV_PrimitiveID, and SPIR-V PrimitiveId.  The latter requires Geometry and an
+enabled Vulkan geometryShader feature even without a geometry stage.  Mesh
+or geometry stages must explicitly supply the primitive ID; this input does
+not synthesize one for them.  The WGSL backend does not support it.")
 
 (defun stage-built-in-type (stage direction built-in)
   "The type BUILT-IN has as a DIRECTION of STAGE, or NIL."

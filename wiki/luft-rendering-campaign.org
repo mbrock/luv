@@ -577,3 +577,35 @@ Vulkan checks retain exact depth but have larger native1080 color differences;
 pre-existing validation errors remain. Keep geometric merging and appearance
 retirement experimental. Sparse-scene selection and backend-specific shading
 costs remain measured follow-ups, not hidden heuristics in this change.
+
+** DONE Restore indexed vertex reuse inside exact visibility
+:PROPERTIES:
+:ID: E5U8OV
+:END:
+
+The [[file:measurements/yawl-indexed-294b723/README.org][indexed visibility experiment]] keeps #EAWKSG's original atlas, resident
+streams, material reconstruction and bevels. Indexed instancing replaces
+non-indexed corner pulling; a 1 KiB immutable star-offset table and the new
+fragment =:primitive-index= builtin preserve the exact winning triangle ID.
+No per-resident geometry upload, approximation or temporal hiding is added.
+
+Adjacent/reversed M5 runs use 77.3%/78.2% of the preceding visibility path's
+full-frame GPU time at 1280x720 with MetalFX; a native 960x540 cohort uses
+72.4%. CPU encoding grows roughly .6--.8 ms, but total serialized completion
+still improves. This is not displayed FPS. The three cohorts compare 113
+whole attachments byte-for-byte, including both IDs, depth, HDR, motion and
+presentation; 12 grazing poses, removal/republication and resize all match.
+
+On chapel's RX 6600 XT, 108 whole-attachment comparisons across alpine and
+meadow also match exactly, including motion, resident-ID renumbering and
+resize. Reversed interleaving repeats the result, and intentionally wrong
+resident IDs fail the comparator. Native validation retains the two known
+timestamp-extension and independentBlend error classes; it is not clean.
+No Vulkan speedup or change to its opt-in visibility default is claimed.
+
+Material scissoring and already-zero-weight relief skipping save only about
+3% in their trials and remain unadopted. Static visibility reuse is a useful
+ablation, not a cache suitable for moving players. Geometry is the next
+budget to reduce: keep nearby bevels exact and measure bounded distant
+clusters against silhouette, depth and camera-motion errors before replacing
+voxel surfaces. A blurry far field is not needed to obtain this exact gain.

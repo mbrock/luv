@@ -409,6 +409,27 @@ fn wgsl_pulling_vertex_probe(stage_in: WgslPullingVertexProbeInput) -> WgslPulli
            (placed-source-of specification
                              :comparison-samplers '(:linear-clamp)))))))
 
+(define-test primitive-index-is-explicitly-unsupported-in-wgsl
+  ;; Even an unused declaration must not silently become invalid WGSL.
+  (dolist (value '(primitive (shader:uint 0.0)))
+    (let* ((declaration '(primitive :uint :built-in :primitive-index))
+           (specification
+             (shader:parse-shader-specification
+              'primitive-index-probe
+              `(:stage :fragment :inputs (,declaration)
+                :outputs ((value :uint :location 0)))
+              `((shader:set-output value ,value))))
+           (condition
+             (handler-case (progn (wgsl:compile-wgsl specification) nil)
+               (shader:shader-language-error (condition) condition))))
+      (true condition)
+      (when condition
+        (is eq :unsupported-wgsl-built-in
+            (shader:shader-language-error-reason condition))
+        (is equal declaration (shader:shader-language-error-form condition))
+        (is equal '(:fragment :input :primitive-index)
+            (shader:shader-language-error-details condition))))))
+
 (define-test unsupported-wgsl-boundaries-retain-source-reasons
   (flet ((reason (options body)
            (failure-reason

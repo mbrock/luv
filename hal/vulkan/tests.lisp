@@ -1,5 +1,57 @@
 (in-package #:luv.tests)
 
+(define-test vulkan-device-enables-geometry-shader-only-when-supported
+  (let* ((query-symbol 'vk:get-physical-device-features)
+         (create-symbol 'lvk::create-device-handle)
+         (original-query (symbol-function query-symbol))
+         (original-create (symbol-function create-symbol))
+         (geometry 0)
+         (int64 1)
+         (creations 0)
+         (device (cffi:make-pointer 1)))
+    (unwind-protect
+         (progn
+           ;; Exercise real device-create-info construction without a loader
+           ;; or GPU.  Other supported features must not be enabled wholesale.
+           (setf (symbol-function query-symbol)
+                 (lambda (physical-device features)
+                   (declare (ignore physical-device))
+                   (lvk::clear-foreign-object
+                    features '(:struct lvk::physical-device-features))
+                   (cffi:with-foreign-slots
+                       ((lvk::geometry-shader lvk::shader-int64
+                         lvk::tessellation-shader)
+                        features (:struct lvk::physical-device-features))
+                     (setf lvk::geometry-shader geometry
+                           lvk::shader-int64 int64
+                           lvk::tessellation-shader 1)))
+                 (symbol-function create-symbol)
+                 (lambda (physical-device create-info)
+                   (declare (ignore physical-device))
+                   (incf creations)
+                   (let ((features
+                           (cffi:foreign-slot-value
+                            create-info '(:struct lvk::device-create-info)
+                            'lvk::p-enabled-features)))
+                     (cffi:with-foreign-slots
+                         ((lvk::geometry-shader lvk::shader-int64
+                           lvk::tessellation-shader)
+                          features (:struct lvk::physical-device-features))
+                       (true (= geometry lvk::geometry-shader))
+                       (true (= 1 lvk::shader-int64))
+                       (true (zerop lvk::tessellation-shader))))
+                   device))
+           (dolist (supported '(0 1))
+             (setf geometry supported)
+             (true (cffi:pointer-eq
+                    device (lvk:create-device (cffi:null-pointer) 0))))
+           ;; geometryShader support must not mask the existing Int64 floor.
+           (setf int64 0)
+           (fail (lvk:create-device (cffi:null-pointer) 0))
+           (true (= 2 creations)))
+      (setf (symbol-function query-symbol) original-query
+            (symbol-function create-symbol) original-create))))
+
 (define-test vulkan-temporal-motion-format-is-r16g16-sfloat
   (let ((descriptor
           (luv:make-texture-descriptor

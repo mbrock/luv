@@ -65,6 +65,7 @@
        (:frag-coord (and (eq stage :fragment) "[[position]]"))
        (:front-facing (and (eq stage :fragment) "[[front_facing]]"))
        (:sample-index (and (eq stage :fragment) "[[sample_id]]"))
+       (:primitive-index (and (eq stage :fragment) "[[primitive_id]]"))
        (:wave-lane-index "[[thread_index_in_simdgroup]]")
        (:wave-lane-count "[[threads_per_simdgroup]]")))
     (:output

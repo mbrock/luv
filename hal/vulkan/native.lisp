@@ -504,6 +504,18 @@ advertised is never placed in the query chain and is returned as NIL."
                         :flags 0 :queue-family-index family :queue-count 1
                         :p-queue-priorities queue-priority))
               (with-vk (features physical-device-features :shader-int64 1)
+                ;; Fragment PrimitiveId declares SPIR-V Geometry, requiring
+                ;; geometryShader even without a geometry pipeline stage.
+                ;; Keep it optional: other shaders still work on devices
+                ;; without it, but PrimitiveId modules remain unsupported.
+                (with-vk (supported physical-device-features)
+                  (vk:get-physical-device-features physical-device supported)
+                  (setf (cffi:foreign-slot-value
+                         features '(:struct physical-device-features)
+                         'geometry-shader)
+                        (cffi:foreign-slot-value
+                         supported '(:struct physical-device-features)
+                         'geometry-shader)))
                 (with-vk (timeline-features
                           physical-device-timeline-semaphore-features
                           :timeline-semaphore 1)

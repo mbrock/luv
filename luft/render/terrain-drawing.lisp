@@ -14,6 +14,7 @@
    (scene-vertices :initform nil :accessor terrain-scene-vertices)
    (normals :initform nil :accessor terrain-normals)
    (scene-indices :initform nil :accessor terrain-scene-indices)
+   (triangle-offsets :initform nil :accessor terrain-triangle-offsets)
    (shadow-vertices :initform nil :accessor terrain-shadow-vertices)
    (shadow-indices :initform nil :accessor terrain-shadow-indices)
    (merged-shadows-p :initarg :merged-shadows-p :initform nil
@@ -83,27 +84,29 @@ SITES and PRIMITIVES select the material pass and its current ID targets."
            :sites (resident-population-instance-buffer resident)
            :camera-state camera
            :terrain-vertices (terrain-scene-vertices drawing)
-           :terrain-indices (terrain-scene-indices drawing)
-           (when sites
-             (list :terrain-appearances (resident-population-appearance-buffer resident)
+           (if sites
+             (list :terrain-indices (terrain-scene-indices drawing)
+                   :terrain-appearances (resident-population-appearance-buffer resident)
                    :terrain-lights (resident-population-light-buffer resident)
                    :material-descriptors (resident-population-descriptor-buffer resident)
                    :terrain-normals (terrain-normals drawing)
                    :visibility-sites sites :visibility-primitives primitives
-                   :shadow-map shadow-map :shadow-sampler shadow-sampler)))))
+                   :shadow-map shadow-map :shadow-sampler shadow-sampler)
+             (list :star-triangle-offsets (terrain-triangle-offsets drawing))))))
 
 (defun encode-terrain-visibility (drawing pass binding resident resident-id)
   "Draw the unchanged triangles with a frame-local resident/atlas identity.
-The shared index table is pulled by the vertex shader; only its addressing
-changes. Site/appearance/light publication and resident lifetime are unchanged."
+The hardware indexes the shared vertices; the fragment primitive index selects
+the original atlas triangle. Site/appearance/light publication is unchanged."
   (set-pipeline pass (program-pipeline (terrain-visibility-program drawing)))
   (set-bind-group pass 0 binding)
   (loop for (star first count) in (resident-population-star-runs resident)
         for range = (aref (terrain-star-ranges drawing) star)
         when (plusp (aref range 1))
-          do (draw pass (aref range 1) count
-                   (+ (aref range 0) (* resident-id shaders::+terrain-visibility-resident-stride+))
-                   first)))
+          do (draw-indexed pass (terrain-scene-indices drawing) :uint32
+                           (aref range 1) count (aref range 0)
+                           (* resident-id shaders::+terrain-visibility-resident-stride+)
+                           first)))
 
 (defun encode-terrain-material (drawing pass binding resident-id)
   ;; The shader rejects other residents before touching these local streams.
@@ -304,6 +307,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                             shadow-indices ranges)
           (star-patch-tables *terrain-bevels-p*)
         (assert (<= (/ (length scene-indices) 3) shaders::+terrain-visibility-triangles-per-resident+))
+        (assert (<= (/ (length scene-words) 4) shaders::+terrain-visibility-resident-stride+))
         (flet ((upload (label words usage)
                  (let ((buffer (own-gpu-resource
                                 drawing device
@@ -312,6 +316,12 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                                  :usage (cons :copy-dst (if (listp usage) usage (list usage)))))))
                    (write-buffer buffer words)
                    buffer)))
+          (when (and *terrain-visibility-p* (= sample-count 1))
+            (setf (terrain-triangle-offsets drawing)
+                  (upload "luft star triangle offsets"
+                          (map '(simple-array (unsigned-byte 32) (256))
+                               (lambda (range) (/ (aref range 0) 3)) ranges)
+                          :storage)))
           (setf (terrain-star-ranges drawing) ranges
                 (terrain-scene-vertices drawing)
                 (upload "luft star patch vertices" scene-words :storage)

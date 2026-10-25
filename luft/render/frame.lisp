@@ -265,7 +265,7 @@ final pass."
   (and *terrain-visibility-p*
        (terrain-visibility-program (renderer-terrain renderer))
        ;; Extremely large publications retain the forward path rather than
-       ;; wrapping the frame-local identity carried in firstVertex.
+       ;; wrapping the frame-local identity carried in signed baseVertex.
        (<= (length (renderer-slot-order renderer)) shaders::+terrain-visibility-resident-limit+)))
 
 (defun encode-renderer-terrain-visibility (renderer frame encoder)

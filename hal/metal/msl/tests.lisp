@@ -720,6 +720,14 @@ on success or without the compiler, else its report."
 
 ;;; Textures, fragment built-ins, and compute effects in MSL.
 
+(define-test primitive-index-is-a-direct-metal-fragment-parameter
+  (let ((source (msl:msl-document-source
+                 (msl:compile-msl (primitive-index-fragment-probe)))))
+    (true (search "uint primitive [[primitive_id]]" source))
+    (true (search "result.value = primitive;" source))
+    (false (search "stage_in.primitive" source))
+    (false (metal-compiler-diagnostics source))))
+
 (define-test texture-kinds-and-fragment-built-ins-lower-to-metal
   (let* ((document (msl:compile-msl (texture-kinds-fragment-probe)))
          (source (msl:msl-document-source document)))

@@ -69,6 +69,7 @@
   (:operands :id (:enum group-operation) :id))
 
 (extend-enumeration capability
+  (geometry 2)
   (sample-rate-shading 35)
   (image-query 50)
   (group-non-uniform 61)
@@ -76,6 +77,7 @@
   (group-non-uniform-ballot 64))
 (extend-enumeration execution-mode (depth-replacing 12))
 (extend-enumeration built-in
+  (primitive-id 7)
   (frag-coord 15)
   (front-facing 17)
   (sample-id 18)
@@ -121,6 +123,11 @@
 (defun spir-v-built-in-name (context built-in)
   "The BuiltIn enumerant for the language's BUILT-IN, noting what it needs."
   (case built-in
+    (:primitive-index
+     ;; Fragment PrimitiveId needs Geometry even without a geometry stage
+     ;; (VUID-PrimitiveId-Fragment-04333), hence Vulkan's geometryShader.
+     (require-spir-v-capability context 'geometry)
+     'primitive-id)
     (:sample-index
      (require-spir-v-capability context 'sample-rate-shading)
      'sample-id)

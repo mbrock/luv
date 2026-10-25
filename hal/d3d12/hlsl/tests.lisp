@@ -703,6 +703,20 @@ access chain named: (ID . INDEX)."
 
 ;;; Textures, fragment built-ins, and compute effects.
 
+(define-test primitive-index-is-a-direct-hlsl-fragment-parameter
+  (multiple-value-bind (source document)
+      (source-of
+       (shader:parse-shader-specification
+        'primitive-index-probe
+        '(:stage :fragment
+          :inputs ((primitive :uint :built-in :primitive-index))
+          :outputs ((value :uint :location 0)))
+        '((shader:set-output value primitive))))
+    (true (search "uint primitive : SV_PrimitiveID" source))
+    (true (search "result.value = primitive;" source))
+    (false (search "stage_in.primitive" source))
+    (compiles document)))
+
 (shader:define-shader hlsl-texture-kinds-probe
     (:stage :fragment
      :inputs ((uv :vec2 :location 0)

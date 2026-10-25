@@ -1132,6 +1132,12 @@ reciprocal of clip w in w."
            (and (eq stage :fragment) (eq direction :input) "front_facing"))
           (:sample-index
            (and (eq stage :fragment) (eq direction :input) "sample_index"))
+          (:primitive-index
+           ;; WGSL's optional primitive_index extension needs device feature
+           ;; negotiation, which this backend does not implement.
+           (wgsl-failure (shader:shader-object-source-form declaration)
+                         :unsupported-wgsl-built-in
+                         (list stage direction built-in)))
           (:frag-depth
            (and (eq stage :fragment) (eq direction :output) "frag_depth"))
           (:global-invocation-id

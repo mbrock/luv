@@ -39,6 +39,77 @@ spirv-val, else its report."
 (defun effect-probe (options &rest body)
   (shader:parse-shader-specification 'effect-probe options body))
 
+(shader:define-shader primitive-index-fragment-probe
+    (:stage :fragment
+     :inputs ((primitive :uint :built-in :primitive-index))
+     :outputs ((value :uint :location 0)))
+  (set-output value primitive))
+
+(define-test primitive-index-is-only-a-uint-fragment-input
+  (let ((input (first (shader:shader-specification-inputs
+                      (primitive-index-fragment-probe)))))
+    (true (eq :primitive-index (shader:shader-interface-built-in input)))
+    (true (shader:shader-type= :uint (shader:shader-declaration-type input))))
+  (dolist (options
+           '((:stage :vertex
+              :inputs ((primitive :uint :built-in :primitive-index))
+              :outputs ((position :vec4 :built-in :position)))
+             (:stage :compute :workgroup-size (1 1 1)
+              :inputs ((primitive :uint :built-in :primitive-index)))
+             (:stage :task :workgroup-size (1 1 1)
+              :inputs ((primitive :uint :built-in :primitive-index)))
+             (:stage :mesh :workgroup-size (1 1 1)
+              :inputs ((primitive :uint :built-in :primitive-index))
+              :mesh-output (:topology :triangles :max-vertices 3
+                            :max-primitives 1
+                            :vertex ((position :vec4 :built-in :position))))
+             (:stage :fragment
+              :outputs ((primitive :uint :built-in :primitive-index)))))
+    (true (eq :built-in-not-in-stage
+              (effect-failure-reason (lambda () (effect-probe options))))))
+  (dolist (type '(:float :int :bool :uvec2 :uint64))
+    (true (eq :built-in-type
+              (effect-failure-reason
+               (lambda ()
+                 (effect-probe
+                  `(:stage :fragment
+                    :inputs ((primitive ,type :built-in :primitive-index))
+                    :outputs ((value :uint :location 0)))
+                  '(set-output value (uint 0.0))))))))
+  (true (eq :duplicate-built-in
+            (effect-failure-reason
+             (lambda ()
+               (effect-probe
+                '(:stage :fragment
+                  :inputs ((first :uint :built-in :primitive-index)
+                           (second :uint :built-in :primitive-index))
+                  :outputs ((value :uint :location 0)))
+                '(set-output value first)))))))
+
+(define-test primitive-index-lowers-to-flat-spir-v-with-geometry-capability
+  (let* ((specification (primitive-index-fragment-probe))
+         (module (spv:shader-module specification))
+         (annotations (spv:spir-v-module-annotations module))
+         (primitive
+           (find '(spv::enum spv::built-in spv::primitive-id)
+                 annotations :key #'fourth :test #'equal)))
+    (true primitive)
+    (when primitive
+      (true (equal '(spv::decorate spv::built-in)
+                   (list (first primitive) (third primitive))))
+      (true (find `(spv::decorate ,(second primitive) spv::flat)
+                  annotations :test #'equal)))
+    (true (equal '(spv::shader spv::geometry)
+                 (spv:spir-v-module-capabilities module)))
+    (true (= #x00010000 (spv:spir-v-module-version module)))
+    (false (spirv-val-diagnostics specification :environment "vulkan1.0")))
+  ;; An ordinary fragment must not acquire the optional Geometry requirement.
+  (let ((module (spv:shader-module
+                 (effect-probe
+                  '(:stage :fragment :outputs ((value :uint :location 0)))
+                  '(set-output value (uint 0.0))))))
+    (true (equal '(spv::shader) (spv:spir-v-module-capabilities module)))))
+
 (shader:define-shader texture-kinds-fragment-probe
     (:stage :fragment
      :inputs ((uv :vec2 :location 0)

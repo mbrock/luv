@@ -1,0 +1,133 @@
+#+title: Indexed visibility preserves every terrain sample
+
+Measured on yawl, Apple M5, 2026-10-25, against =294b723=. Campaign: #E5U8OV.
+Both sides already use visibility-first material shading. This is a further
+gain over #EAWKSG, not another comparison against the forward renderer.
+
+* Share vertices without changing geometry
+
+The preceding visibility draw pulled the shared atlas's index buffer from a
+non-indexed vertex shader, transforming three corners per triangle. Indexed
+instancing restores hardware vertex reuse. Signed =baseVertex= carries the
+resident in its high sixteen bits; the low bits address the original atlas
+vertex. A 256-uint, 1,024-byte immutable table supplies each star's first
+triangle. The fragment's hardware =:primitive-index= supplies its offset,
+resetting for each instance. No expanded geometry or per-resident upload is
+introduced. Materials, lighting, bevels and publication ownership are intact.
+
+The shader language lowers this fragment-only uint to MSL =primitive_id=,
+HLSL =SV_PrimitiveID= and SPIR-V =PrimitiveId=. Vulkan enables the optional
+=geometryShader= feature only when supported; this needs a fresh device.
+WGSL explicitly rejects the builtin because its optional extension/device
+feature is not negotiated here. Forward rendering and MSAA do not use it.
+
+* Adjacent full-frame GPU timing
+
+The ordinary seed-7 alpine host settles 49 source chunks and 64 renderer
+residents. Camera (1009,1000,45), yaw .9, pitch -.55, FOV .85, exposure .45,
+noon, bevels enabled. Dynamic resolution is disabled. Each cohort warms 80
+frames and measures 240 frames in adjacent ABBA or BAAB order. Both paths
+have independent renderers/history and identical original resident buffers.
+All three cohorts render terrain internally at 960x540; MetalFX reconstructs
+1280x720 output, while native presents at 960x540 without temporal upscaling.
+
+| Mode / output      | Order | Control median ms | Indexed median ms | Paired ratio |
+|--------------------+-------+-------------------+-------------------+--------------|
+| MetalFX / 1280x720  | ABBA  |             8.855 |             6.770 |       .77264 |
+| MetalFX / 1280x720  | BAAB  |             7.723 |             6.181 |       .78158 |
+| Native / 960x540    | ABBA  |            11.882 |             8.447 |       .72399 |
+
+Ratios are medians of within-four-frame ratios, not ratios of the columns'
+medians. This is 22--23% less GPU time with MetalFX and 28% in the native
+cohort. Readbacks are outside timing. These serialized offscreen measurements
+are not displayed FPS or independent candidate-only clock states. CPU encode
+time increases by roughly .6--.8 ms in these runs; completion still improves.
+The raw =production-*.tsv= files retain both CPU and GPU timings.
+
+The final default run compares 17 paired states: static, twelve grazing
+motion frames, resident removal/republication, and two sizes. All six whole
+attachments match byte-for-byte: site IDs, primitive IDs, depth, HDR, motion,
+and presentation. Reverse/default and native static controls also match:
+113 whole-buffer comparisons, 305,233,920 bytes per side in total. Numerical
+depth/HDR/motion analysis also finds zero nonfinite samples. The retained
+=exact-comparison.json= records the counts, not only cropped RGB differences.
+
+Application builds and =make test TEST_JOBS=4= pass all 35 suites, including
+strict Parinfer. A preceding ten-worker run timed out in the existing
+three-second PTY-output test; that test passed in the first ten-worker run
+and the complete four-worker rerun. Its implementation and timeout were not
+changed. An indentation error in this retained harness was also corrected
+before the final run. Compiler validation includes Metal, DXC and spirv-val;
+compiler acceptance alone is not native rendering proof for those backends.
+
+* Alternatives and limits
+
+A conservative material scissor covered 19.82% of the target but reduced GPU
+time only 2.9%; skipping relief work at already-zero filter weight saved 3.6%.
+Neither was adopted. Diagnostic static visibility reuse used 28.4% of full
+frame time, while omitting material evaluation used 94.2%. These are ablations,
+not shippable caching or proof of a particular hardware limiter. A shadow
+ablation overlapped another process's hidden GPU test and is discarded.
+
+An earlier indexed prototype also improved plain faces (ratio .9287) and
+default 1080p (reversed ratio .7869), preserving the inspected outputs. Those
+are not measurements of the final scalar-offset implementation. No new
+geometric LoD, fog, texture simplification or horizon-distance gain is claimed.
+Vulkan stays opt-in; correctness below does not establish a Vulkan speedup.
+
+* Native Vulkan preserves the same identities
+
+Fresh devices on chapel's RX 6600 XT / RADV render alpine and meadow through
+the indexed and four-definition pulled controls. Eighteen paired states
+compare all six raw attachments and camera uniforms: 108/108 raw channels
+and 18/18 camera records are byte-identical. Four motion frames per world,
+resident removal/republication (64 to 63 to 64), and 640x360 to 768x432 to
+640x360 resizing are included. Internal extents are 480x270 and 576x324 with
+shader temporal reconstruction, not MetalFX. Removal renumbers subsequent
+resident IDs; the removed first resident was not itself visible.
+
+Recorded HAL commands confirm pulled versus indexed draws, up to 5,465
+instances per draw, firstInstance 23,712 and resident ID 64. Up to 23 residents
+are visible in the captured IDs. Reversing the interleaving with Khronos
+validation enabled preserves the result; all 216 raw files also match across
+the two runs. Deliberately shifting indexed resident IDs by one makes the
+comparator fail on primitive IDs, HDR, motion and presentation, establishing
+that the check detects a real addressing mistake.
+
+Native validation is not clean: 14 errors retain the known missing
+VK_KHR_calibrated_timestamps dependency for VK_EXT_present_timing (2) and
+disabled independentBlend feature (12); 16 warnings name unused vertex
+outputs. Both error classes also occur in the earlier forward-only control.
+No new PrimitiveId, geometryShader, indexed-draw or readback/resize error was
+observed. A first run without VK_LAYER_PATH was rejected as validation
+evidence and rerun with the actual layer. The rendering harness exits zero
+despite logged validation errors; only the separate byte comparator passes.
+
+Local raw proof, validation messages, provenance and the scratch native-copy
+harness are retained under =.amp/in/artifacts/landscape-next/vulkan/=. The
+main checkout and managed Chapel images were untouched, and proof processes
+exited. This is offscreen correctness evidence, not performance, swapchain
+presentation, extreme-resident-limit testing or validation-clean portability.
+
+* Reproduce on Metal
+
+Use a disposable process and an otherwise idle GPU, never load this harness
+into the user's game. The harness reloads exactly four baseline definitions
+from Git, with the old resident stride, alongside the current implementation.
+The base revision must therefore be available locally.
+
+#+begin_src sh
+BENCH_LIBRARY=1 BENCH_SCENES=live-alpine BENCH_SIZES=1280x720 \
+BENCH_MODE=default BENCH_WARMUP=80 BENCH_FRAMES=240 \
+BENCH_OUTPUT=build/indexed-summary.sexp VIS_OUTPUT=build/indexed/default/ \
+VIS_GRAZE=1 VIS_MOTION=12 VIS_EDIT=1 VIS_RESIZE=1 \
+./env --slim sbcl --script wiki/measurements/yawl-indexed-294b723/run.lisp
+uv run --no-project --with numpy python \
+  wiki/measurements/yawl-visibility-c8f1d28/analyze.py build/indexed
+#+end_src
+
+Set =VIS_REVERSE=1= for BAAB; set =BENCH_MODE=native-1x= and
+=BENCH_SIZES=960x540= for the native cohort. Use separate output directories.
+In addition to the numerical analyzer, compare every paired =.sites=,
+=.primitives=, =.depth32=, =.rgba16=, =.rg16= and =.bgra8= file byte-for-byte.
+The existing analyzer intentionally omits the identity attachments.

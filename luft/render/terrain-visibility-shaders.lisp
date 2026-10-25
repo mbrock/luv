@@ -5,8 +5,9 @@
 ;;; attachment: site zero is a perfectly ordinary resident-local site.
 
 (defconstant +terrain-visibility-triangles-per-resident+ 65536)
-(defconstant +terrain-visibility-resident-stride+ (* 3 65536))
-(defconstant +terrain-visibility-resident-limit+ 21844)
+(defconstant +terrain-visibility-resident-stride+ 65536)
+;; Indexed draws carry the resident in signed baseVertex's high sixteen bits.
+(defconstant +terrain-visibility-resident-limit+ 32767)
 
 (define-shader-function terrain-visibility-encode (identifier)
   (/ (vec4 (float (ldb (byte 8 0) identifier))
@@ -35,12 +36,11 @@
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (camera-state :uniform-block :binding 2
                   :members #.(scene-uniform-prefix 23))
-                 (terrain-indices :storage-buffer :binding 9 :element :uint)))
-  (let* ((primitive (/ vertex-index (uint 3.0)))
-         (corner (- vertex-index (* primitive (uint 3.0))))
-         (index (+ (* (ldb (byte 16 0) primitive) (uint 3.0)) corner))
-         (site (buffer-element sites instance-index))
-         (record (buffer-element terrain-vertices (buffer-element terrain-indices index)))
+                 (star-triangle-offsets :storage-buffer :binding 9 :element :uint)))
+  (let* ((site (buffer-element sites instance-index))
+         (primitive (+ (* (ldb (byte 16 16) vertex-index) (uint 65536.0))
+                       (buffer-element star-triangle-offsets (ldb (byte 8 0) (swizzle site :w)))))
+         (record (buffer-element terrain-vertices (ldb (byte 16 0) vertex-index)))
          (world (star-record-world
                  record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
                               (float (swizzle site :z)))))
@@ -58,12 +58,15 @@
 (define-live-shader terrain-visibility-fragment-specification
     (:stage :fragment
      :inputs ((site-identifier :uint :location 0 :interpolation :flat)
-              (primitive-identifier :uint :location 1 :interpolation :flat))
+              (primitive-identifier :uint :location 1 :interpolation :flat)
+              (local-primitive :uint :built-in :primitive-index))
      :outputs ((site-output :vec4 :location 0)
                (primitive-output :vec4 :location 1)))
   (let* ()
     (set-output site-output (terrain-visibility-encode site-identifier))
-    (set-output primitive-output (terrain-visibility-encode primitive-identifier))))
+    (set-output primitive-output
+                (terrain-visibility-encode
+                 (+ primitive-identifier local-primitive)))))
 
 (define-live-shader terrain-visibility-material-vertex-specification
     (:stage :vertex
