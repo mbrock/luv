@@ -2916,14 +2916,16 @@ the GPU everything recorded so far.")
            (gpu-copy-texture-to-buffer-command-destination command))
          (size (and (typep source 'metal-gpu-texture)
                     (gpu-texture-size source)))
-         (bytes-per-row (and size (* 4 (first size)))))
-    (unless (and size
+         (format (and size (gpu-texture-format source)))
+         (bytes-per-row
+           (and (member format '(:rgba8-unorm :rgba8-unorm-srgb
+                                 :bgra8-unorm :bgra8-unorm-srgb
+                                 :rgba16-float :depth32-float))
+                (* (texture-format-bytes-per-texel format) (first size)))))
+    (unless (and bytes-per-row
                  (member :copy-src (gpu-texture-usage source))
                  (typep destination 'metal-gpu-buffer)
                  (member :copy-dst (gpu-buffer-usage destination))
-                 (member (gpu-texture-format source)
-                         '(:rgba8-unorm :rgba8-unorm-srgb
-                           :bgra8-unorm :bgra8-unorm-srgb :depth32-float))
                  (<= (* bytes-per-row (second size))
                      (gpu-buffer-size destination)))
       (reject-metal-gpu-request command :unsupported-texture-readback))

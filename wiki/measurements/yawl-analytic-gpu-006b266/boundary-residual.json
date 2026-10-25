@@ -1,0 +1,10 @@
+{
+  "pixel": [
+    514,
+    418
+  ],
+  "oracle_depth_cells": 36.44885216963684,
+  "analytic_depth_cells": 39.83760410470651,
+  "distance_to_nearest_front_surface_edge_pixels": 1.3547316203104237e-06,
+  "interpretation": "residual boundary disagreement, not proof of general watertightness"
+}

@@ -1,0 +1,6220 @@
+{
+  "contract": {
+    "analytic_proxy": "4 coplanar dominant-axis bounds corners and 6 indices per patch",
+    "byte_order": "little",
+    "edge_padding": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "edge_stride_bytes": 16,
+    "edge_test": "dot(e.xyz, world_position) + e.w >= 0",
+    "edges_per_patch": 8,
+    "index_type": "uint32",
+    "max_patch_axis_span_cells": 8.0,
+    "max_polygon_edges": 8,
+    "merged_control": "fan triangulation of the identical convex domains; no clipping",
+    "patch_ids": "zero-based per fixture",
+    "vertex_fields": [
+      "x",
+      "y",
+      "z",
+      "material",
+      "nx",
+      "ny",
+      "nz",
+      "patch_id"
+    ],
+    "vertex_stride_bytes": 32
+  },
+  "environment": {
+    "numpy": "2.5.4",
+    "python": "3.13.16"
+  },
+  "fixtures": {
+    "cave": {
+      "accepted_merges": 3226,
+      "atomic_edge_visits": 28096,
+      "bounds": {
+        "max": [
+          4.0,
+          5.0,
+          5.0
+        ],
+        "maximum_patch_axis_spans": [
+          6.5,
+          4.5,
+          4.5
+        ],
+        "maximum_quad_axis_spans": [
+          6.53125,
+          4.53125,
+          4.53125
+        ],
+        "min": [
+          -3.0,
+          0.0,
+          -1.0
+        ]
+      },
+      "build_seconds": 0.33971841700258665,
+      "canonical_26_directions_only": true,
+      "counts": {
+        "analytic": {
+          "edge_bytes": 50944,
+          "geometry_bytes": 60496,
+          "indices": 2388,
+          "total_bytes": 111440,
+          "triangles": 796,
+          "vertices": 1592
+        },
+        "merged": {
+          "geometry_bytes": 66876,
+          "indices": 2823,
+          "triangles": 941,
+          "vertices": 1737
+        },
+        "reference": {
+          "geometry_bytes": 132448,
+          "indices": 10872,
+          "triangles": 3624,
+          "vertices": 2780
+        }
+      },
+      "files": {
+        "analytic-indices.u32": {
+          "bytes": 9552,
+          "file": "cave-analytic-indices.u32",
+          "sha256": "961d52071b3be34c71a61c593f70332b2187ac2fbefe394940760d754e1bb55c"
+        },
+        "analytic-vertices.f32": {
+          "bytes": 50944,
+          "file": "cave-analytic-vertices.f32",
+          "sha256": "237f29a57a267288f00d2a3161452c4a34fa4be38da4195b0d8d7a59d83369f7"
+        },
+        "edges.f32": {
+          "bytes": 50944,
+          "file": "cave-edges.f32",
+          "sha256": "bbfaca8fbd5738ed4595fc6fad1479ea48258a55e9d34e3faa6faec5bf411a39"
+        },
+        "merged-indices.u32": {
+          "bytes": 11292,
+          "file": "cave-merged-indices.u32",
+          "sha256": "4a223ba4aead9a86ed349ad744028394b3f44230a024bcb520e4ba69ee75a11d"
+        },
+        "merged-vertices.f32": {
+          "bytes": 55584,
+          "file": "cave-merged-vertices.f32",
+          "sha256": "d193329ddf62079bb48cd9ecc7940b26ff236e487a897d956f22695690df334c"
+        },
+        "reference-indices.u32": {
+          "bytes": 43488,
+          "file": "cave-reference-indices.u32",
+          "sha256": "8c5124631cfdb9755fd7d9e62a1cbc8aa1006404e7fc364ce38cd2c53962d8e7"
+        },
+        "reference-vertices.f32": {
+          "bytes": 88960,
+          "file": "cave-reference-vertices.f32",
+          "sha256": "afc029940ea3f852919e93411a6e32c5498ec5e90dde0ab69f14090575682607"
+        }
+      },
+      "geometric_checks": {
+        "area_units": "signed doubled projected tick-squared area; divide by 128 for cell-squared",
+        "areas": [
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              -48,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              28,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -18,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -10,
+              2
+            ],
+            "source": -144
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              22,
+              0
+            ],
+            "source": -144
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              22,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -8,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -8,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              28,
+              2
+            ],
+            "source": -4
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              60,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              -46,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              30,
+              1
+            ],
+            "source": -144
+          },
+          {
+            "patches": -160,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              -16,
+              0
+            ],
+            "source": -160
+          },
+          {
+            "patches": -288,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              24,
+              0
+            ],
+            "source": -288
+          },
+          {
+            "patches": -384,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              24,
+              1
+            ],
+            "source": -384
+          },
+          {
+            "patches": -288,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              24,
+              2
+            ],
+            "source": -288
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -6,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              22,
+              1
+            ],
+            "source": -80
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              62,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              62,
+              2
+            ],
+            "source": -16
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              -40,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              68,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              -10,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              30,
+              0
+            ],
+            "source": -144
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              62,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              62,
+              2
+            ],
+            "source": -144
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              0,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              32,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              68,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              100,
+              2
+            ],
+            "source": -4
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              -34,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              6,
+              1
+            ],
+            "source": 208
+          },
+          {
+            "patches": 3744,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              -32,
+              2
+            ],
+            "source": 3744
+          },
+          {
+            "patches": 2240,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              0
+            ],
+            "source": 2240
+          },
+          {
+            "patches": 832,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              1
+            ],
+            "source": 832
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -30,
+              1
+            ],
+            "source": 208
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              6,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              6,
+              2
+            ],
+            "source": 208
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              38,
+              0
+            ],
+            "source": 208
+          },
+          {
+            "patches": -160,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              -32,
+              0
+            ],
+            "source": -160
+          },
+          {
+            "patches": -3744,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              8,
+              1
+            ],
+            "source": -3744
+          },
+          {
+            "patches": 2080,
+            "plane_material": [
+              0,
+              0,
+              1,
+              0,
+              1
+            ],
+            "source": 2080
+          },
+          {
+            "patches": 160,
+            "plane_material": [
+              0,
+              0,
+              1,
+              8,
+              0
+            ],
+            "source": 160
+          },
+          {
+            "patches": 416,
+            "plane_material": [
+              0,
+              0,
+              1,
+              40,
+              0
+            ],
+            "source": 416
+          },
+          {
+            "patches": 416,
+            "plane_material": [
+              0,
+              0,
+              1,
+              40,
+              2
+            ],
+            "source": 416
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              -26,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              46,
+              1
+            ],
+            "source": -208
+          },
+          {
+            "patches": -2240,
+            "plane_material": [
+              0,
+              1,
+              0,
+              8,
+              0
+            ],
+            "source": -2240
+          },
+          {
+            "patches": -832,
+            "plane_material": [
+              0,
+              1,
+              0,
+              40,
+              1
+            ],
+            "source": -832
+          },
+          {
+            "patches": -3744,
+            "plane_material": [
+              0,
+              1,
+              0,
+              40,
+              2
+            ],
+            "source": -3744
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              1,
+              10,
+              1
+            ],
+            "source": -208
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              0,
+              1,
+              1,
+              14,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              1,
+              46,
+              0
+            ],
+            "source": -208
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              1,
+              78,
+              2
+            ],
+            "source": -208
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              -40,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              36,
+              1
+            ],
+            "source": 4
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              -10,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              -2,
+              2
+            ],
+            "source": 144
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              30,
+              0
+            ],
+            "source": 144
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              30,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              0,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              0,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              36,
+              2
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              68,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              -38,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              38,
+              1
+            ],
+            "source": 144
+          },
+          {
+            "patches": 160,
+            "plane_material": [
+              1,
+              0,
+              0,
+              -8,
+              0
+            ],
+            "source": 160
+          },
+          {
+            "patches": 288,
+            "plane_material": [
+              1,
+              0,
+              0,
+              32,
+              0
+            ],
+            "source": 288
+          },
+          {
+            "patches": 384,
+            "plane_material": [
+              1,
+              0,
+              0,
+              32,
+              1
+            ],
+            "source": 384
+          },
+          {
+            "patches": 288,
+            "plane_material": [
+              1,
+              0,
+              0,
+              32,
+              2
+            ],
+            "source": 288
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              2,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              1,
+              0,
+              1,
+              30,
+              1
+            ],
+            "source": 80
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              70,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              70,
+              2
+            ],
+            "source": 16
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              -32,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              76,
+              1
+            ],
+            "source": 4
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              1,
+              1,
+              0,
+              -2,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              1,
+              0,
+              38,
+              0
+            ],
+            "source": 144
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              1,
+              0,
+              70,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              1,
+              0,
+              70,
+              2
+            ],
+            "source": 144
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              1,
+              8,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              1,
+              40,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              76,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              108,
+              2
+            ],
+            "source": 4
+          }
+        ],
+        "convexity_plane_membership_halfspaces_and_span": true,
+        "exact_atomic_boundary_per_plane_material": true,
+        "exact_oriented_projected_area_per_plane_material": true
+      },
+      "merge_attempts": 8318,
+      "normal_directions": [
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          -1,
+          1
+        ],
+        [
+          -1,
+          0,
+          -1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          0
+        ],
+        [
+          -1,
+          1,
+          1
+        ],
+        [
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          -1,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          -1
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          1,
+          -1,
+          0
+        ],
+        [
+          1,
+          -1,
+          1
+        ],
+        [
+          1,
+          0,
+          -1
+        ],
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          -1
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          1
+        ]
+      ],
+      "patch_count": 398,
+      "plane_material_groups": 84,
+      "polygon_edge_distribution": {
+        "3": 22,
+        "4": 275,
+        "5": 35,
+        "6": 66
+      },
+      "rejected_merges": {
+        "edge_count": 673,
+        "nonconvex": 4419
+      },
+      "serialization_seconds": 0.039400790992658585,
+      "source_triangle_count": 3624,
+      "total_prepare_seconds": 1.6676044999912847,
+      "validation": {
+        "boundary_samples": 21744,
+        "containment_mismatches": 0,
+        "containment_samples": 52080,
+        "deterministic_rebuild": true,
+        "edge_policy": "CPU closed halfspaces; tied nearest source attributes accepted as a set. GPU top-left rules, clipping edge ties, and MSAA coverage NOT resolved.",
+        "float32_stream_checks": true,
+        "maximum_depth_error": 1.4210854715202004e-14,
+        "nearest_hit_count": 2618,
+        "nearest_hit_mismatches": 0,
+        "nearest_hit_rays": 2754,
+        "nearest_hit_tied_source_samples": 315,
+        "outside_or_hole_samples": 19125,
+        "source_mutation_independence": true,
+        "validation_seconds": 1.2880920829775278
+      }
+    },
+    "edited-cave": {
+      "accepted_merges": 3244,
+      "atomic_edge_visits": 28480,
+      "bounds": {
+        "max": [
+          4.0,
+          5.0,
+          5.0
+        ],
+        "maximum_patch_axis_spans": [
+          6.5,
+          4.5,
+          4.5
+        ],
+        "maximum_quad_axis_spans": [
+          6.53125,
+          4.53125,
+          4.53125
+        ],
+        "min": [
+          -3.0,
+          0.0,
+          -1.0
+        ]
+      },
+      "build_seconds": 0.34217929100850597,
+      "canonical_26_directions_only": true,
+      "counts": {
+        "analytic": {
+          "edge_bytes": 54272,
+          "geometry_bytes": 64448,
+          "indices": 2544,
+          "total_bytes": 118720,
+          "triangles": 848,
+          "vertices": 1696
+        },
+        "merged": {
+          "geometry_bytes": 70476,
+          "indices": 2955,
+          "triangles": 985,
+          "vertices": 1833
+        },
+        "reference": {
+          "geometry_bytes": 136048,
+          "indices": 11004,
+          "triangles": 3668,
+          "vertices": 2876
+        }
+      },
+      "files": {
+        "analytic-indices.u32": {
+          "bytes": 10176,
+          "file": "edited-cave-analytic-indices.u32",
+          "sha256": "070b14e5f67a5c6e6bcbbf164596e346e657e8808b644b2dbb5f222a3c381b68"
+        },
+        "analytic-vertices.f32": {
+          "bytes": 54272,
+          "file": "edited-cave-analytic-vertices.f32",
+          "sha256": "39a7c571a278a541ecb5f6a8763df89fa343bbf5d97f252d65ae6f2633f3118c"
+        },
+        "edges.f32": {
+          "bytes": 54272,
+          "file": "edited-cave-edges.f32",
+          "sha256": "c44a33976cb4f77e92d272d291701dacb62fe996b8bf36c115545a9990c0c2fe"
+        },
+        "merged-indices.u32": {
+          "bytes": 11820,
+          "file": "edited-cave-merged-indices.u32",
+          "sha256": "caaf6c65f0d9b43d805420981aaf801e80f63e6b738059c989568d6350229aeb"
+        },
+        "merged-vertices.f32": {
+          "bytes": 58656,
+          "file": "edited-cave-merged-vertices.f32",
+          "sha256": "bc9b4765384598f3b028cf1cd1445471c502e195be93d9720b72f0b9c0a1af28"
+        },
+        "reference-indices.u32": {
+          "bytes": 44016,
+          "file": "edited-cave-reference-indices.u32",
+          "sha256": "1a2d2f22fa52ec002abff155b9e9d0945de8a5b220452dda358231247fcf8dd4"
+        },
+        "reference-vertices.f32": {
+          "bytes": 92032,
+          "file": "edited-cave-reference-vertices.f32",
+          "sha256": "76aed88651a5b495cbb404985070eb437cd896f2bf272053be5408a25d9ff478"
+        }
+      },
+      "geometric_checks": {
+        "area_units": "signed doubled projected tick-squared area; divide by 128 for cell-squared",
+        "areas": [
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              -48,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              -20,
+              3
+            ],
+            "source": -4
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              28,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -18,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -10,
+              2
+            ],
+            "source": -144
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -2,
+              3
+            ],
+            "source": -16
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              22,
+              0
+            ],
+            "source": -144
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              22,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -8,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -8,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              20,
+              3
+            ],
+            "source": -4
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              28,
+              2
+            ],
+            "source": -4
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              60,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              -46,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              -18,
+              3
+            ],
+            "source": -16
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              30,
+              1
+            ],
+            "source": -144
+          },
+          {
+            "patches": -160,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              -16,
+              0
+            ],
+            "source": -160
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              0,
+              3
+            ],
+            "source": -32
+          },
+          {
+            "patches": -288,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              24,
+              0
+            ],
+            "source": -288
+          },
+          {
+            "patches": -384,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              24,
+              1
+            ],
+            "source": -384
+          },
+          {
+            "patches": -288,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              24,
+              2
+            ],
+            "source": -288
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -6,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              22,
+              1
+            ],
+            "source": -80
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              22,
+              3
+            ],
+            "source": -16
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              62,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              62,
+              2
+            ],
+            "source": -16
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              -40,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              -12,
+              3
+            ],
+            "source": -4
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              68,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              -10,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              6,
+              3
+            ],
+            "source": -16
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              30,
+              0
+            ],
+            "source": -144
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              62,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              62,
+              2
+            ],
+            "source": -144
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              0,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              28,
+              3
+            ],
+            "source": -4
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              32,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              68,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              100,
+              2
+            ],
+            "source": -4
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              -34,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              -18,
+              3
+            ],
+            "source": 16
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              6,
+              1
+            ],
+            "source": 208
+          },
+          {
+            "patches": 3744,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              -32,
+              2
+            ],
+            "source": 3744
+          },
+          {
+            "patches": 2240,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              0
+            ],
+            "source": 2240
+          },
+          {
+            "patches": 832,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              1
+            ],
+            "source": 832
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              3
+            ],
+            "source": 32
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -30,
+              1
+            ],
+            "source": 208
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              6,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              6,
+              2
+            ],
+            "source": 208
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              22,
+              3
+            ],
+            "source": 16
+          },
+          {
+            "patches": 208,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              38,
+              0
+            ],
+            "source": 208
+          },
+          {
+            "patches": -160,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              -32,
+              0
+            ],
+            "source": -160
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              -16,
+              3
+            ],
+            "source": -32
+          },
+          {
+            "patches": -3744,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              8,
+              1
+            ],
+            "source": -3744
+          },
+          {
+            "patches": 2080,
+            "plane_material": [
+              0,
+              0,
+              1,
+              0,
+              1
+            ],
+            "source": 2080
+          },
+          {
+            "patches": 160,
+            "plane_material": [
+              0,
+              0,
+              1,
+              8,
+              0
+            ],
+            "source": 160
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              0,
+              0,
+              1,
+              24,
+              3
+            ],
+            "source": 32
+          },
+          {
+            "patches": 416,
+            "plane_material": [
+              0,
+              0,
+              1,
+              40,
+              0
+            ],
+            "source": 416
+          },
+          {
+            "patches": 416,
+            "plane_material": [
+              0,
+              0,
+              1,
+              40,
+              2
+            ],
+            "source": 416
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              -26,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              -10,
+              3
+            ],
+            "source": -16
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              46,
+              1
+            ],
+            "source": -208
+          },
+          {
+            "patches": -2240,
+            "plane_material": [
+              0,
+              1,
+              0,
+              8,
+              0
+            ],
+            "source": -2240
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              0,
+              1,
+              0,
+              8,
+              3
+            ],
+            "source": -32
+          },
+          {
+            "patches": -832,
+            "plane_material": [
+              0,
+              1,
+              0,
+              40,
+              1
+            ],
+            "source": -832
+          },
+          {
+            "patches": -3744,
+            "plane_material": [
+              0,
+              1,
+              0,
+              40,
+              2
+            ],
+            "source": -3744
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              1,
+              10,
+              1
+            ],
+            "source": -208
+          },
+          {
+            "patches": -80,
+            "plane_material": [
+              0,
+              1,
+              1,
+              14,
+              0
+            ],
+            "source": -80
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              0,
+              1,
+              1,
+              30,
+              3
+            ],
+            "source": -16
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              1,
+              46,
+              0
+            ],
+            "source": -208
+          },
+          {
+            "patches": -208,
+            "plane_material": [
+              0,
+              1,
+              1,
+              78,
+              2
+            ],
+            "source": -208
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              -40,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              -12,
+              3
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              36,
+              1
+            ],
+            "source": 4
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              -10,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              -2,
+              2
+            ],
+            "source": 144
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              6,
+              3
+            ],
+            "source": 16
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              30,
+              0
+            ],
+            "source": 144
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              30,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              0,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              0,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              28,
+              3
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              36,
+              2
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              68,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              -38,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              -10,
+              3
+            ],
+            "source": 16
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              38,
+              1
+            ],
+            "source": 144
+          },
+          {
+            "patches": 160,
+            "plane_material": [
+              1,
+              0,
+              0,
+              -8,
+              0
+            ],
+            "source": 160
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              0,
+              0,
+              8,
+              3
+            ],
+            "source": 32
+          },
+          {
+            "patches": 288,
+            "plane_material": [
+              1,
+              0,
+              0,
+              32,
+              0
+            ],
+            "source": 288
+          },
+          {
+            "patches": 384,
+            "plane_material": [
+              1,
+              0,
+              0,
+              32,
+              1
+            ],
+            "source": 384
+          },
+          {
+            "patches": 288,
+            "plane_material": [
+              1,
+              0,
+              0,
+              32,
+              2
+            ],
+            "source": 288
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              2,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              1,
+              0,
+              1,
+              30,
+              1
+            ],
+            "source": 80
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              30,
+              3
+            ],
+            "source": 16
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              70,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              70,
+              2
+            ],
+            "source": 16
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              -32,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              -4,
+              3
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              76,
+              1
+            ],
+            "source": 4
+          },
+          {
+            "patches": 80,
+            "plane_material": [
+              1,
+              1,
+              0,
+              -2,
+              0
+            ],
+            "source": 80
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              1,
+              0,
+              14,
+              3
+            ],
+            "source": 16
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              1,
+              0,
+              38,
+              0
+            ],
+            "source": 144
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              1,
+              0,
+              70,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              1,
+              1,
+              0,
+              70,
+              2
+            ],
+            "source": 144
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              1,
+              8,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              36,
+              3
+            ],
+            "source": 4
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              1,
+              40,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              76,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              108,
+              2
+            ],
+            "source": 4
+          }
+        ],
+        "convexity_plane_membership_halfspaces_and_span": true,
+        "exact_atomic_boundary_per_plane_material": true,
+        "exact_oriented_projected_area_per_plane_material": true
+      },
+      "merge_attempts": 8336,
+      "normal_directions": [
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          -1,
+          1
+        ],
+        [
+          -1,
+          0,
+          -1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          0
+        ],
+        [
+          -1,
+          1,
+          1
+        ],
+        [
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          -1,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          -1
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          1,
+          -1,
+          0
+        ],
+        [
+          1,
+          -1,
+          1
+        ],
+        [
+          1,
+          0,
+          -1
+        ],
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          -1
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          1
+        ]
+      ],
+      "patch_count": 424,
+      "plane_material_groups": 110,
+      "polygon_edge_distribution": {
+        "3": 30,
+        "4": 293,
+        "5": 35,
+        "6": 66
+      },
+      "rejected_merges": {
+        "edge_count": 673,
+        "nonconvex": 4419
+      },
+      "serialization_seconds": 0.040190583007643,
+      "source_triangle_count": 3668,
+      "total_prepare_seconds": 1.6912233750044834,
+      "validation": {
+        "boundary_samples": 22008,
+        "containment_mismatches": 0,
+        "containment_samples": 60656,
+        "deterministic_rebuild": true,
+        "edge_policy": "CPU closed halfspaces; tied nearest source attributes accepted as a set. GPU top-left rules, clipping edge ties, and MSAA coverage NOT resolved.",
+        "float32_stream_checks": true,
+        "maximum_depth_error": 1.4210854715202004e-14,
+        "nearest_hit_count": 2604,
+        "nearest_hit_mismatches": 0,
+        "nearest_hit_rays": 2754,
+        "nearest_hit_tied_source_samples": 326,
+        "outside_or_hole_samples": 26003,
+        "source_mutation_independence": true,
+        "validation_seconds": 1.308427166979527
+      }
+    },
+    "junction": {
+      "accepted_merges": 158,
+      "atomic_edge_visits": 1720,
+      "bounds": {
+        "max": [
+          2.0,
+          2.0,
+          2.0
+        ],
+        "maximum_patch_axis_spans": [
+          1.5,
+          1.5,
+          1.5
+        ],
+        "maximum_quad_axis_spans": [
+          1.53125,
+          1.53125,
+          1.53125
+        ],
+        "min": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "build_seconds": 0.01021387500804849,
+      "canonical_26_directions_only": true,
+      "counts": {
+        "analytic": {
+          "edge_bytes": 6912,
+          "geometry_bytes": 8208,
+          "indices": 324,
+          "total_bytes": 15120,
+          "triangles": 108,
+          "vertices": 216
+        },
+        "merged": {
+          "geometry_bytes": 7636,
+          "indices": 285,
+          "triangles": 95,
+          "vertices": 203
+        },
+        "reference": {
+          "geometry_bytes": 11568,
+          "indices": 636,
+          "triangles": 212,
+          "vertices": 282
+        }
+      },
+      "files": {
+        "analytic-indices.u32": {
+          "bytes": 1296,
+          "file": "junction-analytic-indices.u32",
+          "sha256": "04af1452d5a52ad159174709b51a467e0ab1edf64e55d658b7ed307fda10be12"
+        },
+        "analytic-vertices.f32": {
+          "bytes": 6912,
+          "file": "junction-analytic-vertices.f32",
+          "sha256": "553f9a7571ca48c1797d83d5cda46e1681fd5b436351f250eeb0ad4bf8c7f82a"
+        },
+        "edges.f32": {
+          "bytes": 6912,
+          "file": "junction-edges.f32",
+          "sha256": "9c2c128f4c84a1403816285f17d2f36ec3b7501ada7726e031c254ee4acac592"
+        },
+        "merged-indices.u32": {
+          "bytes": 1140,
+          "file": "junction-merged-indices.u32",
+          "sha256": "ca4510a0aafbe52c218ec52b10a86b4cc23a85afa0b0588199b9d6ca31a9759c"
+        },
+        "merged-vertices.f32": {
+          "bytes": 6496,
+          "file": "junction-merged-vertices.f32",
+          "sha256": "eb16db81fd05308615acdb21d93a808a2db8140af926f08c9dcdffd5f7b01ae6"
+        },
+        "reference-indices.u32": {
+          "bytes": 2544,
+          "file": "junction-reference-indices.u32",
+          "sha256": "ed8d0a4eb97c4207fabbdbbfaffb4300006093bfdf1dd9626d1b76ac87805b61"
+        },
+        "reference-vertices.f32": {
+          "bytes": 9024,
+          "file": "junction-reference-vertices.f32",
+          "sha256": "e8b0e1890b91922626dff9e97f276cc95963b7eec5bfda6870b687c74a89aae7"
+        }
+      },
+      "geometric_checks": {
+        "area_units": "signed doubled projected tick-squared area; divide by 128 for cell-squared",
+        "areas": [
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              -4,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -2,
+              0
+            ],
+            "source": -48
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              12,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              -2,
+              0
+            ],
+            "source": -48
+          },
+          {
+            "patches": -176,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              0,
+              0
+            ],
+            "source": -176
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              6,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              14,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              12,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              6,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              14,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              16,
+              0
+            ],
+            "source": -12
+          },
+          {
+            "patches": -8,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              20,
+              0
+            ],
+            "source": -8
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              -2,
+              0
+            ],
+            "source": 48
+          },
+          {
+            "patches": 176,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              0
+            ],
+            "source": 176
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              6,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              14,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": -288,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              0,
+              0
+            ],
+            "source": -288
+          },
+          {
+            "patches": 176,
+            "plane_material": [
+              0,
+              0,
+              1,
+              8,
+              0
+            ],
+            "source": 176
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              0,
+              0,
+              1,
+              16,
+              0
+            ],
+            "source": 32
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              14,
+              0
+            ],
+            "source": -48
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              0,
+              1,
+              0,
+              8,
+              0
+            ],
+            "source": -32
+          },
+          {
+            "patches": -96,
+            "plane_material": [
+              0,
+              1,
+              0,
+              16,
+              0
+            ],
+            "source": -96
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              0,
+              1,
+              1,
+              18,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -64,
+            "plane_material": [
+              0,
+              1,
+              1,
+              22,
+              0
+            ],
+            "source": -64
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              12,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              6,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              14,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              16,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 8,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              20,
+              0
+            ],
+            "source": 8
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              14,
+              0
+            ],
+            "source": 48
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              0,
+              0,
+              8,
+              0
+            ],
+            "source": 32
+          },
+          {
+            "patches": 96,
+            "plane_material": [
+              1,
+              0,
+              0,
+              16,
+              0
+            ],
+            "source": 96
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              18,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 64,
+            "plane_material": [
+              1,
+              0,
+              1,
+              22,
+              0
+            ],
+            "source": 64
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              28,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              1,
+              0,
+              14,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              1,
+              0,
+              30,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              1,
+              24,
+              0
+            ],
+            "source": 12
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              28,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              36,
+              0
+            ],
+            "source": 4
+          }
+        ],
+        "convexity_plane_membership_halfspaces_and_span": true,
+        "exact_atomic_boundary_per_plane_material": true,
+        "exact_oriented_projected_area_per_plane_material": true
+      },
+      "merge_attempts": 240,
+      "normal_directions": [
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          -1,
+          1
+        ],
+        [
+          -1,
+          0,
+          -1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          0
+        ],
+        [
+          -1,
+          1,
+          1
+        ],
+        [
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          -1,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          -1
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          1,
+          -1,
+          0
+        ],
+        [
+          1,
+          -1,
+          1
+        ],
+        [
+          1,
+          0,
+          -1
+        ],
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          -1
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          1
+        ]
+      ],
+      "patch_count": 54,
+      "plane_material_groups": 40,
+      "polygon_edge_distribution": {
+        "3": 14,
+        "4": 39,
+        "5": 1
+      },
+      "rejected_merges": {
+        "nonconvex": 82
+      },
+      "serialization_seconds": 0.004279250017134473,
+      "source_triangle_count": 212,
+      "total_prepare_seconds": 0.09613712501595728,
+      "validation": {
+        "boundary_samples": 1272,
+        "containment_mismatches": 0,
+        "containment_samples": 14204,
+        "deterministic_rebuild": true,
+        "edge_policy": "CPU closed halfspaces; tied nearest source attributes accepted as a set. GPU top-left rules, clipping edge ties, and MSAA coverage NOT resolved.",
+        "float32_stream_checks": true,
+        "maximum_depth_error": 5.329070518200751e-15,
+        "nearest_hit_count": 2144,
+        "nearest_hit_mismatches": 0,
+        "nearest_hit_rays": 2754,
+        "nearest_hit_tied_source_samples": 380,
+        "outside_or_hole_samples": 10169,
+        "source_mutation_independence": true,
+        "validation_seconds": 0.08159445898490958
+      }
+    },
+    "ridge": {
+      "accepted_merges": 695,
+      "atomic_edge_visits": 6064,
+      "bounds": {
+        "max": [
+          6.0,
+          2.0,
+          2.0
+        ],
+        "maximum_patch_axis_spans": [
+          5.5,
+          1.5,
+          1.5
+        ],
+        "maximum_quad_axis_spans": [
+          5.53125,
+          1.53125,
+          1.53125
+        ],
+        "min": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "build_seconds": 0.07535983299021609,
+      "canonical_26_directions_only": true,
+      "counts": {
+        "analytic": {
+          "edge_bytes": 10368,
+          "geometry_bytes": 12312,
+          "indices": 486,
+          "total_bytes": 22680,
+          "triangles": 162,
+          "vertices": 324
+        },
+        "merged": {
+          "geometry_bytes": 12752,
+          "indices": 516,
+          "triangles": 172,
+          "vertices": 334
+        },
+        "reference": {
+          "geometry_bytes": 29472,
+          "indices": 2328,
+          "triangles": 776,
+          "vertices": 630
+        }
+      },
+      "files": {
+        "analytic-indices.u32": {
+          "bytes": 1944,
+          "file": "ridge-analytic-indices.u32",
+          "sha256": "02d36c276130807df6a99b927615c890c01365a1a8701598006fbd641cc931df"
+        },
+        "analytic-vertices.f32": {
+          "bytes": 10368,
+          "file": "ridge-analytic-vertices.f32",
+          "sha256": "100b5773d021dbad3c3cdd6e3d9be50029e6c519bd55af7b4217acc5ea9b9a53"
+        },
+        "edges.f32": {
+          "bytes": 10368,
+          "file": "ridge-edges.f32",
+          "sha256": "b1e68fc59aecb5488d6f51772d4e79aa5e6a608c3167840c8ae4db8b20d0db4d"
+        },
+        "merged-indices.u32": {
+          "bytes": 2064,
+          "file": "ridge-merged-indices.u32",
+          "sha256": "9dc7786d5a9fc8d03cd1869282c7fea7642300f8a382ead0bceecbf7c360232f"
+        },
+        "merged-vertices.f32": {
+          "bytes": 10688,
+          "file": "ridge-merged-vertices.f32",
+          "sha256": "c0cd39d9b66e6a527384c6f58564b9bd8ce7b36082bfe9b75b43050b9948277e"
+        },
+        "reference-indices.u32": {
+          "bytes": 9312,
+          "file": "ridge-reference-indices.u32",
+          "sha256": "281a5bafebca2da4ec987121b5775b88f0a0f0431aaa6b073d899c58cd922d36"
+        },
+        "reference-vertices.f32": {
+          "bytes": 20160,
+          "file": "ridge-reference-vertices.f32",
+          "sha256": "862c6dbbba551e47fadc4b8eea529c25e4e70d4d4891d79d1c6756e3765b16c1"
+        }
+      },
+      "geometric_checks": {
+        "area_units": "signed doubled projected tick-squared area; divide by 128 for cell-squared",
+        "areas": [
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              -4,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -2,
+              0
+            ],
+            "source": -48
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              12,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              -2,
+              0
+            ],
+            "source": -48
+          },
+          {
+            "patches": -288,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              0,
+              0
+            ],
+            "source": -288
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              14,
+              0
+            ],
+            "source": -48
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              12,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              14,
+              0
+            ],
+            "source": -48
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              28,
+              0
+            ],
+            "source": -4
+          },
+          {
+            "patches": 176,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              -2,
+              0
+            ],
+            "source": 176
+          },
+          {
+            "patches": 1056,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              0
+            ],
+            "source": 1056
+          },
+          {
+            "patches": 176,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              14,
+              0
+            ],
+            "source": 176
+          },
+          {
+            "patches": -1056,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              0,
+              0
+            ],
+            "source": -1056
+          },
+          {
+            "patches": 1056,
+            "plane_material": [
+              0,
+              0,
+              1,
+              16,
+              0
+            ],
+            "source": 1056
+          },
+          {
+            "patches": -176,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              14,
+              0
+            ],
+            "source": -176
+          },
+          {
+            "patches": -1056,
+            "plane_material": [
+              0,
+              1,
+              0,
+              16,
+              0
+            ],
+            "source": -1056
+          },
+          {
+            "patches": -176,
+            "plane_material": [
+              0,
+              1,
+              1,
+              30,
+              0
+            ],
+            "source": -176
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              44,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              46,
+              0
+            ],
+            "source": 48
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              60,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              46,
+              0
+            ],
+            "source": 48
+          },
+          {
+            "patches": 288,
+            "plane_material": [
+              1,
+              0,
+              0,
+              48,
+              0
+            ],
+            "source": 288
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              1,
+              0,
+              1,
+              62,
+              0
+            ],
+            "source": 48
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              60,
+              0
+            ],
+            "source": 4
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              1,
+              1,
+              0,
+              62,
+              0
+            ],
+            "source": 48
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              76,
+              0
+            ],
+            "source": 4
+          }
+        ],
+        "convexity_plane_membership_halfspaces_and_span": true,
+        "exact_atomic_boundary_per_plane_material": true,
+        "exact_oriented_projected_area_per_plane_material": true
+      },
+      "merge_attempts": 1743,
+      "normal_directions": [
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          -1,
+          1
+        ],
+        [
+          -1,
+          0,
+          -1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          0
+        ],
+        [
+          -1,
+          1,
+          1
+        ],
+        [
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          -1,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          -1
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          1,
+          -1,
+          0
+        ],
+        [
+          1,
+          -1,
+          1
+        ],
+        [
+          1,
+          0,
+          -1
+        ],
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          -1
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          1
+        ]
+      ],
+      "patch_count": 81,
+      "plane_material_groups": 26,
+      "polygon_edge_distribution": {
+        "3": 8,
+        "4": 55,
+        "5": 18
+      },
+      "rejected_merges": {
+        "edge_count": 61,
+        "nonconvex": 987
+      },
+      "serialization_seconds": 0.008717040996998549,
+      "source_triangle_count": 776,
+      "total_prepare_seconds": 0.3517738329828717,
+      "validation": {
+        "boundary_samples": 4656,
+        "containment_mismatches": 0,
+        "containment_samples": 13700,
+        "deterministic_rebuild": true,
+        "edge_policy": "CPU closed halfspaces; tied nearest source attributes accepted as a set. GPU top-left rules, clipping edge ties, and MSAA coverage NOT resolved.",
+        "float32_stream_checks": true,
+        "maximum_depth_error": 8.881784197001252e-15,
+        "nearest_hit_count": 2528,
+        "nearest_hit_mismatches": 0,
+        "nearest_hit_rays": 2754,
+        "nearest_hit_tied_source_samples": 373,
+        "outside_or_hole_samples": 5945,
+        "source_mutation_independence": true,
+        "validation_seconds": 0.2676237500272691
+      }
+    },
+    "sheets": {
+      "accepted_merges": 96,
+      "atomic_edge_visits": 1680,
+      "bounds": {
+        "max": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "maximum_patch_axis_spans": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "maximum_quad_axis_spans": [
+          1.0625,
+          0.53125,
+          0.53125
+        ],
+        "min": [
+          -1.0,
+          -1.0,
+          -1.0
+        ]
+      },
+      "build_seconds": 0.007747958006802946,
+      "canonical_26_directions_only": true,
+      "counts": {
+        "analytic": {
+          "edge_bytes": 13312,
+          "geometry_bytes": 15808,
+          "indices": 624,
+          "total_bytes": 29120,
+          "triangles": 208,
+          "vertices": 416
+        },
+        "merged": {
+          "geometry_bytes": 14928,
+          "indices": 564,
+          "triangles": 188,
+          "vertices": 396
+        },
+        "reference": {
+          "geometry_bytes": 15456,
+          "indices": 600,
+          "triangles": 200,
+          "vertices": 408
+        }
+      },
+      "files": {
+        "analytic-indices.u32": {
+          "bytes": 2496,
+          "file": "sheets-analytic-indices.u32",
+          "sha256": "b7c5fe9fe3b5285fe55aa7a30f9b088393f4d1b5f9064f971b67ba95c655e39a"
+        },
+        "analytic-vertices.f32": {
+          "bytes": 13312,
+          "file": "sheets-analytic-vertices.f32",
+          "sha256": "179d89d0d893404893d8b6fa865f57f2e8dc08cea48fc704b49c340d65e7e328"
+        },
+        "edges.f32": {
+          "bytes": 13312,
+          "file": "sheets-edges.f32",
+          "sha256": "5b9338d7fca87a4855f1ed6f827dce3bece1e54cb91adbc40de06b32e5ac99e4"
+        },
+        "merged-indices.u32": {
+          "bytes": 2256,
+          "file": "sheets-merged-indices.u32",
+          "sha256": "28ad45a99374ff820e59ec2962fa3b0bc810cf15e12fc9c04ec52da6c2b68576"
+        },
+        "merged-vertices.f32": {
+          "bytes": 12672,
+          "file": "sheets-merged-vertices.f32",
+          "sha256": "2acc2714640cc1ce01c410e845160ee7442535e455702f7c1ab0767b92403000"
+        },
+        "reference-indices.u32": {
+          "bytes": 2400,
+          "file": "sheets-reference-indices.u32",
+          "sha256": "4df98260887185bd6bf57dddaa6da6e314ed5f9b8e07f99d8ea80ed0bb9fd008"
+        },
+        "reference-vertices.f32": {
+          "bytes": 13056,
+          "file": "sheets-reference-vertices.f32",
+          "sha256": "efea6814340d4643a67795c0b56982e5a6839190906de9778d27ea804f1b4e24"
+        }
+      },
+      "geometric_checks": {
+        "area_units": "signed doubled projected tick-squared area; divide by 128 for cell-squared",
+        "areas": [
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              4,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -36,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              8,
+              1
+            ],
+            "source": -36
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              12,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              2,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              6,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              14,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              20,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              2,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              6,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              14,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -64,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              0,
+              1
+            ],
+            "source": -64
+          },
+          {
+            "patches": -64,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              8,
+              1
+            ],
+            "source": -64
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              2,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              6,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              14,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              20,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              2,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              6,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              14,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              4,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -36,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              8,
+              1
+            ],
+            "source": -36
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              12,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              2,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              6,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              14,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 64,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              1
+            ],
+            "source": 64
+          },
+          {
+            "patches": 64,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              8,
+              1
+            ],
+            "source": 64
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              2,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              6,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              14,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": -64,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              0,
+              1
+            ],
+            "source": -64
+          },
+          {
+            "patches": -64,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              8,
+              1
+            ],
+            "source": -64
+          },
+          {
+            "patches": 64,
+            "plane_material": [
+              0,
+              0,
+              1,
+              0,
+              1
+            ],
+            "source": 64
+          },
+          {
+            "patches": 64,
+            "plane_material": [
+              0,
+              0,
+              1,
+              8,
+              1
+            ],
+            "source": 64
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              2,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              6,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              14,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -64,
+            "plane_material": [
+              0,
+              1,
+              0,
+              0,
+              1
+            ],
+            "source": -64
+          },
+          {
+            "patches": -64,
+            "plane_material": [
+              0,
+              1,
+              0,
+              8,
+              1
+            ],
+            "source": -64
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              0,
+              1,
+              1,
+              2,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": -32,
+            "plane_material": [
+              0,
+              1,
+              1,
+              6,
+              1
+            ],
+            "source": -32
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              0,
+              1,
+              1,
+              14,
+              1
+            ],
+            "source": -16
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              20,
+              1
+            ],
+            "source": 4
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              2,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              6,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              14,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              4,
+              1
+            ],
+            "source": 4
+          },
+          {
+            "patches": 36,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              8,
+              1
+            ],
+            "source": 36
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              12,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              2,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              6,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              14,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 64,
+            "plane_material": [
+              1,
+              0,
+              0,
+              0,
+              1
+            ],
+            "source": 64
+          },
+          {
+            "patches": 64,
+            "plane_material": [
+              1,
+              0,
+              0,
+              8,
+              1
+            ],
+            "source": 64
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              2,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              0,
+              1,
+              6,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              0,
+              1,
+              14,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              4,
+              1
+            ],
+            "source": 4
+          },
+          {
+            "patches": 36,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              8,
+              1
+            ],
+            "source": 36
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              12,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              1,
+              0,
+              2,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 32,
+            "plane_material": [
+              1,
+              1,
+              0,
+              6,
+              1
+            ],
+            "source": 32
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              1,
+              0,
+              14,
+              1
+            ],
+            "source": 16
+          },
+          {
+            "patches": 4,
+            "plane_material": [
+              1,
+              1,
+              1,
+              20,
+              1
+            ],
+            "source": 4
+          }
+        ],
+        "convexity_plane_membership_halfspaces_and_span": true,
+        "exact_atomic_boundary_per_plane_material": true,
+        "exact_oriented_projected_area_per_plane_material": true
+      },
+      "merge_attempts": 96,
+      "normal_directions": [
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          -1,
+          1
+        ],
+        [
+          -1,
+          0,
+          -1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          0
+        ],
+        [
+          -1,
+          1,
+          1
+        ],
+        [
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          -1,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          -1
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          1,
+          -1,
+          0
+        ],
+        [
+          1,
+          -1,
+          1
+        ],
+        [
+          1,
+          0,
+          -1
+        ],
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          -1
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          1
+        ]
+      ],
+      "patch_count": 104,
+      "plane_material_groups": 64,
+      "polygon_edge_distribution": {
+        "3": 20,
+        "4": 84
+      },
+      "rejected_merges": {},
+      "serialization_seconds": 0.005915666988585144,
+      "source_triangle_count": 200,
+      "total_prepare_seconds": 0.1025376660109032,
+      "validation": {
+        "boundary_samples": 1200,
+        "containment_mismatches": 0,
+        "containment_samples": 21752,
+        "deterministic_rebuild": true,
+        "edge_policy": "CPU closed halfspaces; tied nearest source attributes accepted as a set. GPU top-left rules, clipping edge ties, and MSAA coverage NOT resolved.",
+        "float32_stream_checks": true,
+        "maximum_depth_error": 4.440892098500626e-15,
+        "nearest_hit_count": 2212,
+        "nearest_hit_mismatches": 0,
+        "nearest_hit_rays": 2754,
+        "nearest_hit_tied_source_samples": 372,
+        "outside_or_hole_samples": 17493,
+        "source_mutation_independence": true,
+        "validation_seconds": 0.08882183401146904
+      }
+    },
+    "terrain": {
+      "accepted_merges": 1682,
+      "atomic_edge_visits": 15292,
+      "bounds": {
+        "max": [
+          6.0,
+          6.0,
+          4.0
+        ],
+        "maximum_patch_axis_spans": [
+          5.75,
+          5.75,
+          3.0
+        ],
+        "maximum_quad_axis_spans": [
+          5.78125,
+          5.78125,
+          3.03125
+        ],
+        "min": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "build_seconds": 0.1448678330052644,
+      "canonical_26_directions_only": true,
+      "counts": {
+        "analytic": {
+          "edge_bytes": 46336,
+          "geometry_bytes": 55024,
+          "indices": 2172,
+          "total_bytes": 101360,
+          "triangles": 724,
+          "vertices": 1448
+        },
+        "merged": {
+          "geometry_bytes": 55552,
+          "indices": 2208,
+          "triangles": 736,
+          "vertices": 1460
+        },
+        "reference": {
+          "geometry_bytes": 84912,
+          "indices": 6132,
+          "triangles": 2044,
+          "vertices": 1887
+        }
+      },
+      "files": {
+        "analytic-indices.u32": {
+          "bytes": 8688,
+          "file": "terrain-analytic-indices.u32",
+          "sha256": "ef0a2c128f148a26fc1339df2a97b8b7a414af97b58e09e766c9f0b173e88200"
+        },
+        "analytic-vertices.f32": {
+          "bytes": 46336,
+          "file": "terrain-analytic-vertices.f32",
+          "sha256": "1fc87d47c81690f6fe9549a9ebeffb57469408cbc49e46c58d888446acd80069"
+        },
+        "edges.f32": {
+          "bytes": 46336,
+          "file": "terrain-edges.f32",
+          "sha256": "a0b40ce2d73d380ed1cf402c65225834f3f250defd9c24d2ab63f4171866ec47"
+        },
+        "merged-indices.u32": {
+          "bytes": 8832,
+          "file": "terrain-merged-indices.u32",
+          "sha256": "1540939d617a5965f0774350aba3eede6039a3f5ab4cbcc9d45fc92d9edc6996"
+        },
+        "merged-vertices.f32": {
+          "bytes": 46720,
+          "file": "terrain-merged-vertices.f32",
+          "sha256": "358185ebe86ce7cbd4202a2c67462e57987aae10df90ebbe3c5122f4ebba5c28"
+        },
+        "reference-indices.u32": {
+          "bytes": 24528,
+          "file": "terrain-reference-indices.u32",
+          "sha256": "5b517fe430863f1e8d91bc6ec682ca4256f4c59a54bfaaaf4e51ab0f993e11cd"
+        },
+        "reference-vertices.f32": {
+          "bytes": 60384,
+          "file": "terrain-reference-vertices.f32",
+          "sha256": "ada3f0154ee258090e111e5ced9ac7613e9814c6c3f34bc69e6a33487e01d72c"
+        }
+      },
+      "geometric_checks": {
+        "area_units": "signed doubled projected tick-squared area; divide by 128 for cell-squared",
+        "areas": [
+          {
+            "patches": -1,
+            "plane_material": [
+              -1,
+              -1,
+              -1,
+              -2,
+              1
+            ],
+            "source": -1
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -79,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -24,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -73,
+              1
+            ],
+            "source": -24
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -55,
+              1
+            ],
+            "source": -48
+          },
+          {
+            "patches": -60,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -49,
+              1
+            ],
+            "source": -60
+          },
+          {
+            "patches": -36,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -31,
+              1
+            ],
+            "source": -36
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -25,
+              1
+            ],
+            "source": -48
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              -1,
+              0,
+              -1,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -1,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -54,
+              1
+            ],
+            "source": -1
+          },
+          {
+            "patches": -9,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -48,
+              1
+            ],
+            "source": -9
+          },
+          {
+            "patches": -2,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -42,
+              1
+            ],
+            "source": -2
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -38,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -27,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -32,
+              1
+            ],
+            "source": -27
+          },
+          {
+            "patches": -5,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -26,
+              1
+            ],
+            "source": -5
+          },
+          {
+            "patches": -3,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -22,
+              1
+            ],
+            "source": -3
+          },
+          {
+            "patches": -21,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -16,
+              1
+            ],
+            "source": -21
+          },
+          {
+            "patches": -4,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              -10,
+              1
+            ],
+            "source": -4
+          },
+          {
+            "patches": -1,
+            "plane_material": [
+              -1,
+              -1,
+              1,
+              6,
+              1
+            ],
+            "source": -1
+          },
+          {
+            "patches": -44,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              -1,
+              0
+            ],
+            "source": -44
+          },
+          {
+            "patches": -48,
+            "plane_material": [
+              -1,
+              0,
+              -1,
+              -1,
+              1
+            ],
+            "source": -48
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              -40,
+              1
+            ],
+            "source": -144
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              -32,
+              1
+            ],
+            "source": -144
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              -24,
+              1
+            ],
+            "source": -144
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              -16,
+              1
+            ],
+            "source": -144
+          },
+          {
+            "patches": -144,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              -8,
+              1
+            ],
+            "source": -144
+          },
+          {
+            "patches": -352,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              0,
+              0
+            ],
+            "source": -352
+          },
+          {
+            "patches": -556,
+            "plane_material": [
+              -1,
+              0,
+              0,
+              0,
+              1
+            ],
+            "source": -556
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -23,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -17,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -36,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -15,
+              1
+            ],
+            "source": -36
+          },
+          {
+            "patches": -36,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -9,
+              1
+            ],
+            "source": -36
+          },
+          {
+            "patches": -36,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -7,
+              1
+            ],
+            "source": -36
+          },
+          {
+            "patches": -36,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              -1,
+              1
+            ],
+            "source": -36
+          },
+          {
+            "patches": -24,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              1,
+              1
+            ],
+            "source": -24
+          },
+          {
+            "patches": -68,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              7,
+              1
+            ],
+            "source": -68
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              9,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -56,
+            "plane_material": [
+              -1,
+              0,
+              1,
+              15,
+              1
+            ],
+            "source": -56
+          },
+          {
+            "patches": -1,
+            "plane_material": [
+              -1,
+              1,
+              -1,
+              46,
+              0
+            ],
+            "source": -1
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              15,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              39,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -16,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              47,
+              0
+            ],
+            "source": -16
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              -1,
+              1,
+              0,
+              47,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -3,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              40,
+              1
+            ],
+            "source": -3
+          },
+          {
+            "patches": -1,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              46,
+              1
+            ],
+            "source": -1
+          },
+          {
+            "patches": -3,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              56,
+              1
+            ],
+            "source": -3
+          },
+          {
+            "patches": -2,
+            "plane_material": [
+              -1,
+              1,
+              1,
+              62,
+              1
+            ],
+            "source": -2
+          },
+          {
+            "patches": 44,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              -1,
+              0
+            ],
+            "source": 44
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              0,
+              -1,
+              -1,
+              -1,
+              1
+            ],
+            "source": 48
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              -40,
+              1
+            ],
+            "source": 144
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              -32,
+              1
+            ],
+            "source": 144
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              -24,
+              1
+            ],
+            "source": 144
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              -16,
+              1
+            ],
+            "source": 144
+          },
+          {
+            "patches": 144,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              -8,
+              1
+            ],
+            "source": 144
+          },
+          {
+            "patches": 352,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              0
+            ],
+            "source": 352
+          },
+          {
+            "patches": 556,
+            "plane_material": [
+              0,
+              -1,
+              0,
+              0,
+              1
+            ],
+            "source": 556
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -23,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -17,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 36,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -15,
+              1
+            ],
+            "source": 36
+          },
+          {
+            "patches": 36,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -9,
+              1
+            ],
+            "source": 36
+          },
+          {
+            "patches": 36,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -7,
+              1
+            ],
+            "source": 36
+          },
+          {
+            "patches": 36,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              -1,
+              1
+            ],
+            "source": 36
+          },
+          {
+            "patches": 24,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              1,
+              1
+            ],
+            "source": 24
+          },
+          {
+            "patches": 68,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              7,
+              1
+            ],
+            "source": 68
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              9,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 56,
+            "plane_material": [
+              0,
+              -1,
+              1,
+              15,
+              1
+            ],
+            "source": 56
+          },
+          {
+            "patches": -3464,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              0,
+              0
+            ],
+            "source": -3464
+          },
+          {
+            "patches": -768,
+            "plane_material": [
+              0,
+              0,
+              -1,
+              0,
+              1
+            ],
+            "source": -768
+          },
+          {
+            "patches": 592,
+            "plane_material": [
+              0,
+              0,
+              1,
+              8,
+              1
+            ],
+            "source": 592
+          },
+          {
+            "patches": 1576,
+            "plane_material": [
+              0,
+              0,
+              1,
+              16,
+              1
+            ],
+            "source": 1576
+          },
+          {
+            "patches": 1248,
+            "plane_material": [
+              0,
+              0,
+              1,
+              24,
+              1
+            ],
+            "source": 1248
+          },
+          {
+            "patches": 268,
+            "plane_material": [
+              0,
+              0,
+              1,
+              32,
+              1
+            ],
+            "source": 268
+          },
+          {
+            "patches": -92,
+            "plane_material": [
+              0,
+              1,
+              -1,
+              47,
+              0
+            ],
+            "source": -92
+          },
+          {
+            "patches": -1568,
+            "plane_material": [
+              0,
+              1,
+              0,
+              48,
+              0
+            ],
+            "source": -1568
+          },
+          {
+            "patches": -560,
+            "plane_material": [
+              0,
+              1,
+              0,
+              48,
+              1
+            ],
+            "source": -560
+          },
+          {
+            "patches": -12,
+            "plane_material": [
+              0,
+              1,
+              1,
+              63,
+              1
+            ],
+            "source": -12
+          },
+          {
+            "patches": -44,
+            "plane_material": [
+              0,
+              1,
+              1,
+              71,
+              1
+            ],
+            "source": -44
+          },
+          {
+            "patches": -28,
+            "plane_material": [
+              0,
+              1,
+              1,
+              79,
+              1
+            ],
+            "source": -28
+          },
+          {
+            "patches": 1,
+            "plane_material": [
+              1,
+              -1,
+              -1,
+              46,
+              0
+            ],
+            "source": 1
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              15,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              39,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 16,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              47,
+              0
+            ],
+            "source": 16
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              -1,
+              0,
+              47,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 3,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              40,
+              1
+            ],
+            "source": 3
+          },
+          {
+            "patches": 1,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              46,
+              1
+            ],
+            "source": 1
+          },
+          {
+            "patches": 3,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              56,
+              1
+            ],
+            "source": 3
+          },
+          {
+            "patches": 2,
+            "plane_material": [
+              1,
+              -1,
+              1,
+              62,
+              1
+            ],
+            "source": 2
+          },
+          {
+            "patches": 92,
+            "plane_material": [
+              1,
+              0,
+              -1,
+              47,
+              0
+            ],
+            "source": 92
+          },
+          {
+            "patches": 1568,
+            "plane_material": [
+              1,
+              0,
+              0,
+              48,
+              0
+            ],
+            "source": 1568
+          },
+          {
+            "patches": 560,
+            "plane_material": [
+              1,
+              0,
+              0,
+              48,
+              1
+            ],
+            "source": 560
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              0,
+              1,
+              63,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 44,
+            "plane_material": [
+              1,
+              0,
+              1,
+              71,
+              1
+            ],
+            "source": 44
+          },
+          {
+            "patches": 28,
+            "plane_material": [
+              1,
+              0,
+              1,
+              79,
+              1
+            ],
+            "source": 28
+          },
+          {
+            "patches": 1,
+            "plane_material": [
+              1,
+              1,
+              -1,
+              94,
+              0
+            ],
+            "source": 1
+          },
+          {
+            "patches": 48,
+            "plane_material": [
+              1,
+              1,
+              0,
+              95,
+              0
+            ],
+            "source": 48
+          },
+          {
+            "patches": 12,
+            "plane_material": [
+              1,
+              1,
+              0,
+              95,
+              1
+            ],
+            "source": 12
+          },
+          {
+            "patches": 1,
+            "plane_material": [
+              1,
+              1,
+              1,
+              126,
+              1
+            ],
+            "source": 1
+          }
+        ],
+        "convexity_plane_membership_halfspaces_and_span": true,
+        "exact_atomic_boundary_per_plane_material": true,
+        "exact_oriented_projected_area_per_plane_material": true
+      },
+      "merge_attempts": 4221,
+      "normal_directions": [
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          -1,
+          0
+        ],
+        [
+          -1,
+          -1,
+          1
+        ],
+        [
+          -1,
+          0,
+          -1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          0
+        ],
+        [
+          -1,
+          1,
+          1
+        ],
+        [
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          -1,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          -1
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          1,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          1,
+          -1,
+          0
+        ],
+        [
+          1,
+          -1,
+          1
+        ],
+        [
+          1,
+          0,
+          -1
+        ],
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0,
+          1
+        ],
+        [
+          1,
+          1,
+          -1
+        ],
+        [
+          1,
+          1,
+          0
+        ],
+        [
+          1,
+          1,
+          1
+        ]
+      ],
+      "patch_count": 362,
+      "plane_material_groups": 96,
+      "polygon_edge_distribution": {
+        "3": 54,
+        "4": 261,
+        "5": 28,
+        "6": 19
+      },
+      "rejected_merges": {
+        "edge_count": 251,
+        "nonconvex": 2288
+      },
+      "serialization_seconds": 0.026542624982539564,
+      "source_triangle_count": 2044,
+      "total_prepare_seconds": 0.8497999589890242,
+      "validation": {
+        "boundary_samples": 12264,
+        "containment_mismatches": 0,
+        "containment_samples": 44836,
+        "deterministic_rebuild": true,
+        "edge_policy": "CPU closed halfspaces; tied nearest source attributes accepted as a set. GPU top-left rules, clipping edge ties, and MSAA coverage NOT resolved.",
+        "float32_stream_checks": true,
+        "maximum_depth_error": 1.2434497875801753e-14,
+        "nearest_hit_count": 2472,
+        "nearest_hit_mismatches": 0,
+        "nearest_hit_rays": 2754,
+        "nearest_hit_tied_source_samples": 327,
+        "outside_or_hole_samples": 26200,
+        "source_mutation_independence": true,
+        "validation_seconds": 0.6780959999887273
+      }
+    }
+  },
+  "format_version": 1,
+  "input": {
+    "path": "/Users/mbrock/luv/.amp/in/artifacts/far-field-comparison/meshes.json",
+    "sha256": "28521b031519b2bebef6007de3cf02bc0144b452eb62a750798e0522368f49ea"
+  },
+  "limitations": [
+    "Greedy partition, not a minimum-polygon solution.",
+    "Assumes non-overlapping oriented atlas triangles; not an arbitrary soup repairer.",
+    "Eight-cell bound is on convex domains; coplanar bounding quads can extend beyond domains.",
+    "CPU tests do not establish GPU raster edge ownership, MSAA, performance, or image equivalence."
+  ],
+  "scope": "CPU input preparation and validation; no GPU results",
+  "sources": {
+    "wiki/measurements/yawl-analytic-gpu-006b266/prepare.py": "eb013076e09f796434f5ddc509a6c9a1ab780ee3b2a7e79564d6a43df5fb6edb",
+    "wiki/measurements/yawl-far-field-c0c7a8c/common.py": "fa4291bccb8f5d3d9acea7e0e279df8db6b193afdd0d51dde279144a9e5dd789"
+  },
+  "total_prepare_seconds": 4.768410499993479
+}

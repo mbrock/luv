@@ -22,7 +22,10 @@
            (request-gpu-device (make-instance 'metal-gpu-provider)))
          (queue (device-queue device))
          (band-texture nil)
-         (curve-texture nil))
+         (curve-texture nil)
+         (readback nil)
+         (encoder nil)
+         (commands nil))
     (unwind-protect
          (progn
            (setf band-texture
@@ -35,10 +38,10 @@
                  (create
                   device
                  (make-texture-descriptor
-                   :size '(2 1) :dimensions :2d :format :rgba16-float
-                   :usage '(:texture-binding :copy-dst))))
+                   :size '(2 2) :dimensions :2d :format :rgba16-float
+                   :usage '(:texture-binding :copy-dst :copy-src))))
            (true (equal '(2 1 1) (gpu-texture-size band-texture)))
-           (true (equal '(2 1 1) (gpu-texture-size curve-texture)))
+           (true (equal '(2 2 1) (gpu-texture-size curve-texture)))
            (write-texture
             queue (make-texture-copy :texture band-texture)
             (make-array '(1 2) :element-type '(unsigned-byte 32)
@@ -48,11 +51,28 @@
            (write-texture
             queue (make-texture-copy :texture curve-texture)
             (make-array
-             '(1 2) :element-type '(unsigned-byte 64)
+             '(2 2) :element-type '(unsigned-byte 64)
                     :initial-contents
-                    '((#x3c00380034003000 #x40003c0038003400)))
-            (make-texture-data-layout :bytes-per-row 16 :rows-per-image 1)
-           '(2 1))
+                    '((#x3c00380034003000 #x40003c0038003400)
+                      (#x440040003c003800 #x4800440040003c00)))
+            (make-texture-data-layout :bytes-per-row 16 :rows-per-image 2)
+           '(2 2))
+           ;; Exact half-float bits in two different rows catch a four-byte
+           ;; readback stride as well as channel conversion or truncation.
+           (setf readback (create device (make-buffer-descriptor
+                                         :size 32 :usage '(:copy-dst)))
+                 encoder (create device (make-command-encoder-descriptor)))
+           (encode encoder (make-gpu-copy-texture-to-buffer-command
+                            :source curve-texture :destination readback))
+           (setf commands (finish encoder))
+           (submit queue commands)
+           (let ((bytes (read-buffer readback)))
+             (true (= 32 (length bytes)))
+             (true (equal '(#x3c00380034003000 #x40003c0038003400
+                            #x440040003c003800 #x4800440040003c00)
+                          (loop for offset below 32 by 8 collect
+                            (loop for byte below 8 sum
+                              (ash (aref bytes (+ offset byte)) (* byte 8)))))))
            (true (typep band-texture 'luv::metal-gpu-texture))
            (true (typep curve-texture 'luv::metal-gpu-texture))
            (let ((unexpected nil))
@@ -69,6 +89,9 @@
                     (true (member :storage-binding
                                   (gpu-texture-usage unexpected))))
                (when unexpected (destroy unexpected)))))
+      (when commands (destroy commands))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
       (when curve-texture (destroy curve-texture))
       (when band-texture (destroy band-texture))
       (destroy device))))

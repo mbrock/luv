@@ -1,0 +1,171 @@
+#+title: Bounded analytic patches work, but indexed patches are cheaper
+
+M5 / native Metal 4, macOS 27.2, 2026-10-25. Source base =006b266=;
+=source-hashes.json= pins the local experiment and its dependencies.
+Thread: https://ampcode.com/threads/T-01a1725e-3226-740f-a884-eaa984f5905a
+Campaign: #ETRAG8. This follows the exact CPU-domain result in #HHAVYA.
+
+* Result: retain the partition, not this rasterization method
+
+An exact convex partition is useful: it preserves physical bevel planes,
+apertures, separate sheets and material boundaries while retiring triangle
+subdivisions. However, rendering each polygon through a clipped planar quad
+costs more than simply triangulating the same polygon in every tested case.
+Do not infer an analytic-shader gain from its win over the unmerged source.
+
+Medians in milliseconds, 1024x1024 single-sample target, 32x32 instances of
+each fixture. Each pair is the forward/reversed-order run, not a confidence
+interval. The equivalent source and candidate objects occupy the same view.
+
+| Fixture | Indexed source | Merged indexed | Analytic clipped |
+|---------+----------------+----------------+------------------|
+| Ridge   | 2.226 / 2.225  | 1.006 / 1.006  | 1.353 / 1.352    |
+| Cave    | 5.659 / 5.693  | 2.482 / 2.542  | 3.546 / 3.506    |
+| Terrain | 4.081 / 4.086  | 2.784 / 2.781  | 3.638 / 4.090    |
+| Sheets  | 1.854 / 1.856  | 1.652 / 1.654  | 2.362 / 2.363    |
+
+At one large instance, analytic is about 1.5–2.3 times the merged control.
+At 8x8 and 32x32 instances, it is about 1.3–1.9 times the merged control.
+The difficult checkerboard sheets hardly merge and analytic increases their
+primitive count. Most resulting polygons have three or four edges: the
+quad saves little further geometry after merging, but still pays for eight
+domain tests, ray reconstruction, proxy overdraw and discard. These are
+algorithmic costs, not a measured attribution to a particular GPU unit.
+
+This rejects this bounded convex-proxy implementation as the next production
+renderer. It does not reject pixel-owned/tile-local evaluation, larger
+nonconvex domains, or analytic footprint integration. None was implemented.
+The cheaper merged representation needs an actual shared-atlas/production
+comparison before any full-world speedup can be claimed.
+
+* What actually ran
+
+=prepare.py= partitions the existing exported owned atlas triangles using
+integer plane/material groups and cancelled atomic edges. A merge must have
+one convex boundary, at most eight edges and at most eight cells of extent
+on each axis. Holes and nonconvex regions remain multiple polygons; no
+convex hull fills missing space. All 26 normal directions occur. The greedy
+partition is not minimal and is not the earlier unbounded winding-domain
+representation: the cave now needs 398 convex patches, not 84 domains.
+
+The original bevel width stays fixed: quarter-cell diagnostic fixtures and
+the canonical eighth-cell terrain control. No surface shrinks with distance.
+
+| Fixture | Source triangles | Patches | Merged triangles | Proxy triangles | Source / merged / analytic bytes |
+|---------+------------------+---------+------------------+-----------------+---------------------------------|
+| Ridge   |              776 |      81 |              172 |             162 | 29472 / 12752 / 22680           |
+| Junction|              212 |      54 |               95 |             108 | 11568 / 7636 / 15120            |
+| Sheets  |              200 |     104 |              188 |             208 | 15456 / 14928 / 29120           |
+| Cave    |             3624 |     398 |              941 |             796 | 132448 / 66876 / 111440         |
+| Terrain |             2044 |     362 |              736 |             724 | 84912 / 55552 / 101360          |
+| Edited cave |         3668 |     424 |              985 |             848 | 136048 / 70476 / 118720         |
+
+Bytes are actual GPU vertex/index/edge payloads, excluding common cameras,
+targets, device overhead and retained production/shadow data. Analytic uses
+four 32-byte vertices, six u32 indices and eight vec4 edge records per patch.
+The merged control fan-triangulates precisely the same patches. Reference
+vertices deduplicate by position, normal and material, with the same vertex
+layout and shared lighting shader. A fourth image control draws unclipped
+proxies; its deliberately wrong geometry checks that clipping matters.
+
+The shaders use the Lisp DSL and existing HAL, not hand-written MSL. The
+fragment shader reconstructs a sample ray, intersects its patch's plane and
+tests eight halfspaces. Coplanar quads let hardware interpolate depth; there
+is no fragment-depth write, retained-triangle fallback or averaged depth.
+The proxy rectangle has a 1/64-cell tangent guard. This is a tested broad-phase
+margin, not a universal conservative-raster guarantee. It changes no domain.
+
+The only production change enables RGBA16F texture readback in Metal, using
+the format's actual byte stride. This was needed for linear colour and
+normal diagnostics; the previous HAL rejected that readback. The existing
+native texture test now round-trips asymmetric half-float bits across two
+rows. Rendering defaults and shaders outside this experiment are unchanged.
+
+* Accuracy is strong, not pixel-identical or finished antialiasing
+
+45 GPU views cover six fixtures, oblique/grazing/rear views, six perspective
+views, distant sizes, a repeated grid, a 4x-linear denser sample grid, and 13 moving
+camera/light views. =accuracy.json= records per-view colour, coverage,
+normal, material and depth comparisons without excluding bad pixels.
+
+Across the 38 orthographic single-instance comparisons, analytic matches
+the independent double-precision triangle oracle's coverage at all 792,584
+union-covered samples. One material/layer disagreement remains: sample
+(514,418) in the supersampled cave, 1.35e-6 screen pixels from a front-surface
+edge. Its depth error is 3.39 cells, not zero; =boundary-residual.json= retains
+it. Three normal samples disagree. Do not claim universal watertightness.
+
+Against GPU indexed source, all 45 views have 138 coverage disagreements
+among 1,023,095 union-covered samples, 13 material disagreements, and ten
+common-hit depth differences above 0.01 cells (maximum 4.11). GPU indexed
+source itself differs from the CPU oracle at 135 coverage samples. Hardware
+raster edge rules, floating-point camera/projection and near-boundary
+classification are not identical to the mathematical point-sample oracle.
+Ordinary common-hit depth errors are much smaller; raw per-view maxima and
+percentiles remain available. Perspective has only the GPU indexed control,
+not an independent perspective CPU oracle.
+
+An earlier version tested interpolated proxy coordinates directly. One cave
+view leaked the rear material through a 55-pixel line. Reconstructing sample
+rays and padding the broad-phase quad removed that line. Tight proxies with
+ray reconstruction alone still lost a comparable line in the opposite view.
+This is why a visually plausible still was not accepted as the correctness
+gate, and why the extra ray/guard work remains in the timed candidate.
+
+CPU preprocessing checks exact oriented area and atomic boundary conservation
+per plane/material, convexity, extent, 207,228 containment samples and 16,524
+nearest-hit rays, with no mismatches and maximum depth error 1.42e-14 cells.
+Actual serialized buffer hashes match =input-manifest.json=. Its CPU checks
+do not establish GPU top-left rules, MSAA, shadows or temporal reconstruction.
+
+Selected final stills and =cave-motion.mp4= were inspected. Fixed bevel
+lighting and cave apertures persist, including small projected instances.
+These remain point-sampled images; no claim of eliminating edge crawl,
+integrating subpixel facets or producing an impressionistic far field.
+
+* Timing scope and reproduction
+
+One offscreen render pass, no window, shadows, atmosphere, temporal resolve,
+production procedural materials, selection or streaming. The source geometry
+is real, but the deduplicated fixture control is NOT the production packed
+shared-atlas renderer. Repeated isolated objects are not a hilltop panorama.
+No full-world speedup, Xcode counter attribution or displayed FPS is claimed.
+
+All programs and bindings are created before timing. Four variants run in
+adjacent ABCDDCBA symmetric order, including a separately constructed
+identical indexed program. Each case has 64 warmup and 256 measured frames;
+the variant order is reversed in a second run. Four fixtures x three grids x
+two orders give 6,144 measured submissions. One RGBA16F and one depth32 target
+are used for timing; the diagnostic normal/material target and readbacks are
+outside timing. GPU timestamps come from MTL4 queue feedback. CPU encode and
+serialized completion are separate columns; there is no frame overlap.
+
+Identical-control medians usually agree within 1%; the dense cave's reversed
+run differs by about 4%. Terrain analytic also varies between orders. No
+fixed-frequency claim: keep both orders and raw =timings.tsv=. No concurrent
+GPU tests or profiler ran during measurement. Builds, preparation and uploads
+are excluded, so these are candidate execution costs, not end-to-end costs.
+Python preparation takes roughly 8–342 ms per fixture in this run.
+
+#+begin_src sh
+mkdir -p build/analytic-gpu
+./env sbcl --script wiki/measurements/yawl-far-field-c0c7a8c/export.lisp \
+  > build/analytic-gpu/meshes.json
+PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with numpy \
+  python wiki/measurements/yawl-analytic-gpu-006b266/prepare.py \
+  --meshes build/analytic-gpu/meshes.json --output build/analytic-gpu/input
+PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with numpy --with pillow \
+  python wiki/measurements/yawl-analytic-gpu-006b266/compare.py accuracy \
+  --meshes build/analytic-gpu/meshes.json --input build/analytic-gpu/input \
+  --output build/analytic-gpu/accuracy
+PYTHONDONTWRITEBYTECODE=1 uv run --no-project --with numpy --with pillow \
+  python wiki/measurements/yawl-analytic-gpu-006b266/compare.py bench \
+  --meshes build/analytic-gpu/meshes.json --input build/analytic-gpu/input \
+  --output build/analytic-gpu/bench
+#+end_src
+
+Run sequentially on Metal. Raw readbacks and generated inputs are reproducible
+and remain locally under =.amp/in/artifacts/analytic-gpu/=; this bundle keeps
+metrics, configurations, timings and selected inspected media. Final shader
+variants compiled natively and their SPIR-V passed =spirv-val=. =make test=
+passed all 35 suites and strict Parinfer, including native readback coverage.

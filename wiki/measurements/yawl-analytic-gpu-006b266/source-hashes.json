@@ -1,0 +1,11 @@
+{
+  "hal/metal/gpu.lisp": "5fcfd1c0ba0446540b6662be5e97655b1a210b190e241b6f9b2b8190553bc45a",
+  "hal/metal/tests.lisp": "19124ce58ae00d77cb84dafc60d87f5bcbb7a764ef902196142c0a44c419653f",
+  "wiki/measurements/yawl-analytic-gpu-006b266/compare.py": "65d96558cc4cdbe0bd25554a03a6d37047e4cbed1912941a1fc7571a6dbf8abe",
+  "wiki/measurements/yawl-analytic-gpu-006b266/prepare.py": "eb013076e09f796434f5ddc509a6c9a1ab780ee3b2a7e79564d6a43df5fb6edb",
+  "wiki/measurements/yawl-analytic-gpu-006b266/run.lisp": "a36da83f1ec105f47f935a329de7afca75691896b41d771da1598620883e557b",
+  "wiki/measurements/yawl-analytic-gpu-006b266/shaders.lisp": "c492d994380ba3d1c15a0826e145f42b48168990284ecafbd7c0d96e5aa05243",
+  "wiki/measurements/yawl-far-field-c0c7a8c/common.py": "fa4291bccb8f5d3d9acea7e0e279df8db6b193afdd0d51dde279144a9e5dd789",
+  "wiki/measurements/yawl-far-field-c0c7a8c/export.lisp": "b65496a6829eaf51a78a1e824420c881deeeffb7411f9c5e5a96aaf958fd8cb2",
+  "wiki/measurements/yawl-far-field-c0c7a8c/run.py": "280ad0897c8066a6513a55cadaad43bc6bb29f81dc370ef67e62a60f254fd168"
+}

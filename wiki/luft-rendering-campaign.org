@@ -471,19 +471,62 @@ and a slowed orbit. =make test= passes all 35 suites. No shader/HAL/default
 renderer change, GPU timing, new Xcode profile, or large-horizon speedup is
 claimed. The current indexed atlas remains the production control.
 
-** NEXT Price visibility separately from filtered appearance
+** DONE Bounded analytic GPU patches lose to their indexed control
+:PROPERTIES:
+:ID: ETRAG8
+:END:
+
+The [[file:measurements/yawl-analytic-gpu-006b266/README.org][bounded Metal trial]] preserves bevel width and partitions exact owned
+atlas surfaces into convex polygons with at most eight edges and eight-cell
+axis spans. It compares original indexed fixture geometry, fan-triangulated
+patches, and planar bounding quads clipped by eight fragment halfspaces.
+The cave's 3,624 triangles become 398 patches: 941 merged triangles or 796
+proxy triangles. This is a bounded partition, not the earlier 84-domain
+winding evaluator.
+
+Across 38 orthographic GPU/CPU comparisons, analytic coverage matches all
+792,584 union-covered samples. One material/layer sample remains wrong,
+1.35e-6 screen pixels from a projected source edge; it has a 3.39-cell depth
+error. Perspective and moving camera/light views were also exercised against
+GPU indexed controls. These results are strong but not universal exactness.
+Reconstructing sample rays and padding proxy bounds fixed a leaked 55-pixel
+line from the first interpolated-coordinate implementation. No bevel
+shrinking, averaged depth, triangle fallback or temporal concealment is used.
+
+Adjacent, symmetric-order M5 timing with reversed order and an identical
+indexed control favors triangulated patches in every tested workload. For
+1,024 cave instances at 1024x1024, medians are 5.66/5.69 ms indexed source,
+2.48/2.54 ms merged indexed, and 3.55/3.51 ms analytic. In the dense terrain
+case they are 4.08/4.09, 2.78/2.78 and 3.64/4.09 ms. Most bounded polygons
+already have three or four edges; clipping saves little geometry beyond
+merging and adds ray/domain work. This is an execution-cost observation,
+not a GPU-unit attribution or whole-game speedup.
+
+The control is deduplicated indexed fixture geometry, not the production
+packed shared atlas. Shading is deliberately simple; timing excludes
+preparation, uploads, shadows, temporal reconstruction and streaming. Thus
+the analytic path does not earn a hilltop integration. Keep the exact
+partition as a candidate, and reject this proxy rasterizer as its default
+consumer. A tiny HAL change enables RGBA16F readback for the diagnostics;
+production rendering remains unchanged. All 35 suites pass.
+
+** NEXT Price exact patches against the production shared atlas
 :PROPERTIES:
 :ID: EKK3FS
 :END:
 
-Test one bounded M5 scene replacement with exact domains as the correctness
-control and masked planes as the spatial approximation. Compare both against
-the original indexed path, not just against one another or expanded CPU
-triangles. Use a pixel-owned/tile-local evaluator or bounded proxies only
-after pricing the actual domain/mask work; fewer primitives alone are not
-the goal. Preserve the merged shadow path and charge selection, uploads and
-memory. If the small case wins, take it to the fixed-resident hilltop and
-the established adjacent-frame runtime/Xcode-counter workflow.
+Use #ETRAG8's triangulated exact patches as the next small candidate, with
+production material/light interpolation and the packed shared atlas as the
+control. The simplified fixture benchmark has not priced those contracts.
+Preserve merged shadows, resident coverage and fixed bevels; charge build,
+edit/publication, selection, uploads and memory before escalating to the
+fixed-resident hilltop and adjacent-frame runtime/Xcode-counter workflow.
+
+If revisiting analytic evaluation, choose a genuinely different workload:
+larger nonconvex domains, pixel-owned/tile-local evaluation, or visibility-aware
+footprint integration. Eight fragment halfspaces around mostly quadrilateral
+patches did not win. Masked planes remain a separate approximation, with
+their known rare wrong-sheet errors rather than an assumed exact fallback.
 
 Keep filtered directional response and world-stable artistic marks independent
 of that visibility choice. A known normal distribution is not a visibility

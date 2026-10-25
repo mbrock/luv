@@ -1,0 +1,13 @@
+{
+  "revision": "006b26689a6caa6523926eeae013ca3192201727",
+  "sources": {
+    "shaders.lisp": "c492d994380ba3d1c15a0826e145f42b48168990284ecafbd7c0d96e5aa05243",
+    "run.lisp": "a36da83f1ec105f47f935a329de7afca75691896b41d771da1598620883e557b",
+    "compare.py": "65d96558cc4cdbe0bd25554a03a6d37047e4cbed1912941a1fc7571a6dbf8abe",
+    "prepare.py": "eb013076e09f796434f5ddc509a6c9a1ab780ee3b2a7e79564d6a43df5fb6edb"
+  },
+  "meshes_sha256": "28521b031519b2bebef6007de3cf02bc0144b452eb62a750798e0522368f49ea",
+  "system": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2\nBuildVersion:\t\t26B118\n",
+  "geometry": "fixed physical bevels; no distance simplification",
+  "timing_scope": "one offscreen pass, serial completion, no readback/build/upload; not production FPS"
+}
