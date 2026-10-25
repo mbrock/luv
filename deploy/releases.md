@@ -109,8 +109,11 @@ python3 scripts/macos-sign-release.py build/macos-signed/Luvcraft.app
 Omit the notary profile for signing alone; omit both identity and profile for
 ad-hoc development packaging. Every bundled dylib and the SBCL runtime is
 signed before the outer bundle. Developer ID mode enables hardened runtime
-and secure timestamps. SBCL receives only `allow-jit`; library validation
-stays enabled because bundled libraries share the signing identity.
+and secure timestamps. SBCL receives `allow-jit` for generated code and
+`allow-unsigned-executable-memory` for executable pages loaded from its separate
+Lisp core. A signed launch with `allow-jit` alone was killed by macOS with
+`CODESIGNING / Invalid Page` at the core mapping. Library validation stays
+enabled because bundled libraries share the signing identity.
 
 Notarization submits a temporary ZIP, retains Apple's result and log in the
 output directory, and requires `Accepted`. It staples and validates the ticket
@@ -152,6 +155,10 @@ all companions, save/reload, clean shutdown, and Finder launch passed.
 The hosted ZIP was also tested on yawl (M5, macOS 27.2), including native
 rendering and save/relaunch. That cross-machine check caught saved native
 Objective-C addresses; the runtime now rebinds them when restoring an image.
+The Developer ID-signed, hardened-runtime ZIP also passed the full moved-app
+check on yawl: Metal smoke frame, terrain/companions, screenshots, clean shutdown,
+and saved-world relaunch. This required the core-mapping executable-memory
+entitlement described above; notarization remains a separate qualification.
 The unavailable source-update panel explains why a packaged copy cannot
 update a development checkout. Hosted `macos-26` CI builds and checks
 signatures, dependency relocation, help, and error exits with `--cli-only`;

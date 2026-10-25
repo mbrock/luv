@@ -33,9 +33,14 @@ def package(app, identity="-", profile=None, keychain=None):
         signing += ["--options", "runtime", "--timestamp"]
     with tempfile.TemporaryDirectory(prefix="luv-sign-") as temporary:
         entitlements = Path(temporary) / "sbcl-entitlements.plist"
-        # Apple Silicon SBCL uses MAP_JIT. All bundled dylibs are signed with
-        # the same identity, so library validation can remain enabled.
-        entitlements.write_bytes(plistlib.dumps({"com.apple.security.cs.allow-jit": True}))
+        # SBCL uses MAP_JIT for generated code, but also maps executable pages
+        # from the separate Lisp core outside MAP_JIT. Hardened runtime kills
+        # that mapping as an Invalid Page without unsigned-executable-memory.
+        # All bundled dylibs share this identity; keep library validation on.
+        entitlements.write_bytes(plistlib.dumps({
+            "com.apple.security.cs.allow-jit": True,
+            "com.apple.security.cs.allow-unsigned-executable-memory": True,
+        }))
         for library in sorted((app / "Contents/Frameworks").iterdir()):
             if library.is_file() and not library.is_symlink():
                 run(*signing, library)
