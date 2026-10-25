@@ -9,6 +9,10 @@
   };
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.nix-bundle = {
+    url = "github:nix-community/nix-bundle";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
   inputs.ghostty.url = "github:ghostty-org/ghostty";
   inputs.mcclim = {
     url = "git+https://git.swa.sh/mcclim?ref=master";
@@ -42,7 +46,7 @@
   # a shared cache ahead of the work that will use it.
   inputs.nix-wpe-webkit.url = "github:eval-exec/nix-wpe-webkit";
 
-  outputs = { self, nixpkgs, ghostty, mcclim, cl-sdl3, parachute, swash, tracy, nix-wpe-webkit, ... }:
+  outputs = { self, nixpkgs, nix-bundle, ghostty, mcclim, cl-sdl3, parachute, swash, tracy, nix-wpe-webkit, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -881,6 +885,35 @@
           swash = env.swashPackage;
           default = luvcraft;
         } // nixpkgs.lib.optionalAttrs env.pkgs.stdenv.hostPlatform.isLinux {
+          # Carry the exact runtime closure in a single self-extracting file.
+          # nix-user-chroot mounts its private store in a user namespace;
+          # players need neither Nix nor the paths from the build machine.
+          luvcraft-portable =
+            (import nix-bundle { nixpkgs = env.pkgs; }).nix-bootstrap {
+              target = luvcraft;
+              run = "/bin/luvcraft";
+              # The upstream mount list omits these conventional host paths.
+              # Vulkan ICDs may need libraries under /lib, and shell programs
+              # need their /bin interpreters, even on usr-merged distributions.
+              nixUserChrootFlags = "$hostMappings";
+              initScript = ''
+                set -eu
+                hostMappings=
+                for directory in bin sbin lib lib64; do
+                  if [ -d "/$directory" ]; then
+                    hostMappings="$hostMappings -m /$directory:$directory"
+                  fi
+                done
+                # Nix glibc deliberately ignores the host's loader cache.
+                # Make it available AFTER each library's own RPATH lookup so
+                # host GPU drivers can find their dependencies without putting
+                # old host libraries ahead of the bundled FFmpeg/SDL libraries.
+                # The leading dot is essential: modify the extracted copy only.
+                if [ -r /etc/ld.so.cache ]; then
+                  ln -sf /etc/ld.so.cache .${env.pkgs.glibc}/etc/ld.so.cache
+                fi
+              '';
+            };
           # Wayland is a Linux protocol; Luvland has no Darwin build.
           inherit luvland;
           # Reachable only by name, `nix build .#wpewebkit` on Linux: not in

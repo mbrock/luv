@@ -34,6 +34,9 @@ Linux only. The first run downloads or builds everything it needs, and later
 runs start straight from the Nix store. Luvcraft saves its world under
 `~/.local/share/luvcraft` (or `$XDG_DATA_HOME/luvcraft`).
 
+For the experimental single-file Linux download and the macOS/Windows
+packaging status, see [downloadable builds](deploy/releases.md).
+
 ## Luvcraft
 
 ![Morning in a generated Luvcraft meadow, the sun breaking through the trees](screenshots/luvcraft-meadow.webp)

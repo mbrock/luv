@@ -1,0 +1,56 @@
+#!/bin/sh
+# Test the download, not the Nix launcher. Run on a Linux host with Xvfb,
+# xauth, Mesa's lavapipe ICD, and unprivileged user namespaces available.
+set -eu
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: scripts/test-portable-release BUNDLE OUTPUT.png" >&2
+  exit 2
+fi
+source_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+temporary=$(mktemp -d /tmp/luv-release.XXXXXX)
+trap 'rm -rf "$temporary"' EXIT
+mkdir -p "$temporary/moved download" "$temporary/home/.cache"
+cp -L -- "$1" "$temporary/moved download/Luvcraft.run"
+chmod +x "$temporary/moved download/Luvcraft.run"
+
+# Hide both the real store and checkout, and remove the development shell's
+# environment. These mounts exist only in this short-lived private namespace.
+# A fresh HOME also prevents a successful earlier extraction masking a bug.
+# shellcheck disable=SC2016 # Expand in the isolated child shell, not here.
+if ! unshare --user --map-root-user --mount --fork \
+  env -i PATH=/usr/bin:/bin HOME="$temporary/home" \
+  /bin/sh -eu -c '
+    mount --make-rprivate /
+    mount -t tmpfs tmpfs /nix
+    mount -t tmpfs tmpfs "$1"
+    test -z "$(ls -A /nix)"
+    test -z "$(ls -A "$1")"
+    cd "$2"
+    bundle="$2/moved download/Luvcraft.run"
+    timeout 300 "$bundle" --help > help.log 2>&1
+    grep -q "Usage: luvcraft" help.log
+    if timeout 60 "$bundle" --not-a-luvcraft-option > invalid.log 2>&1; then
+      echo "Invalid arguments unexpectedly succeeded" >&2
+      exit 1
+    else
+      code=$?
+      test "$code" -eq 1
+      grep -q "Invalid luvcraft arguments" invalid.log
+    fi
+    export SDL_VIDEODRIVER=x11
+    export VK_DRIVER_FILES="/usr/share/vulkan/icd.d/lvp_icd.$(uname -m).json"
+    test -r "$VK_DRIVER_FILES"
+    timeout 300 xvfb-run -a "$bundle" --vulkan-smoke-test "$2/frame.png"
+    test -s frame.png
+    test "$(od -An -tx1 -N8 frame.png | tr -d " \n")" = 89504e470d0a1a0a
+    echo "Portable release: relocated launch, argument errors, and Vulkan frame passed without host Nix or checkout."
+  ' sh "$source_root" "$temporary" > "$temporary/check.log" 2>&1; then
+  cat "$temporary/check.log"
+  for log in "$temporary/help.log" "$temporary/invalid.log"; do
+    if [ -f "$log" ]; then cat "$log"; fi
+  done
+  exit 1
+fi
+cat "$temporary/check.log"
+cp "$temporary/frame.png" "$2"

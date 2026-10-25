@@ -1,0 +1,76 @@
+name: downloadable game
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: game-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  linux:
+    # Windows needs a game-only build without Unix tools; macOS needs a .app.
+    # Do not publish bare SBCL images that still depend on the CI Nix store.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://luv.swa.sh/nix-cache?priority=30
+            extra-trusted-public-keys = luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG18Bw=
+      - uses: Mic92/hestia@v3
+      - name: Build self-contained Linux download
+        run: |
+          mkdir -p build/downloads
+          nix build .#luvcraft-portable --out-link build/portable
+          cp -L build/portable build/downloads/luvcraft-linux-x86_64.run
+          chmod +x build/downloads/luvcraft-linux-x86_64.run
+          cp deploy/releases.md build/downloads/README.md
+          sha256sum build/downloads/luvcraft-linux-x86_64.run \
+            | sed 's|build/downloads/||' > build/downloads/SHA256SUMS
+      - name: Install disposable smoke-test host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth mesa-vulkan-drivers
+      - name: Run moved download without the build store or checkout
+        run: sh scripts/test-portable-release build/downloads/luvcraft-linux-x86_64.run build/release-smoke.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luvcraft-linux-x86_64
+          path: build/downloads/
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-smoke-frame
+          path: build/release-smoke.png
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'release'
+    needs: linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: luvcraft-linux-x86_64
+          path: downloads
+      - name: Attach verified downloads to the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" downloads/*
