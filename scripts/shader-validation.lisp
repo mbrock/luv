@@ -96,10 +96,10 @@
            (assemble (luv.shader:shader-specification-for :fantus-sdf :vertex)))
      (cons "fantus-sdf.frag.spv"
            (assemble (luv.shader:shader-specification-for :fantus-sdf :fragment)))
-     (cons "fantus-mesh.vert.spv"
-           (assemble (luv.shader:shader-specification-for :fantus-mesh :vertex)))
-     (cons "fantus-mesh.frag.spv"
-           (assemble (luv.shader:shader-specification-for :fantus-mesh :fragment)))
+     (cons "companion-mesh.vert.spv"
+           (assemble (luv.shader:shader-specification-for :companion-mesh :vertex)))
+     (cons "companion-mesh.frag.spv"
+           (assemble (luv.shader:shader-specification-for :companion-mesh :fragment)))
      (cons "player-body-sdf.vert.spv"
            (assemble
             (luv.shader:shader-specification-for :player-body-sdf :vertex)))

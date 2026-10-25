@@ -102,6 +102,9 @@ GPU medium spells as a fully transparent fill.")
    (movement-action :initform nil :accessor embodied-agent-movement-action)
    (movement-accumulator :initform 0d0
                          :accessor embodied-agent-movement-accumulator)
+   (walk-phase :initform 0d0 :accessor companion-walk-phase)
+   (walk-blend :initform 0.0 :accessor companion-walk-blend)
+   (previous-position :initform nil :accessor companion-previous-position)
    (pending-approval :initform nil :accessor embodied-agent-pending-approval
                      :documentation
                      "The one possible-world tool effect awaiting the player.")

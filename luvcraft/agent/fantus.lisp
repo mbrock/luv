@@ -9,10 +9,7 @@
 (defparameter *fantus-face-height* 1.25)
 (defparameter *fantus-audience-distance* 2.6)
 
-(defclass fantus (embodied-agent)
-  ((walk-phase :initform 0d0 :accessor fantus-walk-phase)
-   (walk-blend :initform 0.0 :accessor fantus-walk-blend)
-   (previous-position :initform nil :accessor fantus-previous-position))
+(defclass fantus (embodied-agent) ()
   (:documentation
    "A rigged mesh Fantus carrying the shared embodied WORLD-AGENT surface."))
 
@@ -92,7 +89,7 @@
 
 (defun ensure-fantus-body (fantus)
   (or (gnome-body fantus)
-      (make-fantus-mesh-body fantus)))
+      (make-companion-mesh-body fantus)))
 
 (defmethod ensure-embodied-agent-body ((fantus fantus))
   (ensure-fantus-body fantus))

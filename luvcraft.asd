@@ -115,7 +115,7 @@
   :components ((:file "luvcraft/agent/shaders")
                (:file "luvcraft/agent/cat-shaders")
                (:file "luvcraft/agent/fantus-shaders")
-               (:file "luvcraft/agent/fantus-mesh-shaders")))
+               (:file "luvcraft/agent/companion-mesh-shaders")))
 
 (defsystem "luvcraft/web"
   :description "Luvcraft's showcase and WebGPU body pages in the workshop wiki."
@@ -315,7 +315,7 @@
                              (:file "construction")
                              (:file "cat")
                              (:file "fantus")
-                             (:file "fantus-mesh")
+                             (:file "companion-mesh")
                              (:file "residence")
                              (:file "surroundings"))))
   :in-order-to ((test-op (test-op "luvcraft/agent/test"))))
@@ -332,7 +332,7 @@
                              (:file "opening")
                              (:file "conversation")
                              (:file "residence")
-                             (:file "fantus")
+                             (:file "companion-mesh")
                              (:file "introspection"))))
   :perform (test-op (operation component)
              (declare (ignore operation component))

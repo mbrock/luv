@@ -3,8 +3,8 @@
 ;;; Blender supplies the surface and the IK-solved skeleton, not a distance
 ;;; field. The mesh shares the companions' camera and sky uniforms.
 (define-shader-method shader-specification-for
-    fantus-mesh-vertex-specification
-    ((role (eql :fantus-mesh)) (stage (eql :vertex)))
+    companion-mesh-vertex-specification
+    ((role (eql :companion-mesh)) (stage (eql :vertex)))
     (:stage :vertex
      :inputs ((position :vec3 :location 0)
               (normal :vec3 :location 1)
@@ -16,7 +16,8 @@
                (world-point :vec3 :location 0)
                (world-normal :vec3 :location 1)
                (surface-color :vec3 :location 2)
-               (fabric-point :vec3 :location 3))
+               (fabric-point :vec3 :location 3)
+               (edge-light :float :location 4))
      :resources ((frame-state :uniform-block :set 0 :binding 2
                              :members #.*frame-uniform-members*)))
   (let* ((facing (swizzle heading :xyz))
@@ -42,16 +43,18 @@
                    (+ (vec3 0.0 (swizzle normal :y) 0.0)
                       (* facing (swizzle normal :z)))))
     (set-output surface-color albedo)
-    (set-output fabric-point bind-point)))
+    (set-output fabric-point bind-point)
+    (set-output edge-light (swizzle heading :w))))
 
 (define-shader-method shader-specification-for
-    fantus-mesh-fragment-specification
-    ((role (eql :fantus-mesh)) (stage (eql :fragment)))
+    companion-mesh-fragment-specification
+    ((role (eql :companion-mesh)) (stage (eql :fragment)))
     (:stage :fragment
      :inputs ((world-point :vec3 :location 0)
               (world-normal :vec3 :location 1)
               (surface-color :vec3 :location 2)
-              (fabric-point :vec3 :location 3))
+              (fabric-point :vec3 :location 3)
+              (edge-light :float :location 4))
      :outputs ((color-output :vec4 :location 0))
      :resources ((frame-state :uniform-block :set 0 :binding 2
                              :members #.*frame-uniform-members*)))
@@ -67,4 +70,4 @@
          (rim (expt (- 1.0 (max 0.0 (dot normal view))) 3.0))
          (light (+ (* ambient sky) (* sun-color (+ 0.12 (* wrapped 1.15))))))
     (set-output color-output
-                (vec4 (+ (* cloth light) (* surface-color (* fantus-rim-light rim))) 1.0))))
+                (vec4 (+ (* cloth light) (* surface-color (* edge-light rim))) 1.0))))
