@@ -119,18 +119,6 @@ exec "$here/luvcraft-runtime" --core "$here/../Resources/luvcraft.core" \\
         "NSHighResolutionCapable": True,
     }
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
-    # Ad-hoc signing only. SBCL generates machine code at runtime.
-    entitlements = app.parent / "sbcl-entitlements.plist"
-    entitlements.write_bytes(plistlib.dumps({"com.apple.security.cs.allow-jit": True}))
-    try:
-        for path in frameworks.iterdir():
-            run("/usr/bin/codesign", "--force", "--sign", "-", path)
-        run("/usr/bin/codesign", "--force", "--sign", "-",
-            "--entitlements", entitlements, runtime)
-        run("/usr/bin/codesign", "--force", "--sign", "-", app)
-    finally:
-        entitlements.unlink()
-    run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
     for path in [runtime, *frameworks.iterdir()]:
         if "arm64" not in run("/usr/bin/lipo", "-archs", path).split():
             raise RuntimeError(f"Not an arm64 binary: {path}")
@@ -138,7 +126,7 @@ exec "$here/luvcraft-runtime" --core "$here/../Resources/luvcraft.core" \\
             if not system_library(dependency) and not dependency.startswith(
                     ("@loader_path/", "@executable_path/", "@rpath/")):
                 raise RuntimeError(f"Unrelocated dependency: {path}: {dependency}")
-    print(f"Relocated and ad-hoc signed {len(copied)} libraries in {app}")
+    print(f"Relocated {len(copied)} libraries in {app}")
 
 
 if __name__ == "__main__":

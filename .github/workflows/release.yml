@@ -6,6 +6,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      notarize:
+        description: Sign and notarize the Mac download (requires Apple secrets)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,7 +22,9 @@ concurrency:
 jobs:
   macos:
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 120
+    env:
+      MACOS_NOTARIZE: ${{ github.event_name == 'release' || inputs.notarize == true }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +34,18 @@ jobs:
           extra_nix_config: |
             extra-substituters = https://luv.swa.sh/nix-cache?priority=30
             extra-trusted-public-keys = luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG18Bw=
+      - name: Prepare Developer ID keychain
+        if: env.MACOS_NOTARIZE == 'true'
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: bash scripts/macos-ci-keychain
+      - name: Test release packaging
+        run: python3 scripts/macos-sign-release-tests.py
       - name: Build relocated Apple Silicon app
         run: scripts/build-macos-release
       - name: Test moved app without builder paths
@@ -34,7 +53,22 @@ jobs:
         # and save/reload checks use the same script on a graphical Mac.
         env:
           TMPDIR: ${{ runner.temp }}
-        run: python3 scripts/test-macos-release.py build/macos-release/luvcraft-macos-arm64.zip build/macos-smoke --cli-only
+        run: |
+          args=()
+          if [ "$MACOS_NOTARIZE" = true ]; then args+=(--require-notarized); fi
+          python3 scripts/test-macos-release.py build/macos-release/luvcraft-macos-arm64.zip build/macos-smoke --cli-only "${args[@]}"
+      - name: Remove temporary signing credentials
+        if: always() && env.MACOS_NOTARIZE == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/luv-release.keychain-db" || true
+          rm -f "$RUNNER_TEMP/luv-certificate.p12"
+      - name: Retain notarization diagnostics
+        if: always() && env.MACOS_NOTARIZE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-notarization
+          path: build/macos-release/notarization-*.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: luvcraft-macos-arm64

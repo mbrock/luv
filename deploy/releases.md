@@ -65,10 +65,11 @@ Objective-C helpers, fonts, and companion meshes; Nix and a checkout are
 not needed to play. Intel Macs are not supported. The native Metal 4
 backend requires macOS 26 or later and compatible Apple Silicon hardware.
 
-The app is **ad-hoc signed, not notarized**. Gatekeeper rejects it as an
-untrusted download; it is an experimental build, not a frictionless public
-release. Developer ID signing and notarization need Apple credentials and
-are not configured. Do not disable system-wide Gatekeeper protection.
+Published releases require **Developer ID signing and notarization**. The
+workflow fails before publication if Apple credentials are missing or Apple
+rejects the submission. Push builds and default manual builds remain ad-hoc
+signed development artifacts, which Gatekeeper does not trust. Select
+**notarize** on manual dispatch to qualify a signed release before tagging.
 
 Build on an Apple Silicon Mac with Nix and Xcode:
 
@@ -78,6 +79,66 @@ scripts/build-macos-release
 TMPDIR=/tmp python3 scripts/test-macos-release.py \
   build/macos-release/luvcraft-macos-arm64.zip build/macos-smoke
 ```
+
+### Signing setup
+
+In Xcode → Settings → Apple Accounts → your team → Manage Certificates,
+create a **Developer ID Application** certificate. An Apple Development or
+Apple Distribution certificate cannot sign this download. Keep a secure backup
+of its private key; importing the public certificate alone is insufficient.
+
+For local notarization, create an app-specific password at
+[Apple Account](https://account.apple.com/), then store it in Keychain using
+`notarytool`'s interactive prompt (do not put the password in shell history):
+
+```sh
+xcrun notarytool store-credentials luv-release \
+  --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID
+export LUV_MACOS_SIGN_IDENTITY='Developer ID Application: Your Name (YOUR_TEAM_ID)'
+export LUV_MACOS_NOTARY_PROFILE=luv-release
+scripts/build-macos-release build/macos-signed
+```
+
+To sign an already relocated app without rebuilding Lisp:
+
+```sh
+python3 scripts/macos-sign-release.py build/macos-signed/Luvcraft.app
+```
+
+`LUV_MACOS_KEYCHAIN` optionally selects a non-default signing/notary keychain.
+Omit the notary profile for signing alone; omit both identity and profile for
+ad-hoc development packaging. Every bundled dylib and the SBCL runtime is
+signed before the outer bundle. Developer ID mode enables hardened runtime
+and secure timestamps. SBCL receives only `allow-jit`; library validation
+stays enabled because bundled libraries share the signing identity.
+
+Notarization submits a temporary ZIP, retains Apple's result and log in the
+output directory, and requires `Accepted`. It staples and validates the ticket
+on the app, checks Gatekeeper, then creates the final ZIP and checksum.
+Run the moved-app smoke test against that final ZIP, including the full Metal
+and save/reload test on a graphical Mac before qualifying a release.
+
+For GitHub Actions, export this identity **with its private key** as a
+password-protected `.p12` using Keychain Access. Configure these repository
+Actions secrets through GitHub's secure UI or `gh secret set` via stdin:
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12_BASE64` | Base64 encoding of the `.p12` file |
+| `MACOS_CERTIFICATE_PASSWORD` | Its export password |
+| `MACOS_SIGN_IDENTITY` | Full Developer ID Application identity name |
+| `APPLE_ID` | Apple account used for notarization |
+| `APPLE_TEAM_ID` | Team that owns the certificate |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific notarization password |
+
+The job imports the identity into a temporary keychain, validates/stores the
+notarization credentials there, and removes the keychain in an `always()`
+cleanup step. Certificates and passwords must never be committed. Notary
+results/logs are retained separately as CI diagnostics. Local packaging tests:
+`python3 scripts/macos-sign-release-tests.py`.
+
+Apple references: [notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+and [command-line workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
 
 [Deploy](https://shinmera.com/docs/deploy/) closes/reopens CFFI libraries.
 The packager recursively relocates dylibs and signs the SBCL runtime

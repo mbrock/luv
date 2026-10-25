@@ -31,7 +31,7 @@ def evaluate(port, code):
                 return response
 
 
-def test(archive, evidence, cli_only=False):
+def test(archive, evidence, cli_only=False, require_notarized=False):
     source = Path(__file__).resolve().parent.parent
     evidence.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="luv-macos-") as temporary:
@@ -42,6 +42,9 @@ def test(archive, evidence, cli_only=False):
         subprocess.run(["/usr/bin/ditto", "-x", "-k", str(archive), str(moved)], check=True)
         app = moved / "Luvcraft.app"
         subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+        if require_notarized:
+            subprocess.run(["/usr/bin/xcrun", "stapler", "validate", str(app)], check=True)
+            subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "execute", str(app)], check=True)
         profile = root / "without-builder.sb"
         denied = ["/nix", "/opt/homebrew", "/usr/local", str(source),
                   str(archive.parent), str(Path.home() / ".cache"),
@@ -152,5 +155,7 @@ if __name__ == "__main__":
     parser.add_argument("evidence", type=Path)
     parser.add_argument("--cli-only", action="store_true",
                         help="Check relocation and CLI boot without requiring a GPU")
+    parser.add_argument("--require-notarized", action="store_true",
+                        help="Require a stapled ticket and Gatekeeper acceptance after extraction")
     args = parser.parse_args()
-    test(args.archive.resolve(strict=True), args.evidence.resolve(), args.cli_only)
+    test(args.archive.resolve(strict=True), args.evidence.resolve(), args.cli_only, args.require_notarized)

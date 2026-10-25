@@ -1,0 +1,28 @@
+#!/bin/bash
+# Called only on the disposable GitHub macOS runner; never enable shell tracing.
+set -euo pipefail
+for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_SIGN_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD; do
+  if [ -z "${!name:-}" ]; then
+    echo "Missing required release secret: $name" >&2
+    exit 1
+  fi
+done
+keychain="$RUNNER_TEMP/luv-release.keychain-db"
+certificate="$RUNNER_TEMP/luv-certificate.p12"
+password=$(openssl rand -hex 32)
+echo "::add-mask::$password"
+umask 077
+printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | /usr/bin/base64 -D > "$certificate"
+trap 'rm -f "$certificate"' EXIT
+security create-keychain -p "$password" "$keychain"
+security set-keychain-settings -lut 21600 "$keychain"
+security unlock-keychain -p "$password" "$keychain"
+security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -k "$keychain" -T /usr/bin/codesign
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+xcrun notarytool store-credentials luv-release --keychain "$keychain" \
+  --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD"
+{
+  echo "LUV_MACOS_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY"
+  echo "LUV_MACOS_KEYCHAIN=$keychain"
+  echo 'LUV_MACOS_NOTARY_PROFILE=luv-release'
+} >> "$GITHUB_ENV"

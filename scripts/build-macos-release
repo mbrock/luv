@@ -1,5 +1,5 @@
 #!/bin/sh
-# Native arm64 build; no signing identity, notarization, or publication.
+# Native arm64 build; optional Developer ID signing and notarization.
 set -eu
 project_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 if [ "$(uname -sm)" != 'Darwin arm64' ]; then
@@ -30,7 +30,5 @@ done
 sbcl --script "$project_root/scripts/build-macos-release.lisp"
 python3 "$project_root/scripts/macos-bundle.py" "$app"
 
-# Use Apple's archive tool to preserve the bundle and executable permissions.
-/usr/bin/ditto -c -k --keepParent "$app" "$output/luvcraft-macos-arm64.zip"
-(cd "$output" && /usr/bin/shasum -a 256 luvcraft-macos-arm64.zip > SHA256SUMS)
-printf 'Built %s\n' "$output/luvcraft-macos-arm64.zip"
+# Signing happens after every install-name edit and before archiving.
+python3 "$project_root/scripts/macos-sign-release.py" "$app"
