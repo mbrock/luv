@@ -30,5 +30,16 @@ done
 sbcl --script "$project_root/scripts/build-macos-release.lisp"
 python3 "$project_root/scripts/macos-bundle.py" "$app"
 
+tools="$project_root/build/sparkle"
+python3 "$project_root/scripts/sparkle-release.py" fetch "$tools"
+python3 "$project_root/scripts/sparkle-release.py" prepare "$app" "$tools" \
+  --version "${LUV_RELEASE_VERSION:-0.0.1}" \
+  --build "${LUV_RELEASE_BUILD:-1}"
+/usr/bin/xcrun clang++ -std=c++17 -fobjc-arc -dynamiclib \
+  "$project_root/deploy/macos/game-updates.mm" -F"$tools" \
+  -framework Cocoa -framework Sparkle -mmacosx-version-min=26.0 \
+  -Wl,-rpath,@loader_path -install_name @rpath/libgame-updates.dylib \
+  -o "$app/Contents/Frameworks/libgame-updates.dylib"
+
 # Signing happens after every install-name edit and before archiving.
 python3 "$project_root/scripts/macos-sign-release.py" "$app"

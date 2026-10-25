@@ -243,3 +243,44 @@ References: [ASDF program-op](https://asdf.common-lisp.dev/asdf.html#Building-pr
 [SBCL executable delivery](https://www.sbcl.org/manual/index.html#Saving-a-Core-Image),
 [nix-bundle](https://github.com/nix-community/nix-bundle), and
 [Kandria's deployment experience](https://raw.githubusercontent.com/Shinmera/talks/master/els2023-kandria/paper.pdf).
+
+## Mac in-app updates (Sparkle)
+
+The packaged game includes pinned Sparkle 2.10.1. Its application menu offers
+**Check for Updates…** and **Automatically Check for Updates**. Checks are on
+by default; installation requires the player's explicit choice. The game uses
+its normal save/teardown path before Sparkle is allowed to replace the bundle
+and relaunch it. Development images, help, and rendering smoke commands do not
+start the updater.
+
+`deploy/macos/sparkle.json` records the public update key and Keychain account.
+The private key remains in that local Keychain account and the repository's
+`SPARKLE_PRIVATE_KEY` Actions secret. Keep a secure backup with Sparkle's
+`generate_keys --account sh.swa.luvcraft.updates -x FILE` tool; never commit it.
+This key is independent of the Apple Developer ID identity.
+
+CI assigns `CFBundleVersion` from the increasing workflow run number and the
+visible version from the release tag. After signing, notarization, stapling,
+and the moved-app checks, Sparkle's pinned `generate_appcast` signs the final
+ZIP and `appcast.xml`. The app requires both a signed feed and archive
+verification before extraction. The feed's download URL names an immutable
+GitHub release tag; the stable feed URL is
+`https://github.com/mbrock/luv/releases/latest/download/appcast.xml`.
+
+Pushing a `v*` tag builds/tests all three platforms, then uploads assets to a
+draft release and publishes it. The existing manually published release path
+also remains supported. Manual workflow runs retain qualification artifacts.
+Only stable published releases are offered through GitHub's `latest` URL.
+A user must install the first Sparkle-enabled version manually; older copies
+cannot discover updates by themselves. Worlds stay outside the replaced app.
+
+The framework's nested XPC services, updater app, executables, and framework
+are signed inside-out before the outer game bundle. The packager pins and
+verifies the Sparkle distribution's SHA-256 before extracting it.
+
+Local qualification also exercised a real Sparkle install using isolated app
+copies, a signed loopback feed, and successive build numbers: download,
+signature validation, extraction, Install and Relaunch, saved world, replacement,
+and healthy frames in the new process. The teardown handoff masks Lisp floating
+point traps around Cocoa and restores Cocoa's termination implementation after
+SDL's loop has finished, so SDL cannot leave the updater waiting for a quit event.

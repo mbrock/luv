@@ -372,7 +372,9 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/luft/game" "sb-posix" #-win32 "slynk")
-  :components ((:file "luvcraft/main"))
+  :serial t
+  :components ((:file "luvcraft/macos-updates")
+               (:file "luvcraft/main"))
   :build-operation "program-op"
   :build-pathname "build/luvcraft"
   :entry-point "luvcraft:main")

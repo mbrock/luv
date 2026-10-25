@@ -21,7 +21,7 @@ def package(app, identity="-", profile=None, keychain=None):
     if profile and identity == "-":
         raise ValueError("Notarization requires a Developer ID Application identity")
     output = app.parent
-    archive = output / "luvcraft-macos-arm64.zip"
+    archive = output / f"{app.stem.lower()}-macos-arm64.zip"
     checksum = output / "SHA256SUMS"
     # A failed retry must not leave an older download looking successful.
     archive.unlink(missing_ok=True)
@@ -41,12 +41,25 @@ def package(app, identity="-", profile=None, keychain=None):
             "com.apple.security.cs.allow-jit": True,
             "com.apple.security.cs.allow-unsigned-executable-memory": True,
         }))
-        for library in sorted((app / "Contents/Frameworks").iterdir()):
-            if library.is_file() and not library.is_symlink():
-                run(*signing, library)
-        run(*signing, "--entitlements", entitlements,
-            app / "Contents/MacOS/luvcraft-runtime")
-        run(*signing, app)
+        # Sign every nested executable inside-out, including Sparkle's XPC
+        # services and updater app. Never use --deep to guess signing order.
+        magic = {b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+                 b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"}
+        files = sorted((p for p in app.rglob("*") if p.is_file() and not p.is_symlink()),
+                       key=lambda p: len(p.parts), reverse=True)
+        runtime = app / "Contents/MacOS/luvcraft-runtime"
+        for path in files:
+            with path.open("rb") as stream:
+                macho = stream.read(4) in magic
+            if macho:
+                options = ["--entitlements", entitlements] if path == runtime else []
+                run(*signing, *options, path)
+        bundles = sorted((p for p in app.rglob("*")
+                          if p.is_dir() and not p.is_symlink()
+                          and p.suffix in {".xpc", ".app", ".framework"}),
+                         key=lambda p: len(p.parts), reverse=True)
+        for path in [*bundles, app]:
+            run(*signing, path)
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
     if profile:
         authentication = ["--keychain-profile", profile]

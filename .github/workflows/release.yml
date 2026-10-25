@@ -3,6 +3,7 @@ name: downloadable game
 on:
   push:
     branches: [main]
+    tags: ['v*']
   release:
     types: [published]
   workflow_dispatch:
@@ -28,7 +29,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 120
     env:
-      MACOS_NOTARIZE: ${{ github.event_name == 'release' || inputs.notarize == true }}
+      MACOS_NOTARIZE: ${{ github.event_name == 'release' || github.ref_type == 'tag' || inputs.notarize == true }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,6 +52,9 @@ jobs:
       - name: Test release packaging
         run: python3 scripts/macos-sign-release-tests.py
       - name: Build relocated Apple Silicon app
+        env:
+          LUV_RELEASE_VERSION: ${{ github.event.release.tag_name || (github.ref_type == 'tag' && github.ref_name) || '0.0.1' }}
+          LUV_RELEASE_BUILD: ${{ github.run_number }}
         run: scripts/build-macos-release
       - name: Test moved app without builder paths
         # Standard hosted runners do not promise a Metal 4 GPU. Full render
@@ -61,6 +65,14 @@ jobs:
           args=()
           if [ "$MACOS_NOTARIZE" = true ]; then args+=(--require-notarized); fi
           python3 scripts/test-macos-release.py build/macos-release/luvcraft-macos-arm64.zip build/macos-smoke --cli-only "${args[@]}"
+      - name: Generate signed Sparkle feed
+        if: env.MACOS_NOTARIZE == 'true'
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          test -n "$SPARKLE_PRIVATE_KEY"
+          python3 scripts/sparkle-release.py appcast build/macos-release/luvcraft-macos-arm64.zip build/sparkle "$RELEASE_TAG"
       - name: Remove temporary signing credentials
         if: always() && env.MACOS_NOTARIZE == 'true'
         run: |
@@ -79,6 +91,7 @@ jobs:
           path: |
             build/macos-release/luvcraft-macos-arm64.zip
             build/macos-release/SHA256SUMS
+            build/macos-release/appcast.xml
           if-no-files-found: error
           compression-level: 0
 
@@ -191,7 +204,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.ref_type == 'tag'
     needs: [linux, macos, windows]
     runs-on: ubuntu-latest
     permissions:
@@ -213,9 +226,18 @@ jobs:
         run: |
           mv macos-downloads/SHA256SUMS downloads/luvcraft-macos-arm64.sha256
           mv macos-downloads/luvcraft-macos-arm64.zip downloads/
+          mv macos-downloads/appcast.xml downloads/
       - name: Attach verified downloads to the existing release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" downloads/*
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag \
+              --title "Luvcraft $RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" downloads/*
+          if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true ]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          fi

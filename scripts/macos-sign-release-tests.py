@@ -15,14 +15,21 @@ spec.loader.exec_module(release)
 
 
 class SigningTests(unittest.TestCase):
-    def exercise(self, status="Accepted", fail=None, identity="Developer ID Application: Test (TEAM)", profile="test", submit_error=False):
+    def exercise(self, status="Accepted", fail=None, identity="Developer ID Application: Test (TEAM)", profile="test", submit_error=False, nested=False):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         output = Path(temporary.name)
         app = output / "Luvcraft.app"
         frameworks = app / "Contents/Frameworks"
         frameworks.mkdir(parents=True)
-        (frameworks / "test.dylib").touch()
+        (frameworks / "test.dylib").write_bytes(b"\xcf\xfa\xed\xfe")
+        runtime = app / "Contents/MacOS/luvcraft-runtime"
+        runtime.parent.mkdir()
+        runtime.write_bytes(b"\xcf\xfa\xed\xfe")
+        if nested:
+            helper = frameworks / "Sparkle.framework/Versions/B/Updater.app/Contents/MacOS/Updater"
+            helper.parent.mkdir(parents=True)
+            helper.write_bytes(b"\xcf\xfa\xed\xfe")
         archive = output / "luvcraft-macos-arm64.zip"
         archive.write_text("stale")
         (output / "SHA256SUMS").write_text("stale")
@@ -64,6 +71,16 @@ class SigningTests(unittest.TestCase):
         operations = [command[2] for command in commands if command[0] == "/usr/bin/xcrun"]
         self.assertEqual(operations, ["submit", "log", "staple", "validate"])
         self.assertEqual(commands[-1][0], "/usr/bin/ditto")
+
+    def test_nested_sparkle_helpers_signed_before_the_framework(self):
+        commands = self.exercise(nested=True)
+        paths = [command[-1] for command in commands if "--sign" in command]
+        helper = next(i for i, p in enumerate(paths) if p.endswith("MacOS/Updater"))
+        bundle = next(i for i, p in enumerate(paths) if p.endswith("Updater.app"))
+        framework = next(i for i, p in enumerate(paths) if p.endswith("Sparkle.framework"))
+        self.assertLess(helper, bundle)
+        self.assertLess(bundle, framework)
+        self.assertEqual(paths[-1].split("/")[-1], "Luvcraft.app")
 
     def test_rejected_submission_never_published(self):
         commands = self.exercise(status="Invalid")

@@ -115,13 +115,19 @@
          (progn
            ;; Native close tears down beside SDL and closes the canvas last.
            ;; Keep the executable alive through that final close.
-           (loop until (eq :closed (luv:canvas-state canvas)) do (sleep 0.05))
+           (start-macos-updates canvas)
+           (loop until (eq :closed (luv:canvas-state canvas))
+                 do (when *macos-update-quit-requested*
+                      (setf *macos-update-quit-requested* nil)
+                      (if viewer (luft.render:stop-viewer viewer) (stop-playing)))
+                    (sleep 0.05))
            (let ((failure (luv::sdl-canvas-startup-error canvas)))
              (when failure (error failure)))
            ;; Report worker teardown failures in the executable too.
            (unless (eq :running (stop-controller-state controller))
              (wait-for-controlled-stop controller)))
-      (if viewer (luft.render:stop-viewer viewer) (stop-playing)))))
+      (if viewer (luft.render:stop-viewer viewer) (stop-playing)))
+    (finish-macos-updates)))
 
 (defun parse-interactive-options (arguments)
   (let ((provider nil)
