@@ -309,6 +309,95 @@
       (true (not (member 6 shadow-bindings))
             "the shadow stage does not bind material descriptors"))))
 
+(luv.shader:define-shader-function visibility-test-material-character
+    (tone relief world normal distance)
+  ;; Like the game's material treatment, this reaches the footprint through
+  ;; another typed function, not directly from the fragment's lexical scope.
+  (* tone 0.8125 (shaders::material-detail-weight world 12.0)))
+
+(define-test terrain-visibility-shaders-preserve-the-compact-contract
+  (let* ((vertex (shaders:terrain-visibility-vertex-specification))
+         (fragment (shaders:terrain-visibility-fragment-specification))
+         (material (shaders:terrain-visibility-material-vertex-specification))
+         (stride shaders::+terrain-visibility-resident-stride+)
+         (limit shaders::+terrain-visibility-resident-limit+))
+    (true (= stride (* 3 shaders::+terrain-visibility-triangles-per-resident+)))
+    (true (<= (+ (* limit stride) (1- stride)) #xffffffff))
+    (true (> (+ (* (1+ limit) stride) (1- stride)) #xffffffff))
+    (dolist (resident '(1 255 256 21844))
+      (dolist (triangle '(0 255 256 65535))
+        (dotimes (corner 3)
+          (let* ((index (+ (* resident stride) (* triangle 3) corner))
+                 (identifier (floor index 3)))
+            (true (= resident (ldb (byte 16 16) identifier)))
+            (true (= triangle (ldb (byte 16 0) identifier)))
+            (true (= corner (mod index 3)))))))
+    (true (equal '(0 1 2 9)
+                 (mapcar #'luv.shader:shader-resource-binding
+                         (luv.shader:shader-specification-resources vertex))))
+    (true (= 2 (length (luv.shader:shader-specification-outputs fragment))))
+    (dolist (specification (list vertex fragment material))
+      (true (luv.msl:compile-msl specification))
+      (true (luv.spir-v:compile-shader-specification specification)))))
+
+(define-test terrain-visibility-material-reparses-same-surface-derivatives
+  ;; Build the input before the host bindings. The source, not its already
+  ;; expanded graph, must observe both the later host treatment and edge knob.
+  (let ((fragment (shaders:star-fragment-specification)))
+    (dolist (mode '(:atelier :beveled :rounded))
+      (let* ((shaders::*terrain-screen-filter-p* (not (eq mode :atelier)))
+             (shaders::*terrain-edge-shaping-p* (eq mode :rounded))
+             (shaders::*terrain-material-character-function*
+               (unless (eq mode :atelier) 'visibility-test-material-character))
+             (specification (shaders:terrain-visibility-material-fragment-specification fragment))
+             (msl (luv.msl:msl-document-source (luv.msl:compile-msl specification)))
+             (resources (luv.shader:shader-specification-resources specification)))
+        (true (luv.spir-v:compile-shader-specification specification))
+        (true (equal '(0 1 2 3 4 5 6 7 8 9 10 11)
+                     (sort (mapcar #'luv.shader:shader-resource-binding resources) #'<)))
+        (true (not (search "dfdx(" msl)))
+        (true (not (search "dfdy(" msl)))
+        (true (< (search "discard_fragment();" msl) (search "sites[" msl))
+              "discard other residents before any local buffer access")
+        (true (eq (not (null (search "0.8125f" msl))) (not (eq mode :atelier)))
+              "host material treatment is reparsed, including its nested footprint"))))
+  (true
+   (handler-case
+       (progn
+         (shaders::terrain-visibility-surface-source
+          '(luv.shader:derivative-x unknown-surface) 'dx 'dy 'hx 'hy)
+         nil)
+     (error () t))
+   "new derivative contracts must not silently use neighbouring surfaces"))
+
+(define-test terrain-visibility-footprint-uses-explicit-plane-gradients
+  ;; Realize the actual specialized shader expression on the CPU. A huge
+  ;; discontinuity in the world input must not invent a different footprint:
+  ;; only the supplied same-plane samples determine it. This survives the
+  ;; choice to keep a typed call or inline it and does not count source calls.
+  (let* ((specification
+           (luv.shader:parse-shader-specification
+            'same-plane-footprint
+            '(:stage :fragment
+              :inputs ((world :vec3 :location 0) (dx :vec3 :location 1) (dy :vec3 :location 2))
+              :outputs ((result :float :location 0)))
+            `((luv.shader:set-output result
+                ,(shaders::terrain-visibility-surface-source
+                  '(shaders::material-pixel-footprint world) 'dx 'dy 'hx 'hy)))))
+         (expression (luv.shader:shader-assignment-value
+                      (first (luv.shader:shader-specification-statements specification))))
+         (function
+           (compile nil
+                    `(lambda (world dx dy)
+                       ,(arithmetic:lower-lisp-arithmetic-expression
+                         expression
+                         (mapcar #'cons (luv.shader:shader-specification-inputs specification)
+                                 '(world dx dy)))))))
+    (dolist (world '(#(0.0 0.0 0.0) #(24000.0 -800.0 192.0)))
+      (true (= 4.0 (funcall function world #(3.0 0.0 0.0) #(0.0 4.0 0.0))))
+      (true (= 0.125 (funcall function world #(0.0 0.125 0.0) #(0.0 0.0 0.0625))))
+      (true (= 0.0 (funcall function world #(0.0 0.0 0.0) #(0.0 0.0 0.0)))))))
+
 (define-test one-cell-is-eight-sites-with-no-cpu-geometry
   (let* ((domain (luft:make-world-domain :horizontal-bits 4))
          (builder (luft:make-chain-builder domain)))

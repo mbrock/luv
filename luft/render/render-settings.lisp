@@ -17,6 +17,14 @@ The scene pass tests a chunk's box against the camera's clip volume, the
 shadow pass against the sun's.  A box is skipped only when all eight
 corners lie outside one clip plane, so nothing visible is ever lost.")
 
+(defparameter *terrain-visibility-p* #+darwin t #-darwin nil
+  "Shade single-sample terrain after exact shared-atlas visibility.
+
+Enabled by default on Metal, where real-world A/B measurements show a gain.
+Vulkan remains opt-in: the measured RX 6600 XT plain-face cases lost time.
+NIL retains forward shading for comparison. A renderer built with NIL, a
+custom terrain component, or MSAA keeps its original forward path. #EAWKSG")
+
 (defparameter *bevelled-shadows-p* nil
   "Whether bevelled terrain casts its bevels into the shadow map.
 

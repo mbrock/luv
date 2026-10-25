@@ -54,6 +54,24 @@ Without DXC, return NIL: the text claims still hold."
     (shader:shader-language-error (condition)
       (shader:shader-language-error-reason condition))))
 
+(define-test position-invariance-lowers-to-precise-output
+  (dolist (annotation '(nil (:invariant nil) (:invariant t)))
+    (multiple-value-bind (source document)
+        (source-of
+         (shader:parse-shader-specification
+          'position-invariance-probe
+          `(:stage :vertex
+            :inputs ((position :vec4 :location 0))
+            :outputs ((clip-position :vec4 :built-in :position ,@annotation)))
+          '((shader:set-output clip-position
+                               (+ (* position 0.75)
+                                  (shader:vec4 0.1 0.2 0.3 0.0))))))
+      (true (search (if (getf annotation :invariant)
+                        "  precise float4 clip_position : SV_Position;"
+                        "  float4 clip_position : SV_Position;")
+                    source))
+      (compiles document))))
+
 (shader:define-shader hlsl-pulling-vertex-probe
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)

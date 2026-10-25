@@ -1174,7 +1174,9 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
         (source-form (shader:shader-object-source-form declaration)))
     (cond
       ((and (eq direction :output) (eq built-in :position))
-       "[[position]]")
+       (if (shader:shader-interface-invariant-p declaration)
+           "[[position, invariant]]"
+           "[[position]]"))
       ((msl-stage-built-in-attribute stage direction built-in))
       ((and (eq stage :vertex) (eq direction :input)
             (eq built-in :vertex-index))

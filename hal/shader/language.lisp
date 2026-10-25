@@ -313,7 +313,13 @@ and the laid-out size of a host-shareable structure."
    (interpolation
     :initarg :interpolation
     :initform nil
-    :reader shader-interface-interpolation)))
+    :reader shader-interface-interpolation)
+   (invariant
+    :initarg :invariant
+    :initform nil
+    :reader shader-interface-invariant-p
+    :documentation
+    "Preserve identical position computations across separately compiled shaders.")))
 
 (defclass shader-resource (shader-variable-declaration)
   ((descriptor-set
@@ -4121,7 +4127,7 @@ NIL leaves the character to the named definition; T is the historical
 (defun parse-interface-declaration (form direction)
   (destructuring-bind
       (name type &key location built-in quantity dimension unit affine-p
-                       character components interpolation)
+                       character components interpolation invariant)
       form
     (unless (or (and (typep location '(integer 0 *)) (null built-in))
                 (and (null location) built-in))
@@ -4136,6 +4142,15 @@ NIL leaves the character to the named definition; T is the historical
       (error 'shader-language-error
              :form form :reason :interpolation-on-built-in
              :details built-in))
+    (unless (member invariant '(nil t))
+      (error 'shader-language-error
+             :form form :reason :invalid-interface-invariance
+             :details invariant))
+    (when (and invariant
+               (not (and (eq direction :output) (eq built-in :position))))
+      (error 'shader-language-error
+             :form form :reason :invariance-requires-position-output
+             :details (list direction built-in)))
     (let* ((resolved-type (find-shader-type type form))
            (specification
              (parse-declaration-quantity-specification
@@ -4158,6 +4173,7 @@ NIL leaves the character to the named definition; T is the historical
                      :location location
                      :built-in built-in
                      :interpolation interpolation
+                     :invariant invariant
                      :source-form form))))
 
 (defun parse-resource-declaration (form)

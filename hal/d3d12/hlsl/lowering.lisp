@@ -1123,8 +1123,10 @@ vec4, which MSL builds as float4(depth).  A scalar cast splats the same way."
 (defun hlsl-interface-field (stage declaration &optional name)
   (make-instance
    'hlsl-field
-   :type (hlsl-type-name (shader:shader-declaration-type declaration)
-                         (shader:shader-object-source-form declaration))
+   :type (format nil "~:[~;precise ~]~A"
+                 (shader:shader-interface-invariant-p declaration)
+                 (hlsl-type-name (shader:shader-declaration-type declaration)
+                                 (shader:shader-object-source-form declaration)))
    :name (or name (hlsl-identifier (shader:shader-object-name declaration)))
    :semantic (hlsl-interface-semantic stage declaration)
    :interpolation (and (not (eq :fragment stage))

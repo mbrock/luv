@@ -98,6 +98,70 @@
         ((consp form) (mapcar #'form-names form))
         (t form)))
 
+(defun position-invariance-probe (annotation)
+  (shader:parse-shader-specification
+   'position-invariance-probe
+   `(:stage :vertex
+     :inputs ((position :vec4 :location 0))
+     :outputs ((clip-position :vec4 :built-in :position ,@annotation)))
+   '((set-output clip-position (+ (* position 0.75) (vec4 0.1 0.2 0.3 0.0))))))
+
+(define-test position-invariance-is-opt-in-and-survives-source-reparse
+  (dolist (annotation '(nil (:invariant nil) (:invariant t)))
+    (let* ((specification (position-invariance-probe annotation))
+           (source (shader:shader-object-source-form specification))
+           (reparsed (shader:parse-shader-specification
+                      (second source) (third source) (cdddr source))))
+      (dolist (graph (list specification reparsed))
+        (let ((output (first (shader:shader-specification-outputs graph))))
+          (parachute:is eq (getf annotation :invariant)
+                        (shader:shader-interface-invariant-p output))
+          (parachute:is equal
+                        `(clip-position :vec4 :built-in :position ,@annotation)
+                        (shader:shader-object-source-form output)))))))
+
+(define-test invariance-rejects-non-position-outputs-and-non-booleans
+  (dolist (case
+            '((:input (position :vec4 :built-in :position :invariant t)
+               :invariance-requires-position-output)
+              (:input (position :vec4 :location 0 :invariant t)
+               :invariance-requires-position-output)
+              (:output (color :vec4 :location 0 :invariant t)
+               :invariance-requires-position-output)
+              (:output (depth :float :built-in :frag-depth :invariant t)
+               :invariance-requires-position-output)
+              (:output (position :vec4 :built-in :position :invariant 1)
+               :invalid-interface-invariance)))
+    (destructuring-bind (direction declaration reason) case
+      (parachute:is eq reason
+                    (handler-case
+                        (progn
+                          (shader:parse-shader-specification
+                           'invalid-invariance
+                           (list :stage :vertex
+                                 (if (eq direction :input) :inputs :outputs)
+                                 (list declaration))
+                           nil)
+                          nil)
+                      (shader:shader-language-error (condition)
+                        (shader:shader-language-error-reason condition)))))))
+
+(define-test position-invariance-lowers-to-spir-v-decoration
+  (dolist (annotation '(nil (:invariant nil) (:invariant t)))
+    (let* ((specification (position-invariance-probe annotation))
+           (module (spv:shader-lowering-module
+                    (spv:compile-shader-specification specification)))
+           (annotations (spv:spir-v-module-annotations module))
+           (position (find 'spv::built-in annotations :key #'third))
+           (invariants (remove 'spv::invariant annotations
+                               :key #'third :test-not #'eq)))
+      (parachute:is = (if (getf annotation :invariant) 1 0)
+                    (length invariants))
+      (when invariants
+        (parachute:is eq (second position) (second (first invariants))))
+      (true (> (length (spv:assemble-spir-v-module module)) 5))
+      (parachute:is eq nil (spir-v-validation-diagnostics specification)))))
+
 (defgeneric shader-method-probe (role stage))
 (defgeneric shader-abstraction-method-probe (role stage))
 

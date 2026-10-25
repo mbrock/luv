@@ -76,6 +76,20 @@ releases for retry, but those retired bindings must never be served again. #RBNW
       :shadow-rectangles (resident-population-shadow-rectangle-buffer resident)
       :shadow-p shadow-p))))
 
+(defun renderer-frame-visibility-binding (renderer frame resident material-p)
+  "Join immutable resident data to this generation's visibility images.
+Publication and resize invalidate these bindings with all other frame joins."
+  (let ((sites (and material-p (renderer-visibility-sites-view renderer)))
+        (primitives (and material-p (renderer-visibility-primitives-view renderer))))
+    (renderer-frame-component-binding
+     frame (list :terrain-visibility resident sites primitives (renderer-shadow-view renderer))
+     (lambda ()
+       (make-terrain-visibility-binding
+        (renderer-terrain renderer) (renderer-device renderer) resident
+        (renderer-frame-state-camera-buffer frame)
+        :sites sites :primitives primitives
+        :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer))))))
+
 (defun renderer-frame-component-binding (frame key make-binding)
   "Cache even a component's NIL binding; the presentation slot owns the result."
   (let ((groups (renderer-frame-state-bind-groups frame)))

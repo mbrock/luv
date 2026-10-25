@@ -163,6 +163,41 @@
     (false (search "stage_in.instance_index" source))
     (false (search "[[stage_in]]" source))))
 
+(define-test position-invariance-lowers-to-metal-attribute
+  (dolist (annotation '(nil (:invariant nil) (:invariant t)))
+    (let ((source (msl:msl-document-source
+                   (msl:compile-msl (position-invariance-probe annotation)))))
+      (true (search (if (getf annotation :invariant)
+                        "float4 clip_position [[position, invariant]];"
+                        "float4 clip_position [[position]];")
+                    source))
+      (parachute:is eq nil (metal-compiler-diagnostics source)))))
+
+(define-test mesh-position-invariance-lowers-to-metal-and-spir-v
+  (dolist (annotation '(nil (:invariant nil) (:invariant t)))
+    (let* ((form (copy-tree (shader:shader-object-source-form (msl-mesh-probe))))
+           (outputs (getf (getf (third form) :mesh-output) :vertex)))
+      (setf (first outputs) (append (first outputs) annotation))
+      (let* ((specification (shader:parse-shader-specification
+                            (second form) (third form) (cdddr form)))
+             (source (msl:msl-document-source (msl:compile-msl specification)))
+             (annotations (spv:spir-v-module-annotations
+                           (spv:shader-lowering-module
+                            (spv:compile-shader-specification specification))))
+             (invariant (find 'spv::invariant annotations :key #'third)))
+        (true (search (if (getf annotation :invariant)
+                          "float4 position [[position, invariant]];"
+                          "float4 position [[position]];")
+                      source))
+        (parachute:is eq (getf annotation :invariant) (not (null invariant)))
+        (when invariant
+          (true (find `(spv::decorate ,(second invariant) spv::built-in
+                        (spv::enum spv::built-in :position))
+                      annotations :test #'equal)))
+        (parachute:is eq nil (spir-v-validation-diagnostics
+                             specification :environment "vulkan1.2"))
+        (parachute:is eq nil (metal-compiler-diagnostics source))))))
+
 (define-test task-and-mesh-specifications-retain-their-workgroup-contracts
   (let* ((task (msl-task-probe))
          (mesh (msl-mesh-probe))
@@ -594,6 +629,7 @@ on success or without the compiler, else its report."
           (multiple-value-bind (output error-output status)
               (uiop:run-program
                (append xcrun (list "metal" "-std=metal4.0" "-c"
+                                   "-fpreserve-invariance"
                                    (uiop:native-namestring metal)
                                    "-o" (uiop:native-namestring air)))
                :output :string :error-output :string :ignore-error-status t)

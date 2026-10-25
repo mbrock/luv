@@ -537,6 +537,9 @@ Modules whose expressions use no extended mathematics never acquire one."
           'annotations context
           (list 'decorate variable-id
                 (shader-interface-interpolation declaration))))
+       (when (shader-interface-invariant-p declaration)
+         (append-context-form 'annotations context
+                              (list 'decorate variable-id 'invariant)))
        ;; Vulkan wants every integer fragment input flat, built-ins included.
        (when (eq :sample-index (shader-interface-built-in declaration))
          (append-context-form 'annotations context
@@ -649,6 +652,9 @@ Modules whose expressions use no extended mathematics never acquire one."
        'annotations context
        (list 'decorate variable-id
              (shader-interface-interpolation declaration))))
+    (when (shader-interface-invariant-p declaration)
+      (append-context-form 'annotations context
+                           (list 'decorate variable-id 'invariant)))
     (when per-primitive-p
       (append-context-form 'annotations context
                            (list 'decorate variable-id 'per-primitive-ext)))

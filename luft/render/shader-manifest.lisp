@@ -5,6 +5,10 @@
 (defparameter *production-shader-specifications*
   '(star-fragment-specification
     terrain-vertex-specification
+    terrain-visibility-vertex-specification
+    terrain-visibility-fragment-specification
+    terrain-visibility-material-vertex-specification
+    terrain-visibility-material-fragment-specification
     terrain-shadow-vertex-specification
     terrain-shadow-rectangle-vertex-specification
     player-sdf-vertex-specification

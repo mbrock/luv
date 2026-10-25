@@ -110,6 +110,7 @@
                              (:file "frame-quantities")
                              (:file "lighting")
                              (:file "shaders")
+                             (:file "terrain-visibility-shaders")
                              (:file "world-text-shaders")
                              (:file "gpu-resources")
                              (:file "drawing-program")

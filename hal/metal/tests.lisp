@@ -96,6 +96,36 @@
       (when band-texture (destroy band-texture))
       (destroy device))))
 
+(define-test metal-motion-texture-readback-preserves-signed-half-floats
+  (let* ((device (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (texture nil) (buffer nil) (encoder nil) (commands nil)
+         (words '(#x3c00b800 #xbc003400 #x00008000 #x3800b400)))
+    (unwind-protect
+         (progn
+           (setf texture (create device (make-texture-descriptor
+                                         :size '(2 2) :dimensions :2d :format :rg16-float
+                                         :usage '(:copy-dst :copy-src)))
+                 buffer (create device (make-buffer-descriptor :size 16 :usage '(:copy-dst)))
+                 encoder (create device (make-command-encoder-descriptor)))
+           (write-texture queue (make-texture-copy :texture texture)
+                          (make-array '(2 2) :element-type '(unsigned-byte 32)
+                                            :initial-contents (list (subseq words 0 2) (subseq words 2)))
+                          (make-texture-data-layout :bytes-per-row 8 :rows-per-image 2) '(2 2))
+           (encode encoder (make-gpu-copy-texture-to-buffer-command :source texture :destination buffer))
+           (setf commands (finish encoder))
+           (submit queue commands)
+           (let ((bytes (read-buffer buffer)))
+             (true (= 16 (length bytes)))
+             (true (equal words (loop for offset below 16 by 4 collect
+                                 (loop for byte below 4 sum
+                                   (ash (aref bytes (+ offset byte)) (* 8 byte))))))))
+      (when commands (destroy commands))
+      (when encoder (destroy encoder))
+      (when buffer (destroy buffer))
+      (when texture (destroy texture))
+      (destroy device))))
+
 (define-test adopted-metal-textures-enter-explicit-residency
   (let* ((device
            (request-gpu-device (make-instance 'metal-gpu-provider)))

@@ -18,6 +18,10 @@
    (scene-msaa-view :initform nil :reader renderer-target-generation-scene-msaa-view)
    (scene-texture :initform nil :reader renderer-target-generation-scene-texture)
    (scene-view :initform nil :reader renderer-target-generation-scene-view)
+   (visibility-sites-texture :initform nil :reader renderer-target-generation-visibility-sites-texture)
+   (visibility-sites-view :initform nil :reader renderer-target-generation-visibility-sites-view)
+   (visibility-primitives-texture :initform nil :reader renderer-target-generation-visibility-primitives-texture)
+   (visibility-primitives-view :initform nil :reader renderer-target-generation-visibility-primitives-view)
    (motion-msaa-texture :initform nil :reader renderer-target-generation-motion-msaa-texture)
    (motion-msaa-view :initform nil :reader renderer-target-generation-motion-msaa-view)
    (motion-texture :initform nil :reader renderer-target-generation-motion-texture)
@@ -99,6 +103,12 @@
 (defun renderer-scene-view (renderer)
   (renderer-target-generation-scene-view
    (renderer-target-generation renderer)))
+
+(defun renderer-visibility-sites-view (renderer)
+  (renderer-target-generation-visibility-sites-view (renderer-target-generation renderer)))
+
+(defun renderer-visibility-primitives-view (renderer)
+  (renderer-target-generation-visibility-primitives-view (renderer-target-generation renderer)))
 
 (defun renderer-motion-texture (renderer)
   (renderer-target-generation-motion-texture
@@ -292,6 +302,9 @@ starts over."
                       (and scaler (gpu-temporal-scaler-color-usage scaler))))
         (when (> samples 1)
           (image :scene-msaa :rgba16-float render-extent :render-attachment samples))
+        (when (terrain-visibility-program (renderer-terrain renderer))
+          (image :visibility-sites :rgba8-unorm render-extent '(:render-attachment :texture-binding))
+          (image :visibility-primitives :rgba8-unorm render-extent '(:render-attachment :texture-binding)))
         (when (renderer-temporal-p renderer)
           (image :motion :rg16-float render-extent
                  (usage (if shader-p '(:render-attachment :texture-binding) '(:render-attachment))

@@ -19,6 +19,8 @@
    (merged-shadows-p :initarg :merged-shadows-p :initform nil
                      :reader terrain-merged-shadows-p)
    (scene-program :accessor terrain-scene-program)
+   (visibility-program :initform nil :accessor terrain-visibility-program)
+   (material-program :initform nil :accessor terrain-material-program)
    (shadow-program :accessor terrain-shadow-program)
    ;; Barrels and crates standing in body cells (fixture-drawing.lisp).
    (fixtures :initform nil :accessor terrain-fixtures)))
@@ -70,6 +72,44 @@
             when (plusp index-count)
               do (draw-indexed pass indices :uint32 index-count count
                                (aref range offset) 0 first)))))
+
+(defun make-terrain-visibility-binding
+    (drawing device resident camera &key sites primitives shadow-map shadow-sampler)
+  "Borrow the original resident streams; no expanded mesh or mutable ID map.
+SITES and PRIMITIVES select the material pass and its current ID targets."
+  (let ((program (if sites (terrain-material-program drawing)
+                     (terrain-visibility-program drawing))))
+    (apply #'make-program-binding program device
+           :sites (resident-population-instance-buffer resident)
+           :camera-state camera
+           :terrain-vertices (terrain-scene-vertices drawing)
+           :terrain-indices (terrain-scene-indices drawing)
+           (when sites
+             (list :terrain-appearances (resident-population-appearance-buffer resident)
+                   :terrain-lights (resident-population-light-buffer resident)
+                   :material-descriptors (resident-population-descriptor-buffer resident)
+                   :terrain-normals (terrain-normals drawing)
+                   :visibility-sites sites :visibility-primitives primitives
+                   :shadow-map shadow-map :shadow-sampler shadow-sampler)))))
+
+(defun encode-terrain-visibility (drawing pass binding resident resident-id)
+  "Draw the unchanged triangles with a frame-local resident/atlas identity.
+The shared index table is pulled by the vertex shader; only its addressing
+changes. Site/appearance/light publication and resident lifetime are unchanged."
+  (set-pipeline pass (program-pipeline (terrain-visibility-program drawing)))
+  (set-bind-group pass 0 binding)
+  (loop for (star first count) in (resident-population-star-runs resident)
+        for range = (aref (terrain-star-ranges drawing) star)
+        when (plusp (aref range 1))
+          do (draw pass (aref range 1) count
+                   (+ (aref range 0) (* resident-id shaders::+terrain-visibility-resident-stride+))
+                   first)))
+
+(defun encode-terrain-material (drawing pass binding resident-id)
+  ;; The shader rejects other residents before touching these local streams.
+  (set-pipeline pass (program-pipeline (terrain-material-program drawing)))
+  (set-bind-group pass 0 binding)
+  (draw pass 3 1 0 resident-id))
 
 ;;; Star-table coordinates are mesh ticks in [-8, 8], biased to keep the
 ;;; GPU records unsigned.
@@ -263,12 +303,13 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
       (multiple-value-bind (scene-words normals scene-indices shadow-words
                             shadow-indices ranges)
           (star-patch-tables *terrain-bevels-p*)
+        (assert (<= (/ (length scene-indices) 3) shaders::+terrain-visibility-triangles-per-resident+))
         (flet ((upload (label words usage)
                  (let ((buffer (own-gpu-resource
                                 drawing device
                                 (make-buffer-descriptor
                                  :label label :size (max 16 (* 4 (length words)))
-                                 :usage (list usage :copy-dst)))))
+                                 :usage (cons :copy-dst (if (listp usage) usage (list usage)))))))
                    (write-buffer buffer words)
                    buffer)))
           (setf (terrain-star-ranges drawing) ranges
@@ -277,7 +318,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                 (terrain-normals drawing)
                 (upload "luft star patch normals" normals :storage)
                 (terrain-scene-indices drawing)
-                (upload "luft star patch indices" scene-indices :index)
+                (upload "luft star patch indices" scene-indices '(:index :storage))
                 (terrain-shadow-vertices drawing)
                 (unless (terrain-merged-shadows-p drawing)
                   (upload "luft star shadow vertices" shadow-words :storage))
@@ -311,4 +352,23 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                                :depth-compare :less)))
             (terrain-fixtures drawing)
             (own-gpu-object
-             drawing (make-fixture-drawing device target-formats sample-count))))))
+             drawing (make-fixture-drawing device target-formats sample-count)))
+      (when (and *terrain-visibility-p* (= sample-count 1))
+        (setf (terrain-visibility-program drawing)
+              (own-gpu-object
+               drawing
+               (make-drawing-program
+                device :label "luft terrain visibility"
+                :vertex (shaders:terrain-visibility-vertex-specification)
+                :fragment (shaders:terrain-visibility-fragment-specification)
+                :targets '((:format :rgba8-unorm) (:format :rgba8-unorm))
+                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :less)))
+              (terrain-material-program drawing)
+              (own-gpu-object
+               drawing
+               (make-drawing-program
+                device :label "luft visible terrain material"
+                :vertex (shaders:terrain-visibility-material-vertex-specification)
+                :fragment (shaders:terrain-visibility-material-fragment-specification fragment)
+                :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
+                :depth-stencil '(:format :depth32-float :depth-write-enabled nil :depth-compare :always))))))))

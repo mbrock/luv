@@ -2920,7 +2920,7 @@ the GPU everything recorded so far.")
          (bytes-per-row
            (and (member format '(:rgba8-unorm :rgba8-unorm-srgb
                                  :bgra8-unorm :bgra8-unorm-srgb
-                                 :rgba16-float :depth32-float))
+                                 :rg16-float :rgba16-float :depth32-float))
                 (* (texture-format-bytes-per-texel format) (first size)))))
     (unless (and bytes-per-row
                  (member :copy-src (gpu-texture-usage source))

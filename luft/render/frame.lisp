@@ -261,58 +261,104 @@ final pass."
   (prepare-texture encoder (renderer-shadow-texture renderer)
                    :texture-binding))
 
+(defun renderer-terrain-visibility-p (renderer)
+  (and *terrain-visibility-p*
+       (terrain-visibility-program (renderer-terrain renderer))
+       ;; Extremely large publications retain the forward path rather than
+       ;; wrapping the frame-local identity carried in firstVertex.
+       (<= (length (renderer-slot-order renderer)) shaders::+terrain-visibility-resident-limit+)))
+
+(defun encode-renderer-terrain-visibility (renderer frame encoder)
+  (let* ((views (list (renderer-visibility-sites-view renderer)
+                      (renderer-visibility-primitives-view renderer)))
+         (pass (begin-render-pass
+                encoder
+                (make-render-pass-descriptor
+                 :label "luft terrain visibility"
+                 :color-attachments
+                 (mapcar (lambda (view)
+                           `(:view ,view :load-op :clear :store-op :store
+                             :clear-value #(0.0 0.0 0.0 0.0))) views)
+                 :depth-stencil-attachment
+                 `(:view ,(renderer-depth-view renderer)
+                   :depth-load-op :clear :depth-store-op :store :depth-clear-value 1.0)))))
+    (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
+                          (renderer-slot-order renderer))
+          for id from 1
+          for resident = (mesh-slot-resident (gethash key (renderer-mesh-slots renderer)))
+          when (resident-drawn-p resident nil)
+            do (encode-terrain-visibility
+                (renderer-terrain renderer) pass
+                (renderer-frame-visibility-binding renderer frame resident nil) resident id))
+    (end-pass pass)
+    (let ((generation (renderer-target-generation renderer)))
+      (prepare-texture encoder (renderer-target-generation-visibility-sites-texture generation) :texture-binding)
+      (prepare-texture encoder (renderer-target-generation-visibility-primitives-texture generation) :texture-binding))))
+
 (defun encode-renderer-scene
     (renderer frame encoder player-p construction-p &key repetition-p)
-  (flet ((target (multisampled single clear)
-           ;; A temporal scene has one sample and draws straight into the
-           ;; images reconstruction reads; otherwise MSAA resolves into them.
-           (if multisampled
-               `(:view ,multisampled :resolve-view ,single
-                 :load-op :clear :store-op :store :clear-value ,clear)
-               `(:view ,single :load-op :clear :store-op :store
-                 :clear-value ,clear))))
-    (let* ((color-attachments
-             (cons (target (renderer-scene-msaa-view renderer)
-                           (renderer-scene-view renderer) #(0.0 0.0 0.0 1.0))
-                   (when (renderer-temporal-p renderer)
-                     (list (target (renderer-motion-msaa-view renderer)
-                                   (renderer-motion-view renderer)
-                                   #(0.0 0.0 0.0 0.0))))))
-           (depth-msaa-view (renderer-depth-msaa-view renderer))
-           (pass
-             (begin-render-pass
-              encoder
-              (make-render-pass-descriptor
-               :label "luft site streams"
-               :color-attachments color-attachments
-               :depth-stencil-attachment
-               `(:view ,(or depth-msaa-view (renderer-depth-view renderer))
-                 ,@(when depth-msaa-view
-                     `(:resolve-view ,(renderer-depth-view renderer)))
-                 :depth-load-op :clear
-                 :depth-store-op :store
-                 :depth-clear-value 1.0)))))
-      (encode-renderer-scene-drawings renderer frame pass player-p construction-p
-                                      repetition-p))))
+  (let ((visibility-p (renderer-terrain-visibility-p renderer)))
+    (when visibility-p (encode-renderer-terrain-visibility renderer frame encoder))
+    (flet ((target (multisampled single clear)
+             ;; A temporal scene has one sample and draws straight into the
+             ;; images reconstruction reads; otherwise MSAA resolves into them.
+             (if multisampled
+                 `(:view ,multisampled :resolve-view ,single
+                   :load-op :clear :store-op :store :clear-value ,clear)
+                 `(:view ,single :load-op :clear :store-op :store
+                   :clear-value ,clear))))
+      (let* ((color-attachments
+               (cons (target (renderer-scene-msaa-view renderer)
+                             (renderer-scene-view renderer) #(0.0 0.0 0.0 1.0))
+                     (when (renderer-temporal-p renderer)
+                       (list (target (renderer-motion-msaa-view renderer)
+                                     (renderer-motion-view renderer)
+                                     #(0.0 0.0 0.0 0.0))))))
+             (depth-msaa-view (renderer-depth-msaa-view renderer))
+             (pass
+               (begin-render-pass
+                encoder
+                (make-render-pass-descriptor
+                 :label "luft site streams"
+                 :color-attachments color-attachments
+                 :depth-stencil-attachment
+                 `(:view ,(or depth-msaa-view (renderer-depth-view renderer))
+                   ,@(when depth-msaa-view
+                       `(:resolve-view ,(renderer-depth-view renderer)))
+                   :depth-load-op ,(if visibility-p :load :clear)
+                   :depth-store-op :store
+                   :depth-clear-value 1.0)))))
+        (encode-renderer-scene-drawings renderer frame pass player-p construction-p
+                                        repetition-p visibility-p)))))
 
 (defun encode-renderer-scene-drawings
-    (renderer frame pass player-p construction-p &optional repetition-p)
+    (renderer frame pass player-p construction-p &optional repetition-p visibility-p)
   ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
   ;; the selected temporal implementation reconstructs it, and the exposure
   ;; probe meters the same pixels presentation will grade.
   (encode-scene-drawing
    (renderer-sky renderer) pass
    (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
-  (dolist (key (and (member *benchmark-terrain-p* '(t :scene))
-                    (renderer-slot-order renderer)))
-    (let ((resident
-            (mesh-slot-resident
-             (gethash key (renderer-mesh-slots renderer)))))
-      (when (resident-drawn-p resident nil)
-        (draw-resident-opaque-population
-         (renderer-terrain renderer) pass resident
-         (renderer-frame-resident-bind-group renderer frame resident nil))
-        (draw-resident-fixture-bodies renderer frame pass resident))))
+  (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
+                        (renderer-slot-order renderer))
+        for id from 1
+        for resident = (mesh-slot-resident (gethash key (renderer-mesh-slots renderer)))
+        when (resident-drawn-p resident nil)
+          do (if visibility-p
+                 (encode-terrain-material
+                  (renderer-terrain renderer) pass
+                  (renderer-frame-visibility-binding renderer frame resident t) id)
+                 (draw-resident-opaque-population
+                  (renderer-terrain renderer) pass resident
+                  (renderer-frame-resident-bind-group renderer frame resident nil)))
+             (unless visibility-p (draw-resident-fixture-bodies renderer frame pass resident)))
+  ;; Every terrain material draw must precede fixtures: it writes color
+  ;; without depth testing and must not paint over an earlier resident's crate.
+  (when visibility-p
+    (dolist (key (and (member *benchmark-terrain-p* '(t :scene)) (renderer-slot-order renderer)))
+      (let ((resident (mesh-slot-resident (gethash key (renderer-mesh-slots renderer)))))
+        (when (resident-drawn-p resident nil)
+          (draw-resident-fixture-bodies renderer frame pass resident)))))
   (when (plusp (renderer-flame-instance-count renderer))
     (encode-torch-bodies
      (renderer-torches renderer) pass

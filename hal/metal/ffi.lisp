@@ -401,6 +401,10 @@
     ("setLanguageVersion:" :void)
   (version :uint64))
 
+(objc:define-objective-c-message %set-preserve-invariance
+    ("setPreserveInvariance:" :void)
+  (preserve :uint8))
+
 (objc:define-objective-c-message %new-metal-4-compiler
     ("newCompilerWithDescriptor:error:" :object :ownership :owned
      :class "MTL4Compiler")
@@ -711,6 +715,9 @@ rejection.  Source and names cross only as in-memory NSString objects."
           (%new-metal-compile-options
            (objc:find-objective-c-class "MTLCompileOptions")))
       (%set-language-version options +language-version-4-0+)
+      ;; MSL requires both [[position, invariant]] and this compile option.
+      ;; The option alone does not make unannotated outputs invariant.
+      (%set-preserve-invariance options 1)
       (objc:with-owned-objective-c-object
           (descriptor
             (%new-metal-4-library-descriptor

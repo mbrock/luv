@@ -1,0 +1,45 @@
+make[1]: Entering directory '/Users/mbrock/luv'
+Building cached ./sly client core...
+Cached ./sly client at /Users/mbrock/luv/build/sly-client
+;; make :luvcraft/program
+;; logs ./build/logs/2YDGWI
+
+004.2s 1/1  luvcraft/main.lisp
+
+;; Built :luvcraft/program in 4.2s.
+;;
+;; 1 file compiled, 1124 loaded, 151 systems.
+;; Spent 0s compiling and 3.8s loading.
+;;
+;; Logs are in build/logs/2YDGWI/.
+;;
+;; Note: Build logs take 386.6 MB of the 2.3 GB build directory.
+
+;; make :luft/program
+;; logs ./build/logs/OZ5LIH
+
+002.9s 1/1  luft/render/main.lisp
+
+;; Built :luft/program in 2.9s.
+;;
+;; 1 file compiled, 988 loaded, 137 systems.
+;; Spent 0s compiling and 2.6s loading.
+;;
+;; Logs are in build/logs/OZ5LIH/.
+;;
+;; Note: Build logs take 389.3 MB of the 2.3 GB build directory.
+
+;; make Sly cache "luv-workbench"
+;; logs ./build/logs/TE3TDX
+
+
+;; Built "luv-workbench" in 2.2s.
+;;
+;; 0 files compiled, 337 loaded, 44 systems.
+;; Spent 0s compiling and 2.0s loading.
+;;
+;; Logs are in build/logs/TE3TDX/.
+;;
+;; Note: Build logs take 389.5 MB of the 2.3 GB build directory.
+
+make[1]: Leaving directory '/Users/mbrock/luv'

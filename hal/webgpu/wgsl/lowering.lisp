@@ -1153,7 +1153,9 @@ reciprocal of clip w in w."
   (let ((location (shader:shader-interface-location declaration))
         (direction (shader:shader-interface-direction declaration)))
     (cond ((shader:shader-interface-built-in declaration)
-           (format nil "@builtin(~A)" (wgsl-built-in-name stage declaration)))
+           (format nil "@builtin(~A)~:[~; @invariant~]"
+                   (wgsl-built-in-name stage declaration)
+                   (shader:shader-interface-invariant-p declaration)))
           (location
            (format nil "@location(~D)~:[~; @interpolate(flat)~]"
                    location

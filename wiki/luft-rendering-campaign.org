@@ -546,22 +546,34 @@ use 55–90 MB alpine versus 8.6 MB of source site/appearance/light streams.
 Builds, uploads, edits and streaming are outside frame timings. All 35 test
 suites pass; experiment code and evidence do not change production defaults.
 
-** NEXT Make visibility-first terrain compact and footprint-aware
+** DONE Make visibility-first terrain compact and footprint-aware
 :PROPERTIES:
 :ID: EAWKSG
 :END:
 
-Start with #EKK3FS's original triangles: it retains depth exactly in the tested
-views and captures most of the gain. Encode a compact primitive identity into
-the production shared atlas rather than retaining per-corner references.
-Make resident lifetime, edits, publication and buffer replacement explicit;
-charge their CPU time, uploads and memory. Recheck with temporal rendering,
-moving light, natural apertures, close surfaces and both backend lowerings.
+Production now reuses #EKK3FS's original shared atlas and resident streams:
+two RGBA8 identities, no expanded mesh or CPU merger. Material reconstruction
+uses same-triangle plane gradients and three unchanged height evaluations.
+Existing publication/resize ownership retires its bindings. Bevel geometry,
+material formulas, shadows and motion semantics remain intact.
 
-Give material evaluation explicit surface footprints rather than assuming
-neighbor pixels belong to the same plane. This is a demonstrated DSL need:
-the fullscreen pass and retirement branches change derivative semantics.
-Separate geometric visibility from filtered directional response and artistic
-marks. Keep the merged path optional until rare raster depth disagreements
-are understood; do not trade the unmerged path's stronger depth evidence for
-its last few percent of frame time without a deliberate quality decision.
+The [[file:measurements/yawl-visibility-c8f1d28/README.org][production visibility measurements]] show 25–27% less full-frame GPU time
+at native 1080p and 44–47% less with default MetalFX settings on M5, in both
+adjacent-frame orders. These are GPU timings, not displayed FPS. Plain-face
+live worlds also improve; a small flat cave costs .27 ms more. Two ID targets
+cost eight bytes per internal pixel (4.72 MB at the measured default size).
+
+A grazing edit exposed one 26.6-cell depth disagreement from independently
+optimized vertex positions. The new explicit shader =:invariant t= contract,
+including Metal's required compile option, closes it. Final Metal checks
+compare 51.5 million depth samples with zero byte differences, including
+grazing motion, removal/republication and resizing. Shading is close but not
+pixel-identical. All 35 suites and application builds pass; the live game
+was reloaded and inspected.
+
+Enable by default on Metal, retain forward MSAA, and leave Vulkan opt-in:
+RX 6600 XT plain-face cases lost 9–14% at small resolution. Final beveled
+Vulkan checks retain exact depth but have larger native1080 color differences;
+pre-existing validation errors remain. Keep geometric merging and appearance
+retirement experimental. Sparse-scene selection and backend-specific shading
+costs remain measured follow-ups, not hidden heuristics in this change.

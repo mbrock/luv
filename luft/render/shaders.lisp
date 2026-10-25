@@ -1142,7 +1142,7 @@ NIL leaves the atelier's direct light unchanged.")
     (:stage :vertex
      :inputs ((vertex-index :uint :built-in :vertex-index)
               (instance-index :uint :built-in :instance-index))
-     :outputs ((clip-position :vec4 :built-in :position)
+     :outputs ((clip-position :vec4 :built-in :position :invariant t)
                (world-position-output :vec3 :location 0
                                       :quantity quantities:world-position
                                       :unit quantities:cell)

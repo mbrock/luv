@@ -60,6 +60,24 @@ Without Dawn, return NIL: the text claims still hold."
     (shader:shader-language-error (condition)
       (shader:shader-language-error-reason condition))))
 
+(define-test position-invariance-lowers-to-wgsl-attribute
+  (dolist (annotation '(nil (:invariant nil) (:invariant t)))
+    (multiple-value-bind (source document)
+        (source-of
+         (shader:parse-shader-specification
+          'position-invariance-probe
+          `(:stage :vertex
+            :inputs ((position :vec4 :location 0))
+            :outputs ((clip-position :vec4 :built-in :position ,@annotation)))
+          '((shader:set-output clip-position
+                               (+ (* position 0.75)
+                                  (shader:vec4 0.1 0.2 0.3 0.0))))))
+      (true (search (if (getf annotation :invariant)
+                        "@builtin(position) @invariant clip_position: vec4<f32>,"
+                        "@builtin(position) clip_position: vec4<f32>,")
+                    source))
+      (compiles document))))
+
 (defun family-groups (declaration)
   "Buffers, textures, and samplers each in a bind group of their own."
   (values (ecase (shader:shader-resource-family declaration)

@@ -1,0 +1,159 @@
+#+title: Compact visibility-first terrain, with invariant positions
+
+Measured on yawl, Apple M5, macOS 27.2, 2026-10-25. Production changes follow
+=c8f1d28=. Campaign: #EAWKSG. This replaces neither the terrain topology nor
+the bevel atlas. Merging, analytic proxy polygons and approximate appearance
+retirement remain experiments.
+
+* The production representation keeps the original triangles
+
+Visibility pulls the original shared atlas indices and resident sites. Two
+RGBA8 targets retain the resident-local site and a packed resident/atlas
+triangle identity. A fullscreen material pass rejects other residents before
+reading their buffers, reconstructs the winning triangle's plane and voxel
+light, and evaluates the existing material and lighting formulas. It retains
+the visibility pass's hardware depth. All terrain material draws precede
+fixtures so unconditional material writes cannot paint over another resident's
+crate. Existing publication and target-generation ownership retires bindings
+on edits and resize.
+
+There is no expanded per-corner mesh, CPU merger or new resident geometry
+upload. The new numeric payload is eight bytes per internal pixel: 16,588,800
+bytes at native 1920x1080, or 4,718,592 bytes at the measured default internal
+1024x576. This excludes GPU alignment and program/binding objects. Original
+resident preparation and upload are unchanged; measured clone/setup time
+includes a whole second renderer, not the incremental feature cost.
+
+The material pass computes world gradients from four samples on the same
+triangle plane. Only three height evaluations are needed: the current sample
+and its horizontal and vertical partners. No neighboring surface contributes
+a gradient. Original material hooks, rounded-edge formulas, shadows and
+unjittered motion clips remain in use. This is more expensive per surviving
+pixel than forward shading; savings come from avoiding hidden and partial-
+facet material invocations. Color is not bit-identical to forward hardware
+interpolation and implementation-selected derivatives.
+
+* Final Metal timings retain the gain in both orders
+
+Seed-7 live alpine/meadow, settled nine source chunks / sixteen renderer
+residents, camera (1009,1000,45), yaw .9, pitch -.55, FOV .85, exposure .45,
+frozen sky clock. Bevels are explicitly passed to the host: changing the
+renderer special alone does not override =play='s plain-face default.
+
+Each final cohort warms 80 adjacent A/B frames and records 400 timed frames,
+200 per path, in ABBA or BAAB order. Timing is full GPU command-buffer work,
+including shadow, scene, reconstruction and presentation; readbacks are
+outside the timed loop. Dynamic resolution is disabled. These are serialized
+offscreen GPU times, not displayed FPS or independent candidate-only clocks.
+
+| Beveled world | Mode / internal extent          | Visibility / forward, ABBA | BAAB  |
+|---------------+---------------------------------+----------------------------+-------|
+| Alpine        | native / 1920x1080              |                      .7299 | .7297 |
+| Meadow        | native / 1920x1080              |                      .7515 | .7552 |
+| Alpine        | default MetalFX / 1024x576      |                      .5375 | .5340 |
+| Meadow        | default MetalFX / 1024x576      |                      .5603 | .5582 |
+
+Median within-block ratios: about 25–27% less GPU time natively and 44–47%
+less with normal temporal settings at 1920x1080 output. Default rendering
+keeps the existing output-pixel budget, so its internal size is NOT 1440x810.
+Forward/native medians range 15.37–16.76 ms; visibility 11.08–12.42 ms.
+Default forward medians range 14.11–14.86 ms; visibility 7.65–7.90 ms.
+CPU encoding is not the claimed gain and varies with the governor/workload.
+
+Plain-face live terrain at 640x360 output / 480x270 internal also improves:
+ratios .7136 alpine and .7339 meadow. A small flat cave loses .27 ms
+(2.1275 to 2.4007 ms, ratio 1.1273). The forward path remains available with
+=luft.render::*terrain-visibility-p*= NIL. No unmeasured density heuristic
+silently changes representation. MSAA retains the original forward path;
+its cave and balls control images match exactly.
+
+* Position invariance closes a real depth failure
+
+Before invariance, grazing alpine after resident removal chose a surface
+26.608 cells away at one sample (x249,y252 of 480x270). Other motion samples
+had small depth ULP differences despite identical geometry. Both vertex
+shaders computed the same mathematical position, but independent compiler
+optimization was not required to produce the same raster coordinates.
+
+Both terrain position outputs now request =:invariant t=. Metal emits
+=[[position, invariant]]= and enables =preserveInvariance=; the option alone
+is insufficient. SPIR-V, WGSL and HLSL also lower the explicit contract.
+Unannotated shaders retain their previous compilation semantics. See
+[[https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf][Apple's MSL specification]] and
+[[https://developer.apple.com/documentation/metal/mtlcompileoptions/preserveinvariance][preserveInvariance]].
+
+Final Metal acceptance covers 321 paired frames and 51,503,616 depth samples:
+zero depth-byte differences, zero coverage differences and zero nonfinite
+depth/HDR/motion samples. It includes 192 grazing poses, 96 plain-face motion
+poses, resident removal/republication and target resizing. The exact failing
+removal case now matches bit-for-bit. Current-frame motion remains close,
+not bit-identical, because its interpolation is reconstructed.
+
+Beveled native RGB HDR mean absolute error is .002718 alpine / .002054 meadow;
+default temporal input .001012 / .000252. Grazing-path RGB error is about
+.0000125 / .00000632. Native presentation differs by at most 5/9 channel
+levels out of 255; default alpine reaches 14. =grazing-comparison.mp4= is
+inspected 12-fps comparison playback, not a throughput demonstration.
+The blue-gray cliff bands and small detached voxel details in the stills
+also occur in the exact-depth forward control.
+
+A pre-invariance MetalFX cohort had one transient black patch in the forward
+presentation only, not its finite HDR input. A forward/forward repeat control
+was byte-identical over 96 poses. Its cause is unresolved; it is not evidence
+of a visibility regression or a claimed fix. Raw exploratory evidence remains
+under =.amp/in/artifacts/visibility-production/=.
+
+* Vulkan stays opt-in
+
+On chapel's RX 6600 XT / RADV, preliminary three-height plain-face tests at
+640x360 showed identical depth and small color errors, but 9–14% more GPU
+time. This is not evidence about beveled 1080p performance. Linux therefore
+keeps forward rendering by default rather than inheriting a Mac-only win.
+
+The final invariant Vulkan run explicitly enables bevels and candidate
+construction. Its ten A/B comparisons (5,587,200 depth samples) are byte-
+identical, including native1080 alpine. Every forward-repeat is also exact,
+and the ordinary Linux default builds no visibility pipeline. Color is not
+strictly equivalent: native1080 alpine has presentation RGB MAE .471 channel
+levels, maximum 23, with 6.41% of pixels differing by more than two levels.
+At 640x360 the 99th-percentile channel error is zero. The cause of the larger
+native1080 shading differences remains unverified; no Vulkan performance
+claim follows from this final image-validation run.
+
+Validation completes all captures but exits 2 on pre-existing errors that
+also reproduce with visibility disabled: present-timing lacks calibrated-
+timestamps, and unrelated mixed blend pipelines lack independentBlend.
+There is no new error category. This change does not fix those issues.
+
+* Reproduce
+
+Run in a disposable SBCL process, not by loading =run.lisp= into a live game.
+The harness is Metal-specific; the ordinary production path is portable.
+
+#+begin_src sh
+BENCH_LIBRARY=1 BENCH_MODE=default BENCH_SIZES=1920x1080 \
+BENCH_SCENES=live-alpine,live-meadow BENCH_REPEATS=1 \
+BENCH_WARMUP=80 BENCH_FRAMES=400 VIS_REVERSE=0 \
+VIS_OUTPUT=build/visibility/release-default-0 BENCH_OUTPUT=build/visibility/run.sexp \
+./env sbcl --dynamic-space-size 12000 \
+  --script wiki/measurements/yawl-visibility-c8f1d28/run.lisp
+
+uv run --no-project --with numpy python \
+  wiki/measurements/yawl-visibility-c8f1d28/analyze.py build/visibility
+
+make test
+make
+#+end_src
+
+Repeat with =VIS_REVERSE=1= and a fresh output folder, then with
+=BENCH_MODE=native-1x=. =VIS_BEVELS=0= selects plain faces. =VIS_MOTION=96=
+records the moving camera; =VIS_GRAZE=1= selects the horizon-crossing path.
+=VIS_EDIT=1= removes and republishes a resident; =VIS_RESIZE=1= grows then
+restores the target. =VIS_NULL=1= runs forward in both renderers, each retaining
+its own history. =VIS_SHADER=1= forces the portable temporal reconstruction.
+Warmup and timed counts must be divisible by four.
+
+All 35 test suites and both application builds pass. The actual durable game
+was reloaded, verified with visibility and bevels active, screenshot-inspected,
+and left playing with a healthy canvas loop. Raw accepted timing tables and
+analysis accompany this bundle; large readbacks stay locally excluded.

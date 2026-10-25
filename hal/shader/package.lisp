@@ -85,6 +85,7 @@
            #:shader-interface-location
            #:shader-interface-built-in
            #:shader-interface-interpolation
+           #:shader-interface-invariant-p
            #:shader-resource
            #:shader-resource-descriptor-set
            #:shader-resource-binding
