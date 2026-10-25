@@ -348,6 +348,52 @@ from spawn to green, ridge, and pond without teleportation. This advances
 the playable-journey bet, not the whole fortress/resume requirement below:
 the wizard's completion and edits are retained only for this session.
 
+/Hollow Walk, 2026-10-25./ [[lisp:luvcraft:make-first-journey-world]] now
+authors a separate seed-7 alpine world through sparse edits, without changing
+the version-1 generator, save reader, or ordinary game startup. A materialized
+survey chose the grove's foot level 13, the ruin's 14, and the natural cave's
+8 beneath a roof at 12--13. Seven Crowns, Split-Mouth and Watchman's Rest are
+joined by a graded three-cell trail, a descending cave branch, and an eastern
+return crossing the ravine on planks. Coordinates are Luvcraft X/Y/Z (Y up):
+trailhead (-48,12,8), grove (-48,13,40), entrance (-23,8,62), chamber
+(-23,8,72), ruin (24,14,104). The constructor returns exact route and foot-cell
+data as its fourth value. Its initial save is 3,654 edits and 171,646 bytes;
+reloading does not run the constructor or rebuild a mined wall.
+
+The guarded CPU run passed 1,091 =luvcraft/luft/test= checks and 883
+=luvcraft/luft/game/test= checks, with GPU acquisition and canvas opening
+forbidden. Four generated chunks retain pre-change material fingerprints;
+four complete Luft chunks agree with the edited Luvcraft streaming oracle
+over 1,048,576 cells. A canvas-free Luvcraft host installs the real walking
+motor and traverses 886 centreline waypoints, outward and reversed, without
+pose writes or flight: 974.67 cells travelled in 569.05 simulated seconds,
+maximum frame displacement 0.1456 cells. This is cell-by-cell route-controller
+evidence, not normal walking pace or renderer performance. Body clearance and
+grounded support are checked throughout; blocking a foot cell or its headroom
+refuses a route and clearing it restores reachability. The first run caught
+an upper trail foundation blocking the cave; the trail now goes west around
+the chamber rather than across it.
+
+The game save test mines a ruin wall, places a crystal, preserves the player's
+pose/look, evicts all four derived CPU chunks, regenerates them, and walks
+home. A separate fresh SBCL process also read the checkpoint at the ruin,
+retained the air edit and crystal, and walked the return without teleporting.
+
+An isolated current-code Metal host loaded a disposable copy of the authored
+save, settled its real asynchronous residency and captured eight eye-level
+1280x800 views: trailhead, grove, cave approach/chamber/exit, ruin
+approach/interior, and return bridge. Native review finds the grove and
+natural ravine intact, the slate-brow entrance visible from open sky, the
+wall crystal in an enclosed chamber, and both ruin exits and the continuous
+plank crossing clear. The cave is deliberately a small constructed chamber,
+not yet organic cave art. Captures use fixed exposure .45 and do not measure
+walking latency; their paused FPS placeholder is expected. The preserved
+live game and user's save were not replaced.
+
+Long sightlines between landmarks, streaming-cohort latency during continuous
+play, the initial fortress and a distant structure remain open; this is not
+a completion note for the larger journey.
+
 /Done when./ A player can leave the initial fortress, follow and lose a road,
 cross at least one distant authored structure, return by another route, edit a
 cell, restart, and find both edit and position preserved while residency stays

@@ -453,6 +453,7 @@
            #:resize-luvcraft-component
            #:make-default-sky-profile
            #:make-empty-little-block-world
+           #:make-first-journey-world
            #:make-little-block-world
            #:make-luvcraft-save-description
            #:*inhabitant-describers*

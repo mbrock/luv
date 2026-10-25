@@ -3,7 +3,9 @@
   (:import-from #:parachute #:define-test #:is #:true)
   (:local-nicknames (#:host #:luvcraft.luft.game)
                     (#:game #:luvcraft.luft)
-                    (#:render #:luft.render)))
+                    (#:render #:luft.render)
+                    (#:terrain #:luft.terrain)
+                    (#:v #:luv.arithmetic.lisp.vec3)))
 
 (in-package #:luvcraft.luft.game.tests)
 
@@ -372,3 +374,153 @@
         (true (null (luvcraft.agent::companion-ground-height session 3.4d0 7.2d0 4.5d0 3d0)))
         (true (null (luvcraft.agent::companion-ground-height session 3.4d0 8.2d0 5.5d0 3d0)))
         (true (null (luvcraft.agent::companion-ground-height session 300.4d0 7.2d0 5.5d0 3d0)))))))
+
+(defun hollow-walk-test-viewer (world resume)
+  "Real source materialization and game motor, without a canvas or renderer."
+  (multiple-value-bind (source dropped) (game:luvcraft-world-luft-source world)
+    (assert (zerop dropped))
+    (let ((scene (game:make-luvcraft-streaming-scene source))
+          (keys nil))
+      (dolist (x '(960 1024))
+        (dolist (y '(1024 1088))
+          (let ((key (luft:chunk-key-at x y)))
+            (push key keys)
+            (setf (gethash key (terrain:streaming-scene-store scene))
+                  (terrain:materialize-world-source-chunk
+                   source key 1 :edits (terrain:capture-world-source-chunk-edits source key))))))
+      (terrain:rebuild-authored-world-resident-values scene keys)
+      (multiple-value-bind (position yaw pitch) (game:luvcraft-resume-luft-pose source resume)
+        (let ((viewer (make-instance
+                       'host:luvcraft-viewer :source scene :luvcraft-world world :resume resume
+                       :camera (render:make-fly-camera :yaw yaw :pitch pitch)
+                       :player (terrain:make-walking-character :position (apply #'v:make-vec3 position))
+                       :hotbar (list (game:block-placement luvcraft::*stone-block*)))))
+          (assert (null (render:viewer-canvas viewer)))
+          (assert (typep (render:viewer-player viewer) 'host::luvcraft-character))
+          viewer)))))
+
+(defun walk-hollow-route (viewer points)
+  "Walk POINTS continuously; return simulated seconds, travel and largest frame step."
+  (let* ((scene (render:viewer-source viewer))
+         (simulation (render:viewer-simulation viewer))
+         (player (render:viewer-player viewer))
+         (body (terrain:character-body player))
+         (frames 0) (travel 0d0) (largest 0d0))
+    (dolist (point points)
+      (destructuring-bind (x y z) point
+        (assert (terrain:body-standable-cell-p body scene (+ x 1024) (+ z 1024) y))
+        (let ((route (terrain:start-character-route player scene (+ x 1024) (+ z 1024) y)))
+          (loop repeat 2400 while (eq :running (terrain:walking-route-status route)) do
+            (let* ((p (terrain:body-position body))
+                   (px (v:vec3-x p)) (py (v:vec3-y p)) (pz (v:vec3-z p)))
+              (terrain:advance-world-simulation simulation (/ 1d0 60))
+              (incf frames)
+              (let* ((next (terrain:body-position body))
+                     (distance (sqrt (+ (expt (- px (v:vec3-x next)) 2)
+                                        (expt (- py (v:vec3-y next)) 2)
+                                        (expt (- pz (v:vec3-z next)) 2)))))
+                (incf travel distance)
+                (setf largest (max largest distance))
+                (assert (< distance 0.5))
+                (assert (not (terrain:character-flying-p player)))
+                (assert (terrain:body-clear-at-p
+                         (terrain:scene-solid scene) (v:vec3-x next) (v:vec3-y next)
+                         (v:vec3-z next) (terrain:body-height body) (terrain:body-radius body)))
+                (when (terrain:body-grounded-p body)
+                  (assert (not (terrain:body-clear-at-p
+                                (terrain:scene-solid scene) (v:vec3-x next) (v:vec3-y next)
+                                (- (v:vec3-z next) 0.01)
+                                (terrain:body-height body) (terrain:body-radius body))))))))
+          (unless (eq :arrived (terrain:walking-route-status route))
+            (error "Hollow Walk stuck before ~S: ~S at ~S (~A)" point
+                   (terrain:walking-route-status route) (terrain:body-position body)
+                   (terrain:walking-route-detail route))))))
+    (values (/ frames 60d0) travel largest)))
+
+(define-test hollow-walk-is-traversable-by-the-real-luvcraft-motor
+  (multiple-value-bind (world camera player review) (luvcraft:make-first-journey-world)
+    (let* ((description (luvcraft:make-luvcraft-save-description
+                         world :camera camera :player player :selected-block luvcraft::*stone-block*))
+           (viewer (hollow-walk-test-viewer world (getf (rest description) :resume)))
+           (points (getf review :foot-cells)))
+      ;; Not only destination reachability: walk every centreline cell in both
+      ;; directions, across chunk seams and down into the cave. No pose writes.
+      (multiple-value-bind (seconds travel largest)
+          (walk-hollow-route viewer (append points (reverse points)))
+        (true (> travel 600))
+        (true (< largest 0.5))
+        (format t "~&Hollow Walk: ~D waypoints, ~,2Fs simulated, ~,2F cells travelled, max frame ~,4F.~%"
+                (* 2 (length points)) seconds travel largest))
+      ;; Negative controls operate on the same real scene. An occupied foot
+      ;; cell or low ceiling must fail, and removing it restores reachability.
+      (let* ((scene (render:viewer-source viewer))
+             (source (terrain:streaming-scene-source scene))
+             (character (render:viewer-player viewer)))
+        (dolist (height '(8 9))
+          (let ((cell (game:luvcraft-cell-site source -23 height 72)))
+            (true (terrain:edit-streaming-scene-cell scene cell (game:block-placement luvcraft::*stone-block*)))
+            (is eq :failed (terrain:walking-route-status
+                            (terrain:start-character-route character scene 1001 1096 8)))
+            (true (terrain:edit-streaming-scene-cell scene cell nil))
+            (is eq :running (terrain:walking-route-status
+                             (terrain:start-character-route character scene 1001 1096 8)))))))))
+
+(define-test hollow-walk-game-save-keeps-mining-building-and-the-walkers-pose
+  (multiple-value-bind (world camera player review) (luvcraft:make-first-journey-world)
+    (let* ((initial (luvcraft:make-luvcraft-save-description
+                    world :camera camera :player player :selected-block luvcraft::*stone-block*))
+           (viewer (hollow-walk-test-viewer world (getf (rest initial) :resume)))
+           (scene (render:viewer-source viewer))
+           (source (terrain:streaming-scene-source scene))
+           (route (getf review :route))
+           (return-leg (member '(24 14 104) route :test #'equal))
+           (mined (game:luvcraft-cell-site source 29 17 108))
+           (built (game:luvcraft-cell-site source 23 14 106)))
+      (walk-hollow-route viewer (ldiff route (rest return-leg)))
+      (true (terrain:edit-streaming-scene-cell scene mined nil))
+      (true (terrain:edit-streaming-scene-cell scene built (game:block-placement luvcraft::*crystal-block*)))
+      (setf (render:camera-yaw (render:viewer-camera viewer)) 0.75
+            (render:camera-pitch (render:viewer-camera viewer)) -0.12)
+      (let* ((saved (render:viewer-world-description viewer))
+             (resume (getf (rest saved) :resume)))
+        (uiop:with-temporary-file (:pathname pathname :type "sexp")
+          (render:write-viewer-world-description viewer saved pathname)
+          (multiple-value-bind (restored restored-resume) (luvcraft:read-luvcraft-save pathname)
+            (is equalp resume restored-resume)
+            (is equal (getf (rest saved) :world) (luvcraft:world-save-description restored))
+            (let* ((again (hollow-walk-test-viewer restored restored-resume))
+                   (next-scene (render:viewer-source again)))
+              ;; Drop all four derived chunks, including collision, then
+              ;; regenerate from the restored source, never the constructor.
+              (let* ((next-source (terrain:streaming-scene-source next-scene))
+                     (store (terrain:streaming-scene-store next-scene))
+                     (keys (loop for key being the hash-keys of store collect key)))
+                (is = 4 (length keys))
+                (clrhash (terrain:streaming-scene-desired next-scene))
+                (terrain:evict-undesired-authored-world-residents next-scene)
+                (terrain:rebuild-authored-world-resident-values next-scene nil)
+                (is = 0 (hash-table-count store))
+                (is = 0 (luft:fiber-store-count (terrain:scene-solid next-scene)))
+                (dolist (key keys)
+                  (setf (gethash key store)
+                        (terrain:materialize-world-source-chunk
+                         next-source key 2
+                         :edits (terrain:capture-world-source-chunk-edits next-source key))))
+                (terrain:rebuild-authored-world-resident-values next-scene keys)
+                (is = 4 (hash-table-count store)))
+              (is equalp (terrain:body-position (terrain:character-body (render:viewer-player viewer)))
+                  (terrain:body-position (terrain:character-body (render:viewer-player again))))
+              (is = 0.75 (render:camera-yaw (render:viewer-camera again)))
+              (is = -0.12 (render:camera-pitch (render:viewer-camera again)))
+              (is = 0 (terrain:scene-cell-bit next-scene 1053 1132 17))
+              (is eq (game:block-placement luvcraft::*crystal-block*)
+                  (terrain:scene-material-placement-at next-scene built))
+              (multiple-value-bind (value present-p)
+                  (gethash mined (terrain:world-source-edits (terrain:streaming-scene-source next-scene)))
+                (true present-p)
+                (is eq nil value))
+              ;; Resume is a new body's initial pose, not a teleport during a
+              ;; walk. Continue out the opposite doorway and back to spawn.
+              (walk-hollow-route again return-leg)
+              (let ((next-save (render:viewer-world-description again)))
+                (is equal (getf (rest saved) :world) (getf (rest next-save) :world))))))))))

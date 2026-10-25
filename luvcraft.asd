@@ -70,6 +70,7 @@
                  (:file "physics")
                  (:file "physics-simd" :if-feature :sbcl)
                  (:file "persistence")
+                 (:file "journey")
                  (:file "sky")
                  (:file "frame-performance")
                  (:file "text")

@@ -286,3 +286,94 @@
       (true (< (abs (- (getf (getf resume :look) :yaw) (- (/ pi 2) 1))) 1e-5))
       (is equal '(:block :name :bricks) (getf resume :selected-block))
       (is equal '((:block :name :planks)) (getf resume :carried)))))
+
+(defun little-world-generation-fingerprint (seed relief cx cz)
+  "FNV-1a of Z/Y/X-ordered block names, each terminated by a zero byte.
+Unlike SXHASH this freezes a portable, independently captured baseline."
+  (let* ((world (luvcraft-oracle-world
+                 (make-instance 'luvcraft:little-world-source :seed seed :relief relief)
+                 64 nil (list (list cx 0 cz))))
+         (hash 2166136261))
+    (dotimes (z 16)
+      (dotimes (y 64)
+        (dotimes (x 16)
+          (let* ((block (luvcraft:world-block-at world (+ (* cx 16) x) y (+ (* cz 16) z)))
+                 (name (symbol-name (if block (luvcraft:block-kind-name block) :air))))
+            (loop for character across name do
+              (setf hash (logand #xffffffff
+                                (* 16777619 (logxor hash (char-code character)))))))
+          (setf hash (logand #xffffffff (* 16777619 (logxor hash 0)))))))
+    hash))
+
+(define-test the-hollow-walk-does-not-change-existing-generation
+  ;; Captured before adding the opt-in authoring constructor, at 294b723.
+  (loop for (seed relief cx cz expected) in
+          '((7 :alpine -2 3 474099773) (7 :alpine 0 4 2885716455)
+            (121 :alpine -1 -1 812114554) (121 :meadow 0 0 1437255226))
+        do (is = expected (little-world-generation-fingerprint seed relief cx cz)))
+  (is = 1 luvcraft:+luvcraft-save-format-version+)
+  (is = 1 luvcraft::+little-world-source-version+)
+  (is eq :meadow
+      (luvcraft:little-world-source-relief
+       (luvcraft:restore-world-source-save-description
+        :little-world '(:source-version 1 :seed 121 :edits ())))))
+
+(define-test hollow-walk-is-a-bounded-deterministic-edit-composition
+  (multiple-value-bind (world camera player review) (luvcraft:make-first-journey-world)
+    (let* ((little (luvcraft:block-world-source world))
+           (overlay (luvcraft:little-world-source-edits little))
+           (entries (luvcraft::block-edit-overlay-entries overlay))
+           (description (luvcraft:make-luvcraft-save-description
+                         world :camera camera :player player
+                         :selected-block luvcraft::*stone-block*)))
+      (is eq 'luvcraft:little-world-source (type-of little))
+      (is = 7 (luvcraft:little-world-source-seed little))
+      (is eq :alpine (luvcraft:little-world-source-relief little))
+      (true (< 1000 (hash-table-count entries) 10000))
+      (true (loop for (x y z) being the hash-keys of entries
+                  always (and (<= -60 x 50) (<= 1 y 26) (<= 7 z 113))))
+      (multiple-value-bind (again camera2 player2 review2) (luvcraft:make-first-journey-world)
+        (is equal review review2)
+        (is equalp description
+            (luvcraft:make-luvcraft-save-description
+             again :camera camera2 :player player2 :selected-block luvcraft::*stone-block*)))
+      ;; Named places have real bodies, not just entries in a waypoint list.
+      (dolist (xz '((-55 35) (-53 44) (-48 47) (-42 32) (-48 30) (-57 40) (-43 39)))
+        (is eq luvcraft::*wood-block* (luvcraft:world-block-at world (first xz) 17 (second xz))))
+      (is eq luvcraft::*stone-block* (luvcraft:world-block-at world -23 12 72))
+      (true (loop for y from 8 below 64 never (luvcraft:world-block-at world -23 y 57)))
+      (is eq luvcraft::*slate-block* (luvcraft:world-block-at world -23 12 60))
+      (is eq luvcraft::*crystal-block* (luvcraft:world-block-at world -27 9 71))
+      (true (luvcraft:world-block-at world 29 19 108))
+      (dolist (point (getf review :foot-cells))
+        (destructuring-bind (x y z) point
+          (true (luvcraft:world-block-at world x (1- y) z))
+          (true (loop for h from y below (+ y 4)
+                      never (luvcraft:world-block-at world x h z)))))
+      ;; Round trip without the constructor. Restoring has no resident chunks.
+      (multiple-value-bind (restored resume) (luvcraft:restore-luvcraft-save-description description)
+        (is equalp '(-47.5d0 12d0 8.5d0) (getf resume :player-position))
+        (is = 0 (length (luvcraft.world:resident-world-chunks restored)))
+        (is equal (luvcraft::world-save-description world) (luvcraft::world-save-description restored))
+        (let ((source (luvcraft:block-world-source restored)))
+          (luvcraft:center-little-world-residency source restored -2 4 :radius 0)
+          (is eq luvcraft::*crystal-block* (luvcraft:world-block-at restored -27 9 71))
+          (luvcraft:edit-block-at nil restored -27 9 71)
+          (luvcraft:edit-block-at luvcraft::*bricks-block* restored -25 8 75)
+          (luvcraft:center-little-world-residency source restored 20 20 :radius 0)
+          (is = 1 (length (luvcraft.world:resident-world-chunks restored)))
+          (luvcraft:center-little-world-residency source restored -2 4 :radius 0)
+          (is = 1 (length (luvcraft.world:resident-world-chunks restored)))
+          (is eq nil (luvcraft:world-block-at restored -27 9 71))
+          (is eq luvcraft::*bricks-block* (luvcraft:world-block-at restored -25 8 75))
+          (multiple-value-bind (block present-p)
+              (luvcraft.world:block-edit-at (luvcraft:little-world-source-edits source) -27 9 71)
+            (true present-p)
+            (is eq nil block))))
+      ;; Independent old streaming requests and Luft materialization agree,
+      ;; including cross-boundary trees, solid foundations and carved air.
+      (let ((edits (loop for (x y z) being the hash-keys of entries using (hash-value block)
+                         collect (list block x y z))))
+        (dolist (x '(960 1024))
+          (dolist (y '(1024 1088))
+            (is = 0 (compare-luft-chunk 7 :alpine 64 (luft:chunk-key-at x y) edits))))))))
