@@ -11,6 +11,10 @@ on:
         description: Sign and notarize the Mac download (requires Apple secrets)
         type: boolean
         default: false
+      macos_only:
+        description: Run only the Mac release qualification
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -79,6 +83,7 @@ jobs:
           compression-level: 0
 
   windows-sources:
+    if: ${{ !inputs.macos_only }}
     # Export the locked Lisp sources on Linux; compile them natively below.
     runs-on: ubuntu-22.04
     timeout-minutes: 30
@@ -144,6 +149,7 @@ jobs:
           if-no-files-found: error
 
   linux:
+    if: ${{ !inputs.macos_only }}
     # Do not publish bare SBCL images that still depend on the CI Nix store.
     runs-on: ubuntu-22.04
     timeout-minutes: 90

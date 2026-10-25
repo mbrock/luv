@@ -70,6 +70,7 @@ workflow fails before publication if Apple credentials are missing or Apple
 rejects the submission. Push builds and default manual builds remain ad-hoc
 signed development artifacts, which Gatekeeper does not trust. Select
 **notarize** on manual dispatch to qualify a signed release before tagging.
+Select **macos_only** to skip the other platforms for this qualification.
 
 Build on an Apple Silicon Mac with Nix and Xcode:
 
@@ -134,8 +135,9 @@ Actions secrets through GitHub's secure UI or `gh secret set` via stdin:
 | `APPLE_TEAM_ID` | Team that owns the certificate |
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific notarization password |
 
-The job imports the identity into a temporary keychain, validates/stores the
-notarization credentials there, and removes the keychain in an `always()`
+The job imports the identity and Apple's Developer ID intermediates into a
+temporary keychain, signs and runs a small probe before building Lisp, validates
+and stores the notarization credentials there, and removes the keychain in an `always()`
 cleanup step. Certificates and passwords must never be committed. Notary
 results/logs are retained separately as CI diagnostics. Local packaging tests:
 `python3 scripts/macos-sign-release-tests.py`.

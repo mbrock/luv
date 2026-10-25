@@ -19,6 +19,36 @@ security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$password" "$keychain"
 security import "$certificate" -P "$MACOS_CERTIFICATE_PASSWORD" -k "$keychain" -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+# The PKCS#12 contains the leaf and private key. Hosted runners may lack
+# its Developer ID intermediate, especially the original G1 authority.
+# Import Apple's intermediates without overriding their system trust policy.
+for authority in DeveloperIDCA DeveloperIDG2CA; do
+  intermediate="$RUNNER_TEMP/$authority.cer"
+  curl --fail --silent --show-error --location \
+    "https://www.apple.com/certificateauthority/$authority.cer" -o "$intermediate"
+  security import "$intermediate" -k "$keychain"
+  rm -f "$intermediate"
+done
+# --keychain restricts identity lookup; chain building also uses the user's
+# search list. Preserve that list while adding the disposable release keychain.
+python3 - "$keychain" <<'PYTHON'
+import shlex
+import subprocess
+import sys
+existing = shlex.split(subprocess.check_output(
+    ["security", "list-keychains", "-d", "user"], text=True))
+subprocess.run(["security", "list-keychains", "-d", "user", "-s",
+                sys.argv[1], *existing], check=True)
+PYTHON
+# Exercise the actual key before spending minutes building the Lisp image.
+probe="$RUNNER_TEMP/luv-signing-probe"
+printf '%s\n' 'int main(void) { return 0; }' | xcrun clang -x c - -o "$probe"
+security find-identity -v -p codesigning "$keychain"
+codesign --force --sign "$MACOS_SIGN_IDENTITY" --keychain "$keychain" \
+  --options runtime --timestamp "$probe"
+codesign --verify --strict "$probe"
+"$probe"
+rm -f "$probe"
 xcrun notarytool store-credentials luv-release --keychain "$keychain" \
   --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD"
 {
