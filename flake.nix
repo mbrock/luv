@@ -775,7 +775,11 @@
           pkgs = nixpkgs.legacyPackages.${system};
           inherit (nixpkgs) lib;
           closerMop = pkgs.sbcl.pkgs.closer-mop;
-          shadercLisp = pkgs.sbcl.withPackages (_lispPackages: [ closerMop ]);
+          alexandria = pkgs.sbcl.pkgs.alexandria;
+          shadercLisp = pkgs.sbcl.withPackages (_lispPackages: [
+            alexandria
+            closerMop
+          ]);
         in
         pkgs.stdenv.mkDerivation {
           pname = "luv-shaderc";
@@ -824,6 +828,7 @@
             # the runtime's code signature (so remove-references-to's
             # re-signing fails).  The runtime's own libraries stay referenced.
             for reference in ${pkgs.sbcl} ${closerMop} ${closerMop.src} \
+                ${alexandria} ${alexandria.src} \
                 "$src"; do
               hash=$(basename "$reference" | cut -c1-32)
               env LC_ALL=C sed -i "s/$hash/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/g" \

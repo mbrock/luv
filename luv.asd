@@ -116,7 +116,7 @@
   :description "The backend-neutral typed shader language and lowering protocols."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("closer-mop" "luv/arithmetic")
+  :depends-on ("alexandria" "closer-mop" "luv/arithmetic")
   :serial t
   :components ((:file "hal/shader/package")
                (:file "hal/shader/language")
