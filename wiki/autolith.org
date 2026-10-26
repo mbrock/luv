@@ -646,3 +646,7 @@ Said in the third voice, as candidates rather than plans, beside #QQRFZ1:
 - Combine with what the other four had that Autolith lacks: froth's block
   results and pager for the 8,000-character cliff (#5GU1VI, #FDMSXG), and
   nxt's parked-task dump for the hung turn (#BWXFJK).
+- Rather than only borrowing from it, give Autolith a body: a stone
+  inhabitant whose mind is an =autolith acp= process with luv's commands as
+  MCP tools, and whose strata are its own image commits and generations
+  (#QM159E, #7OL1FG).

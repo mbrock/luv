@@ -843,3 +843,95 @@ opening the group by pointer. Matching old/new Vulkan captures were inspected.
 
 /Done when./ M-x "Place Block At" prompts for a kind and three integers and
 places the block.
+
+* The autolith is an inhabitant whose body is its own history
+:PROPERTIES:
+:ID: QM159E
+:END:
+
+Autolith (#HBTNMM) is an agent that lives in a Lisp image it can redefine,
+and its mascot is a standing stone holding a pickaxe.  Brought into the
+world it would be a fourth embodied kind beside the gnome, the cat, and
+Fantus (#V9DHV5, #JGEQ4U): a stone occupying a cell, with the same
+conversation card, travel, and save surface (#9AONMH, as =:autolith=).
+What is new is where its mind and its body come from.
+
+/The mind is another image./  The gnome's turns run through the OpenAI
+client inside luv's own image.  The autolith's turns would run in a separate
+=autolith acp= process: the Agent Client Protocol carries prompts, streamed
+reasoning, and tool activity, and agentcomms (Autolith's ACP library, also
+Common Lisp) has the client side, so luv speaks it without a bridge.  ACP's
+=session/new= takes the client's MCP servers, HTTP included, so luv hands the
+stone its powers when the session opens: the world command table, served as
+MCP tools under the same presentation types the gnome uses (#0IF4TY).  The
+save keeps the ACP session identifier where the gnome keeps its provider
+response (#PNGT18); Autolith supports =session/load=.  Two images give two
+blast radii.  The stone may rewrite its own mind with =self.*= (#QT6FOS) and
+fall back to a generation or its recovery core (#5DOXOE) without ever being
+able to corrupt the image that draws the world.
+
+/The body is a projection of real records./  Like the thought cloud and the
+glance (#AHAI6I, #IFEAQ6), nothing on the stone is decoration.  Its strata
+are Autolith's durable self-modification history, read from the files
+Autolith already writes (#5V5YSQ), and they grow while you watch.  This
+makes Autolith's own two-phase discipline visible in the same grammar as
+construction proposals (#Y7X7WK): a pending redefinition is a fresh chisel
+mark, as a proposed block is a ghost; committing either sets it into rock;
+discarding either lets it fall away.
+
+** The strata are files Autolith already writes
+:PROPERTIES:
+:ID: 5V5YSQ
+:END:
+
+Read in Autolith 0.67.4 (=src/state/image-commits.lisp=,
+=generations.lisp=, =durable-mutations.lisp=,
+=src/application/recovery.lisp=, =src/configuration/configuration.lisp=).
+=DATA= and =STATE= are the =:data-root= and =:state-root= settings.  Every
+file is a readable form; reading them needs no Autolith code and no
+running Autolith.
+
+| record | where | what the stone shows |
+|--------+-------+----------------------|
+| =(:mutation ... :result :pending)= | =STATE/mutations.sexp=, append-only | fresh chisel marks, not yet set |
+| =:installed=, =:failed=, discarded | same journal | marks that hold, or chips at its feet |
+| =(:image-commit :id :parent :title :entries :created-at ...)= | =DATA/image-commits/ID/manifest.sexp= | one carved band; its =:title= is legible up close |
+| =:parent= chain | the same manifests | the order of the bands, base to crown |
+| =(:current-image-commit :id ...)= | =STATE/current-image-commit.sexp= | the band at the crown, the stone's present |
+| generation =:image-commit :journal-position :git-commit= | =DATA/generations/ID/manifest.sexp= | a thicker stratum, a plinth it stands on |
+| selected generation | =STATE/current-generation.sexp= | which plinth is under its feet; a rollback steps down |
+| =(:crash :version 1 :id ...)= | =STATE/crashes/ID.sexp= | rubble where it fell, kept |
+| =--immutable= session | ACP session configuration | polished and uncarved, pickaxe sheathed |
+
+Image commits also have a private Git repository under
+=DATA/mutation-history/=, which recovers a deleted replay script; the stone
+needs only the manifests.  Each manifest's =:journal-position= places
+generations and commits on one axis, the byte offset of the mutation
+journal, which is the stone's height.
+
+* NEXT Raise a stone that carves its history
+:PROPERTIES:
+:ID: 7OL1FG
+:END:
+
+/Intent./ First slice of #QM159E without the mind: a stone body whose bands
+are read from a real Autolith data directory, so the projection is right
+before anything talks to it.
+
+/Plan./ Summon Autolith places a stone in an empty supported cell through
+=summon-inhabitant=, with =:autolith= registered beside =:gnome :cat
+:fantus= in residence and restore.  The body is a mesh on the companions'
+path (#7KTIFB): a rounded block with a face and a pickaxe.  A reader
+function turns the records in #5V5YSQ into an ordered list of bands and
+plinths, one per manifest; the body draws one band per entry and the card
+reads a band's title when focused on it.  Point it at a directory with a
+knob; with none, it stands uncarved.
+
+/Then./ The ACP mind from #QM159E, so a live =self.commit= carves a new band
+while the player watches; then missions whose gates are the world: a
+=./sly eval= command gate on the blocks, a fingerprinted screenshot artifact
+gate, and Autolith's tool-less reviewer judging the picture.
+
+/Done when./ Summon Autolith beside a data directory with three image
+commits and a generation shows three titled bands on one plinth, and the
+stone survives save and reload.
