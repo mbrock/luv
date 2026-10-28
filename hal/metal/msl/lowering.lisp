@@ -1803,9 +1803,11 @@ language's (see SHADER:DEFINE-SHADER-STRUCT)."
   (let ((statements nil))
     (dolist (binding (shader:shader-specification-bindings specification))
       (let* ((expression (shader:shader-binding-expression binding))
+             ;; A LET* may rebind a name, which one scope cannot redeclare.
              (name (msl-local-name
                     context
-                    (msl-identifier (shader:shader-object-name binding))))
+                    (msl-identifier (shader:shader-object-name binding))
+                    t))
              (value (lower-msl-expression context expression)))
         (setf statements
               (nconc statements (drain-msl-pending-statements context)))

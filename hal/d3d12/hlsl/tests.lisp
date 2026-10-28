@@ -191,6 +191,22 @@ Without DXC, return NIL: the text claims still hold."
        (shader:counted-fold (index 2.0 sum 0.0)
          (if (< index value) (hlsl-reused-local sum index) sum)))))
 
+(define-test let-rebinding-lowers-to-a-fresh-hlsl-name
+  (multiple-value-bind (source document)
+      (source-of
+       (shader:parse-shader-specification
+        'hlsl-rebinding-probe
+        '(:stage :fragment
+          :inputs ((value :float :location 0))
+          :outputs ((color :vec4 :location 0)))
+        '((let* ((shade (* value value))
+                 (shade (+ shade (* shade value))))
+            (shader:set-output color (shader:vec4 shade shade value 1.0))))))
+    (true (search "float shade_2 = (shade + (shade * stage_in.value));"
+                  source)
+          "the rebinding takes a name of its own: ~A" source)
+    (compiles document)))
+
 (define-test conditional-values-keep-helper-and-fold-work-in-their-arms
   (multiple-value-bind (source document) (source-of (hlsl-branch-local-probe))
     (true (< (search "if (stage_in.value > 0.0f)" source)

@@ -1563,7 +1563,8 @@ the contract numbers them together although HLSL registers would not clash."
 
 (defun lower-hlsl-bindings (context specification)
   (loop for binding in (shader:shader-specification-bindings specification)
-        nconc (lower-hlsl-local-binding context binding)))
+        ;; A LET* may rebind a name, which one scope cannot redeclare.
+        nconc (lower-hlsl-local-binding context binding :unique t)))
 
 (defun lower-hlsl-traditional-specification
     (context entry-point-name interface)

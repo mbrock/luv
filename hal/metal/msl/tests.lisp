@@ -655,6 +655,23 @@ on success or without the compiler, else its report."
           "the scalar read widens to float4: ~A" source)
     (parachute:is eq nil (metal-compiler-diagnostics source))))
 
+;;; A LET* that rebinds a name in one scope, which C cannot redeclare.
+(shader:define-shader msl-rebinding-probe
+    (:stage :fragment
+     :inputs ((value :float :location 0))
+     :outputs ((color :vec4 :location 0)))
+  (let* ((shade (* value value))
+         (shade (+ shade (* shade value))))
+    (shader:set-output color (shader:vec4 shade shade value 1.0))))
+
+(define-test let-rebinding-lowers-to-a-fresh-metal-name
+  (let ((source (msl:msl-document-source
+                 (msl:compile-msl (msl-rebinding-probe)))))
+    (true (search "float shade_2 = (shade + (shade * stage_in.value));"
+                  source)
+          "the rebinding takes a name of its own: ~A" source)
+    (parachute:is eq nil (metal-compiler-diagnostics source))))
+
 (define-test integers-and-booleans-lower-to-metal
   (let ((source (msl:msl-document-source
                  (msl:compile-msl (integer-bits-fragment-probe)))))
