@@ -123,15 +123,17 @@ quickbar begins: things to build a house with, colours, and a lamp.")
                     :blocks (remove-duplicates
                              (append (mapcar #'luvcraft:block-kind-named *starting-hotbar*)
                                      (luvcraft:placeable-block-kinds))
-                             :from-end t)
-                    :quantity 0)))
+                             :from-end t))))
+    ;; Materials are unlimited, as in the original game; only carried blocks
+    ;; keep counts, so stock saved while every material was finite is dropped.
     (if (member :inventory resume)
         (setf (luvcraft:block-inventory-entries inventory)
               (loop for (description quantity) in (getf resume :inventory)
-                    do (check-type quantity (integer 0))
+                    for block = (luvcraft::restore-block-value description)
+                    for count = (and (luvcraft:block-kind-carried-p block) (or quantity 0))
+                    do (check-type count (or null (integer 0)))
                     collect (make-instance 'luvcraft:block-inventory-entry
-                                           :block (luvcraft::restore-block-value description)
-                                           :quantity quantity)))
+                                           :block block :quantity count)))
         (dolist (description (getf resume :carried))
           (luvcraft:add-block-to-inventory
            inventory (luvcraft::restore-block-value description))))
@@ -171,14 +173,15 @@ quickbar begins: things to build a house with, colours, and a lamp.")
     ((viewer luvcraft-viewer) cell placement)
   ;; Commit inventory changes only after the engine accepts the edit.  Undo
   ;; and redo pass through this same boundary, so they conserve stock too.
+  ;; As in the original game, materials are unlimited and only carried
+  ;; blocks, such as films, are picked up and spent.
   (when (and placement (companion-occupies-cell-p viewer cell))
     (setf (render:viewer-last-edit-status viewer) :occupied)
     (return-from render:apply-viewer-world-edit (values nil :occupied)))
   (let* ((inventory (viewer-inventory viewer))
          (block (and placement (selected-block viewer placement)))
          (entry (and block (luvcraft:block-inventory-entry-for inventory block)))
-         (finite-p (or (not (viewer-creative-p viewer))
-                       (and block (luvcraft:block-kind-carried-p block))))
+         (finite-p (and block (luvcraft:block-kind-carried-p block)))
          (old (terrain:scene-material-placement-at (render:viewer-source viewer) cell))
          (coordinate (game:site-luvcraft-cell (streaming-source viewer) cell))
          (overlay (luvcraft:little-world-source-edits
@@ -187,15 +190,16 @@ quickbar begins: things to build a house with, colours, and a lamp.")
          (old-block (and old (or (and original
                                        (eq old (game:block-placement original)) original)
                                  (game::luvcraft-block-for-placement old)))))
-    (when (and block finite-p
+    (when (and finite-p
                (or (null entry) (zerop (luvcraft:block-inventory-entry-quantity entry))))
       (setf (render:viewer-last-edit-status viewer) :empty)
       (return-from render:apply-viewer-world-edit (values nil :empty)))
     (multiple-value-bind (edit status) (call-next-method)
       (when edit
-        (when (and block finite-p)
+        (when finite-p
           (luvcraft:remove-block-from-inventory inventory block))
-        (when old-block (luvcraft:add-block-to-inventory inventory old-block))
+        (when (and old-block (luvcraft:block-kind-carried-p old-block))
+          (luvcraft:add-block-to-inventory inventory old-block))
         ;; Keep per-instance kinds in Luvcraft's overlay: Luft's palette is
         ;; deliberately only a visual identity (all films share one reel).
         (apply #'luvcraft::record-block-edit overlay block coordinate)
@@ -203,8 +207,9 @@ quickbar begins: things to build a house with, colours, and a lamp.")
           (luvcraft::smash-block-particles
            (viewer-particles viewer) old-block
            (apply #'luvcraft.world:make-world-coordinate coordinate))
-          (setf (viewer-held-block viewer) old-block)
-          (put-on-hotbar viewer old)))
+          (when (luvcraft:block-kind-carried-p old-block)
+            (setf (viewer-held-block viewer) old-block)
+            (put-on-hotbar viewer old))))
       (values edit status))))
 
 (defun put-on-hotbar (viewer placement)

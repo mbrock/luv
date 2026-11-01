@@ -1081,17 +1081,19 @@ provide the embedding boundary. Luft's host owns focus and final-pass overlay
 lifetime; no pretend old session or second inventory implementation is used.
 The workbench's generic palette is disabled only for this game.
 
-Mining adds one and selects what was picked up; placing spends one only
-after the engine accepts the edit. Picking selects without manufacturing
+Mining a carried block adds one and selects what was picked up; placing
+one spends it only after the engine accepts the edit. Picking selects without manufacturing
 stock. Failed, busy, and body-overlapping edits spend nothing. The hotbar
 observes finite counts as well as selection and displays infinity for
 creative materials without changing the stored quantities. Number keys and
 the wheel select actual block identities, not just their visual placements.
 
-Fresh games start with zero finite stock.  =F6= retains creative building:
-ordinary materials place without consuming stock and show infinity, but
-per-instance carried blocks such as films are always finite.  Mining still
-collects in creative mode, and toggling it never rewrites the bag's counts.
+As in the original game, ordinary materials are unlimited in every mode:
+they place without consuming stock, and mining them collects nothing.  Only
+per-instance carried blocks such as films are finite.  An earlier version
+counted every material outside creative mode and started fresh games at
+zero, which left migrated worlds unable to build; restoring a save now
+drops counts for ordinary materials and keeps them for carried blocks.
 The Luvcraft save's resume holds exact entries and quantities, the selected
 block instance, hotbar order, simple/full mode, building kit, creative state,
 and the legacy carried list. A saved world's selection and kit take

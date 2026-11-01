@@ -12,7 +12,7 @@
 (define-test player-instruments-share-the-old-quickbar-without-spending-stock
   (let* ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
          (inventory (host::restore-inventory nil))
-         (block luvcraft::*bricks-block*))
+         (block (luvcraft::ensure-film "quickbar-stock")))
     (setf (slot-value viewer 'host::inventory) inventory
           (slot-value viewer 'host::held-block) nil
           (slot-value viewer 'render::edit-material)
@@ -136,8 +136,9 @@
       (multiple-value-bind (restored-world resume) (luvcraft:read-luvcraft-save pathname)
         (true restored-world)
         (let ((restored (host::restore-inventory resume)))
-          (is = 7 (luvcraft:block-inventory-entry-quantity
-                   (luvcraft:block-inventory-entry-for restored luvcraft::*planks-block*)))
+          ;; Materials are unlimited; stock counted for them is not restored.
+          (is eq nil (luvcraft:block-inventory-entry-quantity
+                      (luvcraft:block-inventory-entry-for restored luvcraft::*planks-block*)))
           (is = 2 (luvcraft:block-inventory-entry-quantity
                    (luvcraft:block-inventory-entry-for restored film)))
           (is equal (luvcraft::block-save-description film)
@@ -159,8 +160,19 @@
                      (list :carried (list (luvcraft::block-save-description film))))))
     (is = 1 (luvcraft:block-inventory-entry-quantity
              (luvcraft:block-inventory-entry-for inventory film)))
-    (is = 0 (luvcraft:block-inventory-entry-quantity
-             (luvcraft:block-inventory-entry-for inventory luvcraft::*stone-block*)))))
+    (is eq nil (luvcraft:block-inventory-entry-quantity
+                (luvcraft:block-inventory-entry-for inventory luvcraft::*stone-block*)))))
+
+(define-test a-save-with-zero-material-stock-can-build-again
+  ;; Saves written while every material was finite hold zero counts; only
+  ;; a carried film keeps its count.
+  (let* ((film (luvcraft::ensure-film "zero-stock-save"))
+         (inventory (host::restore-inventory
+                     (list :inventory
+                           (list (list (luvcraft::block-save-description luvcraft::*grass-block*) 0)
+                                 (list (luvcraft::block-save-description film) 0))))))
+    (true (luvcraft:remove-block-from-inventory inventory luvcraft::*grass-block*))
+    (true (not (luvcraft:remove-block-from-inventory inventory film)))))
 
 (define-test companions-cross-the-inhabitant-save-without-losing-other-inhabitants
   (let* ((world (luvcraft:make-empty-little-block-world :seed 7 :chunk-height 16))
