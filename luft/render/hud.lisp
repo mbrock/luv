@@ -97,8 +97,10 @@ the pointer on the first click; every later click edits.")
 
 (defmethod mcluv:keymap-legend-command-label
     ((viewer game-host) (name (eql 'com-start-moving)) arguments table)
-  (declare (ignore viewer arguments table))
-  "walk")
+  (declare (ignore viewer table))
+  (if (member (first arguments) '(:look-left :look-right :look-up :look-down))
+      "look"
+      "walk"))
 
 (defmethod mcluv:keymap-legend-command-label
     ((viewer viewer) (name (eql 'com-select-material)) arguments table)

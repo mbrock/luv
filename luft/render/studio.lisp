@@ -958,6 +958,25 @@ before the operation boundary, or it would encode through resources which the
     (declare (ignore viewer))
     (advance-sky-clock seconds)))
 
+(defparameter *keyboard-look-rate* 2.2
+  "Radians per second of camera turn while an arrow key is held.")
+
+(defun advance-viewer-keyboard-look (viewer seconds)
+  "Turn VIEWER's camera for held arrow keys wherever the mouse also looks."
+  (when (typep (viewer-mode viewer) '(or orbit-mode first-person-mode))
+    (flet ((axis (positive negative)
+             (- (if (viewer-control-active-p viewer positive) 1 0)
+                (if (viewer-control-active-p viewer negative) 1 0))))
+      (let ((camera (viewer-camera viewer))
+            (turn (* *keyboard-look-rate* seconds))
+            (yaw (axis :look-left :look-right))
+            (pitch (axis :look-up :look-down)))
+        (unless (zerop yaw)
+          (setf (camera-yaw camera) (+ (camera-yaw camera) (* yaw turn))))
+        (unless (zerop pitch)
+          (setf (camera-pitch camera)
+                (max -1.5 (min 1.5 (+ (camera-pitch camera) (* pitch turn))))))))))
+
 (defun advance-viewer-world (viewer timestamp)
   "Submit local input, then advance the whole world, even without a player."
   (let* ((last (viewer-last-timestamp viewer))
@@ -965,6 +984,7 @@ before the operation boundary, or it would encode through resources which the
          (camera (viewer-camera viewer)))
     (setf (viewer-last-timestamp viewer) timestamp)
     (advance-camera-response camera dt)
+    (advance-viewer-keyboard-look viewer dt)
     (advance-viewer-sky viewer dt)
     (when-let ((player (and (not (typep (viewer-mode viewer) 'free-camera-mode))
                             (viewer-player viewer))))
@@ -1407,13 +1427,13 @@ offers the few its player carries.")
   (request-viewer-quit (viewer-command-viewer)))
 
 (defparameter +viewer-movement-keys+
-  '((:w :forward) (:up :forward)
-    (:s :backward) (:down :backward)
-    (:a :left) (:left :left)
-    (:d :right) (:right :right)
+  '((:w :forward) (:s :backward) (:a :left) (:d :right)
+    ;; Arrows turn the camera, as in the original Luvcraft: a mouse for the
+    ;; mouseless (see ADVANCE-VIEWER-KEYBOARD-LOOK).
+    (:up :look-up) (:down :look-down) (:left :look-left) (:right :look-right)
     ;; A flying player sinks while Shift is held; Space rises (COM-JUMP).
     (:shift-left :down) (:shift-right :down))
-  "Physical keys whose press and release urge the active controller.")
+  "Physical keys whose press and release urge the active controller or camera.")
 
 (defun install-viewer-movement-commands ()
   "Install the atelier's held controls into their press and release tables."
