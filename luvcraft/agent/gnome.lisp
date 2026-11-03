@@ -1146,6 +1146,13 @@ candidate that loses to release or another publication is detached and closed."
     (luvcraft::luvcraft-frame-scene-bind-group
      (luvcraft::luvcraft-frame-state session surface-texture))))
 
+(defgeneric sdf-agent-frame-uniform-buffer (session surface-texture)
+  (:documentation "The host's frame-local scene uniform buffer behind
+SDF-AGENT-SCENE-BIND-GROUP, for bodies that bind it beside resources of their own.")
+  (:method (session surface-texture)
+    (luvcraft::luvcraft-frame-uniform-buffer
+     (luvcraft::luvcraft-frame-state session surface-texture))))
+
 (defmethod luvcraft:luvcraft-focus-score
     ((overlay sdf-agent-body-overlay) session)
   (declare (ignore overlay session))

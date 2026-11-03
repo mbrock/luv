@@ -2,16 +2,28 @@
 
 ;;; Blender supplies the surface and the IK-solved skeleton, not a distance
 ;;; field. The mesh shares the companions' camera and sky uniforms.
+
+;;; Row AXIS of the linear blend of the four bones that move one vertex. Each
+;;; bone is three Vec4 rows of its 3x4 rest-to-pose matrix in PALETTE, the
+;;; layout SKIN-COMPANION-PALETTE reads on the CPU.
+(define-shader-abstraction companion-skin-row (palette joints weights axis)
+  (flet ((term (lane)
+           `(* (swizzle ,weights ,lane)
+               (buffer-element ,palette (+ (* (uint (swizzle ,joints ,lane)) (uint 3.0))
+                                           (uint ,axis))))))
+    `(+ ,(term :x) (+ ,(term :y) (+ ,(term :z) ,(term :w))))))
+
 (define-shader-method shader-specification-for
     companion-mesh-vertex-specification
     ((role (eql :companion-mesh)) (stage (eql :vertex)))
     (:stage :vertex
-     :inputs ((position :vec3 :location 0)
-              (normal :vec3 :location 1)
+     :inputs ((rest-position :vec3 :location 0)
+              (rest-normal :vec3 :location 1)
               (albedo :vec3 :location 2)
-              (bind-point :vec3 :location 3)
-              (origin-scale :vec4 :location 4)
-              (heading :vec4 :location 5))
+              (joints :vec4 :location 3)
+              (weights :vec4 :location 4)
+              (origin-scale :vec4 :location 5)
+              (heading :vec4 :location 6))
      :outputs ((clip-position :vec4 :built-in :position)
                (world-point :vec3 :location 0)
                (world-normal :vec3 :location 1)
@@ -19,8 +31,18 @@
                (fabric-point :vec3 :location 3)
                (edge-light :float :location 4))
      :resources ((frame-state :uniform-block :set 0 :binding 2
-                             :members #.*frame-uniform-members*)))
-  (let* ((facing (swizzle heading :xyz))
+                             :members #.*frame-uniform-members*)
+                 (palette :storage-buffer :set 0 :binding 3 :element :vec4)))
+  (let* ((row-x (companion-skin-row palette joints weights 0.0))
+         (row-y (companion-skin-row palette joints weights 1.0))
+         (row-z (companion-skin-row palette joints weights 2.0))
+         (position (vec3 (+ (dot (swizzle row-x :xyz) rest-position) (swizzle row-x :w))
+                         (+ (dot (swizzle row-y :xyz) rest-position) (swizzle row-y :w))
+                         (+ (dot (swizzle row-z :xyz) rest-position) (swizzle row-z :w))))
+         (normal (vec3 (dot (swizzle row-x :xyz) rest-normal)
+                       (dot (swizzle row-y :xyz) rest-normal)
+                       (dot (swizzle row-z :xyz) rest-normal)))
+         (facing (swizzle heading :xyz))
          (sideways (vec3 (swizzle facing :z) 0.0 (- (swizzle facing :x))))
          (point (+ (swizzle origin-scale :xyz)
                    (* (swizzle origin-scale :w)
@@ -43,7 +65,7 @@
                    (+ (vec3 0.0 (swizzle normal :y) 0.0)
                       (* facing (swizzle normal :z)))))
     (set-output surface-color albedo)
-    (set-output fabric-point bind-point)
+    (set-output fabric-point rest-position)
     (set-output edge-light (swizzle heading :w))))
 
 (define-shader-method shader-specification-for

@@ -221,6 +221,13 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
   (presentation-layout (companion-presentation viewer)))
 
 (defmethod luvcraft.agent::sdf-agent-scene-bind-group ((viewer luvcraft-viewer) surface)
+  (first (companion-frame viewer surface)))
+
+(defmethod luvcraft.agent::sdf-agent-frame-uniform-buffer ((viewer luvcraft-viewer) surface)
+  (second (companion-frame viewer surface)))
+
+(defun companion-frame (viewer surface)
+  "SURFACE's companion scene bind group and uniform buffer, freshly written."
   (let* ((state (companion-presentation viewer))
          (frame
            (luv:canvas-frame-resource
@@ -241,7 +248,7 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
     (luvcraft:luvcraft-session-camera viewer)
     (let ((data (luvcraft::frame-uniform-data environment (first extent) (second extent))))
       (luv:write-buffer (second frame) data))
-    (first frame)))
+    frame))
 
 ;;; The simulation remains Luft's. These objects are the original gnome/cat/
 ;;; Fantus presentation and conversation state, backed by the same provider.
