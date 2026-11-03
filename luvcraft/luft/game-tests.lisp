@@ -92,8 +92,8 @@
       (setf (render::viewer-terminals-terminals state) (list screen)
             (render::viewer-terminals-focus state) screen)
       (render:focus-viewer viewer state)
-      ;; F1 and Return must belong to the shell, not open host drawers.
-      (dolist (name '(:f1 :return :escape))
+      ;; F1, Return, and companion letters belong to the shell, not host drawers.
+      (dolist (name '(:f1 :return :escape :g :t))
         (luv:handle-canvas-event viewer nil
                                 (make-instance 'luv:canvas-key-press-event :timestamp 0 :key-name name))
         (is eq state (render:viewer-modal-focus viewer)))

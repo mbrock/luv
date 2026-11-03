@@ -267,12 +267,14 @@
 
 ;; Conversation remains reachable after a modal prompt releases the pointer.
 ;; The workbench consumes typing first; these are only downstream game keys.
+;; A focused companion is typing too, so its letters skip these bindings.
 ;; N still pages inventory outside a pending approval.
 (defmethod luv:handle-canvas-event :around
     ((viewer luvcraft-viewer) canvas (event luv:canvas-key-press-event))
   (let* ((agent (viewer-conversation-agent viewer))
          (command
-           (when (and (null (luv:canvas-key-event-modifiers event))
+           (when (and (null (render:viewer-modal-focus viewer))
+                      (null (luv:canvas-key-event-modifiers event))
                       (not (luv:canvas-key-event-repeat-p event)))
              (case (luv:canvas-key-event-key-name event)
                (:g '(com-summon-companion))
