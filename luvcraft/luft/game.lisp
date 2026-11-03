@@ -365,6 +365,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
                             (vec3:vec3-z position))))
      :yaw (render:camera-yaw camera)
      :pitch (render:camera-pitch camera)
+     :flying-p (and player (terrain:character-flying-p player))
      :selected-block (selected-block viewer (render:viewer-edit-material viewer))
      :selected (render:viewer-edit-material viewer))))
 
@@ -397,7 +398,7 @@ Other keys go to LUFT.RENDER:START-GAME-HOST."
             (luvcraft:make-empty-little-block-world
              :seed (or seed 1) :relief relief :chunk-height world-height))
       (let ((source (game:luvcraft-world-luft-source world)))
-        (multiple-value-bind (position yaw pitch)
+        (multiple-value-bind (position yaw pitch flying-p)
             (and resume (game:luvcraft-resume-luft-pose source resume))
           (apply #'render:start-game-host
                  :solid (game:make-luvcraft-streaming-scene
@@ -415,7 +416,8 @@ Other keys go to LUFT.RENDER:START-GAME-HOST."
                                           (and pathname (null seed)))
                                       pathname)
                  :saved-world (and position
-                                   (list :player position :yaw yaw :pitch pitch))
+                                   (list :player position :yaw yaw :pitch pitch
+                                         :flying-p flying-p))
                  :frame-class 'luvcraft-viewer
                  :frame-initargs
                  (list :luvcraft-world world :resume resume

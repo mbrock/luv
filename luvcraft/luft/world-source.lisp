@@ -244,12 +244,13 @@ A film's reel stands for every film and names no block of its own."
     overlay))
 
 (defun luvcraft-save-description
-    (source world &key resume inhabitants position yaw pitch selected selected-block)
+    (source world &key resume inhabitants position yaw pitch flying-p selected selected-block)
   "Luvcraft's save of WORLD with SOURCE's edits, as Luvcraft writes it.
 
 POSITION is the player's feet in Luft cells, YAW and PITCH the Luft camera's,
-and SELECTED the placement in hand. SELECTED-BLOCK may name its exact carried
-instance. Without POSITION the supplied RESUME stays unchanged."
+FLYING-P whether the player was in flight there, and SELECTED the placement in
+hand. SELECTED-BLOCK may name its exact carried instance. Without POSITION the
+supplied RESUME stays unchanged."
   (let* ((description (luvcraft::world-save-description world))
          (source-description (copy-list (getf (rest description) :source)))
          (overlay (merged-luvcraft-edit-overlay
@@ -276,6 +277,9 @@ instance. Without POSITION the supplied RESUME stays unchanged."
                          (getf updated :look)
                          (list :yaw (luft-yaw-to-luvcraft yaw)
                                :pitch (coerce pitch 'double-float))
+                         ;; Without it, a save made in the air drops the
+                         ;; player out of the sky at the next start.
+                         (getf updated :flying) (and flying-p t)
                          (getf updated :selected-block)
                          (luvcraft::block-save-description
                           (or selected-block
@@ -289,7 +293,7 @@ instance. Without POSITION the supplied RESUME stays unchanged."
        (list :inhabitants inhabitants)))))
 
 (defun luvcraft-resume-luft-pose (source resume)
-  "The Luft player position, yaw, and pitch of Luvcraft RESUME, or NIL."
+  "The Luft player position, yaw, pitch, and flight of Luvcraft RESUME, or NIL."
   (let ((position (getf resume :player-position))
         (look (getf resume :look))
         (offset (luvcraft-world-source-offset source)))
@@ -297,7 +301,8 @@ instance. Without POSITION the supplied RESUME stays unchanged."
       (destructuring-bind (x y z) position
         (values (list (+ x offset) (+ z offset) y)
                 (luvcraft-yaw-to-luft (getf look :yaw 0))
-                (coerce (getf look :pitch 0) 'single-float))))))
+                (coerce (getf look :pitch 0) 'single-float)
+                (getf resume :flying))))))
 
 (defun make-luvcraft-streaming-scene (source &rest initargs &key &allow-other-keys)
   "A demand-streamed Luft scene over Luvcraft world SOURCE."

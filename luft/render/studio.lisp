@@ -1094,17 +1094,48 @@ before the operation boundary, or it would encode through resources which the
         (when (>= (streaming-scene-frame-counter source)
                   (streaming-scene-frames-per-load source))
           (setf (streaming-scene-frame-counter source) 0)
-          ;; A following camera can cross a chunk seam while its player remains
-          ;; on the other side. Collision residency belongs to the player; the
-          ;; authored world's radius-one window also contains the camera view.
-          (let ((position
-                  (if (and (viewer-player viewer)
-                           (not (typep (viewer-mode viewer) 'free-camera-mode)))
-                      (body-position (character-body (viewer-player viewer)))
-                      (camera-position (viewer-camera viewer)))))
-            (retarget-streaming-scene
-             source production-system (viewer-bevel-width viewer)
-             (vec3-x position) (vec3-y position))))))))
+          (retarget-viewer-streaming viewer))))))
+
+(defun retarget-viewer-streaming (viewer)
+  "Demand VIEWER's streamed terrain around its gameplay focus."
+  ;; A following camera can cross a chunk seam while its player remains
+  ;; on the other side. Collision residency belongs to the player; the
+  ;; authored world's radius-one window also contains the camera view.
+  (let ((position
+          (if (and (viewer-player viewer)
+                   (not (typep (viewer-mode viewer) 'free-camera-mode)))
+              (body-position (character-body (viewer-player viewer)))
+              (camera-position (viewer-camera viewer)))))
+    (retarget-streaming-scene
+     (viewer-source viewer) (viewer-production-system viewer)
+     (viewer-bevel-width viewer) (vec3-x position) (vec3-y position))))
+
+(defparameter *streaming-preroll-seconds* 30
+  "The longest a game host waits for its first terrain before showing anyway.")
+
+(defun preroll-viewer-streaming (viewer)
+  "Stream and publish VIEWER's first terrain cohort before any frame is drawn.
+
+The window then opens on real ground under a supported player instead of
+fog that fills in over several seconds while the player hangs or falls.
+Runs on the thread that made the renderer, before frames are requested, so
+nothing else is drawing with it yet."
+  (let ((source (viewer-source viewer))
+        (production-system (viewer-production-system viewer))
+        (deadline (+ (get-internal-real-time)
+                     (* *streaming-preroll-seconds* internal-time-units-per-second))))
+    (when (and (typep source 'streaming-scene) production-system)
+      (loop
+        (when (drain-streaming-scene-production
+               source (viewer-renderer viewer) production-system
+               :limit most-positive-fixnum)
+          (return t))
+        (when (or (streaming-scene-production-errors source)
+                  (> (get-internal-real-time) deadline))
+          (return nil))
+        (when (null (streaming-scene-replacement source))
+          (retarget-viewer-streaming viewer))
+        (sleep 0.005)))))
 
 (defgeneric advance-viewer-world-text (viewer)
   (:documentation
@@ -1925,6 +1956,7 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
            ;; One Luv-owned shell becomes the outer event handler and owns the
            ;; passive status pane's layout, retained stream, and final replay.
            (luv.workbench:start-workbench viewer)
+           (preroll-viewer-streaming viewer)
            (request-canvas-frame
             canvas (lambda (timestamp) (render-viewer-frame viewer timestamp)))
            (show-canvas canvas)

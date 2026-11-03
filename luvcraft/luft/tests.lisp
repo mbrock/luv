@@ -253,11 +253,13 @@
     (multiple-value-bind (source dropped world resume)
         (game:luvcraft-save-world-source pathname)
       (is = 1 dropped)
-      (multiple-value-bind (position yaw pitch)
+      (multiple-value-bind (position yaw pitch flying-p)
           (game:luvcraft-resume-luft-pose source resume)
         (is equal '(1025.5d0 1026.5d0 7d0) position)
         (true (< (abs (- yaw (- (/ pi 2) 0.25))) 1e-5))
-        (true (< (abs (+ pitch 0.1)) 1e-5)))
+        (true (< (abs (+ pitch 0.1)) 1e-5))
+        ;; A save from before flight was recorded stands on its ground.
+        (is eq nil flying-p))
       ;; Two edits in Luft: carve the crystal, build bricks above the lawn.
       (let ((edits (terrain:world-source-edits source)))
         (setf (gethash (game:luvcraft-cell-site source 2 9 2) edits) nil
@@ -266,9 +268,13 @@
       (luvcraft::write-luvcraft-save-description
        (game:luvcraft-save-description
         source world :resume resume
-        :position '(1030.5 1020.5 9.0) :yaw 1.0 :pitch 0.2
+        :position '(1030.5 1020.5 9.0) :yaw 1.0 :pitch 0.2 :flying-p t
         :selected (game:block-placement luvcraft::*bricks-block*))
-       pathname))
+       pathname)
+      ;; A player saved in the air resumes flying instead of falling.
+      (multiple-value-bind (world resume) (luvcraft:read-luvcraft-save pathname)
+        (declare (ignore world))
+        (true (nth-value 3 (game:luvcraft-resume-luft-pose source resume)))))
     ;; Luvcraft itself reads the result: the same meadow, both edits, the
     ;; out-of-domain block, and the player where Luft left them.
     (multiple-value-bind (world resume) (luvcraft:read-luvcraft-save pathname)
