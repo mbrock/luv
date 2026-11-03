@@ -61,11 +61,13 @@
               (inhabitant-kind inhabitant) (vec3:vec3-x p) (vec3:vec3-y p) (vec3:vec3-z p)
               (vec3:vec3-x player) (vec3:vec3-y player) (vec3:vec3-z player)
               (viewer-creative-p viewer)
+              ;; A NIL quantity is unlimited supply, as in creative mode.
               (loop for entry in (luvcraft:block-inventory-entries (viewer-inventory viewer))
-                    when (plusp (luvcraft:block-inventory-entry-quantity entry))
-                      collect (format nil "~(~A~)=~D"
+                    for quantity = (luvcraft:block-inventory-entry-quantity entry)
+                    when (or (null quantity) (plusp quantity))
+                      collect (format nil "~(~A~)=~A"
                                       (luvcraft:block-kind-name (luvcraft:block-inventory-entry-block entry))
-                                      (luvcraft:block-inventory-entry-quantity entry)))
+                                      (or quantity "unlimited")))
               (loop for (dx dy) in '((0 0) (1 0) (-1 0) (0 1) (0 -1) (3 0) (0 3) (-3 0) (0 -3))
                     for x = (+ (floor (vec3:vec3-x p)) dx)
                     for y = (+ (floor (vec3:vec3-y p)) dy)
