@@ -139,7 +139,43 @@ arrive by CHANNEL."
                 (nth-value 1 (sb-bsd-sockets:socket-name socket)))
       (sb-bsd-sockets:socket-close socket))))
 
+(defun broadcast-deliverable-p ()
+  "Whether a datagram broadcast to 255.255.255.255 comes back to this machine.
+
+A host firewall may drop inbound broadcasts to ports it has not opened --
+NixOS's default one does -- and then no beacon can be heard here at all."
+  (let ((listener (make-instance 'sb-bsd-sockets:inet-socket
+                                 :type :datagram :protocol :udp))
+        (sender (make-instance 'sb-bsd-sockets:inet-socket
+                               :type :datagram :protocol :udp))
+        (probe (map '(vector (unsigned-byte 8)) #'char-code "luvcraft-wire probe"))
+        (buffer (make-array 64 :element-type '(unsigned-byte 8))))
+    (unwind-protect
+         (progn
+           (sb-bsd-sockets:socket-bind listener #(0 0 0 0) 0)
+           (setf (sb-bsd-sockets:non-blocking-mode listener) t
+                 (sb-bsd-sockets:sockopt-broadcast sender) t)
+           (sb-bsd-sockets:socket-send
+            sender probe (length probe)
+            :address (list #(255 255 255 255)
+                           (nth-value 1 (sb-bsd-sockets:socket-name listener))))
+           (wait-until (lambda ()
+                         (let ((length (nth-value 1 (sb-bsd-sockets:socket-receive
+                                                     listener buffer nil))))
+                           (and length (= length (length probe)))))
+                       :timeout 1))
+      (sb-bsd-sockets:socket-close listener)
+      (sb-bsd-sockets:socket-close sender))))
+
 (define-test socket-endpoints-find-each-other-by-broadcast-and-by-name
+  (if (broadcast-deliverable-p)
+      (find-endpoints-by-broadcast-and-by-name)
+      (let ((reason "this machine drops its own UDP broadcasts, probably in a host firewall; open the announce port to discover hosts here"))
+        (format t "~&Skipping LAN discovery: ~A.~%" reason)
+        (parachute:skip reason
+          (true (find-endpoints-by-broadcast-and-by-name))))))
+
+(defun find-endpoints-by-broadcast-and-by-name ()
   (let* ((announce-port (free-udp-port))
          (discovery (start-discovery :port announce-port)))
     (unwind-protect
