@@ -473,6 +473,49 @@ physics, and a shared clock of day (each window keeps its own).
 snapshots, rides, companions spoken to by either player, the players table
 of #Y3S82T, and remote players as physics strangers.
 
+*** DONE Keep collision around every player
+:PROPERTIES:
+:ID: 7CY5VW
+:END:
+
+/Intent./ Realize #I6O4J6, and settle the seam-falling turtles, the
+outside-collision edit of #OLWSWF, and the teleport that fell through the
+ground.
+
+/Evidence./ A streaming scene keeps interest foci by player id
+([[lisp:luft.terrain:set-streaming-scene-interest]],
+[[lisp:luft.terrain:remove-streaming-scene-interest]]).  Each retarget
+demands the gameplay radius around the local focus and every interest
+focus, and installs collision for each of those chunks as soon as it is
+resident ([[lisp:luft.terrain:install-streaming-collision]]); the mesh
+window, light, and publication still follow only the local focus.  The
+host's session sets a guest's focus from each of its poses and removes it
+when the guest leaves; a guest declares none.
+
+/Root cause./ More chunks are resident than collide: the store holds the
+whole visible window (radius 3 in Luvcraft) and its guard, while collision
+covers only the gameplay radius 1.  Turtles, companions, and the player
+were frozen only off /resident/ chunks, so one standing on a chunk that was
+resident but had no collision -- after the player crossed a seam, or as a
+save loaded -- fell through absent collision, which reads as air, and never
+stopped.  Now [[lisp:luft.terrain:scene-collision-resident-p]] is the
+freeze test: every body in a =world-simulation= (players and companions
+alike), turtles, and the viewer's player wait where it is false.  The
+teleport of #OLWSWF was the same gap: the destination was visible but not
+collided with.  The sweep was not at fault; a body dropped on ground at
+-50 to -50000 cells/s lands on it.
+
+/Stopgap./ =edit-streaming-scene-cell= now reads occupancy only from the
+resident chunk, which every visible chunk has, and keeps writing collision
+only inside its window.  It stays: a guest keeps collision only around
+itself, yet sees and receives events for chunks farther away.  A terrain
+test reproduces the phase-1 crash against the code before it.
+
+Tests: collision around two distant foci while publication follows one;
+turtles and gnomes wait on uncollided ground and stand once it collides
+(fails without the fix); and a loopback guest five chunks from the host,
+beside whom a body walks on the host's ground.
+
 ** TODO Make company comfortable
 :PROPERTIES:
 :ID: 3JTHM3
