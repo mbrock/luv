@@ -377,7 +377,7 @@ for seed 121: recipe, vocabulary digest, tag, spawn (including its
 =atan= yaw), and all nine chunk hashes.  The generator itself uses only
 integer hashes, rational double arithmetic, and correctly rounded =sqrt=.
 
-** TODO Steer players by input frames on a phase-locked clock
+** DONE Steer players by input frames on a phase-locked clock
 :PROPERTIES:
 :ID: X56QS3
 :END:
@@ -386,6 +386,31 @@ integer hashes, rational double arithmetic, and correctly rounded =sqrt=.
 
 /Done when./ The local player is steered only by input frames, the clock
 rounds to the nearest step, and a recorded tape replays the same walk.
+
+/Evidence./ A [[lisp:luft.terrain:input-frame]] holds forward and right axes
+along the character's own look, yaw and pitch deltas, jump and flight edges,
+and a vertical urge.  [[lisp:luft.terrain:apply-input-frame]] is the only
+steering path: the look turns first, and the walking direction follows it.
+The viewer's =take-viewer-input-frame= reads held keys and the camera, and it
+spends each press in exactly one frame.  The
+=advance-world-simulation= =:before-tick= hook calls it once per tick.  A
+ride, which moves once a frame, takes one frame each frame.  Luvcraft's
+[[lisp:luvcraft.luft.game:steer-luvcraft-player]] feeds the same axes to the
+player's rider intent, so reins are input frames too.  The clock is moppe's:
+=consume-simulation-time= rounds to the nearest tick, runs at most six, and
+discards the rest.  [[lisp:luft.terrain:simulation-tick]] is the integer time
+base; =simulation-clock= is derived from it, and =simulation-phase= stays
+within half a tick.  Interpolation sits half a tick behind elapsed time.  Tests
+replay moppe's cadence, jitter, and stall cases, and a tape recorded through a
+live viewer over irregular frames, with a jump, a strafe, and a turn, replays
+to an identical position, velocity, and look.  Live play ran at 120.3 ticks/s.
+In it, walking followed the look, a jump peaked at 1.65 cells (9²/48 = 1.69),
+flight rose and hovered, a turtle turned and walked under D and W, and mouse
+look turned the character's look with the camera.
+
+/Open./ The camera still leads: the frame's look delta is the camera minus the
+character's look, so a remote or replayed player's look is the character's,
+not a camera's.  Tapes are in-memory vectors with no file format yet.
 
 ** TODO Two players build one house
 :PROPERTIES:
