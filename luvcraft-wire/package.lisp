@@ -80,7 +80,7 @@ exactly what an encoder would have written.")
    #:chat-message #:make-chat-message #:chat-message-p
    #:chat-message-speaker #:chat-message-text
    #:chunk-hashes-message #:make-chunk-hashes-message #:chunk-hashes-message-p
-   #:chunk-hashes-message-hashes
+   #:chunk-hashes-message-hashes #:chunk-hashes-message-watermark
    #:chunk-content-message #:make-chunk-content-message
    #:chunk-content-message-p #:chunk-content-message-chunk
    #:chunk-content-message-digest #:chunk-content-message-content

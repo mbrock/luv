@@ -473,6 +473,9 @@ only), :UNRELIABLE (a datagram, or the stream as fallback), or :DATAGRAM."
   (text :string ""))
 
 (define-message chunk-hashes-message 8 :reliable
+  "Content hashes of chunks as they stood at journal sequence WATERMARK, so a
+peer compares them only once it stands there too (#RELI34)."
+  (watermark :u64 0)
   (hashes (:list :chunk-hash) nil))
 
 (define-message chunk-content-message 9 :reliable

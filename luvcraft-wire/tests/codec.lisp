@@ -73,6 +73,7 @@
        (in-world (make-chat-message :speaker "Ida" :text "Bygg här — ☃"))
        (in-world
         (make-chunk-hashes-message
+         :watermark 41
          :hashes (list (make-chunk-hash :chunk (make-site 0 -1 2)
                                         :digest (octets 1 2 3 4 5 6 7 8))
                        (make-chunk-hash :chunk (make-site 3 0 0)
