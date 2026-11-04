@@ -145,7 +145,11 @@ NIL removes an occupied cell.  The successor store, chunk fibers, material
 state, and light are constructed before the canvas-owned scene is changed;
 the old values stay intact for any worker snapshot that captured them.  Active production
 is deliberately rejected; the caller may retry after its current cohort has
-published."
+published.
+
+This only materializes a change in the scene.  Authored change is a journal
+event: EDIT-WORLD-CELL sequences one, and APPLY-QUEUED-WORLD-EVENTS calls
+this at a frame boundary."
   (check-type scene streaming-scene)
   (check-type cell luft:site)
   (when new-placement (check-type new-placement material-placement))
@@ -264,11 +268,7 @@ published."
             (if (streaming-scene-source scene)
                 (let ((local-materials
                         (gethash key (material-store-chunks material-cells))))
-                  (setf (gethash cell
-                                 (world-source-edits
-                                  (streaming-scene-source scene)))
-                        new-placement
-                        (gethash key (streaming-scene-store scene))
+                  (setf (gethash key (streaming-scene-store scene))
                         (%make-resident-cell-chunk
                          key
                          (incf (streaming-scene-next-incarnation scene))

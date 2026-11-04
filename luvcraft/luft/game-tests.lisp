@@ -489,8 +489,8 @@
            (mined (game:luvcraft-cell-site source 29 17 108))
            (built (game:luvcraft-cell-site source 23 14 106)))
       (walk-hollow-route viewer (ldiff route (rest return-leg)))
-      (true (terrain:edit-streaming-scene-cell scene mined nil))
-      (true (terrain:edit-streaming-scene-cell scene built (game:block-placement luvcraft::*crystal-block*)))
+      (true (terrain:edit-world-cell scene mined nil))
+      (true (terrain:edit-world-cell scene built (game:block-placement luvcraft::*crystal-block*)))
       (setf (render:camera-yaw (render:viewer-camera viewer)) 0.75
             (render:camera-pitch (render:viewer-camera viewer)) -0.12)
       (let* ((saved (render:viewer-world-description viewer))

@@ -127,15 +127,20 @@
        (domain (terrain:world-source-domain source))
        ;; The same supported cave lantern as capture-frontier-light.lisp.
        (landing
-         (let ((edits (terrain::world-source-edits source))
+         (let ((edits nil)
                (planks (luvcraft.luft::block-placement luvcraft::*planks-block*)))
            (loop for x from 1000 to 1004 do
              (loop for y from 1082 to 1088 do
-               (setf (gethash (luft:make-site domain x y 7 luft:+cell-extent+ 1) edits) planks)
+               (push (list (luft:make-site domain x y 7 luft:+cell-extent+ 1) :unrecorded planks)
+                     edits)
                (loop for z from 8 to 10 do
-                 (setf (gethash (luft:make-site domain x y z luft:+cell-extent+ 1) edits) nil))))
-           (setf (gethash (luft:make-site domain 1002 1086 8 luft:+cell-extent+ 1) edits)
-                 (luvcraft.luft::block-placement luvcraft::*lantern-block*))))
+                 (push (list (luft:make-site domain x y z luft:+cell-extent+ 1) :unrecorded nil)
+                       edits))))
+           (push (list (luft:make-site domain 1002 1086 8 luft:+cell-extent+ 1) :unrecorded
+                       (luvcraft.luft::block-placement luvcraft::*lantern-block*))
+                 edits)
+           (terrain:record-world-events (terrain:world-source-journal source)
+                                        (nreverse edits) :actor :import)))
        (scene (terrain:make-world-source-streaming-scene
                source :mesh-preparer render:+render-population-preparer+))
        (spawn (multiple-value-list (terrain:world-source-spawn source)))

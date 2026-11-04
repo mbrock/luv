@@ -12,12 +12,15 @@
   ((domain :initarg :domain :reader world-source-domain)
    (material-vocabulary :initarg :material-vocabulary
                         :reader world-source-material-vocabulary)
-   ;; Presence is meaningful: NIL is an authored removal, while absence means
-   ;; that the deterministic source still owns the cell.
-   (edits :initform (make-hash-table :test #'eql)
-          :reader world-source-edits))
+   (journal :initform (make-world-journal) :reader world-source-journal))
   (:documentation
-   "A deterministic world in one placement vocabulary, with sparse edits."))
+   "A deterministic world in one placement vocabulary, with a journal of edits."))
+
+(defun world-source-edits (source)
+  "SOURCE's sparse edits: the latest value its journal gives each authored site.
+
+This is a view of the journal (#3F0SCZ); record events rather than change it."
+  (world-journal-edits (world-source-journal source)))
 
 (defgeneric generate-world-source-chunk (source key place)
   (:documentation
@@ -67,6 +70,7 @@ materializes and the descriptors the scene compiles name the same palette."
     (make-instance
      'streaming-scene
      :source source
+     :journal (world-source-journal source)
      :solid (luft:make-fiber-store domain)
      :material-vocabulary vocabulary
      :material-cells (make-material-store)
@@ -90,12 +94,12 @@ materializes and the descriptors the scene compiles name the same palette."
   (gethash cell (world-source-edits source)))
 
 (defun capture-world-source-chunk-edits (source key)
-  "Copy the sparse edits belonging to KEY for immutable worker use."
+  "Copy the sparse edits belonging to KEY, as placements, for immutable worker use."
   (let ((edits nil))
     (maphash
-     (lambda (cell placement)
+     (lambda (cell value)
        (when (= key (luft:site-chunk-key cell))
-         (push (cons cell placement) edits)))
+         (push (cons cell (world-value-placement value)) edits)))
      (world-source-edits source))
     edits))
 

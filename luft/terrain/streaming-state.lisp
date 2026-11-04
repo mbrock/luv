@@ -8,6 +8,11 @@
 
 (defclass streaming-scene (scene)
   ((source :initarg :source :initform nil :reader streaming-scene-source)
+   ;; A source scene shares its source's journal; a finite one keeps its own.
+   (journal :initarg :journal :initform (make-world-journal)
+            :reader streaming-scene-journal)
+   ;; Sequenced events not yet applied, oldest first (#QQT86P).
+   (pending-events :initform nil :accessor streaming-scene-pending-events)
    (store :initform (make-hash-table :test #'eql)
           :reader streaming-scene-store)
    (desired :initform (make-hash-table :test #'eql)

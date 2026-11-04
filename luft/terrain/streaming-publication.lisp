@@ -141,16 +141,20 @@
 ;;; retargeting uses the same scheduling interface.
 
 (defun schedule-streaming-scene-edit
-    (scene production-system changed-source-key bevel-width)
-  "Remesh the resident scene after one already-published authored edit."
+    (scene production-system changed-source-keys bevel-width)
+  "Remesh the resident scene after already-published authored edits.
+
+CHANGED-SOURCE-KEYS is one changed chunk key or a list of them."
   (check-type scene streaming-scene)
   (when (streaming-scene-replacement scene)
     (error "Cannot schedule an edit while another streaming replacement is active."))
-  (let ((loaded (streaming-scene-loaded scene)))
-    (unless (nth-value 1 (gethash changed-source-key loaded))
-      (when (loop for key being the hash-keys of loaded
-                  thereis (chunk-keys-neighbor-p key changed-source-key))
-        (setf (gethash changed-source-key loaded) bevel-width)))
+  (let ((loaded (streaming-scene-loaded scene))
+        (changed (alexandria:ensure-list changed-source-keys)))
+    (dolist (changed-source-key changed)
+      (unless (nth-value 1 (gethash changed-source-key loaded))
+        (when (loop for key being the hash-keys of loaded
+                    thereis (chunk-keys-neighbor-p key changed-source-key))
+          (setf (gethash changed-source-key loaded) bevel-width))))
     (let* ((source-keys
              (sort (loop for key being the hash-keys of loaded collect key) #'<))
            (owners (streaming-scene-canonical-owner-closure scene source-keys))
@@ -160,7 +164,10 @@
              (if (scene-regional-light-p scene)
                  (sort (union (remove-if-not
                                (lambda (key)
-                                 (chunk-keys-neighbor-p key changed-source-key))
+                                 (some (lambda (changed-source-key)
+                                         (chunk-keys-neighbor-p
+                                          key changed-source-key))
+                                       changed))
                                owners)
                               (streaming-light-dirty-owners scene owners))
                        #'<)

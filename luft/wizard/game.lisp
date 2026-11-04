@@ -158,6 +158,7 @@ not let the wizard fall through that gap while the first meshes are built."
         (production-system (wizard-production-system wizard)))
     (render:drain-streaming-scene-production
      scene (wizard-renderer wizard) production-system)
+    (terrain:apply-queued-world-events scene production-system *wizard-bevel-width*)
     (when (null (terrain:streaming-scene-replacement scene))
       (let ((feet (terrain:body-position
                    (terrain:character-body (wizard-character wizard)))))

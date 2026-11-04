@@ -117,7 +117,7 @@ A game hosted in a viewer answers with its own save format.")
         nil))))
 
 (defun load-luft-world-description (scene pathname)
-  "Replay PATHNAME's edits into SCENE's source; return its description.
+  "Import PATHNAME's edits into SCENE's source journal; return its description.
 
 Runs before any chunk is materialized, so every chunk is built with the
 edits already in place.  A save from another seed or world size is left
@@ -129,15 +129,21 @@ alone rather than applied to the wrong landscape."
         (if (and (eql (getf description :seed) (authored-world-source-seed source))
                  (eql (getf description :x-bits) (luft:world-domain-x-bits domain))
                  (eql (getf description :y-bits) (luft:world-domain-y-bits domain)))
-            (let ((edits (world-source-edits source)))
+            (let ((changes nil))
               (dolist (edit (getf description :edits))
                 (destructuring-bind (x y z name) edit
                   (let ((placement (and name (placement-named name))))
                     (when (or (null name) placement)
-                      (setf (gethash (luft:make-site domain x y z
-                                                     luft:+cell-extent+ 1)
-                                     edits)
-                            placement)))))
+                      (push (list (luft:make-site domain x y z
+                                                  luft:+cell-extent+ 1)
+                                  :unrecorded placement)
+                            changes)))))
+              ;; A format-1 save keeps only the edit set, so it imports as
+              ;; one transaction that claims no earlier values (#OVEP9A).
+              (when changes
+                (record-world-events (world-source-journal source)
+                                     (nreverse changes)
+                                     :actor :import :cause (list :save pathname)))
               (when (realp (getf description :sky-hour))
                 (setf *sky-hour* (getf description :sky-hour)))
               description)

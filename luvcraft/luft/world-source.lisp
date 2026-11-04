@@ -167,16 +167,21 @@ Edits outside the Luft domain are dropped and counted: the second value."
                   :relief (luvcraft:little-world-source-relief little)
                   :little-class (class-name (class-of little))
                   :height height :offset offset))
-         (edits (terrain:world-source-edits source))
+         (changes nil)
          (dropped 0))
     (maphash (lambda (coordinate block)
                (destructuring-bind (x y z) coordinate
                  (let ((site (luvcraft-cell-site source x y z)))
                    (if site
-                       (setf (gethash site edits) (block-placement block))
+                       (push (list site :unrecorded (block-placement block))
+                             changes)
                        (incf dropped)))))
              (luvcraft::block-edit-overlay-entries
               (luvcraft:little-world-source-edits little)))
+    (when changes
+      (terrain:record-world-events (terrain:world-source-journal source)
+                                   (nreverse changes) :actor :import
+                                   :cause :luvcraft-edits))
     (values source dropped)))
 
 (defun luvcraft-world-height (world)

@@ -545,8 +545,10 @@ Unlike SXHASH this freezes a portable, independently captured baseline."
       (false (string= (tag :seed 121) other))))
   ;; Edits travel as events, not in the tag.
   (let ((source (game:make-luvcraft-world-source :seed 121)))
-    (setf (gethash (game:luvcraft-cell-site source 0 40 0) (terrain:world-source-edits source))
-          (game:block-placement luvcraft::*stone-block*))
+    (terrain:record-world-events
+     (terrain:world-source-journal source)
+     (list (list (game:luvcraft-cell-site source 0 40 0) :unrecorded
+                 (game:block-placement luvcraft::*stone-block*))))
     (is string= (terrain:world-source-tag (game:make-luvcraft-world-source :seed 121))
         (terrain:world-source-tag source))))
 
@@ -575,7 +577,7 @@ Unlike SXHASH this freezes a portable, independently captured baseline."
                          return z))
                (edit (x y z placement)
                  (is eq :edited
-                     (nth-value 1 (terrain:edit-streaming-scene-cell
+                     (nth-value 1 (terrain:edit-world-cell
                                    scene (luft:make-site domain x y z luft:+cell-extent+ 1)
                                    placement)))))
         ;; A removal, a stone in the air, and a lantern, which becomes an

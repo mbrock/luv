@@ -304,6 +304,35 @@ this package draws; the renderer and the ateliers use it.")
            #:walking-route-start
            #:walking-route-status
            #:walking-route-visits
+           #:apply-queued-world-events
+           #:edit-world-cell
+           #:make-world-journal
+           #:record-world-events
+           #:redo-world-events
+           #:sequence-world-events
+           #:streaming-scene-journal
+           #:streaming-scene-pending-events
+           #:undo-world-events
+           #:world-cell-value
+           #:world-event
+           #:world-event-actor
+           #:world-event-after
+           #:world-event-before
+           #:world-event-cause
+           #:world-event-sequence
+           #:world-event-site
+           #:world-event-tick
+           #:world-event-transaction
+           #:world-journal
+           #:world-journal-edits
+           #:world-journal-events
+           #:world-journal-head
+           #:world-journal-redoable-transaction
+           #:world-journal-transaction-events
+           #:world-journal-undoable-transaction
+           #:world-source-journal
+           #:world-value-placement
+           #:world-visible-value
            #:world-simulation
            #:world-source
            #:world-source-domain

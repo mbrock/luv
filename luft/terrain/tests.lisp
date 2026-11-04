@@ -214,9 +214,10 @@
          (removed (luft:make-site domain 70 5 1 luft:+cell-extent+ 1))
          (added (luft:make-site domain 70 5 2 luft:+cell-extent+ 1))
          (elsewhere (luft:make-site domain 5 5 2 luft:+cell-extent+ 1)))
-    (setf (gethash removed (terrain:world-source-edits source)) nil
-          (gethash added (terrain:world-source-edits source)) *glow*
-          (gethash elsewhere (terrain:world-source-edits source)) *glow*)
+    (terrain:record-world-events
+     (terrain:world-source-journal source)
+     (list (list removed *stone* nil) (list added nil *glow*)
+           (list elsewhere nil *glow*)))
     (let* ((edits (terrain:capture-world-source-chunk-edits source key))
            (chunk (terrain:materialize-world-source-chunk
                    source key 1 :edits edits))
@@ -587,3 +588,167 @@
                (let ((field (terrain::solve-sky-tile scene key unknown)))
                  (is = 0 (luft:voxel-light-at field 20 20 20)))))
         (production:stop-production-system system)))))
+
+;;; The journal (#3F0SCZ) and the queue of sequenced events (#QQT86P).
+
+(defun call-with-journal-scene (function)
+  "Call FUNCTION with a finite streaming scene, its worker, and a cell maker."
+  (let ((builder (make-builder)))
+    (dotimes (x 8) (dotimes (y 8) (terrain:scene-builder-cell builder x y 0)))
+    (let* ((scene (terrain:make-streaming-scene (terrain:finish-scene-builder builder)))
+           (domain (terrain:scene-domain scene))
+           (system (production:make-single-worker-production-system
+                    :name "journal test")))
+      (setf (gethash 0 (terrain:streaming-scene-loaded scene)) 1)
+      (unwind-protect
+           (funcall function scene system
+                    (lambda (x y z) (luft:make-site domain x y z luft:+cell-extent+ 1)))
+        (production:stop-production-system system)))))
+
+(defun shown (scene cell)
+  (terrain::scene-material-placement-at scene cell))
+
+(define-test a-sequenced-event-waits-out-a-busy-cohort
+  (call-with-journal-scene
+   (lambda (scene system cell)
+     (let ((here (funcall cell 2 2 1)))
+       ;; The old materializer refuses while a cohort is in flight.
+       (terrain:schedule-streaming-scene-cohort scene system '(0) 1 0)
+       (is eq :busy (nth-value 1 (terrain:edit-streaming-scene-cell scene here *glow*)))
+       ;; A sequenced event has happened anyway; the scene shows it later.
+       (multiple-value-bind (event status)
+           (terrain:edit-world-cell scene here *glow* :actor :alice
+                                    :production-system system :bevel-width 1)
+         (is eq :queued status)
+         (is eq nil (terrain:world-event-before event))
+         (is eq *glow* (terrain:world-event-after event))
+         (is eq :alice (terrain:world-event-actor event))
+         (is = 1 (terrain:world-event-sequence event)))
+       (is eq nil (shown scene here))
+       (is eq *glow* (terrain:world-cell-value scene here))
+       ;; Bob saw the same empty cell; Alice's queued event got there first.
+       (is eq :stale-before
+           (nth-value 1 (terrain:edit-world-cell scene here *stone* :actor :bob
+                                                 :production-system system
+                                                 :bevel-width 1)))
+       (is eq nil (terrain:apply-queued-world-events scene system 1))
+       ;; The cohort publishes; at the next frame boundary the queue applies
+       ;; and its own cohort is scheduled, as the next edit's would be.
+       (loop for (result present-p)
+               = (multiple-value-list
+                  (production:receive-production-result-no-hang system))
+             until present-p do (sleep 0.005)
+             finally (terrain::receive-streaming-mesh-result scene result))
+       (setf (terrain:streaming-scene-replacement scene) nil)
+       (is = 1 (terrain:apply-queued-world-events scene system 1))
+       (is eq *glow* (shown scene here))
+       (is eq nil (terrain:streaming-scene-pending-events scene))
+       (true (terrain:streaming-scene-replacement scene))
+       (is = 1 (terrain:world-journal-head (terrain:streaming-scene-journal scene)))))))
+
+(define-test the-sequencer-checks-before-values-and-applies-transactions-whole
+  (call-with-journal-scene
+   (lambda (scene system cell)
+     (declare (ignore system))
+     (let ((journal (terrain:streaming-scene-journal scene))
+           (empty (funcall cell 3 3 1))
+           (floor (funcall cell 3 3 0))
+           (stranger (make-instance 'terrain:material-placement
+                                    :name :stranger
+                                    :kind (terrain:material-placement-kind *stone*))))
+       (flet ((refusal (changes)
+                (multiple-value-list
+                 (terrain:sequence-world-events scene changes :actor :alice))))
+         ;; The floor is stone, not air: the second change is stale, so the
+         ;; first is not recorded either.
+         (is equal (list nil :stale-before (list floor nil *glow*))
+             (refusal (list (list empty nil *stone*) (list floor nil *glow*))))
+         (is = 0 (terrain:world-journal-head journal))
+         (is eq nil (terrain:world-cell-value scene empty))
+         (is eq :unchanged (second (refusal (list (list empty nil nil)))))
+         (is eq :unknown-material (second (refusal (list (list empty nil stranger)))))
+         ;; A later change sees an earlier one's value in its transaction.
+         (let ((events (terrain:sequence-world-events
+                        scene (list (list empty nil *stone*) (list empty *stone* *glow*)
+                                    (list floor *stone* nil))
+                        :actor :alice :tick 7 :cause :test)))
+           (is = 3 (length events))
+           (is = 1 (length (remove-duplicates
+                            (mapcar #'terrain:world-event-transaction events))))
+           (is equal '(1 2 3) (mapcar #'terrain:world-event-sequence events))
+           (is eql 7 (terrain:world-event-tick (first events))))
+         (is = 3 (terrain:apply-queued-world-events scene nil 1))
+         (is eq *glow* (shown scene empty))
+         (is eq nil (shown scene floor))
+         (is = 0 (terrain:scene-cell-bit scene 3 3 0))
+         ;; The edit set is a view: one value per site, the latest.
+         (is = 2 (hash-table-count (terrain:world-journal-edits journal)))
+         (is eq *glow* (gethash empty (terrain:world-journal-edits journal))))))))
+
+(define-test two-actors-undo-their-own-interleaved-edits
+  (call-with-journal-scene
+   (lambda (scene system cell)
+     (declare (ignore system))
+     (let ((a (funcall cell 1 1 1)) (b (funcall cell 2 1 1))
+           (c (funcall cell 3 1 1)) (d (funcall cell 4 1 1)))
+       (flet ((edit (actor site value)
+                (is eq :edited
+                    (nth-value 1 (terrain:edit-world-cell scene site value :actor actor
+                                                                          :bevel-width 1))))
+              (undo (actor)
+                (nth-value 1 (terrain:undo-world-events scene actor :bevel-width 1)))
+              (redo (actor)
+                (nth-value 1 (terrain:redo-world-events scene actor :bevel-width 1))))
+         (edit :alice a *stone*)
+         (edit :alice c *glow*)
+         (edit :bob b *glow*)
+         ;; Alice's undo takes back her own latest edit, not Bob's later one.
+         (is eq :edited (undo :alice))
+         (is eq nil (shown scene c))
+         (is eq *glow* (shown scene b))
+         (is eq :edited (undo :bob))
+         (is eq nil (shown scene b))
+         (is eq *stone* (shown scene a))
+         (is eq :edited (undo :alice))
+         (is eq nil (shown scene a))
+         (is eq :nothing (undo :alice))
+         (is eq :edited (redo :alice))
+         (is eq *stone* (shown scene a))
+         (is eq :edited (redo :bob))
+         (is eq *glow* (shown scene b))
+         ;; Once Bob has removed Alice's block, her undo would undo his
+         ;; work too: it is refused, and her next undo reaches further back.
+         (edit :alice d *stone*)
+         (edit :bob d nil)
+         (is eq :stale-before (undo :alice))
+         (is eq nil (shown scene d))
+         (is eq :edited (undo :alice))
+         (is eq nil (shown scene a))
+         (let ((journal (terrain:streaming-scene-journal scene)))
+           (is equal (list :undo (terrain:world-event-transaction
+                                  (aref (terrain:world-journal-events journal) 0)))
+               (terrain:world-event-cause
+                (aref (terrain:world-journal-events journal)
+                      (1- (terrain:world-journal-head journal)))))))))))
+
+(define-test a-source-scene-journal-reaches-chunks-it-has-not-shown
+  (let* ((domain (luft:make-world-domain :x-bits 7 :y-bits 7))
+         (source (make-instance 'flat-source :domain domain
+                                             :material-vocabulary (make-palette)))
+         (scene (terrain:make-world-source-streaming-scene source))
+         (key (luft:chunk-key-at 64 0))
+         (site (luft:make-site domain 70 5 1 luft:+cell-extent+ 1)))
+    (is eq (terrain:world-source-journal source) (terrain:streaming-scene-journal scene))
+    ;; Nothing is resident, so nobody can know what the cell holds.
+    (is eq :nonresident (nth-value 1 (terrain:edit-world-cell scene site nil :actor :alice)))
+    ;; Resident but not shown: the event is checked against the resident value,
+    ;; and the next materialization replays it from the source's edit view.
+    (setf (gethash key (terrain:streaming-scene-store scene))
+          (terrain:materialize-world-source-chunk source key 1))
+    (is eq :edited (nth-value 1 (terrain:edit-world-cell scene site nil :actor :alice)))
+    (is eq nil (gethash site (terrain:world-source-edits source)))
+    (true (nth-value 1 (gethash site (terrain:world-source-edits source))))
+    (let ((chunk (terrain:materialize-world-source-chunk
+                  source key 2
+                  :edits (terrain:capture-world-source-chunk-edits source key))))
+      (is = 0 (luft:fibers-cell-bit (terrain::resident-cell-chunk-fibers chunk) 70 5 1)))))

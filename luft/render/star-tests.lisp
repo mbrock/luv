@@ -538,7 +538,8 @@
          (x 70) (y (round (render::large-world-road-centre-y x)))
          (z (1- (render::large-world-terrain-height source x y)))
          (cell (luft:make-site domain x y z luft:+cell-extent+ 1)))
-    (setf (gethash cell (render::world-source-edits source)) nil)
+    (render::record-world-events (render::world-source-journal source)
+                                 (list (list cell :unrecorded nil)))
     (let ((resident
             (render::materialize-world-source-chunk
              source key 1

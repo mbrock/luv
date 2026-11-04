@@ -27,20 +27,20 @@
                 (cell (luft:make-site
                        (terrain:scene-domain scene) x y
                        (1+ (wizard-ground-height x y)) luft:+cell-extent+ 1)))
-           (multiple-value-bind (edit status key)
-               (terrain:edit-streaming-scene-cell scene cell *ember*)
+           (let ((event (terrain:edit-world-cell
+                         scene cell *ember* :actor :wizard :cause :ember
+                         :production-system (wizard-production-system wizard)
+                         :bevel-width *wizard-bevel-width*)))
              (cond
-               (edit
-                (terrain:schedule-streaming-scene-edit
-                 scene (wizard-production-system wizard) key *wizard-bevel-width*)
+               ;; A sequenced ember has been cast, even while the ground
+               ;; under a busy cohort waits a frame to show it.
+               (event
                 (incf (wizard-embers wizard))
                 (setf (wizard-spell-time wizard) (wizard-last-timestamp wizard)
                       (wizard-message wizard)
                       (if (wizard-next-beacon wizard)
                           "EMBER LEARNED. CARRY ITS LIGHT TO THE NEXT PLINTH."
                           "THREE LIGHTS. THE ISLE IS AWAKE. WELL WALKED.")))
-               ((eq status :busy)
-                (setf (wizard-message wizard) "THE GROUND IS SETTLING. CAST AGAIN."))
                (t (setf (wizard-message wizard) "THE EMBER CANNOT SETTLE HERE."))))))))))
 
 (defun wizard-objective (wizard)

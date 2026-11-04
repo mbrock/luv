@@ -17,15 +17,17 @@
        (domain (terrain:world-source-domain source))
        (planks (game::block-placement luvcraft::*planks-block*))
        (lantern (game::block-placement luvcraft::*lantern-block*))
-       (edits (terrain::world-source-edits source)))
+       (edits nil))
   (flet ((cell (x y z) (luft:make-site domain x y z luft:+cell-extent+ 1)))
     ;; A small test landing in the generated cave near spawn, not a finite
     ;; scene adapter: all surrounding terrain is demand-streamed seed 7.
     (loop for x from 1000 to 1004 do
       (loop for y from 1082 to 1088 do
-        (setf (gethash (cell x y 7) edits) planks)
-        (loop for z from 8 to 10 do (setf (gethash (cell x y z) edits) nil))))
-    (setf (gethash (cell 1002 1086 8) edits) lantern)
+        (push (list (cell x y 7) :unrecorded planks) edits)
+        (loop for z from 8 to 10 do (push (list (cell x y z) :unrecorded nil) edits))))
+    (push (list (cell 1002 1086 8) :unrecorded lantern) edits)
+    (terrain:record-world-events (terrain:world-source-journal source)
+                                 (nreverse edits) :actor :import)
     (let* ((scene (terrain:make-world-source-streaming-scene
                    source :mesh-preparer render:+render-population-preparer+))
            (camera (render:make-fly-camera
