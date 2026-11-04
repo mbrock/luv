@@ -38,64 +38,140 @@ gentle :MEADOW, or the :ALPINE mountains and caves.")
     (error "A little-world relief must be :MEADOW or :ALPINE, not ~S."
            (little-world-source-relief source))))
 
-(defun little-world-hash (source x z &optional (salt 0))
-  "A stable coordinate hash for terrain readings and discrete features."
+;;; The noise is the world, so its arithmetic is pinned (#QTXNY0): integer
+;;; hashes modulo 2^32, then IEEE double +, -, *, and / in a fixed order,
+;;; which SBCL neither reassociates nor contracts.  The typed helpers compute
+;;; exactly what the generic arithmetic they replaced did -- a hash's ratio
+;;; to 2^32-1 rounds as the same double division, checked for every 32-bit
+;;; hash -- without boxing every intermediate.
+
+(deftype little-world-hash-value () '(unsigned-byte 32))
+
+(declaim (inline little-world-seed-bits %little-world-hash %little-world-hash-3d
+                 little-world-hash-unit smooth-little-world-reading
+                 interpolate-little-world-reading little-world-floor
+                 %little-world-value-noise %little-world-volume-plane
+                 %little-world-volume-noise))
+
+(defun little-world-seed-bits (source)
+  (logand #xffffffff (little-world-source-seed source)))
+
+(defun %little-world-hash (seed x z salt)
+  (declare (type little-world-hash-value seed) (type fixnum x z salt))
   (let ((value
           (logand #xffffffff
-                  (+ (little-world-source-seed source)
-                     (* x 374761393) (* z 668265263) (* salt 2246822519)))))
+                  (+ seed
+                     (logand #xffffffff (* (logand x #xffffffff) 374761393))
+                     (logand #xffffffff (* (logand z #xffffffff) 668265263))
+                     (logand #xffffffff
+                             (* (logand salt #xffffffff) 2246822519))))))
+    (declare (type little-world-hash-value value))
     (setf value (logand #xffffffff
                         (* (logxor value (ash value -13)) 1274126177)))
     (logand #xffffffff (logxor value (ash value -16)))))
 
+(defun little-world-hash (source x z &optional (salt 0))
+  "A stable coordinate hash for terrain readings and discrete features."
+  (%little-world-hash (little-world-seed-bits source) x z salt))
+
+(defun little-world-hash-unit (hash)
+  "HASH as a reading in [-1, 1]: twice its ratio to 2^32-1, less one."
+  (declare (type little-world-hash-value hash))
+  (- (* 2.0d0 (/ (float hash 1.0d0) 4294967295.0d0)) 1.0d0))
+
 (defun little-world-hash-reading (source x z salt)
-  (- (* 2.0d0 (/ (little-world-hash source x z salt) #xffffffff)) 1.0d0))
+  (little-world-hash-unit (little-world-hash source x z salt)))
 
 (defun smooth-little-world-reading (reading)
+  (declare (type double-float reading))
   (* reading reading (- 3.0d0 (* 2.0d0 reading))))
 
 (defun interpolate-little-world-reading (left right amount)
+  (declare (type double-float left right amount))
   (+ left (* (- right left) amount)))
+
+(defun little-world-floor (value)
+  (declare (type (double-float -1.0d15 1.0d15) value))
+  (values (floor value)))
+
+(defun %little-world-value-noise (seed x z period salt)
+  (declare (type little-world-hash-value seed) (type fixnum x z salt)
+           (type double-float period))
+  (let* ((sample-x (/ (float x 1.0d0) period))
+         (sample-z (/ (float z 1.0d0) period))
+         (cell-x (little-world-floor sample-x))
+         (cell-z (little-world-floor sample-z))
+         (tx (smooth-little-world-reading (- sample-x (float cell-x 1.0d0))))
+         (tz (smooth-little-world-reading (- sample-z (float cell-z 1.0d0))))
+         (near (interpolate-little-world-reading
+                (little-world-hash-unit (%little-world-hash seed cell-x cell-z salt))
+                (little-world-hash-unit
+                 (%little-world-hash seed (1+ cell-x) cell-z salt))
+                tx))
+         (far (interpolate-little-world-reading
+               (little-world-hash-unit
+                (%little-world-hash seed cell-x (1+ cell-z) salt))
+               (little-world-hash-unit
+                (%little-world-hash seed (1+ cell-x) (1+ cell-z) salt))
+               tx)))
+    (interpolate-little-world-reading near far tz)))
 
 (defun little-world-value-noise (source x z period &optional (salt 0))
   "Sample deterministic smooth value noise at integer world position X,Z."
   (check-type period (real (0) *))
-  (let* ((sample-x (/ x (coerce period 'double-float)))
-         (sample-z (/ z (coerce period 'double-float)))
-         (cell-x (floor sample-x))
-         (cell-z (floor sample-z))
-         (tx (smooth-little-world-reading (- sample-x cell-x)))
-         (tz (smooth-little-world-reading (- sample-z cell-z)))
-         (near (interpolate-little-world-reading
-                (little-world-hash-reading source cell-x cell-z salt)
-                (little-world-hash-reading source (1+ cell-x) cell-z salt)
-                tx))
-         (far (interpolate-little-world-reading
-               (little-world-hash-reading source cell-x (1+ cell-z) salt)
-               (little-world-hash-reading
-                source (1+ cell-x) (1+ cell-z) salt)
-               tx)))
-    (interpolate-little-world-reading near far tz)))
+  (%little-world-value-noise (little-world-seed-bits source) x z
+                             (coerce period 'double-float) salt))
 
-(defun little-world-hash-3d (source x y z &optional (salt 0))
-  "A stable volume hash for cave readings; the 2D hash with a Y term."
-  (declare (type fixnum x y z salt))
+(defun %little-world-hash-3d (seed x y z salt)
+  (declare (type little-world-hash-value seed) (type fixnum x y z salt))
   (let ((value
           (logand #xffffffff
-                  (+ (logand #xffffffff (little-world-source-seed source))
+                  (+ seed
                      (logand #xffffffff (* (logand x #xffffffff) 374761393))
                      (logand #xffffffff (* (logand y #xffffffff) 3266489917))
                      (logand #xffffffff (* (logand z #xffffffff) 668265263))
                      (logand #xffffffff
                              (* (logand salt #xffffffff) 2246822519))))))
-    (declare (type (unsigned-byte 32) value))
+    (declare (type little-world-hash-value value))
     (setf value (logand #xffffffff
                         (* (logxor value (ash value -13)) 1274126177)))
     (logand #xffffffff (logxor value (ash value -16)))))
 
+(defun little-world-hash-3d (source x y z &optional (salt 0))
+  "A stable volume hash for cave readings; the 2D hash with a Y term."
+  (%little-world-hash-3d (little-world-seed-bits source) x y z salt))
+
 (defun little-world-hash-reading-3d (source x y z salt)
-  (- (* 2.0d0 (/ (little-world-hash-3d source x y z salt) #xffffffff))
-     1.0d0))
+  (little-world-hash-unit (little-world-hash-3d source x y z salt)))
+
+(defun %little-world-volume-plane (seed cell-x cell-y cell-z tx tz salt)
+  "The volume noise's corners at lattice level CELL-Y, blended across X, Z."
+  (declare (type little-world-hash-value seed) (type fixnum cell-x cell-y cell-z salt)
+           (type double-float tx tz))
+  (flet ((corner (dx dz)
+           (little-world-hash-unit
+            (%little-world-hash-3d seed (+ cell-x dx) cell-y (+ cell-z dz) salt))))
+    (interpolate-little-world-reading
+     (interpolate-little-world-reading (corner 0 0) (corner 1 0) tx)
+     (interpolate-little-world-reading (corner 0 1) (corner 1 1) tx)
+     tz)))
+
+(defun %little-world-volume-noise (seed x y z period vertical-period salt)
+  (declare (type little-world-hash-value seed) (type fixnum x y z salt)
+           (type double-float period vertical-period))
+  (let* ((sample-x (/ (float x 1.0d0) period))
+         (sample-y (/ (float y 1.0d0) vertical-period))
+         (sample-z (/ (float z 1.0d0) period))
+         (cell-x (little-world-floor sample-x))
+         (cell-y (little-world-floor sample-y))
+         (cell-z (little-world-floor sample-z))
+         (tx (smooth-little-world-reading (- sample-x (float cell-x 1.0d0))))
+         (ty (smooth-little-world-reading (- sample-y (float cell-y 1.0d0))))
+         (tz (smooth-little-world-reading (- sample-z (float cell-z 1.0d0)))))
+    (interpolate-little-world-reading
+     (%little-world-volume-plane seed cell-x cell-y cell-z tx tz salt)
+     (%little-world-volume-plane seed cell-x (1+ cell-y) cell-z tx tz salt)
+     ty)))
 
 (defun little-world-volume-noise
     (source x y z period vertical-period &optional (salt 0))
@@ -105,46 +181,71 @@ PERIOD is the horizontal cell size and VERTICAL-PERIOD the vertical one, so
 a reading can be stretched flat for tunnels that run rather than plunge."
   (check-type period (real (0) *))
   (check-type vertical-period (real (0) *))
-  (let* ((sample-x (/ x (coerce period 'double-float)))
-         (sample-y (/ y (coerce vertical-period 'double-float)))
-         (sample-z (/ z (coerce period 'double-float)))
-         (cell-x (floor sample-x))
-         (cell-y (floor sample-y))
-         (cell-z (floor sample-z))
-         (tx (smooth-little-world-reading (- sample-x cell-x)))
-         (ty (smooth-little-world-reading (- sample-y cell-y)))
-         (tz (smooth-little-world-reading (- sample-z cell-z))))
-    (flet ((corner (dx dy dz)
-             (little-world-hash-reading-3d
-              source (+ cell-x dx) (+ cell-y dy) (+ cell-z dz) salt))
-           (lerp (left right amount)
-             (interpolate-little-world-reading left right amount)))
-      (lerp (lerp (lerp (corner 0 0 0) (corner 1 0 0) tx)
-                  (lerp (corner 0 0 1) (corner 1 0 1) tx)
-                  tz)
-            (lerp (lerp (corner 0 1 0) (corner 1 1 0) tx)
-                  (lerp (corner 0 1 1) (corner 1 1 1) tx)
-                  tz)
-            ty))))
+  (%little-world-volume-noise (little-world-seed-bits source) x y z
+                              (coerce period 'double-float)
+                              (coerce vertical-period 'double-float)
+                              salt))
+
+(defun fill-little-world-volume-column
+    (column seed x z top period vertical-period salt)
+  "Fill COLUMN's first TOP+1 entries with the volume noise of column X,Z.
+
+Each entry is the reading LITTLE-WORLD-VOLUME-NOISE gives at that Y, by the
+same operations: the corners of a lattice level are blended across X and Z
+once per column, then each Y blends its two levels."
+  (declare (type (simple-array double-float (*)) column)
+           (type little-world-hash-value seed) (type fixnum x z top salt)
+           (type double-float period vertical-period))
+  (let* ((sample-x (/ (float x 1.0d0) period))
+         (sample-z (/ (float z 1.0d0) period))
+         (cell-x (little-world-floor sample-x))
+         (cell-z (little-world-floor sample-z))
+         (tx (smooth-little-world-reading (- sample-x (float cell-x 1.0d0))))
+         (tz (smooth-little-world-reading (- sample-z (float cell-z 1.0d0))))
+         (level most-negative-fixnum)
+         (low 0.0d0)
+         (high 0.0d0))
+    (declare (type fixnum level) (type double-float low high))
+    (loop for y of-type fixnum from 0 to top
+          do (let* ((sample-y (/ (float y 1.0d0) vertical-period))
+                    (cell-y (little-world-floor sample-y)))
+               (unless (= cell-y level)
+                 (setf low (if (= cell-y (1+ level))
+                               high
+                               (%little-world-volume-plane
+                                seed cell-x cell-y cell-z tx tz salt))
+                       high (%little-world-volume-plane
+                             seed cell-x (1+ cell-y) cell-z tx tz salt)
+                       level cell-y))
+               (setf (aref column y)
+                     (interpolate-little-world-reading
+                      low high
+                      (smooth-little-world-reading
+                       (- sample-y (float cell-y 1.0d0)))))))
+    column))
 
 (defun little-world-smoothstep (edge0 edge1 value)
   "0 at or below EDGE0, 1 at or above EDGE1, smooth in between."
+  (declare (type double-float edge0 edge1 value))
   (smooth-little-world-reading
    (max 0.0d0 (min 1.0d0 (/ (- value edge0) (- edge1 edge0))))))
 
 ;;; The meadow relief: the original gentle heightmap.
 
 (defun little-world-meadow-surface-height (source x z height)
-  (let ((reading
-          (+ 5.5d0
-             (* 3.2d0 (little-world-value-noise source x z 64 0))
-             (* 1.7d0 (little-world-value-noise source x z 28 1))
-             (* 0.8d0 (little-world-value-noise source x z 11 2)))))
+  (declare (type fixnum height))
+  (let* ((seed (little-world-seed-bits source))
+         (reading
+           (+ 5.5d0
+              (* 3.2d0 (%little-world-value-noise seed x z 64.0d0 0))
+              (* 1.7d0 (%little-world-value-noise seed x z 28.0d0 1))
+              (* 0.8d0 (%little-world-value-noise seed x z 11.0d0 2)))))
     (max 2 (min (- height 4) (round reading)))))
 
-(defun little-world-meadow-surface-material (source x z surface height)
-  (let* ((moisture (little-world-value-noise source x z 52 17))
-         (slope (little-world-surface-slope source x z surface height)))
+(defun little-world-meadow-surface-material
+    (source x z surface height
+     &optional (slope (little-world-surface-slope source x z surface height)))
+  (let ((moisture (little-world-value-noise source x z 52 17)))
     (cond ((>= surface 9) *snow-block*)
           ((or (<= surface 3) (< moisture -0.48d0)) *sand-block*)
           ((>= slope 2) *stone-block*)
@@ -175,40 +276,47 @@ peaks are ridged: one minus the magnitude of a noise reading folds its zero
 crossings into sharp crest lines, and squaring keeps the flanks below them.
 Narrow ravines cut down through everything along the crests of another
 ridged reading, so cliffs and gorges appear in the plains as well."
-  (let* ((lowland
-           (+ *alpine-lowland-level*
-              (* 0.050d0 (little-world-value-noise source x z 96 0))
-              (* 0.028d0 (little-world-value-noise source x z 28 1))
-              (* 0.012d0 (little-world-value-noise source x z 11 2))))
-         (range
-           (little-world-smoothstep
-            0.08d0 0.42d0
-            (+ (little-world-value-noise source x z 176 3)
-               (* 0.35d0 (little-world-value-noise source x z 72 6)))))
-         (ridge (- 1.0d0 (abs (little-world-value-noise source x z 44 4))))
-         (crag (- 1.0d0 (abs (little-world-value-noise source x z 18 5))))
-         (mountain
-           (* range
-              (+ 0.10d0
-                 (* 0.42d0 ridge ridge)
-                 (* 0.12d0 crag)
-                 (* 0.03d0 (little-world-value-noise source x z 7 8)))))
-         (ravine
-           (* 0.12d0
-              (little-world-smoothstep
-               0.92d0 0.985d0
-               (- 1.0d0
-                  (abs (little-world-value-noise source x z 90 7)))))))
-    (- (+ lowland mountain) ravine)))
+  (let ((seed (little-world-seed-bits source))
+        (lowland-level *alpine-lowland-level*))
+    (declare (type double-float lowland-level))
+    (flet ((noise (period salt)
+             (%little-world-value-noise seed x z period salt)))
+      (declare (inline noise))
+      (let* ((lowland
+               (+ lowland-level
+                  (* 0.050d0 (noise 96.0d0 0))
+                  (* 0.028d0 (noise 28.0d0 1))
+                  (* 0.012d0 (noise 11.0d0 2))))
+             (range
+               (little-world-smoothstep
+                0.08d0 0.42d0
+                (+ (noise 176.0d0 3) (* 0.35d0 (noise 72.0d0 6)))))
+             (ridge (- 1.0d0 (abs (noise 44.0d0 4))))
+             (crag (- 1.0d0 (abs (noise 18.0d0 5))))
+             (mountain
+               (* range
+                  (+ 0.10d0
+                     (* 0.42d0 ridge ridge)
+                     (* 0.12d0 crag)
+                     (* 0.03d0 (noise 7.0d0 8)))))
+             (ravine
+               (* 0.12d0
+                  (little-world-smoothstep
+                   0.92d0 0.985d0 (- 1.0d0 (abs (noise 90.0d0 7)))))))
+        (- (+ lowland mountain) ravine)))))
 
 (defun little-world-alpine-surface-height (source x z height)
+  (declare (type fixnum height))
   (max 2 (min (- height 3)
-              (round (* height (little-world-alpine-relief source x z))))))
+              (round (* (float height 1.0d0)
+                        (the double-float
+                             (little-world-alpine-relief source x z)))))))
 
-(defun little-world-alpine-surface-material (source x z surface height)
+(defun little-world-alpine-surface-material
+    (source x z surface height
+     &optional (slope (little-world-surface-slope source x z surface height)))
   (let* ((level (/ surface (coerce height 'double-float)))
-         (moisture (little-world-value-noise source x z 52 17))
-         (slope (little-world-surface-slope source x z surface height)))
+         (moisture (little-world-value-noise source x z 52 17)))
     (cond ((>= slope 4) *slate-block*)
           ((and (>= level *alpine-snow-line*) (<= slope 2)) *snow-block*)
           ((>= level *alpine-tree-line*) *stone-block*)
@@ -241,6 +349,27 @@ lowland keeps its ground while the rock under a mountain hollows out.")
 (defparameter *cave-crystal-chance* 28
   "One in this many cave floors or ceilings grows a crystal.")
 
+(declaim (inline little-world-cave-reading-p))
+(defun little-world-cave-reading-p (y surface a b wander cavern detail)
+  "Whether readings A and B of the tunnel pair, WANDER of the tunnel radius,
+and CAVERN and DETAIL of the cavern field open the cell at Y under SURFACE."
+  (declare (type fixnum y surface) (type double-float a b wander cavern detail))
+  (let* ((narrowing (min 1.0d0 (/ (float (+ (- surface y) 1) 1.0d0) 4.0d0)))
+         (radius (* narrowing narrowing (+ 0.020d0 (* 0.012d0 wander)))))
+    (or (< (+ (* a a) (* b b)) radius)
+        (let ((depth (- surface y 5))
+              (threshold *cave-cavern-threshold*))
+          (declare (type double-float threshold))
+          (and (plusp depth)
+               (> (+ cavern (* 0.35d0 detail))
+                  (+ threshold
+                     (* 0.30d0
+                        (- 1.0d0
+                           (min 1.0d0
+                                (/ (float depth 1.0d0)
+                                   (coerce *cave-cavern-depth*
+                                           'double-float))))))))))))
+
 (defun little-world-cave-p (source x y z surface)
   "Whether the alpine cell at X,Y,Z below SURFACE is open cave.
 
@@ -253,34 +382,21 @@ that relaxes with depth, so they open up under mountains rather than under
 the plains.  The bottom two layers are never carved."
   (and (>= y 2)
        (<= y surface)
-       (let* ((a (little-world-volume-noise
-                  source x y z
-                  *cave-tunnel-period* *cave-tunnel-vertical-period* 40))
-              (b (little-world-volume-noise
-                  source x y z
-                  *cave-tunnel-period* *cave-tunnel-vertical-period* 41))
-              (narrowing (min 1.0d0 (/ (+ (- surface y) 1) 4.0d0)))
-              (radius
-                (* narrowing narrowing
-                   (+ 0.020d0
-                      (* 0.012d0
-                         (little-world-value-noise source x z 40 43))))))
-         (or (< (+ (* a a) (* b b)) radius)
-             (let ((depth (- surface y 5)))
-               (and (plusp depth)
-                    (> (+ (little-world-volume-noise
-                           source x y z
-                           *cave-cavern-period* *cave-cavern-period* 44)
-                          (* 0.35d0
-                             (little-world-volume-noise
-                              source x y z 12 12 45)))
-                       (+ *cave-cavern-threshold*
-                          (* 0.30d0
-                             (- 1.0d0
-                                (min 1.0d0
-                                     (/ depth
-                                        (coerce *cave-cavern-depth*
-                                                'double-float)))))))))))))
+       (let ((seed (little-world-seed-bits source))
+             (tunnel (coerce *cave-tunnel-period* 'double-float))
+             (tunnel-vertical
+               (coerce *cave-tunnel-vertical-period* 'double-float))
+             (cavern (coerce *cave-cavern-period* 'double-float)))
+         (flet ((volume (period vertical-period salt)
+                  (%little-world-volume-noise
+                   seed x y z period vertical-period salt)))
+           (little-world-cave-reading-p
+            y surface
+            (volume tunnel tunnel-vertical 40)
+            (volume tunnel tunnel-vertical 41)
+            (%little-world-value-noise seed x z 40.0d0 43)
+            (volume cavern cavern 44)
+            (volume 12.0d0 12.0d0 45))))))
 
 (defun little-world-alpine-ground-height (source x z height)
   "The highest Y at X,Z that stays solid once caves are carved."
@@ -306,11 +422,15 @@ the plains.  The bottom two layers are never carved."
                 (little-world-surface-height
                  source (+ x dx) (+ z dz) height)))))
 
-(defun little-world-surface-material (source x z surface height)
-  "Choose a visible biome material from height, moisture, and local slope."
+(defun little-world-surface-material
+    (source x z surface height
+     &optional (slope (little-world-surface-slope source x z surface height)))
+  "Choose a visible biome material from height, moisture, and local SLOPE."
   (ecase (little-world-source-relief source)
-    (:meadow (little-world-meadow-surface-material source x z surface height))
-    (:alpine (little-world-alpine-surface-material source x z surface height))))
+    (:meadow (little-world-meadow-surface-material
+              source x z surface height slope))
+    (:alpine (little-world-alpine-surface-material
+              source x z surface height slope))))
 
 (defun little-world-ground-height (source x z height)
   "The highest solid Y at X,Z once caves are carved: where a walker stands."
@@ -423,8 +543,9 @@ up, so cliffs and peaks are not capped with dirt."
         ((or (zerop y) (< y (- surface 2))) *stone-block*)
         ((eq surface-material *sand-block*) *sand-block*)
         ((and (eq (little-world-source-relief source) :alpine)
-              (member surface-material
-                      (list *stone-block* *snow-block* *slate-block*)))
+              (or (eq surface-material *stone-block*)
+                  (eq surface-material *snow-block*)
+                  (eq surface-material *slate-block*)))
          *stone-block*)
         (t *dirt-block*)))
 
@@ -434,7 +555,11 @@ up, so cliffs and peaks are not capped with dirt."
 Every column is filled from the ground up, then, in the alpine relief,
 carved from the bottom up: a carved cell over solid stone may grow a
 crystal on that floor, and a solid cell over a carved one may hang a
-crystal from that ceiling, so cave systems glow from within."
+crystal from that ceiling, so cave systems glow from within.
+
+Each column's surface is read once, with a one-column border for the
+slopes, and each cave field once per column (#QTXNY0): the readings are
+the ones LITTLE-WORLD-SURFACE-HEIGHT and LITTLE-WORLD-CAVE-P give."
   (check-type source little-world-source)
   (with-world-change-transaction (world)
     (let* ((chunk (ensure-world-chunk world chunk-x 0 chunk-z))
@@ -443,47 +568,79 @@ crystal from that ceiling, so cave systems glow from within."
            (height (chunk-shape-height shape))
            (depth (chunk-shape-depth shape))
            (origin (chunk-domain-origin (block-chunk-domain chunk)))
-           (caves-p (eq (little-world-source-relief source) :alpine)))
-      (dotimes (local-z depth)
-        (dotimes (local-x width)
-          (let* ((x (+ (world-coordinate-x origin) local-x))
-                 (z (+ (world-coordinate-z origin) local-z))
-                 (surface (little-world-surface-height source x z height))
-                 (surface-material
-                   (little-world-surface-material
-                    source x z surface height)))
-            (flet ((offset (y)
-                     (+ local-x (* width (+ y (* height local-z))))))
-              (dotimes (y (1+ surface))
-                (setf (chunk-block-at-offset chunk (offset y))
-                      (little-world-column-material
-                       source y surface surface-material)))
-              (when caves-p
-                (let ((below-carved-p nil))
-                  (loop for y from 2 to surface
-                        for carved-p = (little-world-cave-p
-                                        source x y z surface)
-                        for crystal-p = (zerop
-                                         (mod (little-world-hash-3d
-                                               source x y z 46)
-                                              *cave-crystal-chance*))
-                        do (cond (carved-p
-                                  (setf (chunk-block-at-offset
-                                         chunk (offset y))
-                                        nil)
-                                  (when (and crystal-p (not below-carved-p)
-                                             (eq (chunk-block-at-offset
-                                                  chunk (offset (1- y)))
-                                                 *stone-block*))
+           (origin-x (world-coordinate-x origin))
+           (origin-z (world-coordinate-z origin))
+           (caves-p (eq (little-world-source-relief source) :alpine))
+           (seed (little-world-seed-bits source))
+           (surfaces (make-array (list (+ depth 2) (+ width 2))))
+           (fields (loop repeat 4
+                         collect (make-array (1+ height)
+                                             :element-type 'double-float)))
+           (tunnel (coerce *cave-tunnel-period* 'double-float))
+           (tunnel-vertical
+             (coerce *cave-tunnel-vertical-period* 'double-float))
+           (cavern (coerce *cave-cavern-period* 'double-float)))
+      (dotimes (row (+ depth 2))
+        (dotimes (column (+ width 2))
+          (setf (aref surfaces row column)
+                (little-world-surface-height
+                 source (+ origin-x column -1) (+ origin-z row -1) height))))
+      (destructuring-bind (a b cavern-field detail) fields
+        (declare (type (simple-array double-float (*)) a b cavern-field detail))
+        (dotimes (local-z depth)
+          (dotimes (local-x width)
+            (let* ((x (+ origin-x local-x))
+                   (z (+ origin-z local-z))
+                   (surface (aref surfaces (1+ local-z) (1+ local-x)))
+                   (slope (max (abs (- surface (aref surfaces (1+ local-z) local-x)))
+                               (abs (- surface (aref surfaces (1+ local-z) (+ local-x 2))))
+                               (abs (- surface (aref surfaces local-z (1+ local-x))))
+                               (abs (- surface (aref surfaces (+ local-z 2) (1+ local-x))))))
+                   (surface-material
+                     (little-world-surface-material
+                      source x z surface height slope)))
+              (flet ((offset (y)
+                       (+ local-x (* width (+ y (* height local-z))))))
+                (dotimes (y (1+ surface))
+                  (setf (chunk-block-at-offset chunk (offset y))
+                        (little-world-column-material
+                         source y surface surface-material)))
+                (when caves-p
+                  (fill-little-world-volume-column
+                   a seed x z surface tunnel tunnel-vertical 40)
+                  (fill-little-world-volume-column
+                   b seed x z surface tunnel tunnel-vertical 41)
+                  (fill-little-world-volume-column
+                   cavern-field seed x z surface cavern cavern 44)
+                  (fill-little-world-volume-column
+                   detail seed x z surface 12.0d0 12.0d0 45)
+                  (let ((wander (%little-world-value-noise seed x z 40.0d0 43))
+                        (below-carved-p nil))
+                    (loop for y from 2 to surface
+                          for carved-p = (little-world-cave-reading-p
+                                          y surface (aref a y) (aref b y) wander
+                                          (aref cavern-field y) (aref detail y))
+                          for crystal-p = (zerop
+                                           (mod (%little-world-hash-3d
+                                                 seed x y z 46)
+                                                *cave-crystal-chance*))
+                          do (cond (carved-p
                                     (setf (chunk-block-at-offset
-                                           chunk (offset (1- y)))
+                                           chunk (offset y))
+                                          nil)
+                                    (when (and crystal-p (not below-carved-p)
+                                               (eq (chunk-block-at-offset
+                                                    chunk (offset (1- y)))
+                                                   *stone-block*))
+                                      (setf (chunk-block-at-offset
+                                             chunk (offset (1- y)))
+                                            *crystal-block*)))
+                                   ((and crystal-p below-carved-p
+                                         (< y surface))
+                                    (setf (chunk-block-at-offset
+                                           chunk (offset y))
                                           *crystal-block*)))
-                                 ((and crystal-p below-carved-p
-                                       (< y surface))
-                                  (setf (chunk-block-at-offset
-                                         chunk (offset y))
-                                        *crystal-block*)))
-                           (setf below-carved-p carved-p))))))))
+                             (setf below-carved-p carved-p)))))))))
       chunk)))
 
 (defmethod materialize-block-world-chunk
