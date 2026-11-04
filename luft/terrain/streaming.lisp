@@ -156,7 +156,13 @@ this at a frame boundary."
   (when (streaming-scene-replacement scene)
     (return-from edit-streaming-scene-cell (values nil :busy nil)))
   (let* ((solid (scene-solid scene))
-         (domain (luft:fiber-store-domain solid)))
+         (domain (luft:fiber-store-domain solid))
+         (key (luft:site-chunk-key cell))
+         ;; Occupancy comes from the resident chunk, which every visible
+         ;; chunk has.  Collision is only a window of it: a peer may edit a
+         ;; chunk this player sees but does not collide with (#I6O4J6).
+         (old-chunk (streaming-store-fibers
+                     scene key (luft:make-chunk-fibers domain key))))
     (luft:checked-site domain cell)
     (unless (and (= (luft:site-extent cell) luft:+cell-extent+)
                  (luft:site-positive-p cell))
@@ -166,19 +172,9 @@ this at a frame boundary."
       (return-from edit-streaming-scene-cell (values nil :attachment nil)))
     (multiple-value-bind (old-offset occupied-p)
         (material-cell-at (scene-material-cells scene) cell)
-      ;; A visible chunk outside the gameplay window has no collision, and a
-      ;; peer may edit it (#I6O4J6): its resident fibers say what is there.
       (unless (eql occupied-p
-                   (= 1 (if (and (streaming-scene-source scene)
-                                 (null (luft:fiber-store-chunk
-                                        solid (luft:site-chunk-key cell))))
-                            (luft:fibers-cell-bit
-                             (streaming-store-fibers
-                              scene (luft:site-chunk-key cell)
-                              (luft:make-chunk-fibers domain (luft:site-chunk-key cell)))
-                             (luft:site-x cell) (luft:site-y cell) (luft:site-z cell))
-                            (scene-cell-bit scene (luft:site-x cell) (luft:site-y cell)
-                                            (luft:site-z cell)))))
+                   (= 1 (luft:fibers-cell-bit old-chunk (luft:site-x cell)
+                                              (luft:site-y cell) (luft:site-z cell))))
         (error "Scene occupancy and material state disagree at ~S." cell))
       (cond ((and new-placement occupied-p)
              (return-from edit-streaming-scene-cell
@@ -213,9 +209,6 @@ this at a frame boundary."
                                 (scene-material-cells scene) cell
                                 (unless attachment new-offset)))
                (bit (if (and new-placement (not attachment)) 1 0))
-               (key (luft:site-chunk-key cell))
-               (old-chunk (streaming-store-fibers
-                           scene key (luft:make-chunk-fibers domain key)))
                (new-chunk (luft:fibers-with-cell
                            old-chunk (luft:site-x cell) (luft:site-y cell)
                            (luft:site-z cell) bit))
@@ -502,19 +495,77 @@ silently empty the desired residency window."
                                         (* y luft:+chunk-size+))))
      #'<)))
 
+;;; Interest (#I6O4J6).  Collision follows the local focus and one interest
+;;; focus per other player the scene's world simulates for; meshes, light,
+;;; and publication follow only the local focus.
+
+(defun set-streaming-scene-interest (scene id world-x world-y)
+  "Keep collision resident around WORLD-X, WORLD-Y for ID; return its chunk key.
+
+The next retarget demands the chunks, and each one collides once resident."
+  (setf (gethash id (streaming-scene-interest scene))
+        (streaming-scene-focus-key scene world-x world-y)))
+
+(defun remove-streaming-scene-interest (scene id)
+  "Forget ID's interest focus; its chunks leave at the next retarget."
+  (remhash id (streaming-scene-interest scene)))
+
+(defun streaming-scene-interest-keys (scene)
+  "The distinct chunk keys of SCENE's interest foci, sorted."
+  (sort (remove-duplicates
+         (loop for key being the hash-values of (streaming-scene-interest scene)
+               collect key))
+        #'<))
+
+(defun streaming-scene-collision-keys (scene focus-key)
+  "Every chunk within the gameplay radius of FOCUS-KEY or an interest focus."
+  (sort (remove-duplicates
+         (loop for focus in (cons focus-key (streaming-scene-interest-keys scene))
+               append (streaming-domain-keys-near
+                       scene focus +authored-world-gameplay-radius+)))
+        #'<))
+
+(defun scene-collision-resident-p (scene x y)
+  "Whether SCENE's collision knows column X, Y; elsewhere bodies would fall.
+
+A source scene collides only around its foci, though it keeps more chunks
+resident for meshing.  Anything that moves under gravity waits where this
+is false.  Every column of a finite scene is known."
+  (or (not (typep scene 'streaming-scene))
+      (null (streaming-scene-source scene))
+      (let ((domain (scene-domain scene)))
+        (and (< -1 x (luft:world-domain-x-limit domain))
+             (< -1 y (luft:world-domain-y-limit domain))
+             (let ((key (luft:chunk-key-at x y)))
+               (and (nth-value 1 (gethash key (streaming-scene-store scene)))
+                    (not (null (luft:fiber-store-chunk (scene-solid scene) key)))))))))
+
+(defun install-streaming-collision (scene collision-keys)
+  "Make SCENE collide in exactly COLLISION-KEYS, from their resident values.
+
+A replace-only store, so a worker's snapshot keeps the old one; nothing is
+replaced when the window and its fibers are already the installed ones."
+  (let ((solid (scene-solid scene))
+        (store (streaming-scene-store scene)))
+    (unless (and (= (luft:fiber-store-count solid) (length collision-keys))
+                 (every (lambda (key)
+                          (eq (luft:fiber-store-chunk solid key)
+                              (resident-cell-chunk-fibers (gethash key store))))
+                        collision-keys))
+      (let ((collision (luft:make-fiber-store (luft:fiber-store-domain solid))))
+        (dolist (key collision-keys)
+          (setf (luft:fiber-store-chunk collision key)
+                (resident-cell-chunk-fibers (gethash key store))))
+        (setf (scene-solid scene) collision)))
+    scene))
+
 (zdefun (rebuild-authored-world-resident-values
          :zone :luft/rebuild-active-scene
          :value (length collision-keys))
     (scene source-keys &optional (collision-keys source-keys))
   "Publish visible materials and a possibly wider resident collision store."
-  (let* ((source (streaming-scene-source scene))
-         (domain (world-source-domain source))
-         (collision (luft:make-fiber-store domain))
-         (materials (make-material-store)))
-    (dolist (key collision-keys)
-      (setf (luft:fiber-store-chunk collision key)
-            (resident-cell-chunk-fibers
-             (gethash key (streaming-scene-store scene)))))
+  (let ((materials (make-material-store)))
+    (install-streaming-collision scene collision-keys)
     (zone :luft/assemble-visible-materials
       (dolist (key source-keys)
         (let ((resident (gethash key (streaming-scene-store scene))))
@@ -529,8 +580,7 @@ silently empty the desired residency window."
                                 (gethash key (streaming-scene-store scene)))))
                  #'< :key #'surface-attachment-face)
            'vector))
-    (setf (scene-solid scene) collision
-          (scene-material-cells scene) materials
+    (setf (scene-material-cells scene) materials
           (scene-content-revision scene) (1+ (scene-content-revision scene)))
     scene))
 
@@ -550,9 +600,9 @@ silently empty the desired residency window."
     (setf (gethash key (streaming-scene-load-outstanding scene)) ticket)
     request))
 
-(defun authored-world-residency-ready-p (scene)
-  (loop for key being the hash-keys of (streaming-scene-desired scene)
-        always (nth-value 1 (gethash key (streaming-scene-store scene)))))
+(defun authored-world-residency-ready-p (scene keys)
+  (every (lambda (key) (nth-value 1 (gethash key (streaming-scene-store scene))))
+         keys))
 
 (defun streaming-scene-loaded-source-keys (scene)
   "Return the sorted gameplay source keys in SCENE's published mesh cohort."
@@ -591,28 +641,34 @@ silently empty the desired residency window."
 
 (zdefun (retarget-authored-world :zone :luft/retarget-authored-world)
     (scene production-system bevel-width world-x world-y)
-  "Demand, asynchronously materialize, and activate one bounded source window."
+  "Demand, asynchronously materialize, and activate one bounded source window.
+
+The window around WORLD-X, WORLD-Y is meshed and published; collision is
+kept around it and around every interest focus (#I6O4J6), each chunk as soon
+as it is resident."
   (let* ((focus-key (streaming-scene-focus-key scene world-x world-y))
          (focus (cons (luft:chunk-key-x focus-key)
                       (luft:chunk-key-y focus-key)))
+         (interest-keys (streaming-scene-interest-keys scene))
          (visible-keys
            (streaming-domain-keys-near
             scene focus-key (streaming-scene-residency-radius scene)))
-         (gameplay-keys
-           (streaming-domain-keys-near
-            scene focus-key +authored-world-gameplay-radius+))
+         (collision-keys (streaming-scene-collision-keys scene focus-key))
          ;; Materialize exactly the complete occupancy capture which the
          ;; visible owner closure will need: owners, witness, then probe guard.
          ;; This is asymmetric at high seams and substantially smaller than a
          ;; conservative square radius.
-         (desired-keys
+         (visible-desired-keys
            (streaming-scene-dependency-guard-keys
             scene
             (streaming-scene-dependency-guard-keys
              scene
              (streaming-scene-canonical-owner-closure scene visible-keys))))
+         (desired-keys
+           (union visible-desired-keys collision-keys :test #'eql))
          (desired (streaming-scene-desired scene)))
-    (unless (equal focus (streaming-scene-focus scene))
+    (unless (and (equal focus (streaming-scene-focus scene))
+                 (equal interest-keys (streaming-scene-interest-demand scene)))
       (let ((next (make-hash-table :test #'eql)))
         (dolist (key desired-keys)
           (setf (gethash key next)
@@ -635,19 +691,30 @@ silently empty the desired residency window."
         (unless (nth-value 1 (gethash key (streaming-scene-store scene)))
           (schedule-authored-world-chunk-load
            scene production-system key (gethash key desired)
-           (streaming-scene-key-distance key focus))))
-      (setf (streaming-scene-focus scene) focus))
-    (when (and (null (streaming-scene-replacement scene))
-               (authored-world-residency-ready-p scene)
-               (not (equal visible-keys
-                           (streaming-scene-loaded-source-keys scene))))
-      ;; Let the established cohort path observe the old published LOADED set;
-      ;; it computes exact owner removals before replacing it with this focus.
-      (setf (streaming-scene-focus scene) nil)
-      (rebuild-authored-world-resident-values
-       scene visible-keys gameplay-keys)
-      (%retarget-resident-streaming-scene
-       scene production-system bevel-width world-x world-y))))
+           (loop for near in (cons focus-key interest-keys)
+                 minimize (streaming-scene-key-distance
+                           key (cons (luft:chunk-key-x near)
+                                     (luft:chunk-key-y near)))))))
+      (setf (streaming-scene-focus scene) focus
+            (streaming-scene-interest-demand scene) interest-keys))
+    ;; Collision needs no mesh: it follows every focus, a chunk at a time,
+    ;; and a body over a chunk that has not arrived waits for it.
+    (let ((resident-collision-keys
+            (remove-if-not (lambda (key)
+                             (nth-value 1 (gethash key (streaming-scene-store scene))))
+                           collision-keys)))
+      (install-streaming-collision scene resident-collision-keys)
+      (when (and (null (streaming-scene-replacement scene))
+                 (authored-world-residency-ready-p scene visible-desired-keys)
+                 (not (equal visible-keys
+                             (streaming-scene-loaded-source-keys scene))))
+        ;; Let the established cohort path observe the old published LOADED set;
+        ;; it computes exact owner removals before replacing it with this focus.
+        (setf (streaming-scene-focus scene) nil)
+        (rebuild-authored-world-resident-values
+         scene visible-keys resident-collision-keys)
+        (%retarget-resident-streaming-scene
+         scene production-system bevel-width world-x world-y)))))
 
 (zdefun (retarget-streaming-scene :zone :luft/retarget-streaming)
     (scene production-system bevel-width world-x world-y)

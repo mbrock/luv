@@ -34,6 +34,12 @@
    (residency-radius :initarg :residency-radius :initform 1
                      :accessor streaming-scene-residency-radius)
    (focus :initform nil :accessor streaming-scene-focus)
+   ;; Other foci whose collision stays resident (#I6O4J6): one chunk key per
+   ;; player this scene's world simulates for, by that player's id.
+   (interest :initform (make-hash-table :test #'equal)
+             :reader streaming-scene-interest)
+   ;; The interest keys the desired residency was last formed around.
+   (interest-demand :initform nil :accessor streaming-scene-interest-demand)
    (mesh-preparer :initarg :mesh-preparer :initform nil
                   :reader streaming-scene-mesh-preparer
                   :documentation "The consumer that realizes each finished mesh on the worker, or NIL.")

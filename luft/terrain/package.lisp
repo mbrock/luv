@@ -210,6 +210,12 @@ this package draws; the renderer and the ateliers use it.")
            #:resident-cell-chunk-material-cells
            #:retarget-authored-world
            #:retarget-streaming-scene
+           #:scene-collision-resident-p
+           #:set-streaming-scene-interest
+           #:remove-streaming-scene-interest
+           #:install-streaming-collision
+           #:streaming-scene-interest
+           #:streaming-scene-interest-keys
            #:scene
            #:scene-attachments
            #:scene-authored-light-generation

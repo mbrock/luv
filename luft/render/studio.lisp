@@ -1051,15 +1051,13 @@ input frame per tick."
     (values dt (null last))))
 
 (defun viewer-player-ground-resident-p (viewer)
-  "Whether VIEWER's player, if any, stands in a resident streamed chunk."
-  (let ((player (viewer-player viewer))
-        (source (viewer-source viewer)))
+  "Whether VIEWER's player, if any, stands where its scene has collision."
+  (let ((player (viewer-player viewer)))
     (or (null player)
-        (not (typep source 'streaming-scene))
         (let ((position (body-position (character-body player))))
-          (nth-value 1 (gethash (luft:chunk-key-at (floor (vec3-x position))
-                                                   (floor (vec3-y position)))
-                                (streaming-scene-store source)))))))
+          (scene-collision-resident-p (viewer-source viewer)
+                                      (floor (vec3-x position))
+                                      (floor (vec3-y position)))))))
 
 (defun advance-viewer-camera (viewer dt first-frame-p)
   "Observe the simulated character, or move a free inspection camera."

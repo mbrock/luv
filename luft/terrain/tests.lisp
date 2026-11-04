@@ -752,3 +752,108 @@
                   source key 2
                   :edits (terrain:capture-world-source-chunk-edits source key))))
       (is = 0 (luft:fibers-cell-bit (terrain::resident-cell-chunk-fibers chunk) 70 5 1)))))
+
+;;; Interest (#I6O4J6): collision for every focus, publication for one.
+
+(defun settle-streaming (scene system x y &key (until (constantly t)) (seconds 20))
+  "Retarget SCENE around X, Y and install every result until UNTIL holds."
+  (let ((deadline (+ (get-internal-real-time) (* seconds internal-time-units-per-second))))
+    (flet ((idle-p ()
+             (and (zerop (hash-table-count (terrain:streaming-scene-load-outstanding scene)))
+                  (null (terrain:streaming-scene-replacement scene)))))
+      (loop
+        ;; Settled when a retarget with nothing in flight demands nothing.
+        (let* ((idle-p (idle-p))
+               (quiet-p (null (terrain:retarget-streaming-scene scene system 1 x y))))
+          (when (and idle-p quiet-p (idle-p) (funcall until)) (return t)))
+        (loop for (result present-p)
+                = (multiple-value-list (production:receive-production-result-no-hang system))
+              while present-p
+              do (if (typep (production:production-result-request result)
+                            'terrain::streaming-mesh-request)
+                     (terrain::receive-streaming-mesh-result scene result)
+                     (terrain::receive-streaming-source-result scene result)))
+        (let ((replacement (terrain:streaming-scene-replacement scene)))
+          (when (and replacement (terrain:streaming-replacement-result replacement))
+            (when (terrain:streaming-replacement-request replacement)
+              (setf (terrain:streaming-scene-mesh-cache scene)
+                    (terrain:streaming-mesh-result-mesh-cache
+                     (terrain::streaming-replacement-result replacement))))
+            (setf (terrain:streaming-scene-replacement scene) nil)))
+        (when (> (get-internal-real-time) deadline) (return nil))
+        (sleep 0.005)))))
+
+(define-test collision-follows-every-interest-and-publication-one
+  (let* ((domain (luft:make-world-domain :x-bits 9 :y-bits 9))
+         (source (make-instance 'flat-source :domain domain :material-vocabulary (make-palette)))
+         (scene (terrain:make-world-source-streaming-scene source))
+         (system (production:make-single-worker-production-system :name "interest test"))
+         (body (make-instance 'terrain:physical-body)))
+    (unwind-protect
+         (flet ((collides-p (x y) (terrain:scene-collision-resident-p scene x y))
+                (loaded () (sort (loop for key being the hash-keys
+                                         of (terrain:streaming-scene-loaded scene)
+                                       collect key)
+                                 #'<)))
+           (true (settle-streaming scene system 10 10))
+           (true (collides-p 10 10))
+           (true (not (collides-p 400 400)))
+           ;; A second player six chunks away along both axes.
+           (is = (luft:chunk-key-at 400 400)
+               (terrain:set-streaming-scene-interest scene :bea 400.5 400.5))
+           (true (settle-streaming scene system 10 10
+                                   :until (lambda () (collides-p 400 400))))
+           ;; Its whole gameplay radius collides, and nothing between.
+           (dolist (x '(320 384 448))
+             (dolist (y '(320 384 448))
+               (true (collides-p x y) "collides at ~D ~D" x y)))
+           (true (not (collides-p 256 256)))
+           (true (not (collides-p 200 10)))
+           (true (terrain:body-standable-cell-p body scene 400 400 2))
+           (true (terrain:body-standable-cell-p body scene 10 10 2))
+           ;; Meshes and publication follow only the local focus.
+           (is equal (sort (list (luft:chunk-key-at 0 0) (luft:chunk-key-at 64 0)
+                                 (luft:chunk-key-at 0 64) (luft:chunk-key-at 64 64))
+                           #'<)
+               (loaded))
+           (true (null (gethash (luft:chunk-key-at 400 400)
+                                (terrain:material-store-chunks (terrain:scene-material-cells scene)))))
+           ;; The local focus moves; the other stays.
+           (true (settle-streaming scene system 230 10))
+           (true (collides-p 400 400))
+           (true (collides-p 170 10))
+           (true (not (member (luft:chunk-key-at 0 64) (loaded))))
+           ;; Its player leaves: those chunks stop colliding and are evicted.
+           (terrain:remove-streaming-scene-interest scene :bea)
+           (true (settle-streaming scene system 230 10))
+           (true (not (collides-p 400 400)))
+           (true (not (nth-value 1 (gethash (luft:chunk-key-at 400 400)
+                                            (terrain:streaming-scene-store scene))))))
+      (production:stop-production-system system))))
+
+(define-test an-edit-reaches-a-chunk-seen-but-not-collided-with
+  ;; A peer edits a chunk this player sees but neither stands in nor
+  ;; collides with: occupancy is the resident chunk's, not collision's.
+  (let* ((domain (luft:make-world-domain :x-bits 7 :y-bits 7))
+         (source (make-instance 'flat-source :domain domain :material-vocabulary (make-palette)))
+         (scene (terrain:make-world-source-streaming-scene source))
+         (near (luft:chunk-key-at 0 0))
+         (far (luft:chunk-key-at 64 0))
+         (dug (luft:make-site domain 70 5 1 luft:+cell-extent+ 1))
+         (built (luft:make-site domain 71 5 2 luft:+cell-extent+ 1)))
+    (loop for key in (list near far) for incarnation from 1
+          do (setf (gethash key (terrain:streaming-scene-store scene))
+                   (terrain:materialize-world-source-chunk source key incarnation)))
+    (terrain:rebuild-authored-world-resident-values scene (list near far) (list near))
+    (is eq :edited (nth-value 1 (terrain:edit-streaming-scene-cell scene dug nil)))
+    (is eq :edited (nth-value 1 (terrain:edit-streaming-scene-cell scene built *stone*)))
+    (is eq :occupied (nth-value 1 (terrain:edit-streaming-scene-cell scene built *stone*)))
+    ;; Collision keeps its window; the resident chunk has both edits.
+    (true (null (luft:fiber-store-chunk (terrain:scene-solid scene) far)))
+    (let ((fibers (terrain::streaming-store-fibers scene far)))
+      (is = 0 (luft:fibers-cell-bit fibers 70 5 1))
+      (is = 1 (luft:fibers-cell-bit fibers 71 5 2)))
+    ;; And collides with them once it is in a window.
+    (terrain:install-streaming-collision scene (list near far))
+    (is = 0 (terrain:scene-cell-bit scene 70 5 1))
+    (is = 1 (terrain:scene-cell-bit scene 71 5 2))))

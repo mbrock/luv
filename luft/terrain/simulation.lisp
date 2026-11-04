@@ -536,8 +536,19 @@ or late frame never makes a zero-tick, two-tick pair, and catch up at most
     (setf (slot-value simulation 'phase) (- phase steps))
     steps))
 
+(defun body-collision-resident-p (body source)
+  "Whether SOURCE's collision knows the column under BODY's feet."
+  (let ((p (body-position body)))
+    (scene-collision-resident-p source (floor (vec3-x p)) (floor (vec3-y p)))))
+
 (defun run-simulation-tick (simulation solid)
-  (let ((dt (coerce +simulation-step-seconds+ 'double-float)))
+  (let ((dt (coerce +simulation-step-seconds+ 'double-float))
+        ;; A body over a chunk without collision waits for it there: the
+        ;; unknown is not air to fall through (#I6O4J6).
+        (moving (remove-if-not (lambda (body)
+                                 (body-collision-resident-p
+                                  body (simulation-source simulation)))
+                               (simulation-bodies simulation))))
     (dolist (body (simulation-bodies simulation))
       (rotatef (slot-value body 'previous-tick-position)
                (slot-value body 'tick-position)))
@@ -545,10 +556,11 @@ or late frame never makes a zero-tick, two-tick pair, and catch up at most
                            (let ((p (body-position (character-body character))))
                              (list character (vec3-x p) (vec3-y p))))
                          (simulation-characters simulation))))
-      (dolist (body (simulation-bodies simulation)) (refresh-body-support body solid))
+      (dolist (body moving) (refresh-body-support body solid))
       (dolist (character (simulation-characters simulation))
-        (advance-character-motion character solid dt))
-      (dolist (body (simulation-bodies simulation))
+        (when (member (character-body character) moving :test #'eq)
+          (advance-character-motion character solid dt)))
+      (dolist (body moving)
         (unless (find body (simulation-characters simulation) :key #'character-body)
           (integrate-body body solid dt)))
       (dolist (pose poses) (apply #'update-character-travel (append pose (list dt)))))
