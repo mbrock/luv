@@ -166,10 +166,19 @@ this at a frame boundary."
       (return-from edit-streaming-scene-cell (values nil :attachment nil)))
     (multiple-value-bind (old-offset occupied-p)
         (material-cell-at (scene-material-cells scene) cell)
-      (unless (eql occupied-p (= 1 (scene-cell-bit scene
-                                                 (luft:site-x cell)
-                                                 (luft:site-y cell)
-                                                 (luft:site-z cell))))
+      ;; A visible chunk outside the gameplay window has no collision, and a
+      ;; peer may edit it (#I6O4J6): its resident fibers say what is there.
+      (unless (eql occupied-p
+                   (= 1 (if (and (streaming-scene-source scene)
+                                 (null (luft:fiber-store-chunk
+                                        solid (luft:site-chunk-key cell))))
+                            (luft:fibers-cell-bit
+                             (streaming-store-fibers
+                              scene (luft:site-chunk-key cell)
+                              (luft:make-chunk-fibers domain (luft:site-chunk-key cell)))
+                             (luft:site-x cell) (luft:site-y cell) (luft:site-z cell))
+                            (scene-cell-bit scene (luft:site-x cell) (luft:site-y cell)
+                                            (luft:site-z cell)))))
         (error "Scene occupancy and material state disagree at ~S." cell))
       (cond ((and new-placement occupied-p)
              (return-from edit-streaming-scene-cell
@@ -212,7 +221,10 @@ this at a frame boundary."
                            (luft:site-z cell) bit))
                (new-solid (luft:copy-fiber-store solid))
                (light-revision (1+ (scene-authored-light-revision scene))))
-          (setf (luft:fiber-store-chunk new-solid key) new-chunk)
+          ;; Collision keeps its window; the resident store below has the edit.
+          (when (or (null (streaming-scene-source scene))
+                    (luft:fiber-store-chunk solid key))
+            (setf (luft:fiber-store-chunk new-solid key) new-chunk))
           (let* ((sources
                    (let ((sources
                            (remove cell (copy-seq (scene-authored-light-sources scene))

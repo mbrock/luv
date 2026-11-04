@@ -154,14 +154,33 @@ refused change.  A later change in CHANGES sees the earlier ones' values."
            (t (error "Scene shows ~S at ~S, but sequenced event ~S expects ~S."
                      current site event before))))))))
 
+(defun streaming-scene-coherent-p (scene)
+  "Whether every chunk a cohort over SCENE's published owners and cached
+products would capture is resident.
+
+Residency moves first when the focus crosses a seam: chunks leave the store
+before the next cohort replaces the meshes that read them.  An edit meshed
+in that gap would read a chunk that is no longer there."
+  (or (null (streaming-scene-source scene))
+      (let ((keys (union (streaming-scene-canonical-owner-closure
+                          scene (loop for key being the hash-keys
+                                        of (streaming-scene-loaded scene)
+                                      collect key))
+                         (mapcar #'streaming-star-product-key
+                                 (streaming-scene-mesh-cache scene)))))
+        (every (lambda (key) (nth-value 1 (streaming-store-fibers scene key)))
+               (streaming-scene-dependency-guard-keys
+                scene (streaming-scene-dependency-guard-keys scene keys))))))
+
 (defun apply-queued-world-events (scene production-system bevel-width)
   "At a frame boundary, apply SCENE's queued events and remesh them as one cohort.
 
-While a cohort is in flight the events wait, and this returns NIL; otherwise
-it returns how many were applied.  With no PRODUCTION-SYSTEM the caller
-meshes the changed chunks."
+While a cohort is in flight, or residency is between two windows, the events
+wait, and this returns NIL; otherwise it returns how many were applied.  With
+no PRODUCTION-SYSTEM the caller meshes the changed chunks."
   (when (and (streaming-scene-pending-events scene)
-             (null (streaming-scene-replacement scene)))
+             (null (streaming-scene-replacement scene))
+             (streaming-scene-coherent-p scene))
     (let ((changed nil)
           (count 0))
       (loop while (streaming-scene-pending-events scene)
