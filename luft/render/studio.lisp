@@ -1858,6 +1858,11 @@ WORLD-PATHNAME is where VIEWER-WORLD-DESCRIPTION is written as it plays."
     (setf fixed-exposure (checked-exposure-value fixed-exposure)))
   (when (and surface-generation (null surface-mesh))
     (error "SURFACE-GENERATION is only meaningful with SURFACE-MESH."))
+  ;; A stopped session's meshes and worlds are tenured into old generations
+  ;; that ordinary collections rarely visit, so repeated play/stop cycles in
+  ;; one image pile up hundreds of megabytes of garbage each until the heap is
+  ;; exhausted.  Collect them while nothing is drawing.
+  (sb-ext:gc :full t)
   (when surface-mesh
     (check-type surface-mesh luft:surface-mesh))
   (when surface-generation
