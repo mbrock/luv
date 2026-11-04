@@ -4,6 +4,9 @@
 ;;; A replacement changes one publication pointer. Frame bindings join it to
 ;;; current targets; publishing geometry never rebuilds those targets.
 
+(defvar *renderer-publication-precommit-hook* nil
+  "Optional test instrumentation run after complete staging, before commit.")
+
 (defclass renderer-publication (gpu-resource-owner)
   ((mesh-slots :initarg :mesh-slots :reader renderer-publication-mesh-slots)
    (slot-order :initarg :slot-order :reader renderer-publication-slot-order)
@@ -621,9 +624,6 @@ and four light words; the arrays keep their one-for-one order.  The runs are
             (error "Renderer owner ~S does not retain its exact claimed mesh/light generation."
                    key))))
       entries)))
-
-(defvar *renderer-publication-precommit-hook* nil
-  "Optional test instrumentation run after complete staging, before commit.")
 
 (defun renderer-publication-retired-slots (old-publication new-table)
   (let ((retired nil))
