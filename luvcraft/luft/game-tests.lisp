@@ -374,9 +374,10 @@
         (true (null (luvcraft.agent::companion-ground-height session 3.4d0 8.2d0 5.5d0 3d0)))
         (true (null (luvcraft.agent::companion-ground-height session 300.4d0 7.2d0 5.5d0 3d0)))))))
 
-(defun hollow-walk-test-scene (world)
+(defun hollow-walk-test-scene (world &key (watermark 0))
   "WORLD's real streaming scene with the Hollow Walk's four chunks resident."
-  (multiple-value-bind (source dropped) (game:luvcraft-world-luft-source world)
+  (multiple-value-bind (source dropped)
+      (game:luvcraft-world-luft-source world :watermark watermark)
     (assert (zerop dropped))
     (let ((scene (game:make-luvcraft-streaming-scene source))
           (keys nil))
@@ -390,9 +391,9 @@
       (terrain:rebuild-authored-world-resident-values scene keys)
       scene)))
 
-(defun hollow-walk-test-viewer (world resume)
+(defun hollow-walk-test-viewer (world resume &key (watermark 0))
   "Real source materialization and game motor, without a canvas or renderer."
-  (let* ((scene (hollow-walk-test-scene world))
+  (let* ((scene (hollow-walk-test-scene world :watermark watermark))
          (source (terrain:streaming-scene-source scene)))
     (multiple-value-bind (position yaw pitch) (game:luvcraft-resume-luft-pose source resume)
       (let ((viewer (make-instance
@@ -483,20 +484,27 @@
            (built (game:luvcraft-cell-site source 23 14 106)))
       (walk-hollow-route viewer (ldiff route (rest return-leg)))
       (true (terrain:edit-world-cell scene mined nil))
-      (true (terrain:edit-world-cell scene built (game:block-placement luvcraft::*crystal-block*)))
+      (true (terrain:edit-world-cell scene built luvcraft::*crystal-block*))
       (setf (render:camera-yaw (render:viewer-camera viewer)) 0.75
             (render:camera-pitch (render:viewer-camera viewer)) -0.12)
       (let* ((saved (render:viewer-world-description viewer))
              (resume (getf (rest saved) :resume)))
         (uiop:with-temporary-file (:pathname pathname :type "sexp")
           (render:write-viewer-world-description viewer saved pathname)
-          (multiple-value-bind (restored restored-resume) (luvcraft:read-luvcraft-save pathname)
+          (multiple-value-bind (restored restored-resume inhabitants journal)
+              (luvcraft:read-luvcraft-save pathname)
+            (declare (ignore inhabitants))
             (is equalp resume restored-resume)
             (is = 2 (getf (rest saved) :format-version))
             (is equal (getf (rest saved) :recipe) (luvcraft::world-recipe-description restored))
+            ;; Mining and building are the journal's first two events.
+            (is = 2 (getf journal :watermark))
             (is equalp (getf (rest saved) :edits)
-                (getf (rest (luvcraft::make-luvcraft-format-2-save-description restored)) :edits))
-            (let* ((again (hollow-walk-test-viewer restored restored-resume))
+                (getf (rest (luvcraft::make-luvcraft-format-2-save-description
+                             restored :watermark (getf journal :watermark)))
+                      :edits))
+            (let* ((again (hollow-walk-test-viewer restored restored-resume
+                                                   :watermark (getf journal :watermark)))
                    (next-scene (render:viewer-source again)))
               ;; Drop all four derived chunks, including collision, then
               ;; regenerate from the restored source, never the constructor.
@@ -581,17 +589,37 @@
       (is eq :edited (nth-value 1 (host:player-edit-world-cell world player built (game:block-placement film))))
       (is = 0 (luvcraft:block-inventory-entry-quantity
                (luvcraft:block-inventory-entry-for inventory film)))
+      ;; The journal holds the film itself; Luvcraft's overlay is its view.
+      (is eq film (gethash built (terrain:world-source-edits source)))
+      (is eq film (apply #'luvcraft.world:block-edit-at
+                         (luvcraft:little-world-source-edits
+                          (luvcraft:block-world-source block-world))
+                         (game:site-luvcraft-cell source built)))
       (is eq :empty (nth-value 1 (host:player-edit-world-cell world player mined (game:block-placement film))))
       ;; Save, then raise a second world from it in the same image.
       (uiop:with-temporary-file (:pathname pathname :type "sexp")
         (host:save-luvcraft-world world player pathname :yaw 0.75 :pitch -0.12)
-        (multiple-value-bind (restored restored-resume inhabitants) (luvcraft:read-luvcraft-save pathname)
-          (let* ((again (host:make-luvcraft-world :block-world restored :inhabitants inhabitants
-                                                  :scene (hollow-walk-test-scene restored)))
+        (multiple-value-bind (restored restored-resume inhabitants journal)
+            (luvcraft:read-luvcraft-save pathname)
+          ;; The edit set is compacted at the journal's head; numbering goes on.
+          (is = (terrain:world-journal-head (terrain:world-source-journal source))
+              (getf journal :watermark))
+          (true (plusp (getf journal :watermark)))
+          (is eq nil (getf journal :journal))
+          (let* ((again (host:make-luvcraft-world
+                         :block-world restored :inhabitants inhabitants
+                         :scene (hollow-walk-test-scene
+                                 restored :watermark (getf journal :watermark))))
                  (next (host:add-world-player
                         again (host:make-luvcraft-player :id "ada" :resume restored-resume)))
                  (next-source (host:world-source again)))
             (true (not (eq player next)))
+            (is = (getf journal :watermark)
+                (terrain:world-journal-head (terrain:world-source-journal next-source)))
+            (is equal (luvcraft::block-save-description film)
+                (luvcraft::block-save-description
+                 (gethash (game:luvcraft-cell-site next-source 23 14 106)
+                          (terrain:world-source-edits next-source))))
             (is eq player (host:find-world-player world "ada"))
             (is eq nil (terrain:scene-material-placement-at
                         (host:world-scene again) (game:luvcraft-cell-site next-source 29 17 108)))
@@ -625,4 +653,10 @@
         (is eq :edited (nth-value 1 (host:player-edit-world-cell world guest mined stone)))
         (is eq :edited (nth-value 1 (terrain:undo-world-events scene "ada")))
         (is eq nil (terrain:scene-material-placement-at scene built))
+        ;; The overlay follows the journal at the next step, undo included.
+        (host:advance-luvcraft-world world 1/60)
+        (is eq nil (apply #'luvcraft.world:block-edit-at
+                          (luvcraft:little-world-source-edits
+                           (luvcraft:block-world-source block-world))
+                          (game:site-luvcraft-cell source built)))
         (is eq stone (terrain:scene-material-placement-at scene mined))))))

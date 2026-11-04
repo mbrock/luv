@@ -257,3 +257,12 @@ for air."
                       (luvcraft-palette-by-name palette))
              (error "Luvcraft block ~S has no Luft placement."
                     (luvcraft:block-kind-name material))))))
+
+;;; The journal's values are block identities (#FBU3TF); the terrain paints
+;;; each one's material.
+
+(defmethod terrain:world-value-placement ((value luvcraft:block-kind))
+  (block-placement value))
+
+(defmethod terrain:world-value-placement ((value luvcraft:block-entity))
+  (block-placement value))

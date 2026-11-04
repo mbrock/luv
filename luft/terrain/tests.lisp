@@ -729,7 +729,7 @@
                                   (aref (terrain:world-journal-events journal) 0)))
                (terrain:world-event-cause
                 (aref (terrain:world-journal-events journal)
-                      (1- (terrain:world-journal-head journal)))))))))))
+                      (1- (length (terrain:world-journal-events journal))))))))))))
 
 (define-test a-source-scene-journal-reaches-chunks-it-has-not-shown
   (let* ((domain (luft:make-world-domain :x-bits 7 :y-bits 7))

@@ -331,6 +331,9 @@ this package draws; the renderer and the ateliers use it.")
            #:world-journal-transaction-events
            #:world-journal-undoable-transaction
            #:world-source-journal
+           #:world-source-baseline-value
+           #:install-world-edit-set
+           #:world-journal-watermark
            #:world-value-placement
            #:world-visible-value
            #:world-simulation

@@ -199,7 +199,9 @@ actors, such as companions, edit through it when one is open.")
    (physics-clock :initform 0d0 :accessor world-physics-clock)
    (springs :initform nil :accessor world-springs)
    (springs-initialized-p :initform nil :accessor world-springs-initialized-p)
-   (ball-previous-centers :initform (make-hash-table) :reader world-ball-previous-centers))
+   (ball-previous-centers :initform (make-hash-table) :reader world-ball-previous-centers)
+   (authored-sequence :initform nil :accessor world-authored-sequence
+                      :documentation "The journal sequence Luvcraft's overlay of authored blocks is current at."))
   (:documentation "A Luvcraft world and everything that lives in it, without a window."))
 
 (defun make-luvcraft-world (&key block-world scene
@@ -273,6 +275,8 @@ actors, such as companions, edit through it when one is open.")
   "Advance everything living in WORLD but its characters' simulation: turtles,
 balls and springs, then companions.  A game host steps the simulation itself,
 under its own residency and focus rules, before this."
+  ;; Events a view sequenced, or a peer's, reach Luvcraft's overlay first.
+  (sync-world-authored-blocks world)
   (advance-world-animals world seconds)
   (advance-world-balls world seconds)
   (advance-world-companions world seconds))
@@ -286,24 +290,37 @@ under its own residency and focus rules, before this."
 
 ;;; Edits.
 
-;;; Luvcraft's own overlay of authored blocks, kept beside Luft's edits so a
-;;; film keeps its identity: Luft's palette is deliberately only a visual
-;;; identity, and all films share one reel.  These two are its only readers
-;;; and writers here, so the overlay can become a view of the journal.
+;;; The world journal is the authority for authored blocks (#3F0SCZ): its
+;;; values are block identities, so a film keeps its entity.  Luvcraft's own
+;;; overlay, which its block world, balls, and saves read, is a view of the
+;;; journal brought up to date from the events after its watermark.
 
 (defun world-authored-block (world cell)
-  "The block a player or companion last authored at CELL, or NIL."
-  (values (gethash (game:site-luvcraft-cell (world-source world) cell)
-                   (luvcraft::block-edit-overlay-entries
-                    (luvcraft:little-world-source-edits
-                     (luvcraft:block-world-source (world-block-world world)))))))
+  "The block identity last authored at CELL, or NIL."
+  (multiple-value-bind (value present-p)
+      (gethash cell (terrain:world-source-edits (world-source world)))
+    (and present-p (values (game::journal-value-block value)))))
 
-(defun record-world-authored-block (world cell block)
-  "Record BLOCK, or NIL for air, as authored at CELL."
-  (apply #'luvcraft::record-block-edit
-         (luvcraft:little-world-source-edits
-          (luvcraft:block-world-source (world-block-world world)))
-         block (game:site-luvcraft-cell (world-source world) cell)))
+(defun sync-world-authored-blocks (world)
+  "Bring Luvcraft's overlay of WORLD's authored blocks up to its journal's head."
+  (let ((source (world-source world)))
+    (when (typep source 'terrain:world-source)
+      (sync-world-authored-blocks-from world source))))
+
+(defun sync-world-authored-blocks-from (world source)
+  (let* ((journal (terrain:world-source-journal source))
+         (events (terrain:world-journal-events journal))
+         (from (or (world-authored-sequence world)
+                   (terrain:world-journal-watermark journal)))
+         (overlay (luvcraft:little-world-source-edits
+                   (luvcraft:block-world-source (world-block-world world)))))
+    (loop for index from (- from (terrain:world-journal-watermark journal))
+            below (length events)
+          for event = (aref events index)
+          do (apply #'luvcraft::record-block-edit overlay
+                    (values (game::journal-value-block (terrain:world-event-after event)))
+                    (game:site-luvcraft-cell source (terrain:world-event-site event))))
+    (setf (world-authored-sequence world) (terrain:world-journal-head journal))))
 
 (defvar *world-edit-actor* nil
   "The journal actor of the edit in progress when it is not the editing
@@ -323,23 +340,30 @@ player's own, such as a companion building for its player.")
                                :actor (world-edit-actor player))))
 
 (defun player-edit-world-cell (world player cell placement
-                               &key (scene-edit (lambda ()
+                               &key (scene-edit (lambda (block)
                                                   (apply-world-scene-edit
-                                                   world player cell placement))))
+                                                   world player cell block))))
   "Change CELL to PLACEMENT, or mine it when PLACEMENT is NIL, as PLAYER.
+
+PLACEMENT may also be the exact block identity to put there, as undo and
+redo give it; otherwise it names the block PLAYER holds or has for it.
 
 Return the journal event, its status (:EDITED, or :QUEUED while a mesh
 cohort is in flight), and the block mined, if any.  As in the original
 game, materials are unlimited and only carried blocks, such as films, are
 picked up and spent; PLAYER's stock changes only after SCENE-EDIT, a function
-of no arguments returning an edit and status, accepts the change.  A headless
+of the block identity returning an edit and status, accepts the change.  A headless
 world edits its scene directly; a view passes its host's edit, which also
 schedules meshing.  Undo and redo pass through this same boundary, so they
 conserve stock too."
   (when (and placement (companion-occupies-cell-p world cell))
     (return-from player-edit-world-cell (values nil :occupied nil)))
-  (let* ((inventory (luvcraft:player-inventory player))
-         (block (and placement (selected-block player placement)))
+  (let* ((identity-p (typep placement '(or luvcraft:block-kind luvcraft:block-entity)))
+         (block (if identity-p
+                    placement
+                    (and placement (selected-block player placement))))
+         (placement (if identity-p (game:block-placement placement) placement))
+         (inventory (luvcraft:player-inventory player))
          (entry (and block (luvcraft:block-inventory-entry-for inventory block)))
          (finite-p (and block (luvcraft:block-kind-carried-p block)))
          (old (terrain:scene-material-placement-at (world-scene world) cell))
@@ -347,23 +371,24 @@ conserve stock too."
          (old-block (and old (or (and original
                                        (eq old (game:block-placement original)) original)
                                  (game::luvcraft-block-for-placement old)))))
-    (when (and finite-p
-               (or (null entry) (zerop (luvcraft:block-inventory-entry-quantity entry))))
+    (when (or (and placement (null block))
+              (and finite-p
+                   (or (null entry) (zerop (luvcraft:block-inventory-entry-quantity entry)))))
       (return-from player-edit-world-cell (values nil :empty nil)))
-    (multiple-value-bind (edit status) (funcall scene-edit)
+    (multiple-value-bind (edit status) (funcall scene-edit block)
       (when (and edit (world-physics world))
         (luvcraft::wake-physics-bodies-near
          (world-physics world) (- (luft:site-x cell) 1024) (luft:site-z cell)
          (- (luft:site-y cell) 1024) 2.0))
-      ;; The overlay below is not committed yet. Discover springs from that
-      ;; accepted-edit truth next tick, retaining unchanged throw counts.
+      ;; Discover springs from the accepted edit next tick, retaining
+      ;; unchanged throw counts.
+      (sync-world-authored-blocks world)
       (setf (world-springs-initialized-p world) nil)
       (when edit
         (when finite-p
           (luvcraft:remove-block-from-inventory inventory block))
         (when (and old-block (luvcraft:block-kind-carried-p old-block))
           (luvcraft:add-block-to-inventory inventory old-block))
-        (record-world-authored-block world cell block)
         (when (and old-block (null placement) (luvcraft:block-kind-carried-p old-block))
           (setf (player-held-block player) old-block)
           (put-on-hotbar player old)))

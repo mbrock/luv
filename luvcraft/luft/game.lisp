@@ -129,7 +129,7 @@
   ;; meshing, is the scene edit.
   (multiple-value-bind (edit status mined)
       (player-edit-world-cell (viewer-world viewer) (viewer-local-player viewer) cell placement
-                       :scene-edit (lambda () (call-next-method)))
+                       :scene-edit (lambda (block) (call-next-method viewer cell block)))
     (setf (render:viewer-last-edit-status viewer) status)
     (when mined
       (luvcraft::smash-block-particles
@@ -272,12 +272,13 @@ The resident window spans seven 64-cell chunks per side; the streaming
 metabar can adjust its radius without changing the world's collision rules.
 Other keys go to LUFT.RENDER:START-GAME-HOST."
   (let ((loaded-p (and pathname (null seed) (probe-file pathname))))
-    (multiple-value-bind (block-world resume inhabitants)
+    (multiple-value-bind (block-world resume inhabitants journal)
         (if loaded-p
             (luvcraft:read-luvcraft-save pathname)
             (luvcraft:make-empty-little-block-world
              :seed (or seed 1) :relief relief :chunk-height world-height))
-      (let* ((source (game:luvcraft-world-luft-source block-world))
+      (let* ((source (game:luvcraft-world-luft-source
+                      block-world :watermark (getf journal :watermark 0)))
              (world (make-luvcraft-world
                      :block-world block-world :inhabitants inhabitants
                      :scene (game:make-luvcraft-streaming-scene

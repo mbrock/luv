@@ -16,6 +16,15 @@
   (:documentation
    "A deterministic world in one placement vocabulary, with a journal of edits."))
 
+(defgeneric world-source-baseline-value (source placement)
+  (:documentation
+   "The journal value of a cell SOURCE generated as PLACEMENT, NIL for air.
+
+A game whose journal names blocks by its own identities (#FBU3TF) answers
+those here, so a generated cell and an authored one compare alike.")
+  (:method ((source world-source) placement)
+    placement))
+
 (defun world-source-edits (source)
   "SOURCE's sparse edits: the latest value its journal gives each authored site.
 

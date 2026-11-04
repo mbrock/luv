@@ -158,53 +158,60 @@ does in Luvcraft."
 (defun luft-yaw-to-luvcraft (yaw)
   (coerce (- (/ pi 2) yaw) 'double-float))
 
-(defun little-world-luft-source (little height &key (offset 1024))
+(defun little-world-luft-source (little height &key (offset 1024) (watermark 0))
   "A Luft source over Luvcraft source LITTLE, carrying its edits across.
 
-Edits outside the Luft domain are dropped and counted: the second value."
+LITTLE's edits are the source journal's edit set, compacted at WATERMARK:
+the journal sequence its save was written at.  Edits outside the Luft
+domain are dropped and counted: the second value."
   (let* ((source (make-luvcraft-world-source
                   :seed (luvcraft:little-world-source-seed little)
                   :relief (luvcraft:little-world-source-relief little)
                   :little-class (class-name (class-of little))
                   :height height :offset offset))
-         (changes nil)
+         (edits nil)
          (dropped 0))
     (maphash (lambda (coordinate block)
                (destructuring-bind (x y z) coordinate
                  (let ((site (luvcraft-cell-site source x y z)))
                    (if site
-                       (push (list site :unrecorded (block-placement block))
-                             changes)
+                       (push (list site block) edits)
                        (incf dropped)))))
              (luvcraft::block-edit-overlay-entries
               (luvcraft:little-world-source-edits little)))
-    (when changes
-      (terrain:record-world-events (terrain:world-source-journal source)
-                                   (nreverse changes) :actor :import
-                                   :cause :luvcraft-edits))
+    (terrain:install-world-edit-set (terrain:world-source-journal source)
+                                    edits watermark)
     (values source dropped)))
+
+(defmethod terrain:world-source-baseline-value
+    ((source luvcraft-world-source) placement)
+  ;; A generated cell is a plain material; only authored cells hold entities.
+  (and placement
+       (luvcraft:block-kind-named (terrain:material-placement-name placement))))
 
 (defun luvcraft-world-height (world)
   (luvcraft::chunk-shape-height
    (luvcraft::voxel-space-chunk-shape (luvcraft::block-world-space world))))
 
-(defun luvcraft-world-luft-source (world &key (offset 1024))
-  "A Luft source over Luvcraft block WORLD's little-world source and edits."
+(defun luvcraft-world-luft-source (world &key (offset 1024) (watermark 0))
+  "A Luft source over Luvcraft block WORLD's little-world source and edits,
+compacted at journal sequence WATERMARK."
   (let ((little (luvcraft:block-world-source world)))
     (unless (typep little 'luvcraft:little-world-source)
       (error "~S is not a little world; its source is ~S." world little))
     (little-world-luft-source little (luvcraft-world-height world)
-                              :offset offset)))
+                              :offset offset :watermark watermark)))
 
 (defun luvcraft-save-world-source (pathname &key (offset 1024))
   "Read the Luvcraft save at PATHNAME as a Luft source with its edits.
 
 Return the source, the dropped edit count, Luvcraft's world, its resume
 description, and its inhabitants."
-  (multiple-value-bind (world resume inhabitants)
+  (multiple-value-bind (world resume inhabitants journal)
       (luvcraft:read-luvcraft-save pathname)
     (multiple-value-bind (source dropped)
-        (luvcraft-world-luft-source world :offset offset)
+        (luvcraft-world-luft-source world :offset offset
+                                          :watermark (getf journal :watermark 0))
       (values source dropped world resume inhabitants))))
 
 ;;; Saving back, as format 2 (#Y3S82T): the world's recipe, the material
@@ -229,29 +236,32 @@ stands on, names no block by itself."
             (values nil nil)))))
 
 (defun merged-luvcraft-edit-overlay (source original)
-  "Luvcraft's edit overlay for SOURCE's edits over ORIGINAL little source's."
-  (let ((overlay (luvcraft::make-block-edit-overlay))
-        (old (luvcraft::block-edit-overlay-entries
-              (luvcraft:little-world-source-edits original))))
+  "Luvcraft's edit overlay for SOURCE's journal over ORIGINAL little source's.
+
+Inside the Luft domain the journal's block identities are the edits;
+outside it ORIGINAL's are kept as read."
+  (let ((overlay (luvcraft::make-block-edit-overlay)))
     (maphash (lambda (coordinate block)
                (unless (apply #'luvcraft-cell-site source coordinate)
                  (apply #'luvcraft::record-block-edit overlay block coordinate)))
-             old)
-    (maphash (lambda (site placement)
+             (luvcraft::block-edit-overlay-entries
+              (luvcraft:little-world-source-edits original)))
+    (maphash (lambda (site value)
                (let ((coordinate (site-luvcraft-cell source site)))
-                 (multiple-value-bind (kept present-p) (gethash coordinate old)
-                   (multiple-value-bind (block known-p)
-                       (if (and present-p (eq placement (block-placement kept)))
-                           (values kept t)
-                           (luvcraft-block-for-placement placement))
-                     (if known-p
-                         (apply #'luvcraft::record-block-edit
-                                overlay block coordinate)
-                         (warn "Not saving ~S at ~S: Luvcraft has no such block."
-                               (terrain:material-placement-name placement)
-                               coordinate))))))
+                 (multiple-value-bind (block known-p) (journal-value-block value)
+                   (if known-p
+                       (apply #'luvcraft::record-block-edit overlay block coordinate)
+                       (warn "Not saving ~S at ~S: Luvcraft has no such block."
+                             value coordinate)))))
              (terrain:world-source-edits source))
     overlay))
+
+(defun journal-value-block (value)
+  "The Luvcraft block identity of journal VALUE, and whether it names one.
+An edit sequenced as a bare placement is read as its material."
+  (if (typep value 'terrain:material-placement)
+      (luvcraft-block-for-placement value)
+      (values value t)))
 
 (defun luvcraft-save-description
     (source world &key resume inhabitants position yaw pitch flying-p selected selected-block)
@@ -267,6 +277,9 @@ supplied RESUME stays unchanged."
     (luvcraft::make-luvcraft-format-2-save-description
      world
      :overlay overlay
+     ;; The edit set is the journal's view at its head, so nothing follows it.
+     :watermark (terrain:world-journal-head (terrain:world-source-journal source))
+     :journal '()
      :inhabitants inhabitants
      :resume
      (if position

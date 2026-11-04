@@ -291,11 +291,15 @@
         (true (notany (lambda (member) (typep member 'luvcraft:block-entity))
                       (luvcraft.world:block-vocabulary-members
                        (luvcraft.world:block-world-vocabulary world))))
-        ;; Luft places the film's material; the save is format 2.
+        ;; The journal keeps the film itself, Luft paints its material, and
+        ;; the save is format 2.
         (let ((source (game:luvcraft-world-luft-source world)))
-          (is eq (game:block-placement luvcraft:*film-block*)
-              (gethash (game:luvcraft-cell-site source 1 9 2)
-                       (terrain:world-source-edits source)))
+          (is eq a (gethash (game:luvcraft-cell-site source 1 9 2)
+                            (terrain:world-source-edits source)))
+          (let ((site (game:luvcraft-cell-site source 1 9 2)))
+            (is eq (game:block-placement luvcraft:*film-block*)
+                (cdr (assoc site (terrain:capture-world-source-chunk-edits
+                                  source (luft:site-chunk-key site))))))
           (let ((healed (game:luvcraft-save-description source world :resume resume)))
             (luvcraft::write-luvcraft-save-description healed pathname)
             (destructuring-bind (&key format-version vocabulary entities edits
@@ -412,10 +416,11 @@
         ;; A save from before flight was recorded stands on its ground.
         (is eq nil flying-p))
       ;; Two edits in Luft: carve the crystal, build bricks above the lawn.
-      (let ((edits (terrain:world-source-edits source)))
-        (setf (gethash (game:luvcraft-cell-site source 2 9 2) edits) nil
-              (gethash (game:luvcraft-cell-site source -3 8 4) edits)
-              (game:block-placement luvcraft::*bricks-block*)))
+      (terrain:record-world-events
+       (terrain:world-source-journal source)
+       (list (list (game:luvcraft-cell-site source 2 9 2) :unrecorded nil)
+             (list (game:luvcraft-cell-site source -3 8 4) :unrecorded
+                   luvcraft::*bricks-block*)))
       (luvcraft::write-luvcraft-save-description
        (game:luvcraft-save-description
         source world :resume resume

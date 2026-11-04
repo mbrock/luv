@@ -33,9 +33,11 @@ while SITE's chunk is resident."
          (if resident
              (multiple-value-bind (offset occupied-p)
                  (gethash site (resident-cell-chunk-material-cells resident))
-               (values (and occupied-p
-                            (domains:identity-vocabulary-member
-                             (scene-material-vocabulary scene) offset))
+               (values (world-source-baseline-value
+                        (streaming-scene-source scene)
+                        (and occupied-p
+                             (domains:identity-vocabulary-member
+                              (scene-material-vocabulary scene) offset)))
                        t))
              (values nil nil)))))))
 

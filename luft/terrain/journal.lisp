@@ -36,7 +36,10 @@
   (:method ((value material-placement)) value))
 
 (defclass world-journal ()
-  ((events :initform (make-array 16 :adjustable t :fill-pointer 0)
+  ((watermark :initform 0 :reader world-journal-watermark
+              :documentation "The sequence its installed edit set is compacted at.")
+   ;; The events after WATERMARK, in sequence order.
+   (events :initform (make-array 16 :adjustable t :fill-pointer 0)
            :reader world-journal-events)
    (next-transaction :initform 1 :accessor world-journal-next-transaction)
    ;; Presence is meaningful: NIL is an authored removal, while absence means
@@ -54,8 +57,24 @@
   (make-instance 'world-journal))
 
 (defun world-journal-head (journal)
-  "The sequence number of JOURNAL's latest event, zero when it has none."
-  (fill-pointer (world-journal-events journal)))
+  "The sequence number of JOURNAL's latest event, or its watermark before any."
+  (+ (world-journal-watermark journal)
+     (fill-pointer (world-journal-events journal))))
+
+(defun install-world-edit-set (journal edits watermark)
+  "Start empty JOURNAL from EDITS, a list of (SITE VALUE), compacted at WATERMARK.
+
+This is what a save or a host's catch-up hands over (#8DQ18B): the world as
+of sequence WATERMARK, with no events of its own.  Events recorded next
+follow WATERMARK."
+  (unless (and (zerop (world-journal-head journal))
+               (zerop (hash-table-count (world-journal-edits journal))))
+    (error "~S already has events or edits; install an edit set first." journal))
+  (check-type watermark (integer 0 *))
+  (loop for (site value) in edits
+        do (setf (gethash site (world-journal-edits journal)) value))
+  (setf (slot-value journal 'watermark) watermark)
+  journal)
 
 (defun world-journal-transaction-events (journal transaction)
   "TRANSACTION's events in sequence order."

@@ -304,9 +304,12 @@ stale.  [[lisp:luft.terrain:undo-world-events]] inverts the actor's own latest
 transaction and forgets one that someone has since changed; the atelier's
 undo goes through it as actor =:local=.  Values are opaque to the journal and
 painted through [[lisp:luft.terrain:world-value-placement]], so a block
-identity can replace a placement.  Luvcraft's =block-edit-overlay= is still
-its own ledger of instances; it becomes a view once #JH74JS's block
-identities are the journal's values.
+identity can replace a placement.  In Luvcraft on Luft the values are #JH74JS's block
+identities, so a film's entity rides in its event, and
+=block-edit-overlay= is a view brought up to the journal's head from the
+events past its watermark.  A save's edit set is compacted at the head, so
+its =:watermark= is the head and its =:journal= tail is empty; loading
+installs that set at the watermark, and sequence numbers continue.
 
 ** DONE Give every block a name that fits on the wire
 :PROPERTIES:
