@@ -38,6 +38,7 @@
            #:player-placement
            #:player-held-block
            #:player-rider-intent
+           #:steer-luvcraft-player
            #:player-ball-in-hand-p
            ;; One view of it.
            #:luvcraft-viewer

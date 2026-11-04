@@ -74,6 +74,9 @@
   (install-luvcraft-motor character)
   (setf (player-character (viewer-local-player viewer)) character))
 
+(defmethod render:apply-viewer-input-frame ((viewer luvcraft-viewer) frame)
+  (steer-luvcraft-player (viewer-local-player viewer) frame))
+
 ;;; The host's selection and hotbar are the local player's.
 
 (defmethod render:viewer-edit-material ((viewer luvcraft-viewer))

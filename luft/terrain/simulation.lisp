@@ -61,7 +61,11 @@
                           :unit ((quantities:cell 1) (:second -1)))
                :accessor character-jump-speed)
    ;; Creative flight: no gravity, vertical intent, collision as ever.
-   (flying-p :initform nil :accessor character-flying-p))
+   (flying-p :initform nil :accessor character-flying-p)
+   ;; Where the character looks, turned only by input frames: walking axes
+   ;; are relative to this yaw, and it is the look that snapshots carry.
+   (look-yaw :initform 0.0 :accessor character-look-yaw)
+   (look-pitch :initform 0.0 :accessor character-look-pitch))
   (:metaclass quantity-class)
   (:documentation
    "Locomotion tuning and semantic animation, composed with a physical body."))
@@ -297,6 +301,50 @@ Called only on fixed simulation ticks. NIL means no steering, not braking."))
   (setf (intent-direction-z (direct-character-intent character)) z)
   character)
 
+;;; One tick of a player's will, as plain values (#3QHL50).  A keyboard, a
+;;; recorded tape, a bot, and a remote peer all make these, and
+;;; APPLY-INPUT-FRAME is the one way any of them steers a character.
+
+(defstruct (input-frame (:copier nil))
+  "One simulation tick of one player's input.
+FORWARD and RIGHT are walking axes in -1..1 along the character's look yaw;
+YAW-DELTA and PITCH-DELTA turn that look, in radians; JUMP-P and FLIGHT-P are
+edges, true in exactly one frame per press; VERTICAL urges flight up (+1) or
+down (-1)."
+  (forward 0.0 :type real)
+  (right 0.0 :type real)
+  (yaw-delta 0.0 :type real)
+  (pitch-delta 0.0 :type real)
+  (jump-p nil :type boolean)
+  (flight-p nil :type boolean)
+  (vertical 0.0 :type real))
+
+(defun apply-input-frame (character frame)
+  "Steer CHARACTER by one tick's FRAME, before that tick runs.
+The look turns first, so the walking axes follow this tick's look.  A
+walking route keeps running until the frame urges a direction or a jump."
+  (incf (character-look-yaw character) (input-frame-yaw-delta frame))
+  (setf (character-look-pitch character)
+        (max -1.5 (min 1.5 (+ (character-look-pitch character)
+                              (input-frame-pitch-delta frame)))))
+  (when (input-frame-flight-p frame)
+    (set-character-flying character (not (character-flying-p character))))
+  (let ((forward (input-frame-forward frame))
+        (right (input-frame-right frame))
+        (yaw (character-look-yaw character))
+        (jump-p (and (input-frame-jump-p frame) (not (character-flying-p character)))))
+    (when (or (typep (character-controller character) 'movement-intent)
+              (/= 0 forward) (/= 0 right) jump-p)
+      ;; Pitch never tilts walking.
+      (set-character-movement character
+                              (+ (* (cos yaw) forward) (* (sin yaw) right))
+                              (- (* (sin yaw) forward) (* (cos yaw) right))))
+    (when jump-p (request-character-jump character)))
+  (when (and (character-flying-p character)
+             (typep (character-controller character) 'movement-intent))
+    (set-character-vertical-urge character (input-frame-vertical frame)))
+  character)
+
 (defun refresh-body-support (body solid)
   (let ((position (body-position body)))
     (setf (body-grounded-p body)
@@ -403,14 +451,19 @@ Called only on fixed simulation ticks. NIL means no steering, not braking."))
 
 (defconstant +simulation-step-seconds+ 1/120)
 
+(defconstant +simulation-catch-up-steps+ 6
+  "The most ticks one call runs; time beyond them is discarded, not owed.")
+
 (defclass world-simulation ()
   ((source :initarg :source :accessor simulation-source)
    (bodies :initform nil :reader simulation-bodies)
    (characters :initform nil :reader simulation-characters)
-   (clock :initform 0 :reader simulation-clock
-          :quantity (:quantity quantities::simulation-time :unit :second))
-   (accumulator :initform 0d0 :reader simulation-accumulator
-                :quantity (:quantity quantities:elapsed-time :unit :second)))
+   (tick :initform 0 :type (integer 0) :reader simulation-tick
+         :documentation "The number of ticks run: the time base that snapshots and tapes carry.")
+   (phase :initform 0d0 :type double-float :reader simulation-phase
+          :documentation "Elapsed time beyond the last tick, in ticks.
+Rounding to the nearest tick keeps it within half a tick of zero, either
+side, at any steady frame rate."))
   (:metaclass quantity-class)
   (:documentation
    "Owns terrain, physical occupants, and one clock, independently of a viewer.
@@ -419,16 +472,21 @@ Characters supply locomotion; bodies without characters are equally physical."))
 (defun make-world-simulation (source)
   (make-instance 'world-simulation :source source))
 
+(defun simulation-clock (simulation)
+  "The simulated time SIMULATION has run, in seconds: its tick count's time."
+  (* (simulation-tick simulation) +simulation-step-seconds+))
+
 (defun simulation-body-position (simulation body)
-  "Return a fresh interpolated pose one tick behind the simulation's elapsed time.
+  "Return a fresh pose interpolated half a tick behind the simulation's elapsed time.
 Frame motion history and physical collision positions remain untouched. External
 pose changes, including in-place edits, are cuts rather than simulated travel."
   (unless (equalp (body-position body) (body-tick-position body))
     (reset-body-interpolation body))
   (let ((previous (body-previous-tick-position body))
         (current (body-tick-position body))
-        (fraction (max 0d0 (min 1d0 (/ (simulation-accumulator simulation)
-                                      +simulation-step-seconds+)))))
+        ;; The phase lies in -1/2..1/2 ticks around the current tick, so
+        ;; half a tick of delay keeps the pose between the last two ticks.
+        (fraction (max 0d0 (min 1d0 (+ (simulation-phase simulation) 0.5d0)))))
     (flet ((blend (a b) (+ a (* fraction (- b a)))))
       (make-vec3 (blend (vec3-x previous) (vec3-x current))
                  (blend (vec3-y previous) (vec3-y current))
@@ -437,7 +495,7 @@ pose changes, including in-place edits, are cuts rather than simulated travel."
 (defun reset-simulation-interpolation (simulation)
   "Discard paused time and cut render poses to their physical positions.
 Do not advance the simulation clock or overwrite previous-frame motion history."
-  (setf (slot-value simulation 'accumulator) 0d0)
+  (setf (slot-value simulation 'phase) 0d0)
   (mapc #'reset-body-interpolation (simulation-bodies simulation))
   simulation)
 
@@ -465,9 +523,47 @@ Do not advance the simulation clock or overwrite previous-frame motion history."
           (remove (character-body character) (simulation-bodies simulation) :test #'eq)))
   character)
 
-(defun advance-world-simulation (simulation seconds)
-  "Capture one frame history, then run whole 1/120-second world ticks.
-Unspent time is retained; initial authored collision loading time is discarded."
+(defun consume-simulation-time (simulation seconds)
+  "Add SECONDS to SIMULATION's phase and return how many ticks are due.
+As moppe's simulation_clock: round to the nearest tick, so a slightly early
+or late frame never makes a zero-tick, two-tick pair, and catch up at most
++SIMULATION-CATCH-UP-STEPS+, discarding the rest."
+  (let* ((phase (+ (simulation-phase simulation)
+                   ;; Ticks, not seconds: rational frame times stay exact.
+                   (min (coerce (/ seconds +simulation-step-seconds+) 'double-float)
+                        (float +simulation-catch-up-steps+ 1d0))))
+         (steps (max 0 (min +simulation-catch-up-steps+ (floor (+ phase 0.5d0))))))
+    (setf (slot-value simulation 'phase) (- phase steps))
+    steps))
+
+(defun run-simulation-tick (simulation solid)
+  (let ((dt (coerce +simulation-step-seconds+ 'double-float)))
+    (dolist (body (simulation-bodies simulation))
+      (rotatef (slot-value body 'previous-tick-position)
+               (slot-value body 'tick-position)))
+    (let ((poses (mapcar (lambda (character)
+                           (let ((p (body-position (character-body character))))
+                             (list character (vec3-x p) (vec3-y p))))
+                         (simulation-characters simulation))))
+      (dolist (body (simulation-bodies simulation)) (refresh-body-support body solid))
+      (dolist (character (simulation-characters simulation))
+        (advance-character-motion character solid dt))
+      (dolist (body (simulation-bodies simulation))
+        (unless (find body (simulation-characters simulation) :key #'character-body)
+          (integrate-body body solid dt)))
+      (dolist (pose poses) (apply #'update-character-travel (append pose (list dt)))))
+    (dolist (body (simulation-bodies simulation))
+      (let ((position (body-position body)) (current (body-tick-position body)))
+        (setf (vec3-x current) (vec3-x position)
+              (vec3-y current) (vec3-y position)
+              (vec3-z current) (vec3-z position))))
+    (incf (slot-value simulation 'tick))))
+
+(defun advance-world-simulation (simulation seconds &key before-tick)
+  "Capture one frame history, then run the 1/120-second ticks SECONDS makes due.
+BEFORE-TICK, a function of the tick number about to run, is where input
+frames steer characters (#3QHL50).  Initial authored collision loading time
+is discarded."
   (check-type seconds (real 0 *))
   (dolist (body (simulation-bodies simulation))
     (unless (equalp (body-position body) (body-tick-position body))
@@ -483,34 +579,8 @@ Unspent time is retained; initial authored collision loading time is discarded."
                (zerop (luft:fiber-store-count (scene-solid source))))
       (reset-simulation-interpolation simulation)
       (return-from advance-world-simulation simulation))
-    (incf (slot-value simulation 'accumulator) (coerce seconds 'double-float))
-    (let ((solid (inspection-source-solid source))
-          (dt (coerce +simulation-step-seconds+ 'double-float)))
-      ;; Tolerate only floating-point dust at exact tick boundaries, not a
-      ;; partial physics step. Keep arbitrary frame durations in bounded
-      ;; double storage rather than accumulating unbounded rational products.
-      (loop while (>= (+ (simulation-accumulator simulation) 1d-12) dt) do
-        (dolist (body (simulation-bodies simulation))
-          (rotatef (slot-value body 'previous-tick-position)
-                   (slot-value body 'tick-position)))
-        (let ((poses (mapcar (lambda (character)
-                              (let ((p (body-position (character-body character))))
-                                (list character (vec3-x p) (vec3-y p))))
-                            (simulation-characters simulation))))
-          (dolist (body (simulation-bodies simulation)) (refresh-body-support body solid))
-          (dolist (character (simulation-characters simulation))
-            (advance-character-motion character solid dt))
-          (dolist (body (simulation-bodies simulation))
-            (unless (find body (simulation-characters simulation) :key #'character-body)
-              (integrate-body body solid dt)))
-          (dolist (pose poses) (apply #'update-character-travel (append pose (list dt)))))
-        (dolist (body (simulation-bodies simulation))
-          (let ((position (body-position body)) (current (body-tick-position body)))
-            (setf (vec3-x current) (vec3-x position)
-                  (vec3-y current) (vec3-y position)
-                  (vec3-z current) (vec3-z position))))
-        (decf (slot-value simulation 'accumulator) dt)
-        (incf (slot-value simulation 'clock) +simulation-step-seconds+))
-      (when (< (abs (simulation-accumulator simulation)) 1d-12)
-        (setf (slot-value simulation 'accumulator) 0d0))))
+    (let ((solid (inspection-source-solid source)))
+      (dotimes (i (consume-simulation-time simulation seconds))
+        (when before-tick (funcall before-tick (simulation-tick simulation)))
+        (run-simulation-tick simulation solid))))
   simulation)

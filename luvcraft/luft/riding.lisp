@@ -75,9 +75,10 @@
   (when (typep event 'luv:canvas-key-event)
     (let ((direction (second (assoc (luv:canvas-key-event-key-name event)
                                     render::+viewer-movement-keys+))))
-      (when direction
-        (setf (luvcraft:movement-urging-p (viewer-rider-intent viewer) direction)
-              (typep event 'luv:canvas-key-press-event)))))
+      ;; Reins are held controls too: the input frame feeds the rider intent.
+      (when (member direction '(:forward :backward :left :right))
+        (render::set-viewer-control viewer direction
+                                    (typep event 'luv:canvas-key-press-event)))))
   t)
 
 (defmethod render:viewer-focus-camera-pose ((ride luvcraft::critter-ride) (viewer luvcraft-viewer))

@@ -800,6 +800,11 @@ before the operation boundary, or it would encode through resources which the
                   :reader viewer-surface-views)
    (controls :initform (make-hash-table :test #'eq)
              :reader viewer-controls)
+   ;; Presses not yet spent by an input frame: each reaches exactly one.
+   (pending-jump-p :initform nil :accessor viewer-pending-jump-p)
+   (pending-flight-p :initform nil :accessor viewer-pending-flight-p)
+   (input-tape :initform nil :accessor viewer-input-tape
+               :documentation "NIL, or an adjustable vector receiving every input frame the player gets.")
    (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
    (pointer-x :initform nil :accessor viewer-pointer-x)
    (pointer-y :initform nil :accessor viewer-pointer-y)
@@ -938,28 +943,19 @@ before the operation boundary, or it would encode through resources which the
 
 (defun set-viewer-control (viewer direction active-p)
   (if active-p
-      (progn
-        (when (viewer-player viewer)
-          (set-character-movement (viewer-player viewer) 0.0 0.0))
-        (setf (gethash direction (viewer-controls viewer)) t))
+      (setf (gethash direction (viewer-controls viewer)) t)
       (remhash direction (viewer-controls viewer)))
   viewer)
 
 (defun clear-viewer-controls (viewer)
+  "Let go of every held control and an unspent jump.  The player gets a still
+frame now, so a player this view stops steering stands rather than walks on;
+it equals the next frame a tape would record, so tapes still replay."
   (clrhash (viewer-controls viewer))
-  (when-let ((player (viewer-player viewer)))
-    (let ((controller (character-controller player)))
-      (when (typep controller 'movement-intent)
-        (setf (intent-direction-x controller) 0.0
-              (intent-direction-y controller) 0.0
-              (intent-jump-requested-p controller) nil))))
+  (setf (viewer-pending-jump-p viewer) nil)
+  (when (viewer-player viewer)
+    (apply-viewer-input-frame viewer (make-input-frame)))
   viewer)
-
-(defun camera-walking-direction (camera forward right)
-  "Translate horizontal input to world X/Y; pitch never tilts walking."
-  (let ((yaw (camera-yaw camera)))
-    (values (+ (* (cos yaw) forward) (* (sin yaw) right))
-            (- (* (sin yaw) forward) (* (cos yaw) right)))))
 
 (defgeneric advance-viewer-game (viewer seconds)
   (:documentation "Advance game-owned inhabitants after the host's simulation step."))
@@ -992,36 +988,63 @@ before the operation boundary, or it would encode through resources which the
           (setf (camera-pitch camera)
                 (max -1.5 (min 1.5 (+ (camera-pitch camera) (* pitch turn))))))))))
 
+(defun take-viewer-input-frame (viewer)
+  "Read VIEWER's held controls and camera as one tick's input frame for its
+player, spending the presses it carries.  The look deltas turn the player's
+look to the camera's, which the view turns directly."
+  (let ((player (viewer-player viewer))
+        (camera (viewer-camera viewer)))
+    (flet ((axis (positive negative)
+             (- (if (viewer-control-active-p viewer positive) 1.0 0.0)
+                (if (viewer-control-active-p viewer negative) 1.0 0.0))))
+      (prog1 (make-input-frame
+              :forward (axis :forward :backward) :right (axis :right :left)
+              :yaw-delta (- (camera-yaw camera) (character-look-yaw player))
+              :pitch-delta (- (camera-pitch camera) (character-look-pitch player))
+              :jump-p (viewer-pending-jump-p viewer)
+              :flight-p (viewer-pending-flight-p viewer)
+              :vertical (axis :up :down))
+        (setf (viewer-pending-jump-p viewer) nil
+              (viewer-pending-flight-p viewer) nil)))))
+
+(defgeneric apply-viewer-input-frame (viewer frame)
+  (:documentation "Steer VIEWER's local player by one input FRAME.")
+  (:method (viewer frame)
+    (apply-input-frame (viewer-player viewer) frame)))
+
+(defun steer-viewer-player (viewer)
+  "Give VIEWER's player, if any, its next input frame, recording it on a tape."
+  (when (viewer-player viewer)
+    (let ((frame (take-viewer-input-frame viewer)))
+      (when (viewer-input-tape viewer)
+        (vector-push-extend frame (viewer-input-tape viewer)))
+      (apply-viewer-input-frame viewer frame))))
+
 (defun advance-viewer-world (viewer timestamp)
-  "Submit local input, then advance the whole world, even without a player."
+  "Advance the whole world, even without a player, steering the player by one
+input frame per tick."
   (let* ((last (viewer-last-timestamp viewer))
          (dt (if last (min 0.1 (max 0.0 (- timestamp last))) 0.0))
-         (camera (viewer-camera viewer)))
+         (camera (viewer-camera viewer))
+         (simulation (viewer-simulation viewer)))
     (setf (viewer-last-timestamp viewer) timestamp)
     (advance-camera-response camera dt)
     (advance-viewer-keyboard-look viewer dt)
     (advance-viewer-sky viewer dt)
-    (when-let ((player (and (not (typep (viewer-mode viewer) 'free-camera-mode))
-                            (viewer-player viewer))))
-      (when (typep (character-controller player) 'movement-intent)
-        (let ((forward (- (if (viewer-control-active-p viewer :forward) 1 0)
-                          (if (viewer-control-active-p viewer :backward) 1 0)))
-              (right (- (if (viewer-control-active-p viewer :right) 1 0)
-                        (if (viewer-control-active-p viewer :left) 1 0))))
-          (multiple-value-bind (direction-x direction-y)
-              (camera-walking-direction camera forward right)
-            (set-character-movement player direction-x direction-y))
-          (when (character-flying-p player)
-            (set-character-vertical-urge
-             player (- (if (viewer-control-active-p viewer :up) 1.0 0.0)
-                       (if (viewer-control-active-p viewer :down) 1.0 0.0)))))))
     ;; A free camera leaves the character waiting, and no character moves
     ;; until the ground under it is resident again.
-    (if (or (typep (viewer-mode viewer) 'free-camera-mode)
-            (viewer-focus-carries-player-p (viewer-modal-focus viewer))
-            (not (viewer-player-ground-resident-p viewer)))
-        (reset-simulation-interpolation (viewer-simulation viewer))
-        (advance-world-simulation (viewer-simulation viewer) dt))
+    (cond ((or (typep (viewer-mode viewer) 'free-camera-mode)
+               (not (viewer-player-ground-resident-p viewer)))
+           (reset-simulation-interpolation simulation))
+          ((viewer-focus-carries-player-p (viewer-modal-focus viewer))
+           ;; What carries the player moves once a frame, by this frame's input.
+           (reset-simulation-interpolation simulation)
+           (steer-viewer-player viewer))
+          (t
+           (advance-world-simulation
+            simulation dt :before-tick (lambda (tick)
+                                         (declare (ignore tick))
+                                         (steer-viewer-player viewer)))))
     (advance-viewer-game viewer dt)
     (dolist (overlay (copy-list (viewer-overlays viewer)))
       (advance-viewer-overlay overlay viewer dt))
@@ -1249,13 +1272,20 @@ A completed pair is spent, so a third quick press starts a new one."
         (setf (gethash viewer *viewer-space-press-times*) now))
     double-p))
 
+(defun viewer-player-flying-p (viewer)
+  "Whether VIEWER's player flies once its unspent flight press is applied."
+  (let ((player (viewer-player viewer)))
+    (and player
+         (not (eq (character-flying-p player) (viewer-pending-flight-p viewer))))))
+
 (defun toggle-viewer-flight (viewer)
-  "Take VIEWER's player into creative flight, or let it walk again."
-  (when-let ((player (viewer-player viewer)))
-    (set-character-flying player (not (character-flying-p player)))
+  "Take VIEWER's player into creative flight, or let it walk again, at the
+next input frame; return whether it will fly."
+  (when (viewer-player viewer)
+    (setf (viewer-pending-flight-p viewer) (not (viewer-pending-flight-p viewer)))
     (set-viewer-control viewer :up nil)
     (set-viewer-control viewer :down nil)
-    (character-flying-p player)))
+    (viewer-player-flying-p viewer)))
 
 (clim:define-command (com-jump :command-table luft-play
                                 :name "Jump, Rise, or Double-Tap to Fly"
@@ -1266,9 +1296,9 @@ A completed pair is spent, so a third quick press starts a new one."
     (when player
       (cond ((viewer-double-tapped-space-p viewer)
              (toggle-viewer-flight viewer))
-            ((character-flying-p player)
+            ((viewer-player-flying-p viewer)
              (set-viewer-control viewer :up t))
-            (t (request-character-jump player))))))
+            (t (setf (viewer-pending-jump-p viewer) t))))))
 
 (clim:define-command (com-toggle-flight :command-table luft-play
                                         :name "Toggle Flight"

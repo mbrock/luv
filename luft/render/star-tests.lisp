@@ -218,17 +218,19 @@
                   (subseq data 24)))
     (true (zerop (length (render:pack-figure-instances nil))))))
 
-(define-test camera-input-is-translated-only-at-the-viewer-boundary
+(define-test input-frames-walk-along-the-look-and-never-pitch
   (dolist (case '((0.0 1.0 0.0 1.0 0.0)
                   (0.0 0.0 1.0 0.0 -1.0)
                   (1.5707963 1.0 0.0 0.0 1.0)
                   (1.5707963 0.0 1.0 1.0 0.0)))
     (destructuring-bind (yaw forward right expected-x expected-y) case
-      (multiple-value-bind (x y)
-          (render::camera-walking-direction
-           (render:make-fly-camera :yaw yaw :pitch 0.7) forward right)
-        (true (< (abs (- x expected-x)) 0.00001))
-        (true (< (abs (- y expected-y)) 0.00001))))))
+      (let ((character (render::make-walking-character)))
+        (terrain:apply-input-frame
+         character (terrain:make-input-frame :yaw-delta yaw :pitch-delta 0.7
+                                             :forward forward :right right))
+        (let ((intent (render:character-controller character)))
+          (true (< (abs (- (render::intent-direction-x intent) expected-x)) 0.00001))
+          (true (< (abs (- (render::intent-direction-y intent) expected-y)) 0.00001)))))))
 
 (define-test luft-status-is-semantic-only-with-no-pane-adapter
   (dolist (name '("VIEWER-STATUS-BAR"
@@ -677,7 +679,7 @@
     (true (render::intent-jump-requested-p (render::character-controller player)))
     (true (equalp position (render::body-previous-position body)))
     (true (zerop (render::simulation-clock simulation)))
-    (true (zerop (terrain:simulation-accumulator simulation)))
+    (true (zerop (terrain:simulation-phase simulation)))
     (true (equalp position (terrain:simulation-body-position simulation body)))
     (render::rebuild-authored-world-resident-values scene (list key))
     (render::set-character-movement player 0.0 0.0)
@@ -877,6 +879,9 @@
     (setf (slot-value viewer 'render::simulation) simulation
           (slot-value viewer 'render::player) nil
           (slot-value viewer 'render::controls) (make-hash-table :test #'eq)
+          (slot-value viewer 'render::pending-jump-p) nil
+          (slot-value viewer 'render::pending-flight-p) nil
+          (slot-value viewer 'render::input-tape) nil
           (slot-value viewer 'render::camera) (render:make-fly-camera :yaw 0.0)
           (slot-value viewer 'render::speed) 7.0
           (slot-value viewer 'render::mode) (make-instance 'render::orbit-mode)
@@ -900,7 +905,9 @@
     (setf (render:viewer-player viewer) nil)
     (render::advance-viewer-world viewer 0.3d0)
     (render::advance-viewer-camera viewer 1/60 nil)
-    (true (= 3/10 (render:simulation-clock simulation)))
+    ;; Three frames of 0.1 s each catch up only six ticks.
+    (true (= 18 (terrain:simulation-tick simulation)))
+    (true (= 3/20 (render:simulation-clock simulation)))
     (true (= 2 (length (render:simulation-characters simulation))))))
 
 (define-test world-simulation-steps-independent-bodies-once
@@ -919,7 +926,7 @@
     (render::add-simulation-character simulation character)
     (render::add-simulation-body simulation a)
     (true (= 2 (length (render::simulation-bodies simulation))))
-    (render::advance-world-simulation simulation 1)
+    (dotimes (i 120) (render::advance-world-simulation simulation 1/120))
     (loop for body in (list a b)
           for expected in '((12.0 13.0 28.0) (17.0 21.0 31.0))
           do (let ((p (render::body-position body)))
@@ -942,7 +949,7 @@
     (render::add-simulation-character simulation character)
     (render::request-character-jump character)
     (render::advance-world-simulation simulation 0)
-    (render::advance-world-simulation simulation 1/240)
+    (render::advance-world-simulation simulation 1/480)
     (true (render::intent-jump-requested-p (render::character-controller character)))
     (true (= 1.0 (vec3-z (render::body-position body))))
     (render::set-character-movement character 1.0 0.0)
@@ -974,15 +981,57 @@
     (render::add-simulation-character b cb)
     (render::set-character-movement ca 1.0 1.0)
     (render::set-character-movement cb 1.0 1.0)
-    (render::advance-world-simulation a 1)
+    (dotimes (i 120) (render::advance-world-simulation a 1/120))
     (dotimes (i 144) (render::advance-world-simulation b (/ 1d0 144)))
     (true (= 1 (render::simulation-clock a) (render::simulation-clock b)))
-    (true (zerop (render::simulation-accumulator b)))
+    (true (< (abs (render::simulation-phase b)) 1d-9))
     (true (equalp (render::body-position (render::character-body ca))
                   (render::body-position (render::character-body cb))))
     (true (equalp (render::body-velocity (render::character-body ca))
                   (render::body-velocity (render::character-body cb))))
     (true (= (render::character-gait ca) (render::character-gait cb)))))
+
+(define-test a-recorded-input-tape-replays-the-same-walk
+  ;; Live play records the frames its player gets on irregular frames; the
+  ;; tape alone, one frame per tick, replays that walk from the same start.
+  (flet ((ground ()
+           (let ((store (make-body-collision-fixture)))
+             (loop for x from 4 to 40 do
+               (loop for y from 4 to 30 do (luft:fiber-store-edit-cell store x y 0 1)))
+             (luft:fiber-store-edit-cell store 16 12 1 1)
+             store)))
+    (let* ((live (make-test-walking-body 10.5 10.5 1.0))
+           (viewer (make-instance 'render:game-host :source (ground) :player live))
+           (camera (render:viewer-camera viewer))
+           (tape (make-array 0 :adjustable t :fill-pointer t)))
+      (setf (render:viewer-input-tape viewer) tape
+            (render:camera-yaw camera) 0.3)
+      (loop for frame below 150
+            for time = 0d0 then (+ time (if (evenp frame) 0.0158d0 0.0175d0))
+            do (case frame
+                 (5 (render::set-viewer-control viewer :forward t))
+                 (40 (setf (render::viewer-pending-jump-p viewer) t))
+                 (60 (render::set-viewer-control viewer :right t))
+                 (90 (render::set-viewer-control viewer :right nil)
+                  (setf (render:camera-yaw camera) 1.2))
+                 (120 (render::set-viewer-control viewer :forward nil)))
+               (render::advance-viewer-world viewer time))
+      (true (= (length tape) (terrain:simulation-tick (render:viewer-simulation viewer))))
+      (true (= 1 (count-if #'terrain:input-frame-jump-p tape)) "a press is one edge")
+      (let* ((body (render:character-body live))
+             (replayed (make-test-walking-body 10.5 10.5 1.0))
+             (simulation (render:make-world-simulation (ground))))
+        (true (> (vec3-x (render:body-position body)) 13.0) "the live player walked")
+        (render:add-simulation-character simulation replayed)
+        (dotimes (i (length tape))
+          (terrain:advance-world-simulation
+           simulation 1/120 :before-tick (lambda (tick)
+                                           (terrain:apply-input-frame replayed (aref tape tick)))))
+        (true (equalp (render:body-position body)
+                      (render:body-position (render:character-body replayed))))
+        (true (equalp (render:body-velocity body)
+                      (render:body-velocity (render:character-body replayed))))
+        (true (= (terrain:character-look-yaw live) (terrain:character-look-yaw replayed)))))))
 
 (define-test simulation-render-position-uses-tick-not-frame-endpoints
   (let* ((simulation (terrain:make-world-simulation (make-body-collision-fixture)))
@@ -990,29 +1039,62 @@
                               :velocity (make-vec3 12d0 0d0 0d0) :gravity 0d0)))
     (terrain:add-simulation-body simulation body)
     (true (= 10d0 (vec3-x (terrain:simulation-body-position simulation body))))
-    ;; Two ticks and half a tick left: last-tick endpoints are 10.1 and 10.2,
-    ;; not the frame's initial 10.0 and final 10.2.
+    ;; Two and a half ticks round to three, leaving half a tick owed. The
+    ;; pose is half a tick behind elapsed time, between the last two ticks:
+    ;; 10.2 and 10.3, not the frame's initial 10.0 and final 10.3.
     (terrain:advance-world-simulation simulation 5/240)
-    (true (< (abs (- 10.2d0 (vec3-x (terrain:body-position body)))) 1d-10))
+    (true (= 3 (terrain:simulation-tick simulation)))
+    (true (= -1/2 (terrain:simulation-phase simulation)))
+    (true (< (abs (- 10.3d0 (vec3-x (terrain:body-position body)))) 1d-10))
     (true (= 10d0 (vec3-x (terrain:body-previous-position body))))
-    (true (< (abs (- 10.15d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    (true (< (abs (- 10.2d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
     ;; Registration is idempotent; observing an existing body cannot cut it.
     (terrain:add-simulation-body simulation body)
-    (true (< (abs (- 10.15d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    (true (< (abs (- 10.2d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
     ;; A zero-tick frame updates frame history but must retain both tick poses.
     (terrain:advance-world-simulation simulation 1/480)
-    (true (= 1/60 (terrain:simulation-clock simulation)))
+    (true (= 1/40 (terrain:simulation-clock simulation)))
     (true (equalp (terrain:body-position body) (terrain:body-previous-position body)))
-    (true (< (abs (- 10.175d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    (true (< (abs (- 10.225d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
     (terrain:advance-world-simulation simulation 0)
-    (true (< (abs (- 10.175d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    (true (< (abs (- 10.225d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
     (terrain:advance-world-simulation simulation 1/480)
     (true (= 1/40 (terrain:simulation-clock simulation)))
-    (true (< (abs (- 10.2d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    (true (< (abs (- 10.25d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
+    ;; Half a tick more reaches the next rounding boundary.
+    (terrain:advance-world-simulation simulation 1/240)
+    (true (= 1/30 (terrain:simulation-clock simulation)))
+    (true (< (abs (- 10.3d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))
     ;; The public result is not a borrowed mutable physical or history vector.
     (setf (vec3-x (terrain:simulation-body-position simulation body)) -50d0)
-    (true (< (abs (- 10.3d0 (vec3-x (terrain:body-position body)))) 1d-10))
-    (true (< (abs (- 10.2d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))))
+    (true (< (abs (- 10.4d0 (vec3-x (terrain:body-position body)))) 1d-10))
+    (true (< (abs (- 10.3d0 (vec3-x (terrain:simulation-body-position simulation body)))) 1d-10))))
+
+(define-test simulation-clock-rounds-to-the-nearest-tick-and-bounds-catch-up
+  ;; Moppe's simulation_clock cases: common cadences, jitter, and delays.
+  (let ((simulation (terrain:make-world-simulation (make-body-collision-fixture))))
+    (flet ((ticks (seconds)
+             (let ((before (terrain:simulation-tick simulation)))
+               (terrain:advance-world-simulation simulation seconds)
+               (- (terrain:simulation-tick simulation) before))))
+      (true (= 1 (ticks 1/120)))
+      (true (= 2 (ticks 1/60)))
+      (true (= 3 (ticks 1/40)))
+      (true (zerop (terrain:simulation-phase simulation)))
+      ;; A slightly early 120 Hz frame still ticks, and the late one after
+      ;; it does not tick twice: rounding, not flooring.
+      (true (= 1 (ticks 0.0076d0)))
+      (true (= 1 (ticks (- 1/60 0.0076d0))))
+      (true (< (abs (terrain:simulation-phase simulation)) 1d-9))
+      (dotimes (i 50)
+        (true (= 1 (ticks (if (evenp i) 0.0080d0 0.0087d0))))
+        (true (<= (abs (terrain:simulation-phase simulation)) 1/2)))
+      ;; Half a second of stall catches up six ticks and forgets the rest.
+      (let ((tick (terrain:simulation-tick simulation)))
+        (true (= 6 (ticks 1/2)))
+        (true (= (+ tick 6) (terrain:simulation-tick simulation))))
+      (true (<= (abs (terrain:simulation-phase simulation)) 1/2))
+      (true (= 0 (ticks 0))))))
 
 (define-test simulation-render-position-cuts-edits-pauses-and-live-slot-updates
   (let* ((simulation (terrain:make-world-simulation (make-body-collision-fixture)))
@@ -1033,7 +1115,7 @@
       (terrain:reset-simulation-interpolation simulation)
       (true (= clock (terrain:simulation-clock simulation)))
       (true (= history-x (vec3-x (terrain:body-previous-position body))))
-      (true (zerop (terrain:simulation-accumulator simulation)))
+      (true (zerop (terrain:simulation-phase simulation)))
       (true (equalp (terrain:body-position body) (terrain:simulation-body-position simulation body)))
       (terrain:advance-world-simulation simulation 1/480)
       (true (equalp (terrain:body-position body) (terrain:simulation-body-position simulation body))))
@@ -1059,8 +1141,8 @@
           (render:camera-pitch camera) 0.2d0)
     (terrain:advance-world-simulation simulation 5/240)
     (render::place-viewer-at-player-eyes viewer)
-    (true (< (abs (- 10.15d0 (vec3-x (render:camera-position camera)))) 1d-10))
-    (true (< (abs (- 10.2d0 (vec3-x (terrain:body-position body)))) 1d-10))
+    (true (< (abs (- 10.2d0 (vec3-x (render:camera-position camera)))) 1d-10))
+    (true (< (abs (- 10.3d0 (vec3-x (terrain:body-position body)))) 1d-10))
     (true (= 10d0 (vec3-x (terrain:body-previous-position body))))
     (true (= 0.7d0 (render:camera-yaw camera)))
     (true (= 0.2d0 (render:camera-pitch camera)))
@@ -1073,7 +1155,7 @@
       (true (< pitch 0.2d0))
       (terrain:advance-world-simulation simulation 1/480)
       (render::advance-viewer-camera viewer 1/480 nil)
-      (true (< (abs (- 10.175d0 (vec3-x (render:camera-position camera)))) 1d-10))
+      (true (< (abs (- 10.225d0 (vec3-x (render:camera-position camera)))) 1d-10))
       (true (= yaw (render:camera-yaw camera)))
       (true (= pitch (render:camera-pitch camera))))))
 
@@ -1161,13 +1243,13 @@
     (setf (render::body-gravity body) 0.0
           (render::body-velocity body) (make-vec3 200.0 0.0 0.0))
     (render::add-simulation-body simulation body)
-    (render::advance-world-simulation simulation 0.1)
+    (dotimes (i 2) (render::advance-world-simulation simulation 1/20))
     (true (< (abs (- (vec3-x position) 11.7)) 0.0001)
           "a long sweep stops a body radius before the wall")
     (true (= 1.0 (vec3-z position)) "horizontal movement never changes height")
     (true (zerop (vec3-x (render::body-velocity body))))
     (setf (vec3-y (render::body-velocity body)) 20.0)
-    (render::advance-world-simulation simulation 0.1)
+    (dotimes (i 2) (render::advance-world-simulation simulation 1/20))
     (true (< (abs (- 12.5 (vec3-y position))) 0.0001)
           "the touching body slides along the wall")
     (true (= 20.0 (vec3-y (render::body-velocity body))))
@@ -1208,7 +1290,7 @@
                              :velocity (make-vec3 1.0 0.0 200.0) :gravity 0.0)))
     (loop for x from 9 to 13 do (luft:fiber-store-edit-cell store x 10 4 1))
     (render::add-simulation-body simulation body)
-    (render::advance-world-simulation simulation 1/10)
+    (dotimes (i 2) (render::advance-world-simulation simulation 1/20))
     (true (< (abs (- (vec3-z (render::body-position body)) 2.2)) 1.0e-5))
     (true (zerop (vec3-z (render::body-velocity body))))
     (true (= 1.0 (vec3-x (render::body-velocity body))))
@@ -1251,10 +1333,10 @@
     (luft:fiber-store-edit-cell store 11 10 0 1)
     (render::add-simulation-body simulation body)
     (setf (vec3-x (render::body-velocity body)) 6.0)
-    (render::advance-world-simulation simulation 0.1)
+    (dotimes (i 2) (render::advance-world-simulation simulation 1/20))
     (true (= 4.0 (vec3-z position)) "the trailing edge still has support")
     (setf (vec3-x (render::body-velocity body)) 4.0)
-    (render::advance-world-simulation simulation 0.1)
+    (dotimes (i 2) (render::advance-world-simulation simulation 1/20))
     (setf (vec3-x (render::body-velocity body)) 0.0)
     (true (< 3.8 (vec3-z position) 4.0) "gravity begins a continuous fall")
     (true (not (render::body-grounded-p body)))

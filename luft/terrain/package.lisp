@@ -119,6 +119,18 @@ this package draws; the renderer and the ateliers use it.")
            #:character-body
            #:character-controller
            #:character-flying-p
+           #:character-look-pitch
+           #:character-look-yaw
+           #:input-frame
+           #:make-input-frame
+           #:input-frame-forward
+           #:input-frame-right
+           #:input-frame-yaw-delta
+           #:input-frame-pitch-delta
+           #:input-frame-jump-p
+           #:input-frame-flight-p
+           #:input-frame-vertical
+           #:apply-input-frame
            #:character-gait
            #:character-ground-acceleration
            #:character-heading-x
@@ -247,7 +259,8 @@ this package draws; the renderer and the ateliers use it.")
            #:set-character-movement
            #:set-character-vertical-urge
            #:reset-simulation-interpolation
-           #:simulation-accumulator
+           #:simulation-phase
+           #:simulation-tick
            #:simulation-bodies
            #:simulation-body-position
            #:simulation-characters

@@ -258,6 +258,19 @@ actors, such as companions, edit through it when one is open.")
     (terrain:remove-simulation-character (world-simulation world) (player-character player)))
   player)
 
+(defun steer-luvcraft-player (player frame)
+  "Steer PLAYER by one terrain:INPUT-FRAME: its character walks, looks, jumps,
+and flies by it, and its rider intent reins whatever it rides by the same axes."
+  (let ((intent (player-rider-intent player)))
+    (flet ((urge (positive negative value)
+             (setf (luvcraft:movement-urging-p intent positive) (plusp value)
+                   (luvcraft:movement-urging-p intent negative) (minusp value))))
+      (urge :forward :backward (terrain:input-frame-forward frame))
+      (urge :right :left (terrain:input-frame-right frame))))
+  (when (player-character player)
+    (terrain:apply-input-frame (player-character player) frame))
+  player)
+
 (defun player-ground-resident-p (world player)
   "Whether PLAYER's character stands on a resident chunk of WORLD's scene."
   (let ((character (player-character player)))
@@ -281,10 +294,13 @@ under its own residency and focus rules, before this."
   (advance-world-balls world seconds)
   (advance-world-companions world seconds))
 
-(defun advance-luvcraft-world (world seconds)
-  "Advance a headless WORLD by SECONDS in a view's order: sky, characters, then populations."
+(defun advance-luvcraft-world (world seconds &key before-tick)
+  "Advance a headless WORLD by SECONDS in a view's order: sky, characters, then
+populations.  BEFORE-TICK, a function of the tick number, steers its players,
+as by STEER-LUVCRAFT-PLAYER with a tape's or a bot's next frame."
   (advance-world-sky world seconds)
-  (terrain:advance-world-simulation (world-simulation world) seconds)
+  (terrain:advance-world-simulation (world-simulation world) seconds
+                                    :before-tick before-tick)
   (advance-world-populations world seconds)
   world)
 

@@ -100,7 +100,7 @@
              (render::advance-viewer-world viewer 1d0)
              (render::place-viewer-at-player-eyes viewer)
              (true (= clock (luft.terrain:simulation-clock simulation)))
-             (true (zerop (luft.terrain:simulation-accumulator simulation)))
+             (true (zerop (luft.terrain:simulation-phase simulation)))
              (true (= x (luv.arithmetic.lisp.vec3:vec3-x
                          (render:camera-position (render:viewer-camera viewer))))))
         (setf (gethash key store) resident))
@@ -168,6 +168,8 @@
       (true (typep ride 'luvcraft::critter-ride))
       (ride-key viewer :w)
       (ride-key viewer :d)
+      ;; Reins reach the rider intent through the next input frame.
+      (render::steer-viewer-player viewer)
       (true (not (luvcraft::movement-intent-still-p (host::viewer-rider-intent viewer))))
       (luv:handle-canvas-event
        viewer nil (make-instance 'luv:canvas-window-focus-lost-event :timestamp 0))
@@ -175,6 +177,7 @@
       (is eq ride (render:viewer-modal-focus viewer))
       (true (luvcraft::movement-intent-still-p (host::viewer-rider-intent viewer)))
       (ride-key viewer :w)
+      (render::steer-viewer-player viewer)
       (true (luvcraft:movement-urging-p (host::viewer-rider-intent viewer) :forward))
       (ride-key viewer :escape)
       (true (null (render:viewer-modal-focus viewer))))))
@@ -240,10 +243,12 @@
                 (luft.terrain:character-body (render:viewer-player viewer)))))
         (is equalp (host::animal-luft-position turtle) p))
       (ride-key viewer :d)
+      (render::steer-viewer-player viewer)
       (host::advance-viewer-ride viewer 0.1d0)
       (true (> (luvcraft::turtle-heading turtle) (/ pi 2)))
       (ride-key viewer :w t)
       (ride-key viewer :d t)
+      (render::steer-viewer-player viewer)
       (host::advance-viewer-ride viewer 0.1d0)
       (true (luvcraft::turtle-resting-p turtle))
       (let* ((pose (render:viewer-focus-camera-pose ride viewer))
