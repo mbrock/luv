@@ -271,7 +271,7 @@ actor-owned undo.
 ledgers are derived views, a queued event survives a busy cohort, and two
 actors' interleaved edits undo independently.
 
-** NEXT Give every block a name that fits on the wire
+** DONE Give every block a name that fits on the wire
 :PROPERTIES:
 :ID: JH74JS
 :END:
@@ -282,6 +282,16 @@ format-2 save reader (#Y3S82T).
 /Done when./ Films are entities over one film material, every block
 identity is an offset and optional entity, and a format-1 save with films
 loads intact.
+
+/Result./ A block identity is air, a material, or a [[lisp:block-entity]]
+over one; [[lisp:block-identity-offset]] answers its material offset and
+entity, and [[lisp:material-vocabulary-table]] is the table a join
+handshake ships.  [[lisp:resolve-material-vocabulary]] turns a received or
+saved table into a remap.  Format 2 is written by Luvcraft on Luft and read
+alongside format 1; its =:journal= and =:players= fields are written empty
+and returned by the reader for the journal (#48I94O) and the shared world
+(#EA88ON) to fill.  The resume and inhabitants still use format 1's symbolic
+block values; the players table will decide whether they become offsets.
 
 ** DONE Speak the wire protocol
 :PROPERTIES:

@@ -221,32 +221,23 @@ The kind's tone is the elements'; mortar has its own.")
   ((vocabulary :initarg :vocabulary :reader luvcraft-palette-vocabulary)
    (by-name :initarg :by-name :reader luvcraft-palette-by-name))
   (:documentation
-   "One placement per Luvcraft block kind, in Luvcraft's own order.
+   "One placement per Luvcraft material, in Luvcraft's own vocabulary order.
 
-Kinds are found by name: every film is its own block kind but shares the
-name :FILM, and a film's reel is what the terrain draws."))
+The material vocabulary is closed (#R7MAN5): every film stands on the one
+:FILM material, so placements are a visual identity of materials alone and
+a block's entity, such as which video a film holds, stays in Luvcraft's
+authored edits."))
 
 (defun make-luvcraft-palette ()
-  (let* ((kinds (append luvcraft::*block-kinds*
-                        ;; Films are not in the vocabulary; a reel with the
-                        ;; film's tiles (ENSURE-FILM) stands in for them all.
-                        (list (make-instance
-                               'luvcraft::block-kind
-                               :name :film
-                               :face-tiles '(:front :film-flange :back :film-flange
-                                             :top :reel-rim :bottom :reel-rim
-                                             :left :reel-rim :right :reel-rim)
-                               :display-color '(0.62 0.55 0.42)))))
-         (by-name (make-hash-table :test #'eq))
+  (let* ((by-name (make-hash-table :test #'eq))
          (placements
-           (loop for kind in kinds
+           (loop for kind in luvcraft::*block-kinds*
                  for name = (luvcraft:block-kind-name kind)
-                 unless (gethash name by-name)
-                   collect (setf (gethash name by-name)
-                                 (make-instance
-                                  'terrain:material-placement
-                                  :name name
-                                  :kind (block-material-kind kind))))))
+                 collect (setf (gethash name by-name)
+                               (make-instance
+                                'terrain:material-placement
+                                :name name
+                                :kind (block-material-kind kind))))))
     (make-instance 'luvcraft-palette
                    :vocabulary (domains:make-identity-vocabulary-domain
                                 :members placements :limit #xff)
@@ -258,9 +249,11 @@ name :FILM, and a film's reel is what the terrain draws."))
 (setf *luvcraft-palette* (make-luvcraft-palette))
 
 (defun block-placement (block &optional (palette *luvcraft-palette*))
-  "The placement for Luvcraft BLOCK, or NIL for air."
-  (and block
-       (or (gethash (luvcraft:block-kind-name block)
-                    (luvcraft-palette-by-name palette))
-           (error "Luvcraft block ~S has no Luft placement."
-                  (luvcraft:block-kind-name block)))))
+  "The placement for the material of Luvcraft block identity BLOCK, or NIL
+for air."
+  (let ((material (luvcraft:block-identity-material block)))
+    (and material
+         (or (gethash (luvcraft:block-kind-name material)
+                      (luvcraft-palette-by-name palette))
+             (error "Luvcraft block ~S has no Luft placement."
+                    (luvcraft:block-kind-name material))))))

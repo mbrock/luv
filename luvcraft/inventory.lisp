@@ -37,7 +37,7 @@ unlimited supply."
    'block-inventory
    :entries
    (mapcar (lambda (block)
-             (check-type block block-kind)
+             (check-type block (and block-identity (not null)))
              (make-instance 'block-inventory-entry
                             :block block :quantity quantity))
            blocks)))

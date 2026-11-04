@@ -220,6 +220,157 @@
       (luvcraft::write-luvcraft-save-description description pathname)))
   pathname)
 
+(defparameter *format-1-save-with-films*
+  "(:luvcraft-world :format-version 1
+ :world (:block-world
+         :space (:chunk-shape (16 32 16) :cell-extent (1.0 1.0 1.0))
+         :source (:little-world :source-version 1 :seed 41 :relief :meadow
+                  :edits ((:at (1 9 2)
+                           :value (:film :video-id \"fmt1-reel-a\" :title \"Reel A\"
+                                   :uploader \"luv\" :duration 61
+                                   :upload-date \"20261104\"
+                                   :pathname \"/tmp/fmt1-reel-a.mp4\"))
+                          (:at (3 9 2) :value (:film :video-id \"fmt1-reel-a\"))
+                          (:at (5 9 2)
+                           :value (:film :video-id \"fmt1-reel-b\" :title \"Reel B\"))
+                          (:at (6 9 2) :value (:block :name :bricks))
+                          (:at (7 9 2) :value (:block :name :gnome))
+                          (:at (8 9 2) :value (:block :name :retired-moonstone))
+                          (:at (9 9 2) :value (:air)))))
+ :resume (:player-position (1.5d0 10d0 2.5d0) :look (:yaw 0d0 :pitch 0d0)
+          :selected-block (:film :video-id \"fmt1-reel-b\")
+          :carried ((:film :video-id \"fmt1-reel-b\"))))"
+  "A format-1 save as Luvcraft wrote it, films and all, frozen as text.")
+
+(defun forget-test-films ()
+  (dolist (id '("fmt1-reel-a" "fmt1-reel-b"))
+    (remhash id luvcraft:*films*)))
+
+(defun save-edit-entries (world)
+  (luvcraft::block-edit-overlay-entries
+   (luvcraft:little-world-source-edits (luvcraft:block-world-source world))))
+
+(define-test a-format-1-save-with-films-loads-intact-and-heals-to-format-2
+  (forget-test-films)
+  (uiop:with-temporary-file (:pathname pathname :type "sexp")
+    (with-open-file (stream pathname :direction :output :if-exists :supersede)
+      (write-string *format-1-save-with-films* stream))
+    (multiple-value-bind (world resume) (luvcraft:read-luvcraft-save pathname)
+      (let* ((entries (save-edit-entries world))
+             (a (gethash '(1 9 2) entries))
+             (b (gethash '(5 9 2) entries))
+             (missing (gethash '(8 9 2) entries)))
+        ;; Films are entities over the one film material, and the same
+        ;; video placed twice is one entity.
+        (true (typep a 'luvcraft:film))
+        (is eq a (gethash '(3 9 2) entries))
+        (is equal "Reel A" (luvcraft:film-title a))
+        (is = 61 (luvcraft:film-duration a))
+        (is equal #p"/tmp/fmt1-reel-a.mp4" (luvcraft:film-pathname a))
+        (is equal "Reel B" (luvcraft:film-title b))
+        (is eq luvcraft:*film-block* (luvcraft:block-identity-material a))
+        (multiple-value-bind (offset entity) (luvcraft:block-identity-offset a)
+          (is eq luvcraft:*film-block* (luvcraft:material-at-offset offset))
+          (is eq a entity))
+        ;; The vocabulary closes: every edit's material is in *BLOCK-KINDS*.
+        (true (loop for identity being the hash-values of entries
+                    for material = (luvcraft:block-identity-material identity)
+                    always (or (null material)
+                               (member material luvcraft::*block-kinds*))))
+        ;; A retired name is its alias, and an unknown one a placeholder.
+        (is eq luvcraft::*bricks-block* (gethash '(6 9 2) entries))
+        (multiple-value-bind (block present-p) (gethash '(7 9 2) entries)
+          (true present-p) (is eq nil block))
+        (is eq :retired-moonstone (luvcraft::missing-material-name missing))
+        (is eq luvcraft::*stone-block* (luvcraft:block-identity-material missing))
+        ;; Dense storage holds the material; the film is found by its site.
+        (luvcraft:center-little-world-residency
+         (luvcraft:block-world-source world) world 0 0 :radius 0)
+        (is eq luvcraft:*film-block* (luvcraft:world-block-at world 1 9 2))
+        (is eq a (luvcraft:world-block-identity-at world 1 9 2))
+        (true (notany (lambda (member) (typep member 'luvcraft:block-entity))
+                      (luvcraft.world:block-vocabulary-members
+                       (luvcraft.world:block-world-vocabulary world))))
+        ;; Luft places the film's material; the save is format 2.
+        (let ((source (game:luvcraft-world-luft-source world)))
+          (is eq (game:block-placement luvcraft:*film-block*)
+              (gethash (game:luvcraft-cell-site source 1 9 2)
+                       (terrain:world-source-edits source)))
+          (let ((healed (game:luvcraft-save-description source world :resume resume)))
+            (luvcraft::write-luvcraft-save-description healed pathname)
+            (destructuring-bind (&key format-version vocabulary entities edits
+                                   journal players &allow-other-keys)
+                (rest healed)
+              (is = 2 format-version)
+              (is equalp (luvcraft:material-vocabulary-table)
+                  (subseq vocabulary 0 (1- (length vocabulary))))
+              (is eq :retired-moonstone (aref vocabulary (1- (length vocabulary))))
+              (is = 2 (length entities))
+              (is = 7 (length (getf edits :materials)))
+              (is = 0 (getf edits :watermark))
+              (is eq nil journal)
+              (is eq nil players))
+            ;; Read back with no films in the image: everything comes from
+            ;; the file, and writing again is the same save.
+            (forget-test-films)
+            (multiple-value-bind (again again-resume) (luvcraft:read-luvcraft-save pathname)
+              (let* ((entries (save-edit-entries again))
+                     (a (gethash '(1 9 2) entries)))
+                (is equal "Reel A" (luvcraft:film-title a))
+                (is equal "luv" (luvcraft:film-uploader a))
+                (is equal "20261104" (luvcraft:film-upload-date a))
+                (is eq a (gethash '(3 9 2) entries))
+                (is equal "Reel B" (luvcraft:film-title (gethash '(5 9 2) entries)))
+                (is eq :retired-moonstone
+                    (luvcraft::missing-material-name (gethash '(8 9 2) entries)))
+                (is equal resume again-resume)
+                (is equalp healed
+                    (game:luvcraft-save-description
+                     (game:luvcraft-world-luft-source again) again
+                     :resume again-resume))))))))))
+
+(define-test a-saved-vocabulary-is-a-remap-not-an-ordering
+  ;; Reordered, aliased, and unknown rows each resolve on their own.
+  (let ((remap (luvcraft:resolve-material-vocabulary
+                #(:air :stone :gnome :not-a-material :bricks))))
+    (is eq nil (aref remap 0))
+    (is eq luvcraft::*stone-block* (aref remap 1))
+    (is eq nil (aref remap 2))
+    (is eq :not-a-material (luvcraft::missing-material-name (aref remap 3)))
+    (is eq luvcraft::*bricks-block* (aref remap 4)))
+  (multiple-value-bind (world)
+      (luvcraft:restore-luvcraft-save-description
+       '(:luvcraft-world :format-version 2
+         :recipe (:block-world
+                  :space (:chunk-shape (16 32 16) :cell-extent (1.0 1.0 1.0))
+                  :source (:little-world :source-version 1 :seed 3 :relief :meadow))
+         :vocabulary #(:air :bricks :film :stone)
+         :entities ((:film :video-id "remap-reel"))
+         :edits (:watermark 0 :sites #(0 9 0 1 9 0 2 9 0)
+                 :materials #(3 1 2) :entities #(nil nil 0))
+         :journal () :players () :resume nil))
+    (let ((entries (save-edit-entries world)))
+      (is eq luvcraft::*stone-block* (gethash '(0 9 0) entries))
+      (is eq luvcraft::*bricks-block* (gethash '(1 9 0) entries))
+      (is equal "remap-reel" (luvcraft:film-video-id (gethash '(2 9 0) entries)))))
+  ;; A film material without its entity, or an entity on another material,
+  ;; names no block and is refused.
+  (dolist (columns '((:materials #(2) :entities #(nil))
+                     (:materials #(1) :entities #(0))))
+    (true (handler-case
+              (progn
+                (luvcraft:restore-luvcraft-save-description
+                 `(:luvcraft-world :format-version 2
+                   :recipe (:block-world
+                            :space (:chunk-shape (16 32 16) :cell-extent (1.0 1.0 1.0))
+                            :source (:little-world :source-version 1 :seed 3))
+                   :vocabulary #(:air :bricks :film)
+                   :entities ((:film :video-id "remap-reel"))
+                   :edits (:watermark 0 :sites #(0 9 0) ,@columns)
+                   :journal () :players () :resume nil))
+                nil)
+            (luvcraft::invalid-luvcraft-save () t)))))
+
 (define-test a-relative-save-pathname-lands-where-it-names
   (let* ((directory (uiop:ensure-directory-pathname
                      (uiop:merge-pathnames*

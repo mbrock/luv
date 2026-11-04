@@ -145,7 +145,7 @@ the session's outstanding-work and cancellation bookkeeping."))
          (when (and (= (floor x width) (first key))
                     (= (floor y height) (second key))
                     (= (floor z depth) (third key)))
-           (push (list block x y z) captured-edits))))
+           (push (list (block-identity-material block) x y z) captured-edits))))
      (block-edit-overlay-entries (little-world-source-edits source)))
     (make-instance
      'little-world-load-request

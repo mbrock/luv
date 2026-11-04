@@ -46,6 +46,10 @@
            #:make-block-vocabulary
            #:block-content-at-offset
            #:block-edit-at
+           #:block-entity
+           #:block-entity-material
+           #:block-identity-entity
+           #:block-identity-material
            #:block-edit-overlay
            #:block-edit-overlay-count
            #:block-edit-overlay-entries

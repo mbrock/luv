@@ -256,7 +256,8 @@ off-thread terrain matches the meadow rather than the stock hills."))
          (when (and (= (floor x width) (first key))
                     (= (floor y height) (second key))
                     (= (floor z depth) (third key)))
-           (push (list block x y z) captured-edits))))
+           (push (list (luvcraft.world:block-identity-material block) x y z)
+                 captured-edits))))
      (luvcraft::block-edit-overlay-entries
       (luvcraft:little-world-source-edits source)))
     (make-instance

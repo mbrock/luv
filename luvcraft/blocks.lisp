@@ -148,6 +148,12 @@ hang upright."
 A class of its own rather than a name test, so activating one is a method
 on the kind and no other block's activation has to know about tapes."))
 
+(defclass film-block-kind (block-kind) ()
+  (:metaclass luv.arithmetic.records:quantity-class)
+  (:documentation
+   "The one static film material.  A film's video, title, and media are a
+FILM entity over it, so the material vocabulary closes (#KSWJZG)."))
+
 (defclass spring-block-kind (block-kind) ()
   (:metaclass luv.arithmetic.records:quantity-class)
   (:documentation
@@ -459,7 +465,18 @@ that glows rather than glass to see through; the world has no transparent
 cells."
    :face-tiles '(:all :lit-window)
    :categories '(:building :decor :luminous) :display-color '(0.92 0.76 0.42)
-   :light-emission 9 :surface-emission 0.55))
+   :light-emission 9 :surface-emission 0.55)
+  ;; Appended rather than beside the tape, so earlier offsets stay put and
+  ;; Luvcraft on Luft's palette, whose stand-in reel was last, is unchanged.
+  (*film-block* :film
+   "A loaded film reel.  Every film is this one material; which video it
+holds is the FILM entity standing on it (#R7MAN5).  See luvcraft/tape.lisp."
+   :class 'film-block-kind
+   :face-tiles '(:front :film-flange :back :film-flange
+                 :top :reel-rim :bottom :reel-rim
+                 :left :reel-rim :right :reel-rim)
+   :categories '(:building) :display-color '(0.62 0.55 0.42)
+   :placeable-p nil))
 
 (eval-when (:load-toplevel :execute)
   ;; ENSURE-BLOCK-KIND preserves identities across live redefinition, so
@@ -481,6 +498,73 @@ kinds through this vocabulary instead of printing CLOS object identities."
   (or (find name *block-kinds* :key #'block-kind-name :test #'eq)
       (when error-p
         (error "No block kind is named ~S." name))))
+
+(defgeneric block-kind-entity-required-p (kind)
+  (:documentation
+   "Whether a block of material KIND is whole only with an entity over it.
+A bare film material names no video, so it is never a block by itself.")
+  (:method (kind)
+    (declare (ignore kind))
+    nil))
+
+(defmethod block-kind-entity-required-p ((kind film-block-kind)) t)
+
+;;; A block identity is a material and an optional entity (#FBU3TF).  An
+;;; entity answers the material protocol for the material it stands on, so
+;;; an inventory, a mesher, or a particle system can hold either.
+
+(macrolet ((forward (&rest readers)
+             `(progn
+                ,@(loop for reader in readers
+                        collect `(defmethod ,reader ((entity block-entity))
+                                   (,reader (block-entity-material entity)))))))
+  (forward block-kind-name block-kind-face-tiles block-kind-categories
+           block-kind-display-color block-kind-placeable-p
+           block-kind-light-opacity block-kind-light-emission
+           block-kind-surface-emission
+           block-solid-p block-light-opacity block-light-emission
+           block-surface-emission))
+
+(defmethod block-face-tile ((entity block-entity) face)
+  (block-face-tile (block-entity-material entity) face))
+
+(deftype block-identity ()
+  "Air, a static material, or an entity over one."
+  '(or null block-kind block-entity))
+
+;;; The material vocabulary is closed: *BLOCK-KINDS* is every material in the
+;;; image, so it can be enumerated and shipped as a table of names.  Offset
+;;; zero is air.  A peer or a save resolves such a table into a remap
+;;; (RESOLVE-MATERIAL-VOCABULARY in persistence.lisp, #FTDOCV).
+
+(defun material-vocabulary-table ()
+  "Return the running material vocabulary as a fresh vector of names.
+Element zero is :AIR; element N is the name of the material at offset N."
+  (coerce (cons :air (mapcar #'block-kind-name *block-kinds*)) 'simple-vector))
+
+(defun material-offset (material)
+  "Return MATERIAL's offset in the running vocabulary; air is zero."
+  (if (null material)
+      0
+      (let ((position (position material *block-kinds* :test #'eq)))
+        (unless position
+          (error "~S is not a material of this image's vocabulary." material))
+        (1+ position))))
+
+(defun material-at-offset (offset)
+  "Return the material at OFFSET in the running vocabulary, NIL for air."
+  (check-type offset (integer 0))
+  (if (zerop offset)
+      nil
+      (or (nth (1- offset) *block-kinds*)
+          (error "Offset ~D is outside the material vocabulary of ~D."
+                 offset (1+ (length *block-kinds*))))))
+
+(defun block-identity-offset (identity)
+  "Return IDENTITY's material offset and its entity, or NIL for none.
+The pair is the name of a block that fits on the wire."
+  (values (material-offset (block-identity-material identity))
+          (block-identity-entity identity)))
 
 (defconstant +block-atlas-tile-size+ 16)
 

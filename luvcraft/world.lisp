@@ -1208,6 +1208,33 @@ retains chunk revision, boundary revision, and world invalidation semantics."))
                             (local-coordinate-z local-coordinate))
             block))))
 
+;;; A block identity is a material and an optional entity (#R7MAN5).  Dense
+;;; content columns hold only materials, so the vocabulary they index closes;
+;;; an entity is sparse per-site state, such as a film's video, over the one
+;;; static material it stands on.  Authored edits keep whole identities, and
+;;; replaying one writes only its material into dense storage.
+
+(defclass block-entity () ()
+  (:documentation
+   "Per-site state over one static material, kept outside dense storage.
+
+A terminal wall's PTY hangs off coordinate-bearing surfaces in the same way;
+an entity is that pattern for state which must persist and travel with the
+block, as a film's video does."))
+
+(defgeneric block-entity-material (entity)
+  (:documentation "The static material ENTITY stands on in dense storage."))
+
+(defun block-identity-material (identity)
+  "The material of block IDENTITY: itself, or its entity's material."
+  (if (typep identity 'block-entity)
+      (block-entity-material identity)
+      identity))
+
+(defun block-identity-entity (identity)
+  "The entity of block IDENTITY, or NIL for a plain material or air."
+  (and (typep identity 'block-entity) identity))
+
 ;;; Sparse edits are an overlay on a materialized world, not another dense
 ;;; chunk field.  NIL is a meaningful stored value (an explicitly removed
 ;;; block), so hash-table presence distinguishes it from no edit.
@@ -1262,7 +1289,8 @@ retains chunk revision, boundary revision, and world invalidation semantics."))
                 (block-world-space world) (make-world-coordinate x y z))
              (declare (ignore local))
              (when (same-chunk-coordinate-p coordinate target)
-               (setf (world-block-at world x y z) block)))))
+               (setf (world-block-at world x y z)
+                     (block-identity-material block))))))
        (block-edit-overlay-entries overlay))))
   chunk)
 

@@ -64,8 +64,10 @@
   particles)
 
 (defun smash-block-particles (system block coordinate)
-  "Emit a small deterministic fragment burst for BLOCK at COORDINATE."
+  "Emit a small deterministic fragment burst for BLOCK at COORDINATE.
+BLOCK is a block identity; the fragments are its material's."
   (check-type system block-particle-system)
+  (setf block (block-identity-material block))
   (check-type block block-kind)
   (let* ((particles (block-particle-system-particles system))
          (x (world-coordinate-x coordinate))

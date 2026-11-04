@@ -151,7 +151,7 @@ on the bar wears the number key that selects it."
       (concatenate 'string (subseq text 0 (1- limit)) "…")
       (or text "—")))
 
-(defmethod inventory-detail-rows ((film luvcraft:film-block-kind) entry)
+(defmethod inventory-detail-rows ((film luvcraft:film) entry)
   "A film is its video: what it is called, who put it up, how long it runs."
   (let ((duration (luvcraft:film-duration film)))
     (list (cons "Type" "Film")
@@ -187,6 +187,9 @@ on the bar wears the number key that selects it."
               ((member :decor categories) '("A small detail" "to make it yours."))
               (t '("A material for" "your next idea."))))))
 
+(defmethod inventory-material-description ((block luvcraft:block-entity))
+  (inventory-material-description (luvcraft:block-entity-material block)))
+
 (defgeneric inventory-material-traits (block)
   (:documentation "Rows of (ICON LABEL VALUE), using actual block properties."))
 
@@ -197,6 +200,9 @@ on the bar wears the number key that selects it."
    (when (plusp (luvcraft:block-surface-emission block))
      (list (list :glow "Glow" (format nil "~,2F" (luvcraft:block-surface-emission block)))))
    (list (list :solid (if (luvcraft:block-solid-p block) "Solid block" "Non-solid") nil))))
+
+(defmethod inventory-material-traits ((block luvcraft:block-entity))
+  (inventory-material-traits (luvcraft:block-entity-material block)))
 
 (defun draw-material-trait-icon (medium kind x y)
   "Small native vector icons; no dependence on the font's symbol coverage."

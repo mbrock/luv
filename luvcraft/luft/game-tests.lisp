@@ -499,7 +499,10 @@
           (render:write-viewer-world-description viewer saved pathname)
           (multiple-value-bind (restored restored-resume) (luvcraft:read-luvcraft-save pathname)
             (is equalp resume restored-resume)
-            (is equal (getf (rest saved) :world) (luvcraft:world-save-description restored))
+            (is = 2 (getf (rest saved) :format-version))
+            (is equal (getf (rest saved) :recipe) (luvcraft::world-recipe-description restored))
+            (is equalp (getf (rest saved) :edits)
+                (getf (rest (luvcraft::make-luvcraft-format-2-save-description restored)) :edits))
             (let* ((again (hollow-walk-test-viewer restored restored-resume))
                    (next-scene (render:viewer-source again)))
               ;; Drop all four derived chunks, including collision, then
@@ -535,4 +538,4 @@
               ;; walk. Continue out the opposite doorway and back to spawn.
               (walk-hollow-route again return-leg)
               (let ((next-save (render:viewer-world-description again)))
-                (is equal (getf (rest saved) :world) (getf (rest next-save) :world))))))))))
+                (is equalp (getf (rest saved) :edits) (getf (rest next-save) :edits))))))))))

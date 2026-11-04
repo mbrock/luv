@@ -7,7 +7,12 @@
 
 (in-package #:luvcraft)
 
-(defconstant +luvcraft-save-format-version+ 1)
+(defconstant +luvcraft-save-format-version+ 1
+  "The symbolic format legacy Luvcraft writes: each block a tagged value.")
+(defconstant +luvcraft-newest-save-format-version+ 2
+  "The newest format this image reads and Luvcraft on Luft writes: a
+vocabulary table and columns of offsets into it (#Y3S82T).  Every older
+format is still read.")
 (defconstant +little-world-source-version+ 1)
 
 (define-condition invalid-luvcraft-save (error)
@@ -70,8 +75,12 @@
   (let ((name (description-value description :name "block value")))
     (unless (keywordp name)
       (invalid-luvcraft-save "A block name must be a keyword, not ~S." name))
-    (or (block-kind-named name nil)
-        (invalid-luvcraft-save "No block kind is named ~S." name))))
+    (let ((kind (or (block-kind-named name nil)
+                    (invalid-luvcraft-save "No block kind is named ~S." name))))
+      (when (block-kind-entity-required-p kind)
+        (invalid-luvcraft-save "A bare ~S material names no block; its entity is missing."
+                               name))
+      kind)))
 
 (defmethod restore-block-save-description ((kind t) description)
   (declare (ignore description))
@@ -100,19 +109,87 @@
                        :value (block-save-description block)))
    #'coordinate-key< :key (lambda (edit) (getf edit :at))))
 
-(defun restore-world-edit-block-value (description)
-  "Restore one authored edit, migrating the retired gnome block to air.
+(defparameter *material-aliases*
+  '((:gnome . :air))
+  "Saved material names that now mean another material, as (OLD . NEW).
 
 Gnomes became embodied agents rather than terrain after save format version 1
-had already written them as block edits.  This compatibility belongs at the
-world-edit boundary: a legacy gnome occupied a cell, so removing that obsolete
-occupant means an explicit air edit.  Other uses of block descriptions remain
-strict; in particular a selected or carried block cannot silently become air."
+had already written them as block edits; a legacy gnome occupied a cell, so
+removing that obsolete occupant means an explicit air edit.  A renamed
+material is one more row here.")
+
+(defclass missing-material (block-entity)
+  ((name :initarg :name :reader missing-material-name))
+  (:documentation
+   "A placeholder for a saved material this image does not know, which saves
+again under the NAME it stood for (#FTDOCV).  It stands on stone: a solid,
+ordinary cell, without minting a material that would change every world's
+vocabulary digest."))
+
+(defmethod block-entity-material ((missing missing-material)) *stone-block*)
+
+(defmethod print-object ((missing missing-material) stream)
+  (print-unreadable-object (missing stream :type t)
+    (format stream "~S" (missing-material-name missing))))
+
+(defvar *missing-materials* (make-hash-table :test #'eq)
+  "One placeholder per unknown name, so equal names stay EQ identities.")
+
+(defun ensure-missing-material (name)
+  (or (gethash name *missing-materials*)
+      (setf (gethash name *missing-materials*)
+            (make-instance 'missing-material :name name))))
+
+(defmethod block-save-description ((missing missing-material))
+  (list :block :name (missing-material-name missing)))
+
+(defun saved-material-name (identity)
+  "The name IDENTITY's material is written under: a placeholder's own."
+  (if (typep identity 'missing-material)
+      (missing-material-name identity)
+      (let ((material (block-identity-material identity)))
+        (if material (block-kind-name material) :air))))
+
+(defun resolve-material-name (name)
+  "Return what saved material NAME means in this image: NIL for air, a
+material, or a placeholder entity that remembers NAME.  Aliases apply first."
+  (unless (keywordp name)
+    (invalid-luvcraft-save "A material name must be a keyword, not ~S." name))
+  (let ((alias (assoc name *material-aliases* :test #'eq)))
+    (cond ((eq name :air) nil)
+          (alias (resolve-material-name (cdr alias)))
+          ((block-kind-named name nil))
+          (t (ensure-missing-material name)))))
+
+(defun resolve-material-vocabulary (table)
+  "Resolve a saved or shipped material TABLE into a remap from its offsets.
+
+TABLE is a vector of names with :AIR at offset zero, as
+MATERIAL-VOCABULARY-TABLE makes.  Element N of the result is what offset N
+of TABLE means here: NIL for air, a material, or a MISSING-MATERIAL
+placeholder.  Aliases, unknown names, and reordering are each one row."
+  (unless (and (vectorp table) (plusp (length table))
+               (eq (aref table 0) :air))
+    (invalid-luvcraft-save
+     "A material vocabulary must be a vector beginning with :AIR, not ~S." table))
+  (map 'simple-vector #'resolve-material-name table))
+
+(defun restore-world-edit-block-value (description)
+  "Restore one authored edit, resolving its material name through the remap.
+
+Unlike a selected or carried block, which must name a material this image
+has, an edit keeps an unknown material as a placeholder and a retired one
+as its alias (*MATERIAL-ALIASES*), so a world is never refused for a name."
   (multiple-value-bind (kind fields)
       (tagged-description-values description "block value")
-    (if (and (eq kind :block)
-             (eq (description-value fields :name "block value") :gnome))
-        nil
+    (if (eq kind :block)
+        (let ((identity (resolve-material-name
+                         (description-value fields :name "block value"))))
+          (when (and (typep identity 'block-kind)
+                     (block-kind-entity-required-p identity))
+            (invalid-luvcraft-save "A bare ~S edit names no block; its entity is missing."
+                                   (block-kind-name identity)))
+          identity)
         (restore-block-save-description kind fields))))
 
 (defun restore-block-edit-overlay (descriptions)
@@ -262,6 +339,176 @@ such as gnomes, written only when there are some."
    (when inhabitants
      (list :inhabitants inhabitants))))
 
+;;; Format 2 (#Y3S82T): a save is its recipe, its material vocabulary as a
+;;; table, the entities its blocks carry, and the authored edits as columns
+;;; of offsets into those tables (#FTDOCV).  The edit set is compacted at a
+;;; journal watermark; the journal tail after it and a players table by
+;;; stable identity have their places, empty until the journal (#3F0SCZ)
+;;; and the shared world (#EA88ON) fill them.  The resume and inhabitants
+;;; keep format 1's symbolic shape.
+;;;
+;;;   (:luvcraft-world :format-version 2
+;;;    :recipe (:block-world :space (...) :source (:little-world ... no edits))
+;;;    :vocabulary #(:air :grass ...)       ; offset N names material N
+;;;    :entities ((:film :video-id "..." ...) ...)
+;;;    :edits (:watermark 0 :sites #(x y z ...) :materials #(offset ...)
+;;;            :entities #(index-or-nil ...))
+;;;    :journal () :players ()
+;;;    :resume (...) [:inhabitants (...)])
+
+(defun world-recipe-description (world)
+  "WORLD's save description without its authored edits: what raises the
+baseline, so a peer or a save can install the edits separately."
+  (destructuring-bind (kind &rest fields) (world-save-description world)
+    (let* ((source (getf fields :source))
+           (recipe-source (cons (first source)
+                                (loop for (key value) on (rest source) by #'cddr
+                                      unless (eq key :edits)
+                                        collect key and collect value))))
+      (list* kind (let ((copy (copy-list fields)))
+                    (setf (getf copy :source) recipe-source)
+                    copy)))))
+
+(defun encode-block-edit-columns (overlay)
+  "Return OVERLAY as a vocabulary table, an entity table, and edit columns.
+
+The table is the running vocabulary, with a row appended for every unknown
+material a placeholder still stands for, so writing never loses a name."
+  (let* ((table (coerce (material-vocabulary-table) 'list))
+         (extra-names '())
+         (entities '())
+         (entity-indices (make-hash-table :test #'eq))
+         (edits (sort (loop for coordinate being the hash-keys
+                              of (block-edit-overlay-entries overlay)
+                            using (hash-value identity)
+                            collect (cons coordinate identity))
+                      #'coordinate-key< :key #'car))
+         (count (length edits))
+         (sites (make-array (* 3 count)))
+         (materials (make-array count))
+         (entity-column (make-array count :initial-element nil)))
+    (flet ((name-offset (name)
+             (or (position name table :test #'eq)
+                 (let ((offset (+ (length table) (length extra-names))))
+                   (push name extra-names)
+                   (setf table (append table (list name)))
+                   offset))))
+      (loop for (coordinate . identity) in edits
+            for index from 0
+            do (replace sites coordinate :start1 (* 3 index))
+               (setf (aref materials index) (name-offset (saved-material-name identity)))
+               (let ((entity (block-identity-entity identity)))
+                 (when (and entity (not (typep entity 'missing-material)))
+                   (setf (aref entity-column index)
+                         (or (gethash entity entity-indices)
+                             (prog1 (setf (gethash entity entity-indices)
+                                          (length entities))
+                               (push (block-save-description entity) entities))))))))
+    (values (coerce table 'simple-vector)
+            (reverse entities)
+            (list :sites sites :materials materials :entities entity-column))))
+
+(defun make-luvcraft-format-2-save-description
+    (world &key (overlay (little-world-source-edits (block-world-source world)))
+                resume inhabitants (watermark 0) journal players)
+  "Capture WORLD as a format-2 save whose authored edits are OVERLAY.
+
+RESUME is the local player's portable resume, as in format 1.  WATERMARK
+is the journal sequence the edit set is compacted at; JOURNAL the events
+after it and PLAYERS the players table, both written as given."
+  (multiple-value-bind (vocabulary entities columns)
+      (encode-block-edit-columns overlay)
+    (append
+     (list :luvcraft-world
+           :format-version +luvcraft-newest-save-format-version+
+           :recipe (world-recipe-description world)
+           :vocabulary vocabulary
+           :entities entities
+           :edits (list* :watermark watermark columns)
+           :journal journal
+           :players players
+           :resume resume)
+     (when inhabitants
+       (list :inhabitants inhabitants)))))
+
+(defun decode-block-edit-columns (vocabulary entities edits overlay)
+  "Record format-2 EDITS into OVERLAY through VOCABULARY's remap."
+  (let* ((remap (resolve-material-vocabulary vocabulary))
+         (restored-entities
+           (progn
+             (unless (listp entities)
+               (invalid-luvcraft-save "Entities must be a list, not ~S." entities))
+             (map 'simple-vector
+                  (lambda (description)
+                    (let ((entity (restore-block-value description)))
+                      (unless (typep entity 'block-entity)
+                        (invalid-luvcraft-save "~S does not describe an entity."
+                                               description))
+                      entity))
+                  entities)))
+         (sites (description-value edits :sites "edit columns"))
+         (materials (description-value edits :materials "edit columns"))
+         (entity-column (description-value edits :entities "edit columns")))
+    (unless (and (vectorp sites) (vectorp materials) (vectorp entity-column)
+                 (= (length sites) (* 3 (length materials)))
+                 (= (length materials) (length entity-column))
+                 (every #'integerp sites))
+      (invalid-luvcraft-save "Edit columns disagree in length or type: ~S." edits))
+    (dotimes (index (length materials) overlay)
+      (let ((offset (aref materials index))
+            (entity-index (aref entity-column index)))
+        (unless (and (integerp offset) (< -1 offset (length remap)))
+          (invalid-luvcraft-save "Material offset ~S is outside the vocabulary." offset))
+        (let* ((row (aref remap offset))
+               (identity
+                 (cond (entity-index
+                        (unless (and (integerp entity-index)
+                                     (< -1 entity-index (length restored-entities)))
+                          (invalid-luvcraft-save "Entity index ~S is outside the table."
+                                                 entity-index))
+                        (let ((entity (aref restored-entities entity-index)))
+                          (unless (eq (block-identity-material entity) row)
+                            (invalid-luvcraft-save
+                             "Entity ~S does not stand on material ~S."
+                             entity (aref vocabulary offset)))
+                          entity))
+                       ((and (typep row 'block-kind)
+                             (block-kind-entity-required-p row))
+                        (invalid-luvcraft-save
+                         "A bare ~S edit names no block; its entity is missing."
+                         (aref vocabulary offset)))
+                       (t row))))
+          (record-block-edit overlay identity
+                             (aref sites (* 3 index))
+                             (aref sites (+ 1 (* 3 index)))
+                             (aref sites (+ 2 (* 3 index)))))))))
+
+(defun restore-format-2-world (fields)
+  "Restore a format-2 save's world: raise the recipe, then install its edits."
+  (let* ((recipe (description-value fields :recipe "luvcraft save"))
+         (vocabulary (description-value fields :vocabulary "luvcraft save"))
+         (entities (description-value fields :entities "luvcraft save"))
+         (edits (description-value fields :edits "luvcraft save")))
+    (multiple-value-bind (kind world-fields)
+        (tagged-description-values recipe "saved recipe")
+      (let* ((source (description-value world-fields :source "saved recipe"))
+             (with-edits (list* kind
+                                (let ((copy (copy-list world-fields)))
+                                  (setf (getf copy :source)
+                                        (append source (list :edits '())))
+                                  copy)))
+             (world (multiple-value-call #'restore-world-save-description
+                      (tagged-description-values with-edits "saved recipe")))
+             (little (block-world-source world)))
+        (unless (integerp (description-value edits :watermark "edit columns"))
+          (invalid-luvcraft-save "An edit watermark must be an integer."))
+        (if (typep little 'little-world-source)
+            (decode-block-edit-columns vocabulary entities edits
+                                       (little-world-source-edits little))
+            (unless (zerop (length (description-value edits :materials "edit columns")))
+              (invalid-luvcraft-save "~S keeps no authored edits." little)))
+        world))))
+
 ;;; Inhabitants are individuals living in the world that the core does not
 ;;; know: gnomes and cats belong to the agent system.  Each system registers
 ;;; a describer and specializes the restorer on its own kinds.  A description
@@ -330,15 +577,17 @@ DESCRIPTION."
 
 (defun restore-luvcraft-save-description (description)
   "Return the world, resume description, and inhabitant descriptions
-represented by DESCRIPTION."
+represented by DESCRIPTION, and a plist of its journal :WATERMARK, its
+:JOURNAL tail, and its :PLAYERS table (empty before format 2).
+
+Every format up to +LUVCRAFT-NEWEST-SAVE-FORMAT-VERSION+ is read; format 1
+migrates forward through the same name resolution format 2 uses."
   (multiple-value-bind (kind fields)
       (tagged-description-values description "luvcraft save")
     (unless (eq kind :luvcraft-world)
       (invalid-luvcraft-save "Expected :LUVCRAFT-WORLD, not ~S." kind))
     (let ((version
             (description-value fields :format-version "luvcraft save"))
-          (world-description
-            (description-value fields :world "luvcraft save"))
           (resume-description
             (description-value fields :resume "luvcraft save"
                                :optional t :default nil))
@@ -346,21 +595,38 @@ represented by DESCRIPTION."
             (validate-inhabitant-descriptions
              (description-value fields :inhabitants "luvcraft save"
                                 :optional t :default nil))))
-      (unless (eql version +luvcraft-save-format-version+)
-        (invalid-luvcraft-save
-         "Format version ~S is unsupported; expected ~D."
-         version +luvcraft-save-format-version+))
-      (multiple-value-bind (world-kind world-fields)
-          (tagged-description-values world-description "saved world")
-        (values (restore-world-save-description world-kind world-fields)
-                resume-description
-                inhabitants)))))
+      (case version
+        (1
+         (multiple-value-bind (world-kind world-fields)
+             (tagged-description-values
+              (description-value fields :world "luvcraft save") "saved world")
+           (values (restore-world-save-description world-kind world-fields)
+                   resume-description
+                   inhabitants
+                   (list :watermark 0 :journal '() :players '()))))
+        (2
+         (let ((watermark (description-value
+                           (description-value fields :edits "luvcraft save")
+                           :watermark "edit columns"))
+               (journal (description-value fields :journal "luvcraft save"))
+               (players (description-value fields :players "luvcraft save")))
+           (unless (and (listp journal) (listp players))
+             (invalid-luvcraft-save "A journal and players table must be lists."))
+           (values (restore-format-2-world fields)
+                   resume-description
+                   inhabitants
+                   (list :watermark watermark :journal journal :players players))))
+        (t
+         (invalid-luvcraft-save
+          "Format version ~S is unsupported; this image reads 1 through ~D."
+          version +luvcraft-newest-save-format-version+))))))
 
 (defun read-luvcraft-save (pathname)
   "Read and validate one luvcraft save from PATHNAME.
 
-Return the restored world, its still-portable resume description, and its
-inhabitant descriptions."
+Return the restored world, its still-portable resume description, its
+inhabitant descriptions, and its journal and players plist; see
+RESTORE-LUVCRAFT-SAVE-DESCRIPTION."
   (with-open-file (stream pathname :direction :input :external-format :utf-8)
     (let ((*read-eval* nil)
           (*readtable* (copy-readtable nil))

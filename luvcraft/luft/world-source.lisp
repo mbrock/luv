@@ -202,21 +202,26 @@ description, and its inhabitants."
         (luvcraft-world-luft-source world :offset offset)
       (values source dropped world resume inhabitants))))
 
-;;; Saving back.  A Luvcraft save is its world's description -- the source
-;;; kind, seed, and sparse edits -- and a resume.  The Luft source's edits are
-;;; the truth for every cell it can hold; Luvcraft's own edit at such a cell
-;;; is kept when it is already that block, so a film keeps its reel.  Edits
-;;; Luft could not hold and inhabitants it does not know are kept as read.
-;;; The game supplies its current inventory and carried instances in RESUME.
+;;; Saving back, as format 2 (#Y3S82T): the world's recipe, the material
+;;; vocabulary, its entities, and the sparse edits as columns.  Format 1
+;;; saves are read through the same remap and healed when written.  The Luft
+;;; source's edits are the truth for every cell it can hold; Luvcraft's own
+;;; edit at such a cell is kept when it is already that material, so a film
+;;; keeps its entity.  Edits Luft could not hold and inhabitants it does not
+;;; know are kept as read.  The game supplies its current inventory and
+;;; carried instances in RESUME.
 
 (defun luvcraft-block-for-placement (placement)
   "Luvcraft's block for PLACEMENT, NIL for air, and whether there is one.
-A film's reel stands for every film and names no block of its own."
+A material whole only with an entity, such as the film reel every film
+stands on, names no block by itself."
   (if (null placement)
       (values nil t)
       (let ((block (luvcraft:block-kind-named
                     (terrain:material-placement-name placement) nil)))
-        (values block (not (null block))))))
+        (if (and block (not (luvcraft:block-kind-entity-required-p block)))
+            (values block t)
+            (values nil nil)))))
 
 (defun merged-luvcraft-edit-overlay (source original)
   "Luvcraft's edit overlay for SOURCE's edits over ORIGINAL little source's."
@@ -245,52 +250,40 @@ A film's reel stands for every film and names no block of its own."
 
 (defun luvcraft-save-description
     (source world &key resume inhabitants position yaw pitch flying-p selected selected-block)
-  "Luvcraft's save of WORLD with SOURCE's edits, as Luvcraft writes it.
+  "The format-2 save of WORLD with SOURCE's edits.
 
 POSITION is the player's feet in Luft cells, YAW and PITCH the Luft camera's,
 FLYING-P whether the player was in flight there, and SELECTED the placement in
 hand. SELECTED-BLOCK may name its exact carried instance. Without POSITION the
 supplied RESUME stays unchanged."
-  (let* ((description (luvcraft::world-save-description world))
-         (source-description (copy-list (getf (rest description) :source)))
-         (overlay (merged-luvcraft-edit-overlay
-                   source (luvcraft:block-world-source world)))
-         (offset (luvcraft-world-source-offset source)))
-    (setf (getf (rest source-description) :edits)
-          (luvcraft::block-edit-overlay-save-descriptions overlay))
-    (setf description (list* (first description)
-                             (let ((fields (copy-list (rest description))))
-                               (setf (getf fields :source) source-description)
-                               fields)))
-    (append
-     (list :luvcraft-world
-           :format-version luvcraft::+luvcraft-save-format-version+
-           :world description
-           :resume
-           (if position
-               (destructuring-bind (x y z) position
-                 (let ((updated (copy-list resume)))
-                   (setf (getf updated :player-position)
-                         (list (coerce (- x offset) 'double-float)
-                               (coerce z 'double-float)
-                               (coerce (- y offset) 'double-float))
-                         (getf updated :look)
-                         (list :yaw (luft-yaw-to-luvcraft yaw)
-                               :pitch (coerce pitch 'double-float))
-                         ;; Without it, a save made in the air drops the
-                         ;; player out of the sky at the next start.
-                         (getf updated :flying) (and flying-p t)
-                         (getf updated :selected-block)
-                         (luvcraft::block-save-description
-                          (or selected-block
-                              (and selected
-                                   (luvcraft:block-kind-named
-                                    (terrain:material-placement-name selected) nil))
-                              luvcraft::*stone-block*)))
-                   updated))
-               resume))
-     (when inhabitants
-       (list :inhabitants inhabitants)))))
+  (let ((overlay (merged-luvcraft-edit-overlay
+                  source (luvcraft:block-world-source world)))
+        (offset (luvcraft-world-source-offset source)))
+    (luvcraft::make-luvcraft-format-2-save-description
+     world
+     :overlay overlay
+     :inhabitants inhabitants
+     :resume
+     (if position
+         (destructuring-bind (x y z) position
+           (let ((updated (copy-list resume)))
+             (setf (getf updated :player-position)
+                   (list (coerce (- x offset) 'double-float)
+                         (coerce z 'double-float)
+                         (coerce (- y offset) 'double-float))
+                   (getf updated :look)
+                   (list :yaw (luft-yaw-to-luvcraft yaw)
+                         :pitch (coerce pitch 'double-float))
+                   ;; Without it, a save made in the air drops the
+                   ;; player out of the sky at the next start.
+                   (getf updated :flying) (and flying-p t)
+                   (getf updated :selected-block)
+                   (luvcraft::block-save-description
+                    (or selected-block
+                        (and selected (luvcraft-block-for-placement selected))
+                        luvcraft::*stone-block*)))
+             updated))
+         resume))))
 
 (defun luvcraft-resume-luft-pose (source resume)
   "The Luft player position, yaw, pitch, and flight of Luvcraft RESUME, or NIL."

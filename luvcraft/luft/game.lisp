@@ -345,7 +345,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
   (declare (ignore arguments table))
   "choose a block")
 
-;;; Saves: Luvcraft's own format, so Luvcraft reads what this game wrote.
+;;; Saves: format 2, a vocabulary table and columns (#Y3S82T); format 1 still loads.
 
 (defun streaming-source (viewer)
   (terrain:streaming-scene-source (render:viewer-source viewer)))

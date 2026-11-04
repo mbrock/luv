@@ -133,11 +133,26 @@
            #:block-kind-name
            #:block-kind-named
            #:block-kind-carried-p
+           ;; Block identities and the closed material vocabulary (#FBU3TF).
+           #:block-entity
+           #:block-entity-material
+           #:block-identity
+           #:block-identity-material
+           #:block-identity-entity
+           #:block-identity-offset
+           #:block-kind-entity-required-p
+           #:material-vocabulary-table
+           #:material-offset
+           #:material-at-offset
+           #:resolve-material-vocabulary
+           #:world-block-identity-at
            #:block-inventory-carried-blocks
            ;; The tape and its films; luvcraft/tape.lisp.
            #:tape-block-kind
            #:*tape-block*
            #:film-block-kind
+           #:*film-block*
+           #:film
            #:film-video-id
            #:film-title
            #:film-uploader

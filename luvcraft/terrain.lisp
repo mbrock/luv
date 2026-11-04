@@ -563,15 +563,37 @@ crystal from that ceiling, so cave systems glow from within."
 (defmethod edit-block-world-source
     ((source little-world-source) (world block-world) block x y z)
   (record-block-edit (little-world-source-edits source) block x y z)
-  (setf (world-block-at world x y z) block))
+  (setf (world-block-at world x y z) (block-identity-material block))
+  block)
 
 (defmethod edit-block-world-source
     ((source t) (world block-world) block x y z)
-  (setf (world-block-at world x y z) block))
+  ;; A source that records no edits has nowhere to keep an entity.
+  (setf (world-block-at world x y z) (block-identity-material block))
+  block)
 
 (defun edit-block-at (block world x y z)
-  "Edit one resident site, recording it in WORLD's source when supported."
+  "Edit one resident site, recording it in WORLD's source when supported.
+BLOCK is a block identity: dense storage receives its material, and the
+source's authored edits keep any entity."
   (edit-block-world-source (block-world-source world) world block x y z))
+
+(defun world-block-identity-at (world x y z)
+  "Return the block identity at X,Y,Z in WORLD and its residency.
+
+Dense storage answers the material; an authored edit over that same material
+supplies its entity, such as the film standing there."
+  (multiple-value-bind (block residency) (world-block-at world x y z)
+    (let ((source (block-world-source world)))
+      (values (or (and block
+                       (typep source 'little-world-source)
+                       (let ((edit (block-edit-at (little-world-source-edits source)
+                                                  x y z)))
+                         (and (block-identity-entity edit)
+                              (eq (block-identity-material edit) block)
+                              edit)))
+                  block)
+              residency))))
 
 (defun rematerialize-little-world-chunk (source world chunk-x chunk-z)
   "Regenerate one chunk from SOURCE, then replay its explicit edits."

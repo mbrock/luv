@@ -5,9 +5,9 @@
 ;;; OPEN-TAPE-PROMPT); answering starts yt-dlp in the background and hangs a
 ;;; progress orb over the block -- a sphere of bright motes that fills from
 ;;; the bottom as the download comes in.  When the file lands the tape is
-;;; replaced by a FILM: a per-instance block kind carrying the video's
-;;; metadata and the path of the media, which the player picks up into the
-;;; inventory by hitting it, and can put down again anywhere.
+;;; replaced by a FILM: an entity over the one film material, carrying the
+;;; video's metadata and the path of the media, which the player picks up
+;;; into the inventory by hitting it, and can put down again anywhere.
 ;;;
 ;;; The download job is an overlay that draws nothing: it hangs on the session
 ;;; so REFRESH-LUVCRAFT-OVERLAY polls the process once per frame, on the
@@ -72,9 +72,9 @@ or any of the usual YouTube URLs; NIL when there is none."
             (t nil)))))
 
 ;;; ---------------------------------------------------------------------
-;;; The film: a block kind per video.
+;;; The film: one material, and an entity per video.
 
-(defclass film-block-kind (block-kind)
+(defclass film (block-entity)
   ((video-id :initarg :video-id :reader film-video-id)
    (title :initarg :title :initform nil :accessor film-title)
    (uploader :initarg :uploader :initform nil :accessor film-uploader)
@@ -84,15 +84,17 @@ or any of the usual YouTube URLs; NIL when there is none."
                 :documentation "YYYYMMDD as a string, or NIL.")
    (pathname :initarg :pathname :initform nil :accessor film-pathname
              :documentation "Where the media is, or NIL if it never landed."))
-  (:metaclass luv.arithmetic.records:quantity-class)
   (:documentation
    "One downloaded video as a thing in the world and in the bag.
 
-Every film shares the name :FILM and the reel's tiles; what differs is the
-video, so a film is its own block kind rather than one entry in the palette,
-and the world's palette-by-identity storage keeps them apart for free."))
+Every film stands on the one static *FILM-BLOCK* material; what differs is
+the video, which is this entity's state.  Dense storage holds the material,
+and a placed film lives in the world's authored edits by site, as a terminal
+wall's PTY hangs off its surface rather than minting a material (#R7MAN5)."))
 
-(defmethod block-kind-carried-p ((block film-block-kind)) t)
+(defmethod block-entity-material ((film film)) *film-block*)
+
+(defmethod block-kind-carried-p ((block film)) t)
 
 (defvar *films* (make-hash-table :test 'equal)
   "Every film this image knows, by video id, so a saved world and a saved
@@ -102,16 +104,9 @@ bag that name the same video get the same object back.")
   "Return the film for VIDEO-ID, making it or filling in what is now known."
   (check-type video-id string)
   (let ((film (gethash video-id *films*)))
-    (unless film
-      (setf film
-            (make-instance
-             'film-block-kind
-             :name :film :video-id video-id
-             :face-tiles '(:front :film-flange :back :film-flange
-                           :top :reel-rim :bottom :reel-rim
-                           :left :reel-rim :right :reel-rim)
-             :categories '(:building) :display-color '(0.62 0.55 0.42)
-             :placeable-p nil)
+    (unless (typep film 'film)
+      ;; An image from before films were entities holds old block kinds here.
+      (setf film (make-instance 'film :video-id video-id)
             (gethash video-id *films*) film))
     (when title (setf (film-title film) title))
     (when uploader (setf (film-uploader film) uploader))
@@ -124,7 +119,7 @@ bag that name the same video get the same object back.")
   "A short line naming FILM for a title bar or a bag."
   (or (film-title film) (film-video-id film)))
 
-(defmethod block-save-description ((film film-block-kind))
+(defmethod block-save-description ((film film))
   (list :film
         :video-id (film-video-id film)
         :title (film-title film)
@@ -549,10 +544,10 @@ Return the display it plays on, or NIL."
               (remove-luvcraft-overlay session display)
               (show-terminal-display-shell display session)))))))
 
-(defmethod luvcraft-block-placed ((film film-block-kind) session x y z)
+(defmethod luvcraft-block-placed ((film film) session x y z)
   (show-film-beside session film x y z))
 
-(defmethod luvcraft-block-removed ((film film-block-kind) session x y z)
+(defmethod luvcraft-block-removed ((film film) session x y z)
   (hide-film-beside session x y z))
 
 ;;; ---------------------------------------------------------------------
@@ -575,7 +570,7 @@ soon as its cell is resident, then takes itself down."))
       (loop for coordinate being the hash-keys
               of (block-edit-overlay-entries (little-world-source-edits source))
               using (hash-value block)
-            when (typep block 'film-block-kind)
+            when (typep block 'film)
               collect coordinate))))
 
 (defun relight-world-films (session)
@@ -592,9 +587,9 @@ soon as its cell is resident, then takes itself down."))
            (lambda (coordinate)
              (destructuring-bind (x y z) coordinate
                (multiple-value-bind (block residency)
-                   (world-block-at world x y z)
+                   (world-block-identity-at world x y z)
                  (when (eq residency :resident)
-                   (when (typep block 'film-block-kind)
+                   (when (typep block 'film)
                      (show-film-beside session block x y z))
                    t))))
            (film-relighting-pending job)))

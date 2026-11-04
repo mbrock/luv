@@ -382,20 +382,27 @@ a global material domain, a single materialization of per-material properties
 rather than one per chunk palette, and the removal of the per-chunk palette
 in favour of a global material index stored directly in the site column.
 
-*Evidence.* #KSWJZG: films are =block-kind= instances deliberately absent from
-=*block-kinds*=, and persistence special-cases them for that reason.  Since
-#CPCZDB the world vocabulary is already global and append-only, so a film
-costs one offset per video rather than a palette entry per chunk; what
-remains open is that the vocabulary cannot be enumerated from =*block-kinds*=
-alone, and =block-palette-light-properties= still rebuilds its table per
-capture rather than once per vocabulary revision.
+*Evidence.* #KSWJZG: films were =block-kind= instances deliberately absent
+from =*block-kinds*=.  Now =*film-block*= is one static material at the end
+of =*block-kinds*=, and a [[lisp:film]] is a [[lisp:block-entity]] over it.
+Dense storage holds only materials ([[lisp:block-identity-material]]); a
+placed film lives by site in the world's authored edits, found again by
+[[lisp:world-block-identity-at]].  So =*block-kinds*= enumerates every
+material in the image, [[lisp:material-vocabulary-table]] ships it, and
+Luvcraft on Luft's palette no longer needs a stand-in reel.  A format-1
+world with films loads intact through [[lisp:resolve-material-vocabulary]]
+(test =a-format-1-save-with-films-loads-intact-and-heals-to-format-2=).
+What remains is the middle clause: =block-palette-light-properties= still
+rebuilds its table per chunk capture.  Caching it per vocabulary revision
+needs a frozen member vector per revision, since the live one grows under
+a cached table's domain.
 
 *Done when.* =*block-kinds*= enumerates every material in the running image;
 per-material properties are materialized once per vocabulary revision; an
 existing saved world containing films loads with its films intact through the
 remap of #FTDOCV.
 
-* IDEA A save is a vocabulary table and its columns
+* DONE A save is a vocabulary table and its columns
 :PROPERTIES:
 :ID: OQDNC5
 :END:
@@ -412,3 +419,12 @@ would otherwise be scattered through per-block restoration.
 
 *Note.* This should not move before #R7MAN5, since the vocabulary a save would
 embed is the one that does not yet close.
+
+*Result.* Save format 2 (#Y3S82T) is the recipe, the vocabulary table, an
+entity table, and the authored edits as columns of site, material offset,
+and entity index.  Loading resolves the table into a remap: the retired gnome
+is an alias row in =*material-aliases*=, an unknown name a placeholder entity
+that is written back under its own name, and a reordered table only another
+permutation.  The reader accepts formats 1 and 2; format 1 edits pass the
+same name resolution.  Luvcraft on Luft writes format 2; legacy Luvcraft
+still writes format 1, which both read.

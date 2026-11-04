@@ -1282,11 +1282,18 @@ longer names stay reachable at the end, past the number keys."
 (defun pick-luvcraft-block (session)
   "Select the material currently under the centre crosshair."
   (multiple-value-bind (hit status) (luvcraft-session-target session)
-    (when hit
-      (setf (luvcraft-session-selected-block session)
-            (block-ray-hit-block hit))
-      (update-luvcraft-session-title session))
-    (values (and hit (block-ray-hit-block hit)) status)))
+    ;; The whole identity, so picking a film selects that film.
+    (let ((block (and hit
+                      (let ((coordinate (block-ray-hit-coordinate hit)))
+                        (world-block-identity-at
+                         (luvcraft-session-world session)
+                         (world-coordinate-x coordinate)
+                         (world-coordinate-y coordinate)
+                         (world-coordinate-z coordinate))))))
+      (when hit
+        (setf (luvcraft-session-selected-block session) block)
+        (update-luvcraft-session-title session))
+      (values block status))))
 
 (defgeneric luvcraft-block-placed (block session x y z)
   (:documentation
@@ -1320,7 +1327,8 @@ something where it stands -- a film beside a wall -- answers here.")
       (let ((x (world-coordinate-x coordinate))
             (y (world-coordinate-y coordinate))
             (z (world-coordinate-z coordinate)))
-        (multiple-value-bind (old-block residency) (world-block-at world x y z)
+        (multiple-value-bind (old-block residency)
+            (world-block-identity-at world x y z)
           (unless (eq residency :resident)
             (return-from edit-luvcraft-block (values nil :absent)))
           ;; The ground is about to move: whatever was asleep on it must
