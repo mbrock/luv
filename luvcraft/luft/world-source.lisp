@@ -101,13 +101,20 @@ does in Luvcraft."
                  (chunk (load-luvcraft-chunk little world chunk-x chunk-z))
                  (base-x (+ offset (* chunk-x +luvcraft-chunk-size+)))
                  (base-y (+ offset (* chunk-z +luvcraft-chunk-size+))))
-            (dotimes (lx +luvcraft-chunk-size+)
-              (dotimes (lz +luvcraft-chunk-size+)
-                (dotimes (y height)
-                  (let ((block (luvcraft::chunk-block-at chunk lx y lz)))
-                    (when block
-                      (funcall place (+ base-x lx) (+ base-y lz) y
-                               (placement block))))))))))))
+            ;; Read the dense storage directly; X varies fastest, then Y.
+            (luvcraft.world:with-block-content-storage (domain palette indices)
+                chunk
+              (declare (ignore domain))
+              (dotimes (lx +luvcraft-chunk-size+)
+                (dotimes (lz +luvcraft-chunk-size+)
+                  (dotimes (y height)
+                    (let ((block (aref palette
+                                       (aref indices
+                                             (+ lx (* +luvcraft-chunk-size+
+                                                      (+ y (* height lz))))))))
+                      (when block
+                        (funcall place (+ base-x lx) (+ base-y lz) y
+                                 (placement block)))))))))))))
   (values))
 
 (defun luvcraft-column-top (source x z)
