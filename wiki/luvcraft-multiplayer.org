@@ -566,6 +566,59 @@ than failing it.
 #EA88ON's entity snapshots.  Only the host summons; a guest's G is refused.
 Companions build from the owner's stock, whoever asked.
 
+*** DONE Share the turtles, balls, rides, and sky
+:PROPERTIES:
+:ID: U4TBMP
+:END:
+
+/Intent./ Phase 2B: the host owns turtles, balls, springs, the sky clock,
+and the day settings (#8EZK9F), and a guest draws them through the tracks
+of #VM5TN6.
+
+/Done when./ Loopback tests show a guest's turtles, balls, and clock
+following the host's, a guest's throw happening once on the host, and a
+guest's ride moving the host's turtle; two windows on one Mac show the same
+hour and the same turtle.
+
+/Evidence./ A host's session sends an =entity-snapshot-message= every
+1/25 s, stamped with the simulation tick: each turtle (position, velocity,
+yaw, gait, resting), each ball (position, velocity, orientation, kind), and
+one =:sky= entity with the day fraction, rate, pause, pin, orbit tilt, and
+cloud time.  The welcome carries the first one.  A guest's world
+(=replica-world-p=) never simulates turtles, balls, or springs.  Each
+entity gets a [[lisp:luvcraft.luft.game:remote-track]], which now also
+carries an orientation and opaque state; a replica turtle is an ordinary
+turtle set from its track every frame, so focus, rides, and drawing read it
+unchanged.  An entity the host stops naming is forgotten.  The guest's sky
+runs on between snapshots and is eased to the host's, or snapped across
+more than six minutes of the day.  A guest's throw is a =throw-message= the
+host performs.  A ride begins and ends with reliable =ride-message=s; the
+host confirms a guest's begin by broadcasting it, or refuses it when
+someone else rides that turtle, and a mount someone else rides is not
+offered as a focus.  While riding, the rider's world reins the turtle, and
+its pose carries the turtle's velocity, yaw, and id; the host stands the
+turtle where the rider's track shows it, with its mind following, and gives
+the turtle its mind back at the end.  The views now own the previous turtle
+boxes and ball centres, so two windows on one world keep separate motion
+histories.  Each view derives particles from the journal's confirmed
+events, so a guest's mining also bursts on the host's screen and on the
+guest's.
+
+Live, on one Mac (seed 121, host on port 47575): at the same wall-clock
+second the host's clock read 9.4706 h and the guest's 9.4660 h, which is
+the skew between the two queries.  The six turtles had the same ids on both
+sides and stood within 0.3 cells of each other.  A beach ball thrown from
+the guest's window was one body in the host's physics; the guest has no
+physics.  Riding turtle 1 from the guest moved the host's turtle to the
+same cell, and getting off gave the turtle its own mind back.  Setting the
+host's clock to noon turned both windows to 12:19.
+
+/Open./ A guest's day-setting knobs are overwritten by the next snapshot
+rather than asking the host.  After a ride, the guest's turtle goes back to
+being drawn about 0.2 s behind, which makes it step back slightly.  With
+#7CY5VW the host now keeps collision around each guest, so a turtle beside
+a distant guest walks; the live run above kept the creatures near the host.
+
 ** TODO Make company comfortable
 :PROPERTIES:
 :ID: 3JTHM3
