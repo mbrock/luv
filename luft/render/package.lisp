@@ -238,6 +238,7 @@
            #:viewer-pick-material
            #:viewer-edit-at-crosshair
            #:apply-viewer-world-edit
+           #:viewer-world-actor
            #:viewer-key-event-tables
            #:viewer-command-viewer
            #:viewer-world-description

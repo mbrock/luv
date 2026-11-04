@@ -259,7 +259,7 @@ journal (#48I94O) rebases its viewer edit hunk onto it.  The clock
 view; a headless world with one player advances, edits, and saves in tests;
 and the game plays and captures as before.
 
-** NEXT Keep one journal of events, and queue sequenced edits
+** DONE Keep one journal of events, and queue sequenced edits
 :PROPERTIES:
 :ID: 48I94O
 :END:
@@ -270,6 +270,22 @@ actor-owned undo.
 /Done when./ Edits are journal events with checked before values, the two
 ledgers are derived views, a queued event survives a busy cohort, and two
 actors' interleaved edits undo independently.
+
+/Evidence./ A [[lisp:luft.terrain:world-journal]] holds
+[[lisp:luft.terrain:world-event]]s, and [[lisp:luft.terrain:sequence-world-events]]
+records a transaction only when every change's before is the site's value at
+the journal head, else names the reason (=:stale-before=, =:nonresident=,
+=:attachment=, ...).  A source scene shares its source's journal, and
+=world-source-edits= is the journal's latest value per site.  Recorded events
+wait in the scene's queue until [[lisp:luft.terrain:apply-queued-world-events]]
+finds no cohort in flight; a click whose before a queued event has changed is
+stale.  [[lisp:luft.terrain:undo-world-events]] inverts the actor's own latest
+transaction and forgets one that someone has since changed; the atelier's
+undo goes through it as actor =:local=.  Values are opaque to the journal and
+painted through [[lisp:luft.terrain:world-value-placement]], so a block
+identity can replace a placement.  Luvcraft's =block-edit-overlay= is still
+its own ledger of instances; it becomes a view once #JH74JS's block
+identities are the journal's values.
 
 ** DONE Give every block a name that fits on the wire
 :PROPERTIES:

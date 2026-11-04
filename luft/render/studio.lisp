@@ -408,11 +408,21 @@ wall. Corner rays reserve space for the near plane, even at grazing angles."
        domain (+ (luft:site-x cell) dx) (+ (luft:site-y cell) dy)
        (+ (luft:site-z cell) dz) luft:+cell-extent+ 1))))
 
+(defgeneric viewer-world-actor (viewer)
+  (:documentation "The principal whose journal events VIEWER's edits are; undo is its own.")
+  (:method (viewer)
+    (declare (ignore viewer))
+    :local))
+
+(defvar *viewer-world-edit-cause* :edit
+  "Why APPLY-VIEWER-WORLD-EDIT changes a cell: :UNDO and :REDO take back or
+repeat the actor's own latest transaction rather than sequence a new change.")
+
 (defgeneric apply-viewer-world-edit (viewer cell placement)
   (:documentation "Apply one world edit; games may account for owned materials."))
 
 (defmethod apply-viewer-world-edit (viewer cell placement)
-  "Apply and schedule one edit, returning its record and status."
+  "Sequence one edit as VIEWER's actor, returning its event and status."
   (let ((scene (viewer-source viewer))
         (production-system (viewer-production-system viewer)))
     (cond
@@ -425,46 +435,53 @@ wall. Corner rays reserve space for the near plane, even at grazing angles."
        (setf (viewer-last-edit-status viewer) :occupied)
        (values nil :occupied))
       (t
-       (multiple-value-bind (edit status key)
-           (edit-streaming-scene-cell scene cell placement)
-         (when edit
-           (schedule-streaming-scene-edit
-            scene production-system key (viewer-bevel-width viewer))
+       (multiple-value-bind (event status)
+           (let ((actor (viewer-world-actor viewer))
+                 (cause *viewer-world-edit-cause*)
+                 (bevel-width (viewer-bevel-width viewer)))
+             (case cause
+               ((:undo :redo)
+                (multiple-value-bind (events status)
+                    (funcall (if (eq cause :undo) #'undo-world-events #'redo-world-events)
+                             scene actor :production-system production-system
+                                         :bevel-width bevel-width)
+                  (values (first events) status)))
+               (t (edit-world-cell scene cell placement
+                                   :actor actor :cause cause
+                                   :production-system production-system
+                                   :bevel-width bevel-width))))
+         (when event
            (setf (viewer-inspection viewer) nil))
          (setf (viewer-last-edit-status viewer) status)
-         (values edit status))))))
+         (values event status))))))
 
-(defun record-viewer-world-edit (viewer cell placement)
-  (multiple-value-bind (edit status)
-      (apply-viewer-world-edit viewer cell placement)
-    (when edit
-      (push edit (viewer-edit-undo-history viewer))
-      (setf (viewer-edit-redo-history viewer) nil))
-    (values edit status)))
+(defun repeat-viewer-world-edit (viewer cause)
+  "Undo or redo VIEWER's actor's latest transaction through the edit boundary."
+  (let ((scene (viewer-source viewer)))
+    (when (typep scene 'streaming-scene)
+      (let* ((journal (streaming-scene-journal scene))
+             (transaction
+               (funcall (if (eq cause :undo)
+                            #'world-journal-undoable-transaction
+                            #'world-journal-redoable-transaction)
+                        journal (viewer-world-actor viewer)))
+             (event (and transaction
+                         (first (world-journal-transaction-events
+                                 journal transaction)))))
+        (when event
+          ;; Games account for the cell's change, as they do for a click.
+          (let ((*viewer-world-edit-cause* cause))
+            (nth-value 1 (apply-viewer-world-edit
+                          viewer (world-event-site event)
+                          (if (eq cause :undo)
+                              (world-event-before event)
+                              (world-event-after event))))))))))
 
 (defun undo-viewer-world-edit (viewer)
-  (let ((original (first (viewer-edit-undo-history viewer))))
-    (when original
-      (multiple-value-bind (inverse status)
-          (apply-viewer-world-edit
-           viewer (scene-edit-cell original) (scene-edit-old-placement original))
-        (declare (ignore inverse))
-        (when (eq status :edited)
-          (pop (viewer-edit-undo-history viewer))
-          (push original (viewer-edit-redo-history viewer)))
-        status))))
+  (repeat-viewer-world-edit viewer :undo))
 
 (defun redo-viewer-world-edit (viewer)
-  (let ((original (first (viewer-edit-redo-history viewer))))
-    (when original
-      (multiple-value-bind (replay status)
-          (apply-viewer-world-edit
-           viewer (scene-edit-cell original) (scene-edit-new-placement original))
-        (declare (ignore replay))
-        (when (eq status :edited)
-          (pop (viewer-edit-redo-history viewer))
-          (push original (viewer-edit-undo-history viewer)))
-        status))))
+  (repeat-viewer-world-edit viewer :redo))
 
 (defun same-inspected-site-p (left right)
   (or (eq left right)
@@ -789,8 +806,6 @@ before the operation boundary, or it would encode through resources which the
    (inspection :initform nil :accessor viewer-inspection)
    (edit-material :initform nil
                   :accessor viewer-edit-material)
-   (edit-undo-history :initform nil :accessor viewer-edit-undo-history)
-   (edit-redo-history :initform nil :accessor viewer-edit-redo-history)
    (last-edit-status :initform nil :accessor viewer-last-edit-status)
    (last-timestamp :initform nil :accessor viewer-last-timestamp)
    (speed :initarg :speed :initform 4.0 :accessor viewer-speed)
@@ -1087,6 +1102,9 @@ before the operation boundary, or it would encode through resources which the
     (when (and (typep source 'streaming-scene) production-system)
       (drain-streaming-scene-production
        source (viewer-renderer viewer) production-system)
+      ;; Sequenced edits wait out a cohort in flight, then show (#QQT86P).
+      (apply-queued-world-events
+       source production-system (viewer-bevel-width viewer))
       ;; One complete neighborhood cohort crosses the owner boundary before
       ;; another residency change can invalidate it.
       (when (null (streaming-scene-replacement source))
@@ -1611,11 +1629,11 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
     (when inspection
       (ecase action
         (:smash
-         (record-viewer-world-edit
+         (apply-viewer-world-edit
           viewer (site-inspection-cell inspection) nil))
         (:build
          (handler-case
-             (record-viewer-world-edit
+             (apply-viewer-world-edit
               viewer (site-inspection-adjacent-cell inspection)
               (viewer-edit-material viewer))
            (luft:outside-domain ()
