@@ -412,7 +412,7 @@ look turned the character's look with the camera.
 character's look, so a remote or replayed player's look is the character's,
 not a camera's.  Tapes are in-memory vectors with no file format yet.
 
-** TODO Two players build one house
+** DONE Two players build one house
 :PROPERTIES:
 :ID: OLWSWF
 :END:
@@ -423,6 +423,46 @@ guest.
 /Done when./ Two worlds in one image pass the join, catch-up, conflict,
 undo, and reconnect tests, and two windows on one Mac build a house
 together with equal chunk hashes.
+
+/Evidence./ [[lisp:luvcraft.luft.game:host-luvcraft-world]] opens a session
+on a world, and [[lisp:luvcraft.luft.game:join-luvcraft-world]] raises a
+guest's world from the welcome's recipe. It checks the world tag, installs
+the compacted edit set at the watermark, and then records only events after
+it. Every edit, the host's own included, goes through the host's sequencer.
+A guest's edit request is answered with a refusal or with the broadcast
+events. Undo stays per player. Poses travel at 30 Hz stamped with the
+simulation tick. Each remote player gets a
+[[lisp:luvcraft.luft.game:remote-track]], ported from moppe's
+CompanionTrack, and is drawn as the wizard figure. Chunk hashes are compared
+at equal watermarks on a background thread, and any mismatch is logged.
+=play :host= and =play :join "host[:port]"= start the two ends, as do
+=./sly play --host= and =./sly --lisp guest play --join localhost=. The game
+port is 47475 on TCP and UDP. Discovery beacons use 47474. Open both on a
+firewall.
+
+The loopback tests cover:
+- join;
+- catch-up while the host builds;
+- two players filling one cell, where one wins and the journals stay equal;
+- per-player undo;
+- leaving and rejoining where the player left;
+- pose ticks;
+- the remote track;
+- a logged hash mismatch.
+
+Two images on one Mac built a planks-and-bricks house with a wool roof. Both
+journal heads reached 72, and every common chunk hash matched (764 and 607
+comparisons, none different).
+
+Live play exposed two terrain bugs, and both are fixed with regression
+tests:
+- A peer's event could arrive while residency moved. The queue now waits
+  for a coherent scene.
+- A guest could edit a chunk outside the host's collision radius. Occupancy
+  there is now read from the chunk's fibers.
+
+Still to do: a skinned body with a held block, remote bodies in local
+physics, and a shared clock of day (each window keeps its own).
 
 ** TODO Share the living world
 :PROPERTIES:
