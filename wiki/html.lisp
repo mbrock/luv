@@ -107,6 +107,10 @@ leaving out the definitions of test systems."
 (defun site-page-name (document)
   (concatenate 'string (document-name document) ".html"))
 
+(defvar *page-prefix* ""
+  "The relative path from the page being rendered back to the site root,
+\"\" for top-level pages and \"../\" or deeper for source pages.")
+
 (defun figure-href (id &key (site *site*) from)
   "The href for figure ID from the page FROM (a document), or NIL if dangling."
   (let ((figure (find-figure id site)))
@@ -174,10 +178,6 @@ including headings' titles and table cells, but not into subheadings."
 
 (defvar *rendering-document* nil
   "The document whose page is being rendered; makes same-page links relative.")
-
-(defvar *page-prefix* ""
-  "The relative path from the page being rendered back to the site root,
-\"\" for top-level pages and \"../\" or deeper for source pages.")
 
 (defgeneric render-html (element)
   (:documentation

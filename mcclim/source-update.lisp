@@ -30,7 +30,7 @@
 (defmethod source-update-root-for ((owner t))
   (declare (ignore owner))
   (or (and (boundp 'cl-user::*luv-project-root*)
-           cl-user::*luv-project-root*)
+           (symbol-value 'cl-user::*luv-project-root*))
       (asdf:system-source-directory "luv")))
 
 (defgeneric source-update-systems-for (owner)

@@ -1,7 +1,9 @@
 ;;;; Lisp entry point run by the Nix-backed scripts/luv launcher.
 
 (require :asdf)
-(require :sb-posix)
+(handler-bind ((warning #'muffle-warning))
+  ;; ASDF grumbles about duplicate entries in SBCL's own contrib directory.
+  (require :sb-posix))
 
 (defun launcher-project-root ()
   (merge-pathnames #P"../"
