@@ -619,6 +619,46 @@ being drawn about 0.2 s behind, which makes it step back slightly.  With
 #7CY5VW the host now keeps collision around each guest, so a turtle beside
 a distant guest walks; the live run above kept the creatures near the host.
 
+*** DONE Give the other player a body
+:PROPERTIES:
+:ID: AVKN70
+:END:
+
+/Intent./ #VM5TN6's body, held block, nameplate, and physics strangers, in
+place of phase 1's wizard figure.
+
+/Evidence./ The avatar of =luvcraft/avatar= is exported by its
+=export-fmesh.py= as FNT1 (12,054 vertices, 25 bones, the Idle pose and a
+24-frame Walk loop) with a =.rig= naming the right palm. Each view gives
+every remote player whose track draws it a =remote-avatar=: an embodied
+agent with only its companion body overlay, so it is skinned in the vertex
+shader like the gnome. The snapshot's gait turns its Walk loop by distance
+travelled, and the blend eases to Idle when it stops or flies. The held
+block is a box figure at the palm, as the walk swings it. The player's name
+stands above its head in DM Sans as world text, turned to the camera, and
+grows with distance so it stays legible. A new
+=render::viewer-world-text-batches= lets a game publish batches beside the
+terminals. The batch is rebuilt only when the plate moves a centimetre or
+turns a degree.
+
+Each track also owns a =terrain:physical-body= placed where the player is
+drawn. The session makes those bodies the simulation's
+=terrain:simulation-strangers=: ticks bind them, sweeps stop against them,
+and a step up never climbs into one. Balls meet them as kinematic boxes.
+No tick moves them; only their owner's poses do. Placement into one is
+refused locally, by the host's sequencer for a guest's request, and by a
+guest before it asks. The test =a-remote-player-is-a-stranger-to-local-physics=
+walks Ada into Bea, throws a ball at her, and places into both bodies. With
+strangers switched off, all seven of its checks fail.
+
+Two images on one Mac showed each other's bodies holding planks, walking,
+and named near and at about 25 cells.
+
+/Open./ A rider's pose will carry its turtle (2B); =remote-body-walking-p=
+and the avatar's position are where the body sits instead of walking. Both
+players wear the same avatar. The arm hangs at the side rather than
+carrying the block forward.
+
 ** TODO Make company comfortable
 :PROPERTIES:
 :ID: 3JTHM3

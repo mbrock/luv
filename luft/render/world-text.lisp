@@ -84,6 +84,11 @@
     (setf (world-text-batch-glyph-buffer batch) nil))
   (values))
 
+(defgeneric viewer-world-text-batches (viewer)
+  (:documentation "A game's own world text batches for VIEWER's next frame, such
+as nameplates, published after the terminal walls.  Their owner releases them.")
+  (:method ((viewer t)) (declare (ignore viewer)) nil))
+
 (defun publish-renderer-world-text (renderer batches)
   "Make BATCHES the surfaces RENDERER draws from its next frame on.
 

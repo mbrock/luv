@@ -594,14 +594,16 @@ Return the terminal, or NIL when the crosshair is not on a terminal wall."
                 (remove terminal (viewer-terminals-terminals state)))
           ;; Unpublish before releasing what the renderer would draw.
           (publish-renderer-world-text
-           renderer (remove nil (mapcar #'world-terminal-batch
-                                        (viewer-terminals-terminals state))))
+           renderer (append (remove nil (mapcar #'world-terminal-batch
+                                                (viewer-terminals-terminals state)))
+                            (viewer-world-text-batches viewer)))
           (close-world-terminal terminal)))
       (dolist (terminal (viewer-terminals-terminals state))
         (refresh-world-terminal terminal (renderer-device renderer)))
       (publish-renderer-world-text
-       renderer (remove nil (mapcar #'world-terminal-batch
-                                    (viewer-terminals-terminals state)))))))
+       renderer (append (remove nil (mapcar #'world-terminal-batch
+                                            (viewer-terminals-terminals state)))
+                        (viewer-world-text-batches viewer))))))
 
 (defun terminal-release-gesture-p (event)
   (and (eq :tab (canvas-key-event-key-name event))

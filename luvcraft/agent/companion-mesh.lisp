@@ -5,20 +5,26 @@
 ;;; sidecar let the game solve its own legs against the actual terrain.
 (defstruct companion-mesh vertices joints weights indices poses bone-count frame-count stride rig)
 (defstruct companion-leg name bones hip knee ankle pole phase)
-(defstruct companion-rig stance legs)
+(defstruct companion-rig stance legs palm)
 (defstruct companion-foot point heading from from-heading target target-heading
            (progress 1d0) swing-p distance-driven-p supported-p (stance-p t))
 (defstruct companion-pose mesh palette feet position (pelvis 0d0) moving-p scale)
 
 (defvar *companion-meshes* (make-hash-table))
 
+(defparameter *avatar-stature* (/ 1.8 1.85)
+  "Cells per figure unit of the 1.85-unit avatar a remote player wears: a player's 1.8 cells.")
+
 (defun companion-stature (kind)
-  (ecase kind (:gnome (gnome-stature)) (:cat (cat-stature)) (:fantus (fantus-stature))))
+  (ecase kind
+    (:gnome (gnome-stature)) (:cat (cat-stature)) (:fantus (fantus-stature))
+    (:avatar (float *avatar-stature* 1.0))))
 
 (defun companion-body-height (kind)
   (* (companion-stature kind)
      (ecase kind
-       (:gnome (gnome-body-height)) (:cat (cat-figure-height)) (:fantus (fantus-figure-height)))))
+       (:gnome (gnome-body-height)) (:cat (cat-figure-height)) (:fantus (fantus-figure-height))
+       (:avatar 1.85))))
 
 (defun companion-walk-speed (kind)
   (coerce (* *embodied-agent-walk-speed* (companion-stature kind)) 'double-float))
@@ -27,14 +33,16 @@
   (float (ecase kind
            (:gnome luvcraft.shaders::*gnome-rim-light*)
            (:cat luvcraft.shaders::*cat-rim-light*)
-           (:fantus luvcraft.shaders::*fantus-rim-light*)) 1.0))
+           (:fantus luvcraft.shaders::*fantus-rim-light*)
+           (:avatar luvcraft.shaders::*gnome-rim-light*)) 1.0))
 
 (defun companion-mesh-path (kind)
   (asdf:system-relative-pathname
    :luvcraft (ecase kind
                (:fantus "luvcraft/fantus/fantus.fmesh")
                (:gnome "luvcraft/companions/gnome.fmesh")
-               (:cat "luvcraft/companions/cat.fmesh"))))
+               (:cat "luvcraft/companions/cat.fmesh")
+               (:avatar "luvcraft/avatar/claude-avatar.fmesh"))))
 
 (defun load-companion-rig (mesh-path bone-count)
   (let* ((*read-eval* nil)
@@ -47,6 +55,9 @@
             "Stale IK rig ~A. Re-run luvcraft/agent/export-rig.py on its .blend." path)
     (make-companion-rig
      :stance (getf data :stance)
+     ;; Where a held thing sits: a bone and a point in the rest frame.
+     :palm (let ((palm (getf data :palm)))
+             (and palm (cons (getf palm :bone) (apply #'make-vec3 (getf palm :point)))))
      :legs (mapcar
             (lambda (leg)
               (assert (every (lambda (i) (<= 0 i (1- bone-count))) (getf leg :bones)))

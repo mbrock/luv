@@ -271,6 +271,8 @@ this package draws; the renderer and the ateliers use it.")
            #:simulation-phase
            #:simulation-tick
            #:simulation-bodies
+           #:simulation-strangers
+           #:stranger-meets-box-p
            #:simulation-body-position
            #:simulation-characters
            #:simulation-clock

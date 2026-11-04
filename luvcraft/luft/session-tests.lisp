@@ -565,3 +565,51 @@ frames would, until UNTIL holds with nothing in flight."
                                         (not (terrain:scene-collision-resident-p scene x y)))))
                  (true (not (nth-value 1 (gethash far (terrain:streaming-scene-store scene)))))))))
       (luv.production:stop-production-system producer))))
+
+(define-test a-remote-player-is-a-stranger-to-local-physics
+  ;; Bea stands still in her world; Ada's host world meets her as its track
+  ;; draws her: Ada cannot walk through her, a ball bounces off her, and
+  ;; neither world places a block in the other's body (#VM5TN6).
+  (with-host (world session network)
+    (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
+      (let* ((ground (ground guest-world 1050 1060))
+             (ada (host:find-world-player world "ada"))
+             (ada-body (terrain:character-body (host:player-character ada)))
+             (stone (game:block-placement luvcraft::*stone-block*)))
+        (setf (host:player-character bea)
+              (terrain:make-walking-character
+               :position (v:make-vec3 1050.5d0 1060.5d0 (float ground 1d0))))
+        (host:add-world-player guest-world bea)
+        (true (pump (list session guest) :advance t
+                    :until (lambda ()
+                             (and (terrain:simulation-strangers (host:world-simulation world))
+                                  (terrain:simulation-strangers (host:world-simulation guest-world))))))
+        ;; Ada walks west into her and stops at her side; unhindered, two
+        ;; seconds would take her ten cells past.
+        (terrain:set-character-movement (host:player-character ada) -4d0 0d0)
+        (dotimes (i 120) (terrain:advance-world-simulation (host:world-simulation world) 1/60))
+        (true (< 1051.09 (v:vec3-x (terrain:body-position ada-body)) 1051.5))
+        (terrain:set-character-movement (host:player-character ada) 0d0 0d0)
+        ;; A ball thrown at Bea from the west comes back west.  Physics is
+        ;; Y-up and 1024 cells off: her body spans x 26.2..26.8 there.
+        (let* ((physics (host::ensure-world-physics world))
+               (ball (luvcraft::spawn-physics-body physics 23.5 (+ ground 0.7) 36.5
+                                                   :radius 0.25 :vx 6.0 :restitution 0.5))
+               (farthest 0.0))
+          (dotimes (i 90)
+            (host::advance-world-balls world luvcraft::*physics-step-seconds*)
+            (setf farthest (max farthest (luvcraft::physics-body-position physics ball))))
+          (true (< farthest 26.1))
+          (true (< (luvcraft::physics-body-position physics ball) 25.9)))
+        ;; Placement into either body is refused where it is asked for, once
+        ;; Bea's world has seen where Ada stopped.
+        (is eq :occupied (nth-value 1 (host:player-edit-world-cell
+                                       world ada (cell world 1050 1060 (1+ ground)) stone)))
+        (true (pump (list session guest) :advance t
+                    :until (lambda ()
+                             (let ((stranger (first (terrain:simulation-strangers
+                                                     (host:world-simulation guest-world)))))
+                               (< (v:vec3-x (terrain:body-position stranger)) 1051.6)))))
+        (is eq :occupied (nth-value 1 (host:player-edit-world-cell
+                                       guest-world bea (cell guest-world 1051 1060 ground) stone)))
+        (host:close-world-session guest)))))

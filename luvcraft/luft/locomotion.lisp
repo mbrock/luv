@@ -36,8 +36,12 @@
       blocked)))
 
 (defmethod luvcraft::body-position-clear-p (player (contact player-contact) x y z)
-  (terrain:body-clear-at-p (player-contact-solid contact) x z y
-                          (luvcraft::body-height player) (luvcraft::body-half-width player)))
+  ;; A step up never climbs into another player's body.
+  (and (terrain:body-clear-at-p (player-contact-solid contact) x z y
+                               (luvcraft::body-height player) (luvcraft::body-half-width player))
+       (not (terrain:stranger-meets-box-p x z y (luvcraft::body-height player)
+                                          (luvcraft::body-half-width player)
+                                          (player-contact-body contact)))))
 
 (defmethod terrain:advance-character-motion ((character luvcraft-character) solid seconds)
   (if (terrain:character-flying-p character)

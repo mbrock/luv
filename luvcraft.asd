@@ -252,7 +252,8 @@
                (:file "luvcraft/luft/session")
                (:file "luvcraft/luft/player-table")
                (:file "luvcraft/luft/companion-session")
-               (:file "luvcraft/luft/living-world"))
+               (:file "luvcraft/luft/living-world")
+               (:file "luvcraft/luft/remote-body"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"

@@ -397,10 +397,14 @@ walking route keeps running until the frame urges a direction or a jump."
               (body-grounded-p body) nil)))))
 
 (defun move-body-axis (body solid axis amount)
-  "Sweep, retain tangential velocity, and zero only the blocked component."
+  "Sweep, retain tangential velocity, and zero only the blocked component.
+Strangers stop the sweep as terrain does."
   (multiple-value-bind (travel blocked)
       (sweep-body-axis solid (body-position body) (body-height body)
                        (body-radius body) axis amount)
+    (when *stranger-bodies*
+      (let ((clipped (clip-body-axis-to-strangers body axis travel)))
+        (setf blocked (or blocked (/= clipped travel)) travel clipped)))
     (ecase axis
       (:x (incf (vec3-x (body-position body)) travel))
       (:y (incf (vec3-y (body-position body)) travel))
@@ -458,6 +462,9 @@ walking route keeps running until the frame urges a direction or a jump."
   ((source :initarg :source :accessor simulation-source)
    (bodies :initform nil :reader simulation-bodies)
    (characters :initform nil :reader simulation-characters)
+   (strangers :initform nil :accessor simulation-strangers
+              :documentation "Bodies the others collide with but that no tick moves:
+other players' bodies, which only their owners move.  Their owner sets them.")
    (tick :initform 0 :type (integer 0) :reader simulation-tick
          :documentation "The number of ticks run: the time base that snapshots and tapes carry.")
    (phase :initform 0d0 :type double-float :reader simulation-phase
@@ -548,7 +555,8 @@ or late frame never makes a zero-tick, two-tick pair, and catch up at most
         (moving (remove-if-not (lambda (body)
                                  (body-collision-resident-p
                                   body (simulation-source simulation)))
-                               (simulation-bodies simulation))))
+                               (simulation-bodies simulation)))
+        (*stranger-bodies* (simulation-strangers simulation)))
     (dolist (body (simulation-bodies simulation))
       (rotatef (slot-value body 'previous-tick-position)
                (slot-value body 'tick-position)))

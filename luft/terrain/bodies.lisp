@@ -111,6 +111,46 @@ box and fall through nothing they cannot see."
          (< cell-z (+ base-z (body-height body)))
          (< base-z (1+ cell-z)))))
 
+(defvar *stranger-bodies* nil
+  "Bodies that moving bodies stop against but never push: a simulation's
+strangers, bound around its ticks.")
+
+(defun clip-body-axis-to-strangers (body axis amount)
+  "AMOUNT along AXIS, shortened where BODY's box would enter a stranger's.
+A stranger BODY already overlaps does not hold it, so it can walk out."
+  (let* ((p (body-position body)) (r (body-radius body)) (allowed amount)
+         (epsilon +walking-collision-epsilon+))
+    (flet ((low (q radius a) (if (eq a :z) (vec3-z q) (- (vec3-component q a) radius)))
+           (high (q radius height a)
+             (if (eq a :z) (+ (vec3-z q) height) (+ (vec3-component q a) radius))))
+      (dolist (stranger *stranger-bodies*)
+        (unless (eq stranger body)
+          (let ((q (body-position stranger)) (sr (body-radius stranger))
+                (sh (body-height stranger)))
+            (when (every (lambda (other)
+                           (and (< (+ (low p r other) epsilon) (high q sr sh other))
+                                (< (+ (low q sr other) epsilon) (high p r (body-height body) other))))
+                         (remove axis '(:x :y :z)))
+              (let ((near (low q sr axis)) (far (high q sr sh axis))
+                    (front (high p r (body-height body) axis)) (back (low p r axis)))
+                (cond ((and (plusp amount) (>= near (- front epsilon)))
+                       (setf allowed (min allowed (max 0 (- near front)))))
+                      ((and (minusp amount) (<= far (+ back epsilon)))
+                       (setf allowed (max allowed (min 0 (- far back))))))))))))
+    allowed))
+
+(defun stranger-meets-box-p (x y base-z height radius &optional except)
+  "Whether a stranger other than EXCEPT intersects the body box at X, Y, BASE-Z."
+  (let ((epsilon +walking-collision-epsilon+))
+    (some (lambda (stranger)
+            (and (not (eq stranger except))
+                 (let ((q (body-position stranger)) (r (+ radius (body-radius stranger))))
+                   (and (< (abs (- x (vec3-x q))) (- r epsilon))
+                        (< (abs (- y (vec3-y q))) (- r epsilon))
+                        (< (+ base-z epsilon) (+ (vec3-z q) (body-height stranger)))
+                        (< (+ (vec3-z q) epsilon) (+ base-z height))))))
+          *stranger-bodies*)))
+
 (defun reset-body-interpolation (body)
   "Cut both tick endpoints to BODY's physical pose, without changing frame history."
   (let ((position (body-position body)))

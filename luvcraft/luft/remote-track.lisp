@@ -135,7 +135,9 @@ motion on.  What does not blend is B's, and so is all of it across a leap."
    (slip :initform (vector 0d0 0d0 0d0)
          :documentation "How far the body is still drawn from where the snapshots put it.")
    (shown :initform nil :accessor track-shown :documentation "The pose last drawn.")
-   (previous :initform nil :accessor track-previous :documentation "The pose drawn before it."))
+   (previous :initform nil :accessor track-previous :documentation "The pose drawn before it.")
+   (body :initform (make-instance 'terrain:physical-body) :reader track-body
+         :documentation "The body as local physics meets it, where it was last drawn."))
   (:documentation "A remote player's recent snapshots and the moment they are drawn at."))
 
 (defun make-remote-track () (make-instance 'remote-track))

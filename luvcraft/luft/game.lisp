@@ -140,7 +140,7 @@ or NIL for the watermark."))
   (advance-viewer-companions viewer seconds))
 
 (defmethod render:viewer-figures ((viewer luvcraft-viewer))
-  (append (call-next-method) (remote-player-figures (viewer-world viewer))
+  (append (call-next-method) (remote-player-figures viewer)
           (animal-figure-list viewer)
           (ball-figures viewer) (particle-figures viewer)))
 

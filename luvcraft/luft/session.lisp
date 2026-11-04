@@ -306,7 +306,8 @@ the order the host first saw it act."
 (defun forget-remote-player (session id)
   (let ((player (find-world-player (session-world session) id)))
     (when (and player (player-track player))
-      (remove-world-player (session-world session) player))
+      (remove-world-player (session-world session) player)
+      (update-world-strangers session))
     player))
 
 (defun receive-pose (session message)
@@ -319,48 +320,38 @@ the order the host first saw it act."
                               (pose-wire-snapshot session (wire:pose-message-pose message))
                               (wall-seconds)))))))
 
-(defparameter *remote-body-radius* 0.3d0)
-(defparameter *remote-body-height* 1.8d0)
-
 (defun remote-player-occupies-cell-p (session cell &key except)
   "Whether a remote player other than EXCEPT stands where CELL would be."
   (some (lambda (player)
-          (let ((shown (and (not (equal (player-id player) except))
-                            (track-shown (player-track player)))))
-            (and shown
-                 (let ((p (pose-snapshot-position shown))
-                       (r *remote-body-radius*))
-                   (and (< (- (luft:site-x cell) r) (svref p 0) (+ (luft:site-x cell) 1 r))
-                        (< (- (luft:site-y cell) r) (svref p 1) (+ (luft:site-y cell) 1 r))
-                        (< (- (luft:site-z cell) *remote-body-height*) (svref p 2)
-                           (+ (luft:site-z cell) 1)))))))
+          (and (not (equal (player-id player) except))
+               (track-shown (player-track player))
+               (terrain:body-overlaps-cell-p (track-body (player-track player)) cell)))
         (session-remote-players session)))
 
+(defun place-stranger-body (track)
+  "Put TRACK's body where its player is drawn, moving as the player moves."
+  (let ((shown (track-shown track)) (body (track-body track)))
+    (flet ((fill-vec3 (v from)
+             (setf (vec3:vec3-x v) (coerce (svref from 0) 'single-float)
+                   (vec3:vec3-y v) (coerce (svref from 1) 'single-float)
+                   (vec3:vec3-z v) (coerce (svref from 2) 'single-float))))
+      (fill-vec3 (terrain:body-position body) (pose-snapshot-position shown))
+      (fill-vec3 (terrain:body-velocity body) (pose-snapshot-velocity shown)))
+    body))
+
 (defun advance-remote-tracks (session seconds)
+  "Move remote players' tracks on, and make their bodies the strangers of
+local physics (#VM5TN6): what is drawn is what balls and walkers meet."
   (let ((now (wall-seconds)))
     (dolist (player (session-remote-players session))
-      (advance-remote-track (player-track player) now seconds))))
+      (advance-remote-track (player-track player) now seconds))
+    (update-world-strangers session)))
 
-(defun remote-player-figures (world)
-  "The figure lanes of WORLD's remote players, as their tracks draw them."
-  (loop for player in (world-players world)
-        for track = (player-track player)
-        for shown = (and track (track-shown track))
-        for previous = (and shown (or (track-previous track) shown))
-        when shown
-          collect (flet ((vec (pose)
-                           (let ((p (pose-snapshot-position pose)))
-                             (vec3:make-vec3 (coerce (svref p 0) 'single-float)
-                                             (coerce (svref p 1) 'single-float)
-                                             (coerce (svref p 2) 'single-float)))))
-                    (render:figure-lanes
-                     (vec shown) (vec previous)
-                     (coerce (pose-snapshot-gait shown) 'single-float)
-                     (coerce (pose-snapshot-gait previous) 'single-float)
-                     (coerce (cos (pose-snapshot-yaw shown)) 'single-float)
-                     (coerce (sin (pose-snapshot-yaw shown)) 'single-float)
-                     (coerce (cos (pose-snapshot-yaw previous)) 'single-float)
-                     (coerce (sin (pose-snapshot-yaw previous)) 'single-float)))))
+(defun update-world-strangers (session)
+  (setf (terrain:simulation-strangers (world-simulation (session-world session)))
+        (loop for player in (session-remote-players session)
+              for track = (player-track player)
+              when (track-shown track) collect (place-stranger-body track))))
 
 ;;; Edits.
 
@@ -1032,6 +1023,7 @@ and PITCH are the local player's look, when a view knows it."
     (when (typep session 'host-session)
       (keep-departed-player session player))
     (remove-world-player (session-world session) player))
+  (update-world-strangers session)
   (when (eq (world-session (session-world session)) session)
     (setf (world-session (session-world session)) nil))
   session)

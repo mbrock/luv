@@ -12,6 +12,7 @@ skeleton to move around, work at terminals, and build things.
 | `claude-avatar.blend` | generated Blender scene (mesh, rig, materials, clips, lighting) |
 | `claude-avatar.glb` | generated glTF 2.0 export: skinned mesh + 3 animations |
 | `preview.png` | generated contact sheet |
+| `export-fmesh.py` | writes `claude-avatar.fmesh` and `.rig`, the runtime body a remote player wears |
 
 ## Rebuilding
 
