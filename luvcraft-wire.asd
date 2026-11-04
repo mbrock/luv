@@ -29,7 +29,8 @@ the endpoints live in LUVCRAFT-WIRE/NET.  See wiki figure A8LXLK."
   :components ((:module "luvcraft-wire"
                 :serial t
                 :components ((:file "endpoint")
-                             (:file "sockets")
+                             (:file "sockets" :if-feature (:not :win32))
+                             (:file "sockets-windows" :if-feature :win32)
                              (:file "loopback")))))
 
 (defsystem "luvcraft-wire/test"
