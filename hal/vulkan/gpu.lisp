@@ -1733,8 +1733,7 @@ render-pass compatibility need no separate vocabulary."
                    (vulkan-render-pass-for-format
                     device formats descriptor depth-format
                     (or depth-store-op :discard) sample-count
-                    (> sample-count 1) color-load-op
-                    (if (eq depth-load-op :load) :load :clear))))
+                    (> sample-count 1))))
                (pipeline-layout
                  (with-cpu-trace-zone (:vulkan/pipeline/create-layout)
                    (lvk:create-pipeline-layout
