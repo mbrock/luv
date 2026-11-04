@@ -92,8 +92,10 @@ under the capture output directory and do not belong in Git. #IVRWI8"))
      (pathname) &body body)
   "Define one inspectable wiki capture recipe.
 
-NAME is its command-line identity.  FIGURE is the stable six-character wiki
-figure ID; KIND is :IMAGE or :VIDEO; EXTENSION is the generated file suffix.
+NAME is its command-line identity.  FIGURE is the recipe's stable
+six-character capture ID, which prefixes its output file; it may also be the
+ID of a wiki figure that shows the capture, but need not be.  KIND is :IMAGE
+or :VIDEO; EXTENSION is the generated file suffix.
 LAYOUT is :LANDSCAPE by default or :PORTRAIT for uncropped 9:16 presentation.
 BODY is an ordinary named renderer function body with PATHNAME bound to its
 requested output.  Re-evaluating the definition replaces the recipe without
