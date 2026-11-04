@@ -32,7 +32,15 @@
    (body :initform (make-instance 'luvcraft::player-body) :reader viewer-body
          :documentation "The first-person hands, bob, and held item that this view draws.")
    (conversation-agent :initform nil :accessor viewer-conversation-agent
-                       :documentation "The companion this view addresses with T, Y, and N."))
+                       :documentation "The companion this view addresses with T, Y, and N.")
+   (previous-animal-figures :initform (make-hash-table :test #'eq)
+                            :reader viewer-previous-animal-figures
+                            :documentation "Each turtle's boxes as this view last drew them, for motion.")
+   (previous-ball-centers :initform (make-hash-table) :reader viewer-previous-ball-centers
+                          :documentation "Each ball's centre as this view last drew it, for motion.")
+   (particle-sequence :initform nil :accessor viewer-particle-sequence
+                      :documentation "The journal sequence this view's particles are derived up to,
+or NIL for the watermark."))
   (:command-table (luvcraft-viewer
                    :inherit-from (luvcraft-window render:luft-window-release
                                   luvcraft-world luvcraft-world-release)
@@ -125,7 +133,9 @@
         (setf (session-viewer session) viewer))
       (advance-world-session session seconds :yaw (render:camera-yaw camera)
                                              :pitch (render:camera-pitch camera))))
+  (remember-viewer-poses viewer)
   (advance-world-populations (viewer-world viewer) seconds)
+  (derive-viewer-particles viewer)
   (luvcraft::advance-block-particles (viewer-particles viewer) seconds)
   (advance-viewer-companions viewer seconds))
 
@@ -142,15 +152,11 @@
     ((viewer luvcraft-viewer) cell placement)
   ;; The local player edits the world; the host's own edit, which schedules
   ;; meshing, is the scene edit.
-  (multiple-value-bind (edit status mined)
+  ;; Particles follow from the journal's confirmed events, whoever made them.
+  (multiple-value-bind (edit status)
       (player-edit-world-cell (viewer-world viewer) (viewer-local-player viewer) cell placement
                        :scene-edit (lambda (block) (call-next-method viewer cell block)))
     (setf (render:viewer-last-edit-status viewer) status)
-    (when mined
-      (luvcraft::smash-block-particles
-       (viewer-particles viewer) mined
-       (apply #'luvcraft.world:make-world-coordinate
-              (game:site-luvcraft-cell (streaming-source viewer) cell))))
     (values edit status)))
 
 (defmethod luv:handle-canvas-event

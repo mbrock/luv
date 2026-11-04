@@ -218,8 +218,6 @@ actors, such as companions, edit through it when one is open.")
    (saved-inhabitants :initarg :inhabitants :initform nil :accessor world-saved-inhabitants)
    (animals :initform nil :accessor world-animals)
    (animal-count :initform 6 :accessor world-animal-count)
-   (animal-previous-figures :initform (make-hash-table :test #'eq)
-                            :reader world-animal-previous-figures)
    (animals-initialized-p :initform nil :accessor world-animals-initialized-p)
    (agents :initform nil :accessor world-agents)
    (agents-initialized-p :initform nil :accessor world-agents-initialized-p)
@@ -228,7 +226,8 @@ actors, such as companions, edit through it when one is open.")
    (physics-clock :initform 0d0 :accessor world-physics-clock)
    (springs :initform nil :accessor world-springs)
    (springs-initialized-p :initform nil :accessor world-springs-initialized-p)
-   (ball-previous-centers :initform (make-hash-table) :reader world-ball-previous-centers)
+   (living :initform nil :accessor world-living
+           :documentation "How its turtles, balls, rides, and sky are shared (living-world.lisp), or NIL.")
    (authored-sequence :initform nil :accessor world-authored-sequence
                       :documentation "The journal sequence Luvcraft's overlay of authored blocks is current at.")
    (session :initform nil :accessor world-session
@@ -328,8 +327,11 @@ balls and springs, then companions.  A game host steps the simulation itself,
 under its own residency and focus rules, before this."
   ;; Events a view sequenced, or a peer's, reach Luvcraft's overlay first.
   (sync-world-authored-blocks world)
-  (advance-world-animals world seconds)
-  (advance-world-balls world seconds)
+  (if (replica-world-p world)
+      ;; A guest draws its host's turtles, balls, and sky (#EA88ON).
+      (advance-world-replicas world seconds)
+      (progn (advance-world-animals world seconds)
+             (advance-world-balls world seconds)))
   (advance-world-companions world seconds))
 
 (defun advance-luvcraft-world (world seconds &key before-tick)

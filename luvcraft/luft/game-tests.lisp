@@ -262,6 +262,8 @@
               viewer nil (make-instance 'luv:canvas-pointer-button-press-event
                                         :timestamp 0 :x 400 :y 300 :button :left))
              (is eq :edited (render:viewer-last-edit-status viewer))
+             ;; Particles follow from the confirmed event, as a peer's would.
+             (host::derive-viewer-particles viewer)
              (is = 18 (luvcraft::block-particle-count (host::viewer-particles viewer)))
              (let ((figures (render:viewer-figures viewer)))
                (is = 18 (length figures))
@@ -272,6 +274,7 @@
              (luv:handle-canvas-event
               viewer nil (make-instance 'luv:canvas-pointer-button-press-event
                                         :timestamp 0 :x 400 :y 300 :button :left))
+             (host::derive-viewer-particles viewer)
              (is = 18 (luvcraft::block-particle-count (host::viewer-particles viewer)))))
       (luv.production:stop-production-system producer))))
 

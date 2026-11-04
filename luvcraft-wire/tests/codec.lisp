@@ -93,6 +93,9 @@
        (in-world (make-companion-tell-message :companion "gnome-k3x9q"
                                               :text "Kan du hämta en sten?"))
        (in-world (make-companion-pose-message :companion "gnome-k3x9q" :pose (sample-pose)))
+       (in-world (make-ride-message :rider "c2f0-player-ida" :entity 5 :action :refused))
+       (in-world (make-throw-message :kind :beach-ball :position #(1030.5d0 1040.25d0 21.75d0)
+                                     :velocity #(-3.5d0 8d0 2.25d0)))
        (in-world (make-pose-message :player "c2f0-player-ida" :pose (sample-pose)))
        (in-world (make-entity-snapshot-message :snapshot (sample-entities)))
        (in-world (make-probe-message :heard t))

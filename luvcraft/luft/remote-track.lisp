@@ -23,7 +23,11 @@ feet, velocity, look, walking phase, flight, and the block in hand."
   (pitch 0d0 :type double-float)
   (gait 0d0 :type double-float)
   (flying nil)
-  (held nil))
+  (held nil)
+  ;; A unit quaternion #(x y z w), for a body that turns, and what else an
+  ;; entity's sender says of it, as the newer snapshot has it.
+  (orientation nil)
+  (state nil))
 
 (defparameter *track-length* 32)
 (defparameter *track-patience* 3d0
@@ -89,6 +93,16 @@ way its neighbours lie, and beyond them, straight on."
                             (pose-snapshot-position after) p1))))
           (hermite p1 p2 m1 m2 s)))))
 
+(defun mix-orientation (a b s)
+  "Between two unit quaternions, the short way round, normalized; B when
+either is missing."
+  (if (and a b)
+      (let* ((sign (if (minusp (loop for i below 4 sum (* (aref a i) (aref b i)))) -1 1))
+             (q (map 'vector (lambda (a b) (mix a (* sign b) s)) a b))
+             (norm (sqrt (loop for x across q sum (* x x)))))
+        (if (plusp norm) (map 'vector (lambda (x) (/ x norm)) q) b))
+      b))
+
 (defun blend-poses (before a b after s)
   "The look partway from A (at zero) to B (at one); S beyond one carries the
 motion on.  What does not blend is B's, and so is all of it across a leap."
@@ -103,7 +117,10 @@ motion on.  What does not blend is B's, and so is all of it across a leap."
          :pitch (mix (pose-snapshot-pitch a) (pose-snapshot-pitch b) within)
          :gait (mix-angle (pose-snapshot-gait a) (pose-snapshot-gait b) s)
          :flying (pose-snapshot-flying b)
-         :held (pose-snapshot-held b)))))
+         :held (pose-snapshot-held b)
+         :orientation (mix-orientation (pose-snapshot-orientation a)
+                                       (pose-snapshot-orientation b) within)
+         :state (pose-snapshot-state b)))))
 
 (defclass remote-track ()
   ((snapshots :initform (make-array 0 :adjustable t :fill-pointer 0) :reader track-snapshots)
@@ -222,6 +239,8 @@ once the player has gone.  The previous pose drawn stays in TRACK-PREVIOUS."
                       :position (map 'simple-vector #'+ (pose-snapshot-position seen) slip)
                       :velocity (pose-snapshot-velocity seen) :yaw (pose-snapshot-yaw seen)
                       :pitch (pose-snapshot-pitch seen) :gait (pose-snapshot-gait seen)
-                      :flying (pose-snapshot-flying seen) :held (pose-snapshot-held seen))))
+                      :flying (pose-snapshot-flying seen) :held (pose-snapshot-held seen)
+                      :orientation (pose-snapshot-orientation seen)
+                      :state (pose-snapshot-state seen))))
           (setf (track-previous track) (or (track-shown track) drawn)
                 (track-shown track) drawn))))))

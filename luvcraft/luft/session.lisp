@@ -550,7 +550,7 @@ beacon on UDP 47474."
         :vocabulary (map 'list #'symbol-name (luvcraft:material-vocabulary-table))
         :watermark (session-journal-head session)
         :edits (compacted-edit-set session)
-        :entities (wire:make-entity-snapshot :tick (world-tick world))
+        :entities (world-entity-snapshot world)
         :player record)
        peer)
       (dolist (other (world-players world))
@@ -756,7 +756,10 @@ set installed at its watermark, and the remap of the host's vocabulary."
                                     :world world :endpoint endpoint :local-player player
                                     :peer peer :remap remap :host-offsets offsets
                                     :watermark watermark :applied watermark)))
-        (setf (world-session world) session)
+        (setf (world-session world) session
+              ;; The host's turtles arrive in its snapshots; none are seeded here.
+              (world-animals-initialized-p world) t)
+        (take-entity-snapshot world (wire:welcome-message-entities welcome))
         (session-log session "Joined ~A at sequence ~D with ~D edits."
                      (net::endpoint-target endpoint) watermark
                      (length (wire:welcome-message-edits welcome)))
@@ -997,7 +1000,8 @@ and PITCH are the local player's look, when a view knows it."
   (let ((now (wall-seconds)))
     (when (>= now (session-pose-due session))
       (setf (session-pose-due session) (+ (max now (session-pose-due session)) *pose-period*))
-      (let ((pose (local-pose session :yaw yaw :pitch pitch)))
+      (let ((pose (dress-riding-pose (session-world session) (session-local-player session)
+                                     (local-pose session :yaw yaw :pitch pitch))))
         (when pose
           (session-broadcast session
                              (wire:make-pose-message
@@ -1006,7 +1010,8 @@ and PITCH are the local player's look, when a view knows it."
     (advance-player-record session now)
     (when (>= now (session-hash-due session))
       (setf (session-hash-due session) (+ now *chunk-hash-period*))
-      (report-chunk-hashes session)))
+      (report-chunk-hashes session))
+    (advance-living-world session now))
   (advance-remote-tracks session seconds)
   session)
 

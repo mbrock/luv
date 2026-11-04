@@ -115,10 +115,6 @@
     (when (world-springs world) (ensure-world-physics world)))
   (when (world-physics world)
     (let ((physics (world-physics world)))
-      (clrhash (world-ball-previous-centers world))
-      (luvcraft::do-physics-bodies (handle physics)
-        (setf (gethash handle (world-ball-previous-centers world))
-              (multiple-value-list (luvcraft::physics-body-position physics handle))))
       (incf (world-physics-clock world) seconds)
       (loop repeat luvcraft::*physics-max-steps-per-frame*
             while (>= (world-physics-clock world) luvcraft::*physics-step-seconds*)
@@ -145,14 +141,15 @@
                               (expt (vec3:vec3-z d) 2))))
              (dx (/ (vec3:vec3-x d) length)) (dy (/ (vec3:vec3-y d) length))
              (dz (/ (vec3:vec3-z d) length)))
-        (luvcraft::spawn-body-of-kind
-         (ensure-world-physics (viewer-world viewer)) kind
+        ;; The host throws; a guest asks it to (#EA88ON).
+        (throw-world-body
+         (viewer-world viewer) kind
          (+ (- (vec3:vec3-x p) 1024) (* 0.7 dx) (* 0.25 (vec3:vec3-x right)))
          (+ (vec3:vec3-z p) (* 0.7 dz) -0.15)
          (+ (- (vec3:vec3-y p) 1024) (* 0.7 dy) (* 0.25 (vec3:vec3-y right)))
-         :vx (+ (* speed dx) (if v (vec3:vec3-x v) 0))
-         :vy (+ (* speed dz) (if v (vec3:vec3-z v) 0))
-         :vz (+ (* speed dy) (if v (vec3:vec3-y v) 0)))))))
+         (+ (* speed dx) (if v (vec3:vec3-x v) 0))
+         (+ (* speed dz) (if v (vec3:vec3-z v) 0))
+         (+ (* speed dy) (if v (vec3:vec3-y v) 0)))))))
 
 (clim:define-command (com-ball :command-table luvcraft-world
                               :name "Ball" :keystroke (:b)) ()
@@ -169,28 +166,13 @@
       (call-next-method)))
 
 (defun ball-figures (viewer)
-  "The balls of VIEWER's world, each with its previous centre for motion."
-  (let ((world (viewer-world viewer)))
-    (when (world-physics world)
-      (let ((physics (world-physics world)) (figures nil))
-        (luvcraft::do-physics-bodies (handle physics)
-          (multiple-value-bind (set row) (luvcraft::physics-body-set-and-local physics handle)
-            (let* ((columns (luvcraft::physics-body-columns-for-set physics set))
-                   (p (multiple-value-list (luvcraft::physics-body-position physics handle)))
-                   (old (or (gethash handle (world-ball-previous-centers world)) p))
-                   (kind (aref luvcraft::*body-kinds*
-                               (aref (luvcraft::physics-body-columns-kind-lane columns) row)))
-                   (radius (* (aref (luvcraft::physics-body-columns-radius-lane columns) row)
-                              (luvcraft::body-kind-draw-scale kind))))
-              (flet ((point (p) (list (+ 1024 (first p)) (+ 1024 (third p)) (second p) radius)))
-                (push (list (point p) (point old)
-                            (list (aref (luvcraft::physics-body-columns-qx-lane columns) row)
-                                  (aref (luvcraft::physics-body-columns-qy-lane columns) row)
-                                  (aref (luvcraft::physics-body-columns-qz-lane columns) row)
-                                  (aref (luvcraft::physics-body-columns-qw-lane columns) row))
-                            (list (luvcraft::body-kind-pattern-index kind) 0.0 0.0 2.0)
-                            (list (luvcraft::body-kind-albedo-red kind)
-                                  (luvcraft::body-kind-albedo-green kind)
-                                  (luvcraft::body-kind-albedo-blue kind)
-                                  (luvcraft::body-kind-emission kind))) figures)))))
-        (nreverse figures)))))
+  "The balls of VIEWER's world, each with its centre in VIEWER's previous frame."
+  (loop for (id centre quaternion kind radius) in (world-ball-list (viewer-world viewer))
+        for old = (or (gethash id (viewer-previous-ball-centers viewer)) centre)
+        collect (flet ((point (p) (list (+ 1024 (first p)) (+ 1024 (third p)) (second p) radius)))
+                  (list (point centre) (point old) quaternion
+                        (list (luvcraft::body-kind-pattern-index kind) 0.0 0.0 2.0)
+                        (list (luvcraft::body-kind-albedo-red kind)
+                              (luvcraft::body-kind-albedo-green kind)
+                              (luvcraft::body-kind-albedo-blue kind)
+                              (luvcraft::body-kind-emission kind))))))

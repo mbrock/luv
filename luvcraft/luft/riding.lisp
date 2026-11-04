@@ -48,10 +48,15 @@
 
 (defmethod render:viewer-focus-entered ((ride luvcraft::critter-ride) (viewer luvcraft-viewer))
   (luvcraft:clear-movement-intent (viewer-rider-intent viewer))
+  ;; A ride begins and ends as a reliable event of the world (#EA88ON).
+  (begin-world-ride (viewer-world viewer) (viewer-local-player viewer)
+                    (luvcraft::critter-ride-critter ride))
   (luvcraft::carry-luvcraft-player viewer (luvcraft::critter-ride-critter ride)))
 
 (defmethod render:viewer-focus-left ((ride luvcraft::critter-ride) (viewer luvcraft-viewer))
   (luvcraft:clear-movement-intent (viewer-rider-intent viewer))
+  (end-world-ride (viewer-world viewer) (viewer-local-player viewer)
+                  (luvcraft::critter-ride-critter ride))
   (luvcraft::luvcraft-focus-left ride viewer))
 
 (defmethod render:viewer-focus-return-camera-pose ((viewer luvcraft-viewer) origin)
@@ -94,6 +99,10 @@
 (defmethod render:viewer-focus-score ((ride luvcraft::critter-ride) (viewer luvcraft-viewer))
   (let* ((camera (render:viewer-camera viewer))
          (origin (render:camera-position camera)))
+    ;; Someone else's mount is not on offer.
+    (when (ridden-by-another-p (viewer-world viewer) (viewer-local-player viewer)
+                               (luvcraft::critter-ride-critter ride))
+      (return-from render:viewer-focus-score nil))
     (multiple-value-bind (right up forward) (render:camera-basis camera)
       (declare (ignore right up))
       (let ((distance (luvcraft:critter-ray-distance

@@ -97,6 +97,10 @@ exactly what an encoder would have written.")
    #:companion-tell-message-companion #:companion-tell-message-text
    #:companion-pose-message #:make-companion-pose-message #:companion-pose-message-p
    #:companion-pose-message-companion #:companion-pose-message-pose
+   #:ride-message #:make-ride-message #:ride-message-p
+   #:ride-message-rider #:ride-message-entity #:ride-message-action
+   #:throw-message #:make-throw-message #:throw-message-p
+   #:throw-message-kind #:throw-message-position #:throw-message-velocity
    #:pose-message #:make-pose-message #:pose-message-p
    #:pose-message-player #:pose-message-pose
    #:entity-snapshot-message #:make-entity-snapshot-message

@@ -519,6 +519,20 @@ journey change, and to a guest on joining."
   (companion :string "")
   (text :string ""))
 
+(define-message ride-message 20 :reliable
+  "RIDER on the host's turtle ENTITY.  A guest's :BEGIN or :END is a request;
+the host confirms it by broadcasting it, or answers a :BEGIN with :REFUSED."
+  (rider :string "")
+  (entity :u64 0)
+  (action (:enum :begin :end :refused) :begin))
+
+(define-message throw-message 21 :reliable
+  "A guest's throw, which the host performs: a body of KIND leaving POSITION
+at VELOCITY."
+  (kind :keyword :ball)
+  (position :position (vector 0d0 0d0 0d0))
+  (velocity :velocity (vector 0d0 0d0 0d0)))
+
 (define-message pose-message 32 :unreliable
   (player :string "")
   (pose :pose (make-pose)))

@@ -120,13 +120,14 @@
 (defmethod luv.knobs:realize-knob progn
     ((knob turtle-population-knob) (session luvcraft-viewer))
   ;; Re-seed the requested population on the next resident ground frame.
+  ;; A guest's turtles are its host's.
   (let ((world (viewer-world session)))
-    (setf (world-animals world) nil
-          (world-animals-initialized-p world) nil
-          (world-saved-inhabitants world)
-          (remove :luft-critters (world-saved-inhabitants world) :key #'first))
-    (clrhash (world-animal-previous-figures world))
-    (initialize-world-animals world)))
+    (unless (replica-world-p world)
+      (setf (world-animals world) nil
+            (world-animals-initialized-p world) nil
+            (world-saved-inhabitants world)
+            (remove :luft-critters (world-saved-inhabitants world) :key #'first))
+      (initialize-world-animals world))))
 
 (luv.knobs:define-knob turtle-count
     (:group :critters :label "turtles" :class 'turtle-population-knob
@@ -139,13 +140,16 @@
   (let* ((scene (world-scene world))
          (contact (make-instance 'animal-contact :solid (terrain::inspection-source-solid scene))))
     (dolist (animal (world-animals world))
-      (setf (gethash animal (world-animal-previous-figures world)) (animal-figures animal))
-      (let ((p (animal-luft-position animal)))
-        ;; Unknown chunks are air to queries. Freeze inhabitants there rather
-        ;; than dropping them through the absent world or forgetting them.
-        ;; A chunk resident only for meshing has no collision either.
-        (when (ground-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
-          (luvcraft::advance-critter animal contact seconds))))))
+      (let ((p (animal-luft-position animal))
+            (rider (remote-rider world animal)))
+        (cond
+          ;; A guest's ride moves under its reins in the guest's world.
+          (rider (carry-turtle-by-rider animal rider seconds))
+          ;; Unknown chunks are air to queries. Freeze inhabitants there rather
+          ;; than dropping them through the absent world or forgetting them.
+          ;; A chunk resident only for meshing has no collision either.
+          ((ground-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
+           (luvcraft::advance-critter animal contact seconds)))))))
 
 (defun animal-figures (animal)
   (let ((p (animal-luft-position animal))
@@ -166,11 +170,11 @@
     (nreverse figures)))
 
 (defun animal-figure-list (viewer)
-  "VIEWER's world's turtles, each box with its previous pose for motion."
+  "VIEWER's world's turtles, each box with its pose in VIEWER's previous frame."
   (let ((world (viewer-world viewer)))
     (loop for animal in (world-animals world)
           for figures = (animal-figures animal)
-          for previous = (gethash animal (world-animal-previous-figures world))
+          for previous = (gethash animal (viewer-previous-animal-figures viewer))
           append (progn
                    (loop for figure in figures for old in previous
                          do (setf (second figure) (first old)
