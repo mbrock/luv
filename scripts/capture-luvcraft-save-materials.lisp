@@ -80,7 +80,7 @@
                             (setf (luv:canvas-clock (render:viewer-canvas viewer)) (luv:make-demand-clock)
                                   (render::viewer-running-p viewer) nil
                                   (render:viewer-mode viewer) (make-instance 'render:first-person-mode)
-                                  (old::sky-clock-pinned-day-fraction (host::viewer-sky-clock viewer)) 0.5)))
+                                  (old::sky-clock-pinned-day-fraction (host::world-sky-clock (host:viewer-world viewer))) 0.5)))
                (settle viewer)
                (format t "~&NEW camera ~S~%" (render:camera-pose-from-camera (render:viewer-camera viewer)))
                (let ((overlays (render:viewer-overlays viewer)))

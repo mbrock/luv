@@ -66,6 +66,3 @@
 (defun install-luvcraft-motor (player)
   (when (and player (not (typep player 'luvcraft-character)))
     (change-class player 'luvcraft-character)))
-
-(defmethod (setf render:viewer-player) :after (player (viewer luvcraft-viewer))
-  (install-luvcraft-motor player))

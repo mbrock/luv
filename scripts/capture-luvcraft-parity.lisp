@@ -107,10 +107,10 @@
                         (setf (luv:canvas-clock (render:viewer-canvas viewer)) (luv:make-demand-clock)
                               (render:camera-field-of-view (render:viewer-camera viewer))
                               old::+luvcraft-camera-vertical-field-of-view+
-                              (host::viewer-physics viewer) nil
-                              (host::viewer-physics-clock viewer) 0d0
-                              (host::viewer-springs viewer) nil
-                              (host::viewer-springs-initialized-p viewer) nil)
+                              (host::world-physics (host:viewer-world viewer)) nil
+                              (host::world-physics-clock (host:viewer-world viewer)) 0d0
+                              (host::world-springs (host:viewer-world viewer)) nil
+                              (host::world-springs-initialized-p (host:viewer-world viewer)) nil)
                         (render::restore-luft-world-player
                          viewer (list :player '(1024.5 1015.5 51.0) :yaw (/ pi 2) :pitch 0.08))
                         (render::place-viewer-at-player-eyes viewer)
@@ -118,10 +118,10 @@
                         ;; supply only that ownership bit for world key/ray tests.
                         (setf (render:viewer-pointer-captured-p viewer) t)
                         (dotimes (i 90) (render:advance-viewer-game viewer old::*physics-step-seconds*))
-                        (assert (= 2 (length (host::viewer-springs viewer))))))
+                        (assert (= 2 (length (host::world-springs (host:viewer-world viewer)))))))
            (render:capture-viewer-frame #p".amp/in/artifacts/parity-new-springs.png" viewer)
            (format t "~&Luft springs: ~D bodies; two live sources.~%"
-                   (old::physics-world-body-count (host::viewer-physics viewer)))
+                   (old::physics-world-body-count (host::world-physics (host:viewer-world viewer))))
            ;; A real terminal is looked at through terrain, opened by Tab,
            ;; and fed a command through the same canvas keys as the player.
            (when (luv.ghostty:libghostty-vt-loaded-p)
@@ -175,13 +175,13 @@
            (on-canvas
             viewer
             (lambda ()
-              (setf (host::viewer-creative-p viewer) t)
+              (setf (luvcraft:player-creative-p (host:viewer-local-player viewer)) t)
               (assert (eq :edited
                           (nth-value 1 (render:apply-viewer-world-edit
                                         viewer (game:luvcraft-cell-site source 6 51 0)
                                         (game:block-placement old::*fountain-block*)))))
               (render:advance-viewer-game viewer 0d0)
-              (assert (= 3 (length (host::viewer-springs viewer))))))
+              (assert (= 3 (length (host::world-springs (host:viewer-world viewer)))))))
            (format t "~&Live source placement: two -> three springs through the host edit boundary.~%"))
       (render:stop-viewer viewer))))
 

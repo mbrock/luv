@@ -231,7 +231,9 @@
   ;; The birthday meadow's save kind lives with the party; its saves play too.
   :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
   :serial t
-  :components ((:file "luvcraft/luft/game")
+  :components ((:file "luvcraft/luft/game-package")
+               (:file "luvcraft/luft/world")
+               (:file "luvcraft/luft/game")
                (:file "luvcraft/luft/sky")
                (:file "luvcraft/luft/instruments")
                (:file "luvcraft/luft/animals")

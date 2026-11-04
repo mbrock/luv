@@ -64,8 +64,8 @@
                    start (vec3:vec3-list (inhabitant-position gnome)))
              (assert (eq :gnome (inhabitant-kind gnome)))
              (on-canvas (lambda ()
-                          (luvcraft:add-block-to-inventory (viewer-inventory viewer) luvcraft::*bricks-block* 3)
-                          (luvcraft:add-block-to-inventory (viewer-inventory viewer) luvcraft::*planks-block* 3)))
+                          (luvcraft:add-block-to-inventory (luvcraft:player-inventory viewer) luvcraft::*bricks-block* 3)
+                          (luvcraft:add-block-to-inventory (luvcraft:player-inventory viewer) luvcraft::*planks-block* 3)))
              (let* ((x (floor (first start))) (y (floor (second start))) (z (floor (third start))))
                (setf *inhabitant-provider-factory*
                      (lambda (host inhabitant)
@@ -122,7 +122,7 @@
                   (assert (string= "air" (cell-name viewer (agent-cell viewer (+ x 5) (1- y) z))))
                   (dolist (block (list luvcraft::*bricks-block* luvcraft::*planks-block*))
                     (assert (= 2 (luvcraft:block-inventory-entry-quantity
-                                  (luvcraft:block-inventory-entry-for (viewer-inventory viewer) block)))))
+                                  (luvcraft:block-inventory-entry-for (luvcraft:player-inventory viewer) block)))))
                   (assert (> (first (vec3:vec3-list (inhabitant-position gnome))) (+ x 1.5)))
                   (show-companion-message viewer gnome)))
                (capture "result")
@@ -155,8 +155,8 @@
              (setf viewer (play :pathname #p"build/companion-proof.sexp" :width 1100 :height 760)
                    canvas (render::viewer-canvas viewer))
              (settle)
-             (on-canvas (lambda () (initialize-viewer-agents viewer)))
-             (assert (= 3 (length (viewer-agents viewer))))
+             (on-canvas (lambda () (initialize-world-agents (viewer-world viewer))))
+             (assert (= 3 (length (world-agents (viewer-world viewer)))))
              (on-canvas
               (lambda ()
                 (setf (render::viewer-running-p viewer) nil)

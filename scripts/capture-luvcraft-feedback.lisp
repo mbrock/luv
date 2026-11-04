@@ -60,7 +60,7 @@
            (setf (luv:canvas-clock canvas) (luv:make-demand-clock))
            (setf (r:viewer-mode viewer) (make-instance 'r:first-person-mode)
                  (r:camera-field-of-view camera) (* 70d0 (/ pi 180))
-                 (h::viewer-creative-p viewer) t
+                 (luvcraft:player-creative-p (h:viewer-local-player viewer)) t
                  (old:player-selected-block viewer) old::*red-wool-block*)
            (settle viewer)
            (format t "~&NEW loaded ~D~%" (hash-table-count (ter:streaming-scene-loaded scene)))
@@ -102,7 +102,7 @@
            ;; The extended figure stage must still draw the existing spheres.
            (luv::call-on-sdl-canvas-thread
             canvas (lambda () (key viewer canvas :b) (click viewer canvas :left)))
-           (assert (= 1 (old::physics-world-body-count (h::viewer-physics viewer))))
+           (assert (= 1 (old::physics-world-body-count (h::world-physics (h:viewer-world viewer)))))
            (r:capture-viewer-frame ".amp/in/artifacts/new-ball.png" viewer)
            (dolist (overlay (r:viewer-overlays viewer))
              (when (typep overlay 'h::target-marker)

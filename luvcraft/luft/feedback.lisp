@@ -3,30 +3,26 @@
 ;;; The old effect owns the fragment motion; only its presentation changes
 ;;; coordinate systems and takes the material's Luft tone instead of an atlas.
 ;;; The rim shares the original pixel feathering, not the voxel square (#7O90OS).
-(defmethod render:advance-viewer-game :after ((viewer feedback-game-state) seconds)
-  (luvcraft::advance-block-particles (viewer-particles viewer) seconds))
-
-(defmethod render:viewer-figures :around ((viewer feedback-game-state))
-  (append
-   (call-next-method)
-   (loop with particles = (luvcraft::block-particle-system-particles (viewer-particles viewer))
-         with offset = (if (plusp (length particles))
-                           (game::luvcraft-world-source-offset (streaming-source viewer)) 0)
-         for p across particles
-         for center = (vec3:make-vec3
-                       (+ offset (luvcraft::block-particle-x p))
-                       (+ offset (luvcraft::block-particle-z p))
-                       (luvcraft::block-particle-y p))
-         for half = (* 0.5 (luvcraft::block-particle-size p))
-         collect (let ((figure
-                         (render:box-figure
-                          center center 0.0 1.0 (list half half half)
-                          (nth-value 1
-                            (terrain:material-kind-oriented-tones
-                             (terrain:material-placement-kind
-                              (game:block-placement (luvcraft::block-particle-block p))))))))
-                   (setf (fourth (fourth figure)) 3.0)
-                   figure))))
+(defun particle-figures (viewer)
+  "VIEWER's block fragments, which only this view sees."
+  (loop with particles = (luvcraft::block-particle-system-particles (viewer-particles viewer))
+        with offset = (if (plusp (length particles))
+                          (game::luvcraft-world-source-offset (streaming-source viewer)) 0)
+        for p across particles
+        for center = (vec3:make-vec3
+                      (+ offset (luvcraft::block-particle-x p))
+                      (+ offset (luvcraft::block-particle-z p))
+                      (luvcraft::block-particle-y p))
+        for half = (* 0.5 (luvcraft::block-particle-size p))
+        collect (let ((figure
+                        (render:box-figure
+                         center center 0.0 1.0 (list half half half)
+                         (nth-value 1
+                           (terrain:material-kind-oriented-tones
+                            (terrain:material-placement-kind
+                             (game:block-placement (luvcraft::block-particle-block p))))))))
+                  (setf (fourth (fourth figure)) 3.0)
+                  figure)))
 
 (defun target-face-boundary (scene face cell)
   "The boundary of the actual atlas face, not the uncut voxel square.
@@ -176,10 +172,6 @@ Cancel interior triangle edges, retaining concave joins as well as bevels."
                 (luv:set-bind-group pass 0 (marker-bind-group marker))
                 (luv:set-vertex-buffer pass 0 buffer)
                 (luv:draw pass (/ (length vertices) 7))))))))))
-
-(defmethod initialize-instance :after ((viewer feedback-game-state) &key)
-  (when (render:viewer-canvas viewer)
-    (render:add-viewer-overlay viewer (make-instance 'target-marker))))
 
 (in-package #:luft.render.shaders)
 

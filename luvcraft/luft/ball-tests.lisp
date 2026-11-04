@@ -85,7 +85,7 @@
     (setf (render:viewer-pointer-captured-p viewer) t)
     (true (render::viewer-key-command viewer key))
     (luv:handle-canvas-event viewer nil key)
-    (true (host::viewer-ball-in-hand-p viewer))
+    (true (host:player-ball-in-hand-p (host:viewer-local-player viewer)))
     (true (search "right marbles" (mcluv:palette-hint viewer)))
     (true (search "right marbles"
                   (mcluv:status-bar-channel-value :player-hint viewer nil)))
@@ -100,7 +100,7 @@
       (luv:handle-canvas-event
        viewer nil (make-instance 'luv:canvas-pointer-button-press-event
                                  :timestamp 0 :x 10 :y 10 :button :left)))
-    (let ((physics (host::viewer-physics viewer)))
+    (let ((physics (host::world-physics (host:viewer-world viewer))))
       (is = 5 (luvcraft::physics-world-body-count physics))
       (is = 1 (loop for kind across (subseq (luvcraft::physics-body-columns-kind-lane
                                             (luvcraft::physics-world-awake physics)) 0 5)
@@ -113,7 +113,7 @@
                 (aref (luvcraft::physics-body-columns-handle-lane
                        (luvcraft::physics-world-awake physics)) 0)) 13.0)))
     (luv:handle-canvas-event viewer nil key)
-    (true (not (host::viewer-ball-in-hand-p viewer)))))
+    (true (not (host:player-ball-in-hand-p (host:viewer-local-player viewer))))))
 
 (define-test saved-springs-emit-original-bodies-only-in-resident-terrain
   (let* ((world (luvcraft:make-empty-little-block-world :seed 7 :relief :meadow :chunk-height 16))
@@ -130,19 +130,19 @@
       (setf (gethash key (luft.terrain:streaming-scene-store scene)) chunk)
       (luft.terrain::rebuild-authored-world-resident-values scene (list key))
       (dotimes (i 6) (render:advance-viewer-game viewer luvcraft::*physics-step-seconds*))
-      (let ((physics (host::viewer-physics viewer)))
+      (let ((physics (host::world-physics (host:viewer-world viewer))))
         ;; Same rate and kinds as old Luvcraft, even without taking out B.
         (is = 13 (luvcraft::physics-world-body-count physics))
-        (is = 2 (length (host::viewer-springs viewer)))
+        (is = 2 (length (host::world-springs (host:viewer-world viewer))))
         (remhash key (luft.terrain:streaming-scene-store scene))
         (dotimes (i 6) (render:advance-viewer-game viewer luvcraft::*physics-step-seconds*))
         (is = 13 (luvcraft::physics-world-body-count physics))
         (is = 6 (luvcraft::luvcraft-spring-count
-                 (find :lava-spring (host::viewer-springs viewer) :key #'luvcraft::luvcraft-spring-kind)))
+                 (find :lava-spring (host::world-springs (host:viewer-world viewer)) :key #'luvcraft::luvcraft-spring-kind)))
         ;; Removing an authored source retires it; rediscovery preserves the
         ;; other source's deterministic throw sequence rather than restarting it.
         (luvcraft::record-block-edit overlay nil 8 14 8)
-        (setf (host::viewer-springs-initialized-p viewer) nil)
-        (host::initialize-viewer-springs viewer)
-        (is = 1 (length (host::viewer-springs viewer)))
-        (is = 6 (luvcraft::luvcraft-spring-count (first (host::viewer-springs viewer))))))))
+        (setf (host::world-springs-initialized-p (host:viewer-world viewer)) nil)
+        (host::initialize-world-springs (host:viewer-world viewer))
+        (is = 1 (length (host::world-springs (host:viewer-world viewer))))
+        (is = 6 (luvcraft::luvcraft-spring-count (first (host::world-springs (host:viewer-world viewer)))))))))

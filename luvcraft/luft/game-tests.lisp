@@ -1,6 +1,6 @@
 (defpackage #:luvcraft.luft.game.tests
   (:use #:cl)
-  (:import-from #:parachute #:define-test #:is #:true)
+  (:import-from #:parachute #:define-test #:is #:true #:fail)
   (:local-nicknames (#:host #:luvcraft.luft.game)
                     (#:game #:luvcraft.luft)
                     (#:render #:luft.render)
@@ -10,17 +10,14 @@
 (in-package #:luvcraft.luft.game.tests)
 
 (define-test player-instruments-share-the-old-quickbar-without-spending-stock
-  (let* ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
-         (inventory (host::restore-inventory nil))
+  (let* ((player (host:make-luvcraft-player
+                  :hotbar (list (game:block-placement luvcraft::*grass-block*))))
+         (inventory (luvcraft:player-inventory player))
          (block (luvcraft::ensure-film "quickbar-stock")))
-    (setf (slot-value viewer 'host::inventory) inventory
-          (slot-value viewer 'host::held-block) nil
-          (slot-value viewer 'render::edit-material)
-          (game:block-placement luvcraft::*grass-block*))
     (luvcraft:add-block-to-inventory inventory block 7)
-    (luvcraft:assign-luvcraft-quickbar-slot viewer block 3)
-    (is eq block (luvcraft:player-selected-block viewer))
-    (is eq (game:block-placement block) (third (render:viewer-hotbar viewer)))
+    (luvcraft:assign-luvcraft-quickbar-slot player block 3)
+    (is eq block (luvcraft:player-selected-block player))
+    (is eq (game:block-placement block) (third (host:player-hotbar player)))
     (is = 7 (luvcraft:block-inventory-entry-quantity
              (luvcraft:block-inventory-entry-for inventory block)))
     ;; Simple mode is the same six-block kit the old inventory edits, not
@@ -28,9 +25,9 @@
     ;; the engine while retaining the very same finite entry.
     (setf (luvcraft::block-inventory-simple-p inventory) t
           (luvcraft::block-inventory-kit inventory) (list block))
-    (luvcraft:put-luvcraft-block-on-quickbar viewer luvcraft::*planks-block*)
-    (is eq luvcraft::*planks-block* (luvcraft:player-selected-block viewer))
-    (is = 2 (length (render:viewer-hotbar viewer)))
+    (luvcraft:put-luvcraft-block-on-quickbar player luvcraft::*planks-block*)
+    (is eq luvcraft::*planks-block* (luvcraft:player-selected-block player))
+    (is = 2 (length (host:player-hotbar player)))
     (is = 7 (luvcraft:block-inventory-entry-quantity
              (luvcraft:block-inventory-entry-for inventory block)))))
 
@@ -106,33 +103,26 @@
       (true (null (render::viewer-terminals-terminals state))))))
 
 (define-test inventory-and-carried-identities-round-trip-through-the-game-save
-  (let* ((world (luvcraft:make-empty-little-block-world :seed 291 :chunk-height 16))
-         (source (game:luvcraft-world-luft-source world))
-         (viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
-         (inventory (host::restore-inventory nil))
+  (let* ((block-world (luvcraft:make-empty-little-block-world :seed 291 :chunk-height 16))
+         (source (game:luvcraft-world-luft-source block-world))
+         (world (host:make-luvcraft-world
+                 :block-world block-world :scene (game:make-luvcraft-streaming-scene source)))
+         (player (host:make-luvcraft-player
+                  :character (render::make-walking-character
+                              :position (v:make-vec3 1024.5 1024.5 8.0))))
+         (inventory (luvcraft:player-inventory player))
          (film (luvcraft::ensure-film "inventory-round-trip" :title "A carried film")))
+    (host:add-world-player world player)
     (luvcraft:add-block-to-inventory inventory luvcraft::*planks-block* 7)
     (luvcraft:add-block-to-inventory inventory film 2)
-    (setf (slot-value viewer 'host::luvcraft-world) world
-          (slot-value viewer 'host::resume) nil
-          (slot-value viewer 'host::inhabitants) nil
-          (slot-value viewer 'host::animals-initialized-p) nil
-          (slot-value viewer 'host::inventory) inventory
-          (slot-value viewer 'host::creative-p) t
-          (slot-value viewer 'host::held-block) film
-          (slot-value viewer 'host::hotbar) (list (game:block-placement film))
-          (slot-value viewer 'render::edit-material) (game:block-placement film)
-          (slot-value viewer 'render::player)
-          (render::make-walking-character
-           :position (luv.arithmetic.lisp.vec3:make-vec3 1024.5 1024.5 8.0))
-          (slot-value viewer 'render::camera) (render:make-fly-camera)
-          (slot-value viewer 'render::simulation)
-          (render:make-world-simulation (game:make-luvcraft-streaming-scene source)))
+    (setf (luvcraft:player-creative-p player) t
+          (host:player-held-block player) film
+          (host:player-hotbar player) (list (game:block-placement film))
+          (host:player-placement player) (game:block-placement film))
     ;; Exercise the game's actual save protocol, then Luvcraft's reader.
     ;; A player pose also checks that refreshing it does not drop inventory.
     (uiop:with-temporary-file (:pathname pathname :type "sexp")
-      (render:write-viewer-world-description
-       viewer (render:viewer-world-description viewer) pathname)
+      (host:save-luvcraft-world world player pathname)
       (multiple-value-bind (restored-world resume) (luvcraft:read-luvcraft-save pathname)
         (true restored-world)
         (let ((restored (host::restore-inventory resume)))
@@ -175,44 +165,41 @@
     (true (not (luvcraft:remove-block-from-inventory inventory film)))))
 
 (define-test companions-cross-the-inhabitant-save-without-losing-other-inhabitants
-  (let* ((world (luvcraft:make-empty-little-block-world :seed 7 :chunk-height 16))
-         (source (game:luvcraft-world-luft-source world))
-         (viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
+  (let* ((block-world (luvcraft:make-empty-little-block-world :seed 7 :chunk-height 16))
+         (source (game:luvcraft-world-luft-source block-world))
          (descriptions '((:gnome :cell (3 5 0) :facing-yaw 0.4
                                  :conversation "response-test" :asked "Build" :said "Yes")
                          (:cat :cell (0 5 3)) (:fantus :cell (-3 5 0))
                          (:gnome :cell (99999 5 0))
                          (:luft-critters :animals nil) (:future-inhabitant :value 42))))
-    (setf (slot-value viewer 'host::inhabitants) descriptions
-          (slot-value viewer 'host::agents) nil
-          (slot-value viewer 'host::agents-initialized-p) nil
-          (slot-value viewer 'render::simulation)
-          (render:make-world-simulation (game:make-luvcraft-streaming-scene source)))
-    (host::initialize-viewer-agents viewer)
-    (is = 3 (length (host::viewer-agents viewer)))
-    (let* ((gnome (find :gnome (host::viewer-agents viewer) :key #'host::inhabitant-kind))
-           (position (host::inhabitant-position gnome)))
-      (is equal "Yes" (host::inhabitant-notified gnome))
-      ;; Move in Luft's horizontal Y and save in old Luvcraft's horizontal Z.
-      (incf (luv.arithmetic.lisp.vec3:vec3-y position) 2)
-      (let* ((saved (host::agent-inhabitant-descriptions viewer descriptions))
-             (record (assoc :gnome saved)))
-        (is = 6 (length saved))
-        (true (member (fourth descriptions) saved))
-        (true (member (sixth descriptions) saved))
-        (is equal '(3 5 2) (getf (rest record) :cell))
-        (is equal "response-test" (getf (rest record) :conversation))
-        (is equal "Build" (getf (rest record) :asked))
-        ;; Old Luvcraft's inhabitant reader accepts the new game's record.
-        (let ((old (luvcraft.agent::described-embodied-agent 'luvcraft.agent:gnome nil (rest record))))
-          (is equal '(3 5 2) (list (luvcraft.agent::gnome-x old)
-                                   (luvcraft.agent::gnome-y old) (luvcraft.agent::gnome-z old))))
-        (setf (slot-value viewer 'host::inhabitants) saved
-              (slot-value viewer 'host::agents-initialized-p) nil
-              (slot-value viewer 'host::agents) nil)
-        (host::initialize-viewer-agents viewer)
-        (is = 3 (length (host::viewer-agents viewer)))
-        (is equal saved (host::agent-inhabitant-descriptions viewer saved))))))
+    (let ((world (host:make-luvcraft-world
+                  :block-world block-world :inhabitants descriptions
+                  :scene (game:make-luvcraft-streaming-scene source))))
+      (host::initialize-world-agents world)
+      (is = 3 (length (host::world-agents world)))
+      (let* ((gnome (find :gnome (host::world-agents world) :key #'host::inhabitant-kind))
+             (position (host::inhabitant-position gnome)))
+        (is equal "Yes" (host::inhabitant-notified gnome))
+        ;; Move in Luft's horizontal Y and save in old Luvcraft's horizontal Z.
+        (incf (luv.arithmetic.lisp.vec3:vec3-y position) 2)
+        (let* ((saved (host::agent-inhabitant-descriptions world descriptions))
+               (record (assoc :gnome saved)))
+          (is = 6 (length saved))
+          (true (member (fourth descriptions) saved))
+          (true (member (sixth descriptions) saved))
+          (is equal '(3 5 2) (getf (rest record) :cell))
+          (is equal "response-test" (getf (rest record) :conversation))
+          (is equal "Build" (getf (rest record) :asked))
+          ;; Old Luvcraft's inhabitant reader accepts the new game's record.
+          (let ((old (luvcraft.agent::described-embodied-agent 'luvcraft.agent:gnome nil (rest record))))
+            (is equal '(3 5 2) (list (luvcraft.agent::gnome-x old)
+                                     (luvcraft.agent::gnome-y old) (luvcraft.agent::gnome-z old))))
+          (setf (host::world-saved-inhabitants world) saved
+                (host::world-agents-initialized-p world) nil
+                (host::world-agents world) nil)
+          (host::initialize-world-agents world)
+          (is = 3 (length (host::world-agents world)))
+          (is equal saved (host::agent-inhabitant-descriptions world saved)))))))
 
 (define-test mining-at-the-crosshair-emits-material-tinted-fragments-only-on-success
   (let* ((block luvcraft::*red-wool-block*)
@@ -303,7 +290,7 @@
 (define-test quiet-game-status-follows-the-world-clock
   (let ((viewer (allocate-instance (find-class 'host:luvcraft-viewer)))
         (host::*status-diagnostics-p* nil))
-    (setf (slot-value viewer 'host::sky-clock) (make-instance 'luvcraft::sky-clock)
+    (setf (slot-value viewer 'host::world) (host:make-luvcraft-world :scene (ball-test-scene))
           (render::host-sky-hour viewer) 11.5)
     (is equal '(:daytime :fps) (mcluv:status-bar-channels-for viewer))
     (is eq :chip (mcluv:status-bar-presentation viewer))
@@ -387,8 +374,8 @@
         (true (null (luvcraft.agent::companion-ground-height session 3.4d0 8.2d0 5.5d0 3d0)))
         (true (null (luvcraft.agent::companion-ground-height session 300.4d0 7.2d0 5.5d0 3d0)))))))
 
-(defun hollow-walk-test-viewer (world resume)
-  "Real source materialization and game motor, without a canvas or renderer."
+(defun hollow-walk-test-scene (world)
+  "WORLD's real streaming scene with the Hollow Walk's four chunks resident."
   (multiple-value-bind (source dropped) (game:luvcraft-world-luft-source world)
     (assert (zerop dropped))
     (let ((scene (game:make-luvcraft-streaming-scene source))
@@ -401,15 +388,21 @@
                   (terrain:materialize-world-source-chunk
                    source key 1 :edits (terrain:capture-world-source-chunk-edits source key))))))
       (terrain:rebuild-authored-world-resident-values scene keys)
-      (multiple-value-bind (position yaw pitch) (game:luvcraft-resume-luft-pose source resume)
-        (let ((viewer (make-instance
-                       'host:luvcraft-viewer :source scene :luvcraft-world world :resume resume
-                       :camera (render:make-fly-camera :yaw yaw :pitch pitch)
-                       :player (terrain:make-walking-character :position (apply #'v:make-vec3 position))
-                       :hotbar (list (game:block-placement luvcraft::*stone-block*)))))
-          (assert (null (render:viewer-canvas viewer)))
-          (assert (typep (render:viewer-player viewer) 'host::luvcraft-character))
-          viewer)))))
+      scene)))
+
+(defun hollow-walk-test-viewer (world resume)
+  "Real source materialization and game motor, without a canvas or renderer."
+  (let* ((scene (hollow-walk-test-scene world))
+         (source (terrain:streaming-scene-source scene)))
+    (multiple-value-bind (position yaw pitch) (game:luvcraft-resume-luft-pose source resume)
+      (let ((viewer (make-instance
+                     'host:luvcraft-viewer :source scene :luvcraft-world world :resume resume
+                     :camera (render:make-fly-camera :yaw yaw :pitch pitch)
+                     :player (terrain:make-walking-character :position (apply #'v:make-vec3 position))
+                     :hotbar (list (game:block-placement luvcraft::*stone-block*)))))
+        (assert (null (render:viewer-canvas viewer)))
+        (assert (typep (render:viewer-player viewer) 'host::luvcraft-character))
+        viewer))))
 
 (defun walk-hollow-route (viewer points)
   "Walk POINTS continuously; return simulated seconds, travel and largest frame step."
@@ -539,3 +532,87 @@
               (walk-hollow-route again return-leg)
               (let ((next-save (render:viewer-world-description again)))
                 (is equalp (getf (rest saved) :edits) (getf (rest next-save) :edits))))))))))
+
+(define-test a-headless-world-with-one-player-advances-edits-and-saves
+  (multiple-value-bind (block-world camera walker) (luvcraft:make-first-journey-world)
+    (let* ((resume (getf (rest (luvcraft:make-luvcraft-save-description
+                                block-world :camera camera :player walker
+                                :selected-block luvcraft::*stone-block*))
+                         :resume))
+           (scene (hollow-walk-test-scene block-world))
+           (source (terrain:streaming-scene-source scene))
+           (world (host:make-luvcraft-world :block-world block-world :scene scene))
+           (player (host:make-luvcraft-player
+                    :id "ada" :resume resume
+                    :character (terrain:make-walking-character
+                                :position (apply #'v:make-vec3
+                                                 (game:luvcraft-resume-luft-pose source resume)))))
+           (body (terrain:character-body (host:player-character player)))
+           (inventory (luvcraft:player-inventory player))
+           (film (luvcraft::ensure-film "headless-world"))
+           (mined (game:luvcraft-cell-site source 29 17 108))
+           (built (game:luvcraft-cell-site source 23 14 106)))
+      (host:add-world-player world player)
+      (is eq player (host:find-world-player world "ada"))
+      ;; The players table admits more than one player and keeps ids unique.
+      (let ((guest (host:make-luvcraft-player
+                    :id "bea" :character (terrain:make-walking-character
+                                          :position (v:make-vec3 980.5d0 1036.5d0 12d0)))))
+        (host:add-world-player world guest)
+        (is equal '("ada" "bea") (mapcar #'host:player-id (host:world-players world)))
+        (fail (host:add-world-player world (host:make-luvcraft-player :id "bea")))
+        (host:remove-world-player world guest)
+        (true (not (member (host:player-character guest)
+                           (terrain:simulation-characters (host:world-simulation world))))))
+      ;; Advance: the player walks, the sky turns, and turtles find ground.
+      (let ((start (v:vec3-x (terrain:body-position body))))
+        (terrain:set-character-movement (host:player-character player) 1d0 0d0)
+        (dotimes (i 60) (host:advance-luvcraft-world world 1/60))
+        (true (> (- (v:vec3-x (terrain:body-position body)) start) 1.0)))
+      (true (< (abs (- 1.0 (host::world-sky-elapsed world))) 0.001))
+      (is = 6 (length (host::world-animals world)))
+      ;; Edit: mining reports its block; a carried film is spent once.
+      (multiple-value-bind (edit status block) (host:player-edit-world-cell world player mined nil)
+        (true edit)
+        (is eq :edited status)
+        (true (typep block 'luvcraft:block-kind)))
+      (luvcraft:add-block-to-inventory inventory film 1)
+      (setf (luvcraft:player-selected-block player) film)
+      (is eq :edited (nth-value 1 (host:player-edit-world-cell world player built (game:block-placement film))))
+      (is = 0 (luvcraft:block-inventory-entry-quantity
+               (luvcraft:block-inventory-entry-for inventory film)))
+      (is eq :empty (nth-value 1 (host:player-edit-world-cell world player mined (game:block-placement film))))
+      ;; Save, then raise a second world from it in the same image.
+      (uiop:with-temporary-file (:pathname pathname :type "sexp")
+        (host:save-luvcraft-world world player pathname :yaw 0.75 :pitch -0.12)
+        (multiple-value-bind (restored restored-resume inhabitants) (luvcraft:read-luvcraft-save pathname)
+          (let* ((again (host:make-luvcraft-world :block-world restored :inhabitants inhabitants
+                                                  :scene (hollow-walk-test-scene restored)))
+                 (next (host:add-world-player
+                        again (host:make-luvcraft-player :id "ada" :resume restored-resume)))
+                 (next-source (host:world-source again)))
+            (true (not (eq player next)))
+            (is eq player (host:find-world-player world "ada"))
+            (is eq nil (terrain:scene-material-placement-at
+                        (host:world-scene again) (game:luvcraft-cell-site next-source 29 17 108)))
+            (is eq (game:block-placement film)
+                (terrain:scene-material-placement-at
+                 (host:world-scene again) (game:luvcraft-cell-site next-source 23 14 106)))
+            (is = 0 (luvcraft:block-inventory-entry-quantity
+                     (find (luvcraft::block-save-description film)
+                           (luvcraft:block-inventory-entries (luvcraft:player-inventory next))
+                           :key (lambda (entry)
+                                  (luvcraft::block-save-description
+                                   (luvcraft:block-inventory-entry-block entry)))
+                           :test #'equal)))
+            (is = 6 (length (getf (rest (assoc :luft-critters inhabitants)) :animals)))
+            (multiple-value-bind (position yaw pitch)
+                (game:luvcraft-resume-luft-pose next-source restored-resume)
+              (true (< (reduce #'+ (map 'list (lambda (a b) (abs (- a b)))
+                                        position
+                                        (list (v:vec3-x (terrain:body-position body))
+                                              (v:vec3-y (terrain:body-position body))
+                                              (v:vec3-z (terrain:body-position body)))))
+                       1d-6))
+              (true (< (abs (- yaw 0.75)) 1e-6))
+              (true (< (abs (- pitch -0.12)) 1e-6)))))))))

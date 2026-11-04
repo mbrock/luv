@@ -25,10 +25,10 @@
       (set-knob 'render::sun-orbit-tilt 0.7)
       (dolist (hour '(0.0 5.0 6.7 12.0 17.3 19.0 23.99))
         (set-knob 'render::time-of-day hour)
-        (host::update-luvcraft-light viewer light)
+        (host::update-luvcraft-light (host:viewer-world viewer) light)
         (let* ((luvcraft::*sky-sun-orbit-tilt* 0.7)
                (expected (luvcraft::sky-frame-parameters
-                          (host::viewer-sky-clock viewer)
+                          (host::world-sky-clock (host:viewer-world viewer))
                           (luvcraft::make-default-sky-profile))))
           (is equalp (luvcraft::sky-frame-parameters-fog-color expected)
               (subseq (render::light-fog-color light) 0 3))
@@ -42,7 +42,7 @@
       ;; give the shadow pass a nondegenerate plane.
       (set-knob 'render::sun-orbit-tilt 0.0)
       (set-knob 'render::time-of-day 12.0)
-      (host::update-luvcraft-light viewer light)
+      (host::update-luvcraft-light (host:viewer-world viewer) light)
       (let ((rows (render::light-shadow-rows
                    light (luv.arithmetic.lisp.vec3:make-vec3 0 0 0))))
         (true (> (reduce #'+ (subseq rows 0 3) :key #'abs) 0.001))))))
@@ -158,7 +158,7 @@
              (saved (luv.knobs:knob-value knob viewer)))
         (flet ((inputs ()
                  (let ((light (host::update-luvcraft-light
-                               viewer (render::host-light viewer))))
+                               (host:viewer-world viewer) (render::host-light viewer))))
                    (append (render::atmosphere-uniform-data
                             light 0.0 (render::host-sky-hour viewer))
                            (render::light-uniform-data
@@ -229,12 +229,12 @@
            (viewer (make-knob-test-viewer scene player))
            (knob (luv.knobs:find-knob 'host::turtle-count)))
       (luv.knobs:set-knob-value knob 3 viewer)
-      (is = 3 (length (host::viewer-animals viewer)))
+      (is = 3 (length (host::world-animals (host:viewer-world viewer))))
       (luv.knobs:set-knob-value knob 1 viewer)
-      (is = 1 (length (host::viewer-animals viewer)))
+      (is = 1 (length (host::world-animals (host:viewer-world viewer))))
       (luv.knobs:set-knob-value knob 0 viewer)
-      (is = 0 (length (host::viewer-animals viewer)))
-      (true (host::viewer-animals-initialized-p viewer)))))
+      (is = 0 (length (host::world-animals (host:viewer-world viewer))))
+      (true (host::world-animals-initialized-p (host:viewer-world viewer))))))
 
 (define-test residency-knob-retargets-without-player-motion
   (let* ((scene (luft.world:make-authored-world-streaming-scene

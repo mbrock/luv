@@ -35,38 +35,34 @@
            (expt (- (vec3:vec3-y a) (vec3:vec3-y b)) 2)
            (expt (- (vec3:vec3-z a) (vec3:vec3-z b)) 2))))
 
-(defun agent-cell (viewer x y z)
-  (luft:make-site (terrain:world-source-domain (streaming-source viewer))
+(defun agent-cell (world x y z)
+  (luft:make-site (terrain:world-source-domain (world-source world))
                   x y z luft:+cell-extent+ 1))
 
-(defun cell-resident-p (viewer x y)
-  (nth-value 1 (gethash (luft:chunk-key-at x y)
-                        (terrain:streaming-scene-store (render:viewer-source viewer)))))
-
-(defun make-inhabitant (viewer kind position &key description conversation asked said (yaw 0.0))
+(defun make-inhabitant (world kind position &key description conversation asked said (yaw 0.0))
   (let* ((height (luvcraft.agent::companion-body-height kind))
          (character (terrain:make-walking-character
                      :body (make-instance 'terrain:physical-body :position position
                                           :radius 0.28 :height height)
                      :heading-x (sin yaw) :heading-y (cos yaw)
                      :speed (luvcraft.agent::companion-walk-speed kind)))
-         (simulation (terrain:make-world-simulation (render:viewer-source viewer))))
+         (simulation (terrain:make-world-simulation (world-scene world))))
     (terrain:add-simulation-character simulation character)
     (make-instance 'inhabitant :kind kind :character character :simulation simulation :description description
                               :conversation conversation :asked asked :said said
                               ;; Saved dialogue is history, not a newly completed turn.
                               :notified said)))
 
-(defun initialize-viewer-agents (viewer)
-  (unless (viewer-agents-initialized-p viewer)
-    (dolist (description (luvcraft-viewer-inhabitants viewer))
+(defun initialize-world-agents (world)
+  (unless (world-agents-initialized-p world)
+    (dolist (description (world-saved-inhabitants world))
       (when (member (first description) '(:gnome :cat :fantus))
         ;; Use the old inhabitant format so either game can read the save.
         (destructuring-bind (x y z) (getf (rest description) :cell)
-          (let ((cell (game:luvcraft-cell-site (streaming-source viewer) x y z)))
+          (let ((cell (game:luvcraft-cell-site (world-source world) x y z)))
             (when cell
               (push (make-inhabitant
-                     viewer (first description)
+                     world (first description)
                      (vec3:make-vec3 (+ 0.5 (luft:site-x cell))
                                      (+ 0.5 (luft:site-y cell)) (luft:site-z cell))
                      :description description
@@ -74,17 +70,17 @@
                      :conversation (getf (rest description) :conversation)
                      :asked (getf (rest description) :asked)
                      :said (getf (rest description) :said))
-                    (viewer-agents viewer)))))))
-    (setf (viewer-agents-initialized-p viewer) t)))
+                    (world-agents world)))))))
+    (setf (world-agents-initialized-p world) t)))
 
-(defun inhabitant-description (viewer inhabitant)
+(defun inhabitant-description (world inhabitant)
   (let* ((p (inhabitant-position inhabitant))
          (character (inhabitant-character inhabitant))
          (provider (inhabitant-provider inhabitant)))
     (list (inhabitant-kind inhabitant)
           :cell (game:site-luvcraft-cell
-                 (streaming-source viewer)
-                 (agent-cell viewer (floor (vec3:vec3-x p))
+                 (world-source world)
+                 (agent-cell world (floor (vec3:vec3-x p))
                              (floor (vec3:vec3-y p)) (floor (+ 0.01 (vec3:vec3-z p)))))
           :facing-yaw (atan (terrain:character-heading-x character)
                             (terrain:character-heading-y character))
@@ -92,26 +88,28 @@
                             (inhabitant-conversation inhabitant))
           :asked (inhabitant-asked inhabitant) :said (inhabitant-said inhabitant))))
 
-(defun agent-inhabitant-descriptions (viewer descriptions)
-  ;; ALLOCATE-INSTANCE save tests deliberately don't initialize game services.
-  (if (and (slot-boundp viewer 'agents-initialized-p) (viewer-agents-initialized-p viewer))
-      (append (mapcar (lambda (agent) (inhabitant-description viewer agent))
-                      (reverse (viewer-agents viewer)))
+(defun agent-inhabitant-descriptions (world descriptions)
+  (if (world-agents-initialized-p world)
+      (append (mapcar (lambda (agent) (inhabitant-description world agent))
+                      (reverse (world-agents world)))
               (remove-if (lambda (description)
-                           (find description (viewer-agents viewer)
+                           (find description (world-agents world)
                                  :key #'inhabitant-original-description :test #'eq))
                          descriptions))
       descriptions))
 
-(defun summon-inhabitant (viewer &optional (kind :gnome))
-  "Summon a companion onto clear, resident ground near the player."
-  (initialize-viewer-agents viewer)
-  (let* ((p (terrain:body-position (terrain:character-body (render:viewer-player viewer))))
-         (scene (render:viewer-source viewer)))
+(defun world-inhabitant-descriptions (world)
+  "Every inhabitant of WORLD as its save describes them, including ones this game cannot host."
+  (agent-inhabitant-descriptions world (animal-inhabitant-descriptions world)))
+
+(defun summon-world-inhabitant (world position &optional (kind :gnome))
+  "Summon a companion onto clear, resident ground near POSITION."
+  (initialize-world-agents world)
+  (let ((scene (world-scene world)))
     (loop for (dx dy) in '((3 0) (0 3) (-3 0) (0 -3) (4 2) (-4 2))
-          for x = (+ (floor (vec3:vec3-x p)) dx)
-          for y = (+ (floor (vec3:vec3-y p)) dy)
-          when (cell-resident-p viewer x y) do
+          for x = (+ (floor (vec3:vec3-x position)) dx)
+          for y = (+ (floor (vec3:vec3-y position)) dy)
+          when (cell-resident-p world x y) do
             (multiple-value-bind (face hx hy hz point)
                 (terrain:raycast-face scene (vec3:make-vec3 (+ x 0.5) (+ y 0.5) 254.0)
                                       (vec3:make-vec3 0.0 0.0 -1.0) :max-distance 254.0)
@@ -122,12 +120,19 @@
                               (luvcraft.agent::companion-body-height kind) 0.28)
                          (notany (lambda (other)
                                    (< (companion-distance (inhabitant-position other) point) 1.0))
-                                 (viewer-agents viewer)))
-                (let ((agent (make-inhabitant viewer kind point)))
-                  (push agent (viewer-agents viewer))
-                  (setf (viewer-conversation-agent viewer) agent)
-                  (return-from summon-inhabitant agent)))))
+                                 (world-agents world)))
+                (let ((agent (make-inhabitant world kind point)))
+                  (push agent (world-agents world))
+                  (return-from summon-world-inhabitant agent)))))
     (error "No clear resident ground nearby; wait for terrain or move into the open.")))
+
+(defun summon-inhabitant (viewer &optional (kind :gnome))
+  "Summon a companion near VIEWER's player, and address it."
+  (setf (viewer-conversation-agent viewer)
+        (summon-world-inhabitant
+         (viewer-world viewer)
+         (terrain:body-position (terrain:character-body (render:viewer-player viewer)))
+         kind)))
 
 (defparameter *inhabitant-tools*
   '(com-look-around com-cell-at com-walk-to com-place-cell com-fetch-block com-propose-cell))
@@ -206,13 +211,13 @@ is immediate. Build larger things one cell at a time. Keep replies short.")
 (defmethod luv.application-agent:settle-command-result ((command t) (journey inhabitant-journey))
   (sb-concurrency:receive-message (journey-mailbox journey)))
 
-(defmethod render:advance-viewer-game :after ((viewer luvcraft-viewer) seconds)
-  (initialize-viewer-agents viewer)
-  (dolist (inhabitant (viewer-agents viewer))
+(defun advance-world-companions (world seconds)
+  (initialize-world-agents world)
+  (dolist (inhabitant (world-agents world))
     (let* ((p (inhabitant-position inhabitant))
            (journey (inhabitant-journey inhabitant)))
       ;; Each companion's clock freezes independently outside published ground.
-      (when (cell-resident-p viewer (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
+      (when (cell-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
         (terrain:advance-world-simulation (inhabitant-simulation inhabitant) seconds))
       (when journey
         (when (> (- (get-internal-real-time) (journey-started journey))
@@ -223,37 +228,41 @@ is immediate. Build larger things one cell at a time. Keep replies short.")
             (finish-inhabitant-journey
              inhabitant
              (if (and (eq status :arrived) (journey-fetch journey))
-                 (handler-case (edit-agent-cell viewer inhabitant (journey-fetch journey) nil)
+                 (handler-case (edit-agent-cell world inhabitant (journey-fetch journey) nil)
                    (error (condition) (format nil "Fetch failed: ~A" condition)))
                  (format nil "Walk ~A: ~A" status
-                         (terrain:walking-route-detail (journey-route journey))))))))
-      (let* ((provider (inhabitant-provider inhabitant))
-             (turn (and provider (luv.application-agent:application-agent-current-turn provider))))
-        (when (and turn (member (luv.application-agent:turn-status turn) '(:done :failed))
-                   (not (eq turn (inhabitant-notified inhabitant))))
-          (setf (inhabitant-notified inhabitant) turn
-                (inhabitant-said inhabitant)
-                (if (luv.application-agent:turn-error turn)
-                    (format nil "~A" (luv.application-agent:turn-error turn))
-                    (luv.application-agent:turn-text turn)))
-          (show-companion-message viewer inhabitant))
-        (when (and (null provider) (null (inhabitant-opening inhabitant))
-                   (inhabitant-said inhabitant)
-                   (not (equal (inhabitant-notified inhabitant) (inhabitant-said inhabitant))))
-          (setf (inhabitant-notified inhabitant) (inhabitant-said inhabitant))
-          (show-companion-message viewer inhabitant))))))
+                         (terrain:walking-route-detail (journey-route journey)))))))))))
 
-(defun companion-occupies-cell-p (viewer cell)
-  (and (slot-boundp viewer 'agents)
-       (some (lambda (agent)
-               (terrain:body-overlaps-cell-p
-                (terrain:character-body (inhabitant-character agent)) cell))
-             (viewer-agents viewer))))
+(defun advance-viewer-companions (viewer seconds)
+  "Show what VIEWER's world's companions have newly said."
+  (declare (ignore seconds))
+  (dolist (inhabitant (world-agents (viewer-world viewer)))
+    (let* ((provider (inhabitant-provider inhabitant))
+           (turn (and provider (luv.application-agent:application-agent-current-turn provider))))
+      (when (and turn (member (luv.application-agent:turn-status turn) '(:done :failed))
+                 (not (eq turn (inhabitant-notified inhabitant))))
+        (setf (inhabitant-notified inhabitant) turn
+              (inhabitant-said inhabitant)
+              (if (luv.application-agent:turn-error turn)
+                  (format nil "~A" (luv.application-agent:turn-error turn))
+                  (luv.application-agent:turn-text turn)))
+        (show-companion-message viewer inhabitant))
+      (when (and (null provider) (null (inhabitant-opening inhabitant))
+                 (inhabitant-said inhabitant)
+                 (not (equal (inhabitant-notified inhabitant) (inhabitant-said inhabitant))))
+        (setf (inhabitant-notified inhabitant) (inhabitant-said inhabitant))
+        (show-companion-message viewer inhabitant)))))
+
+(defun companion-occupies-cell-p (world cell)
+  (some (lambda (agent)
+          (terrain:body-overlaps-cell-p
+           (terrain:character-body (inhabitant-character agent)) cell))
+        (world-agents world)))
 
 (defmethod render::quiesce-viewer-services :before ((viewer luvcraft-viewer))
   ;; Wake parked tools before waiting for provider workers. No provider can
   ;; outlive the canvas on which its commands run, including a late opener.
-  (dolist (inhabitant (viewer-agents viewer))
+  (dolist (inhabitant (world-agents (viewer-world viewer)))
     (let ((opening nil))
       (sb-thread:with-mutex ((inhabitant-lock inhabitant))
         (setf (inhabitant-retired-p inhabitant) t

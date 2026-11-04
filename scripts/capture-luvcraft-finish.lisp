@@ -78,7 +78,7 @@
            (setf (luv:canvas-clock (r:viewer-canvas viewer)) (luv:make-demand-clock)
                  (r::viewer-running-p viewer) nil
                  (r:viewer-mode viewer) (make-instance 'r:first-person-mode)
-                 (old::sky-clock-pinned-day-fraction (h::viewer-sky-clock viewer)) (/ hour 24.0))
+                 (old::sky-clock-pinned-day-fraction (h::world-sky-clock (h:viewer-world viewer))) (/ hour 24.0))
            (r:capture-viewer-frame pathname viewer :inspector-p nil)
            (assert (null (luv:canvas-failures (r:viewer-canvas viewer))))
            (format t "~&FINISH ~A exposure=~F temporal=~S scale=1~%" pathname exposure r::*temporal-upscaling-p*))

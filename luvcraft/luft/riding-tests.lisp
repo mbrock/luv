@@ -9,8 +9,8 @@
                                 :player player
                                 :hotbar (list (game:block-placement luvcraft::*grass-block*)))))
     (setf (slot-value scene 'luft.terrain::source) (game:luvcraft-world-luft-source world)
-          (host::viewer-animals-initialized-p viewer) t
-          (host::viewer-agents-initialized-p viewer) t
+          (host::world-animals-initialized-p (host:viewer-world viewer)) t
+          (host::world-agents-initialized-p (host:viewer-world viewer)) t
           (render:viewer-mode viewer) (make-instance 'render:first-person-mode)
           (render:camera-position (render:viewer-camera viewer))
           (luv.arithmetic.lisp.vec3:make-vec3 1032.5 1029.5 2.3)
@@ -21,7 +21,7 @@
 (define-test first-person-hands-are-hidden-without-hiding-the-held-ball
   (let* ((viewer (riding-test-viewer))
          (body (host::viewer-body viewer))
-         (ball (host::viewer-ball-hand viewer))
+         (ball (host::player-ball-hand (host:viewer-local-player viewer)))
          (environment (make-instance 'luvcraft:luvcraft-session
                                      :camera (make-instance 'luvcraft:fly-camera)))
          (ride (luvcraft::activate-luvcraft-critter
@@ -161,7 +161,7 @@
   (let* ((viewer (riding-test-viewer))
          (turtle (make-instance 'luvcraft::turtle :seed 3
                                 :position (luv.arithmetic.lisp.vec3:make-vec3 8.5d0 2d0 8.5d0))))
-    (setf (host::viewer-animals viewer) (list turtle))
+    (setf (host::world-animals (host:viewer-world viewer)) (list turtle))
     (host::update-viewer-rides viewer)
     (ride-key viewer :tab)
     (let ((ride (render:viewer-modal-focus viewer)))
@@ -185,7 +185,7 @@
          (fov (render:camera-field-of-view camera))
          (turtle (make-instance 'luvcraft::turtle :seed 3
                                 :position (luv.arithmetic.lisp.vec3:make-vec3 8.5d0 2d0 8.5d0))))
-    (setf (host::viewer-animals viewer) (list turtle))
+    (setf (host::world-animals (host:viewer-world viewer)) (list turtle))
     (host::update-viewer-rides viewer)
     (ride-key viewer :tab)
     (true (typep (render:viewer-modal-focus viewer) 'luvcraft::critter-ride))
@@ -211,7 +211,7 @@
          (turtle (make-instance 'luvcraft::turtle :seed 3 :yaw (/ pi 2) :heading (/ pi 2)
                                 :position (luv.arithmetic.lisp.vec3:make-vec3 8.5d0 8d0 8.5d0)))
          (camera (render:viewer-camera viewer)))
-    (setf (host::viewer-animals viewer) (list turtle)
+    (setf (host::world-animals (host:viewer-world viewer)) (list turtle)
           (render:camera-position camera) (luv.arithmetic.lisp.vec3:make-vec3 1032.5 1029.5 8.3))
     (host::update-viewer-rides viewer)
     (ride-key viewer :tab)
@@ -272,7 +272,7 @@
   (let* ((viewer (riding-test-viewer :wall t))
          (turtle (make-instance 'luvcraft::turtle :seed 3
                                 :position (luv.arithmetic.lisp.vec3:make-vec3 21.5d0 2d0 8.5d0))))
-    (setf (host::viewer-animals viewer) (list turtle)
+    (setf (host::world-animals (host:viewer-world viewer)) (list turtle)
           (render:camera-position (render:viewer-camera viewer))
           (luv.arithmetic.lisp.vec3:make-vec3 1042.5 1032.5 2.3)
           (render:camera-yaw (render:viewer-camera viewer)) 0.0)
@@ -283,7 +283,7 @@
     (ride-key viewer :tab)
     (true (typep (render:viewer-modal-focus viewer) 'luvcraft::critter-ride))
     (ride-key viewer :w)
-    (setf (host::viewer-animals viewer) nil)
+    (setf (host::world-animals (host:viewer-world viewer)) nil)
     (host::advance-viewer-ride viewer 0.1d0)
     (host::update-viewer-rides viewer)
     (true (null (render:viewer-modal-focus viewer)))
@@ -317,7 +317,7 @@
                                               (* (first normal) (second b))))
                                        (< (third a) (third b)))))))
              (old-surface (make-instance 'luvcraft::terminal-surface
-                                        :world (host::luvcraft-viewer-world viewer) :face face
+                                        :world (host:world-block-world (host:viewer-world viewer)) :face face
                                         :origin (luvcraft.world:make-world-coordinate
                                                  (- (first origin) 1024) (third origin)
                                                  (- (second origin) 1024))

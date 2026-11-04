@@ -33,8 +33,8 @@
                  :entries '((:binding 2 :type :uniform-buffer)))))
              (environment (make-instance 'luvcraft:luvcraft-session
                                          :camera (make-instance 'presentation-camera)
-                                         :sky-clock (viewer-sky-clock viewer)
-                                         :sky-profile (viewer-sky-profile viewer))))
+                                         :sky-clock (world-sky-clock (viewer-world viewer))
+                                         :sky-profile (world-sky-profile (viewer-world viewer)))))
         (render:add-viewer-overlay
          viewer (make-instance 'companion-presentation :layout layout
                                                       :environment environment)))))
@@ -118,7 +118,7 @@
 (defmethod luvcraft:luvcraft-session-device ((viewer luvcraft-viewer))
   (render:viewer-device viewer))
 (defmethod luvcraft:luvcraft-session-world ((viewer luvcraft-viewer))
-  (luvcraft-viewer-world viewer))
+  (world-block-world (viewer-world viewer)))
 (defmethod luvcraft:luvcraft-session-overlays ((viewer luvcraft-viewer))
   (render:viewer-overlays viewer))
 (defmethod luvcraft:luvcraft-session-modal-focus ((viewer luvcraft-viewer))
@@ -339,8 +339,9 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
 
 (defmethod render:advance-viewer-game :before ((viewer luvcraft-viewer) seconds)
   (declare (ignore seconds))
-  (initialize-viewer-agents viewer)
-  (dolist (inhabitant (viewer-agents viewer)) (ensure-inhabitant-presentation viewer inhabitant)))
+  (let ((world (viewer-world viewer)))
+    (initialize-world-agents world)
+    (dolist (inhabitant (world-agents world)) (ensure-inhabitant-presentation viewer inhabitant))))
 
 (defmethod render:viewer-focus-score ((agent luft-companion) (viewer luvcraft-viewer))
   (let ((camera (luvcraft:luvcraft-session-camera viewer)))

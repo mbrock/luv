@@ -253,7 +253,7 @@ The old renderer relights the same occupied cells with its own light solver."
               world))))
 
 (defun fixture-physics (host old-p)
-  (if old-p (old::luvcraft-session-physics host) (h::viewer-physics host)))
+  (if old-p (old::luvcraft-session-physics host) (h::world-physics (h:viewer-world host))))
 
 (defun place-ride-camera (host old-p ride)
   (let ((pose (old::luvcraft-focus-camera-pose ride host)))
@@ -277,7 +277,7 @@ The old renderer relights the same occupied cells with its own light solver."
                                  (+ 10 (* 0.7 (mod (floor i 10) 10)))
                                  :radius 0.25 :never-sleep-p t))
        (if old-p (setf (old::luvcraft-session-physics host) physics)
-           (setf (h::viewer-physics host) physics))))
+           (setf (h::world-physics (h:viewer-world host)) physics))))
     (:turtle
      (let* ((animal (make-instance 'old::turtle :seed 7
                                   :position (v:make-vec3 16d0 4d0 12d0)
@@ -289,8 +289,8 @@ The old renderer relights the same occupied cells with its own light solver."
              (old::add-critter (old::luvcraft-session-critters host) animal)
              (setf (old::luvcraft-session-modal-focus host) ride))
            (progn
-             (setf (h::viewer-animals host) (list animal)
-                   (h::viewer-animals-initialized-p host) t
+             (setf (h::world-animals (h:viewer-world host)) (list animal)
+                   (h::world-animals-initialized-p (h:viewer-world host)) t
                    (r:viewer-modal-focus host) ride)))
        (place-ride-camera host old-p ride)))
     (:terminal
@@ -322,8 +322,8 @@ The old renderer relights the same occupied cells with its own light solver."
                   (make-instance 'luvcraft.agent:gnome :session host
                                  :position (v:make-vec3 16d0 4d0 12d0) :x 16 :y 4 :z 12)
                   (let ((inhabitant (h::make-inhabitant host :gnome (v:make-vec3 1040d0 1036d0 4d0))))
-                    (push inhabitant (h::viewer-agents host))
-                    (setf (h::viewer-agents-initialized-p host) t)
+                    (push inhabitant (h::world-agents (h:viewer-world host)))
+                    (setf (h::world-agents-initialized-p (h:viewer-world host)) t)
                     (h::ensure-inhabitant-presentation host inhabitant)))))
        (setf (luv.application-agent:turn-thought turn)
              "I am thinking about the light in this little block world."
@@ -531,9 +531,9 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
                  (progn
                    (setf (r::viewer-running-p host) nil)
                    (unless (eq kind :atelier)
-                     (setf (h::viewer-animals-initialized-p host) t
-                           (h::viewer-agents-initialized-p host) t
-                           (old::sky-clock-pinned-day-fraction (h::viewer-sky-clock host)) 0.5))
+                     (setf (h::world-animals-initialized-p (h:viewer-world host)) t
+                           (h::world-agents-initialized-p (h:viewer-world host)) t
+                           (old::sky-clock-pinned-day-fraction (h::world-sky-clock (h:viewer-world host))) 0.5))
                    (settle-live-viewer host)))
              (let ((phases (phase-summary)) (setup (- (now) started)))
                (setf *phase-table* nil)
@@ -589,7 +589,7 @@ Unlike the finite cell-matched fixtures, host residency footprints differ."
                    (setf (r::viewer-running-p host) nil
                          (r:viewer-mode host) (make-instance 'r:first-person-mode))
                    (unless (eq kind :atelier)
-                     (setf (old::sky-clock-pinned-day-fraction (h::viewer-sky-clock host)) 0.5)))
+                     (setf (old::sky-clock-pinned-day-fraction (h::world-sky-clock (h:viewer-world host))) 0.5)))
                  (when old-p (old::wait-for-luvcraft-products host :minimum (hash-table-count (old::luvcraft-session-desired-chunks host)) :timeout 120d0))
                  (luv::call-on-sdl-canvas-thread canvas (lambda () (prepare-fixture kind host old-p world)))
                  (let ((startup (- (now) started)) (phases (phase-summary)))

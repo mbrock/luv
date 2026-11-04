@@ -73,10 +73,10 @@
            (setf (luv:canvas-clock (r:viewer-canvas viewer)) (luv:make-demand-clock)
                  (r:viewer-mode viewer) (make-instance 'r:first-person-mode)
                  (r:camera-field-of-view camera) (* 60d0 (/ pi 180))
-                 (h::viewer-animals-initialized-p viewer) t
-                 (h::viewer-animals viewer) (list (animal))
-                 (old::sky-clock-hour (h::viewer-sky-clock viewer)) 10d0
-                 (old::sky-clock-paused-p (h::viewer-sky-clock viewer)) t)
+                 (h::world-animals-initialized-p (h:viewer-world viewer)) t
+                 (h::world-animals (h:viewer-world viewer)) (list (animal))
+                 (old::sky-clock-hour (h::world-sky-clock (h:viewer-world viewer))) 10d0
+                 (old::sky-clock-paused-p (h::world-sky-clock (h:viewer-world viewer))) t)
            (settle viewer)
            (assert (= 10 (length (r:viewer-figures viewer))))
            (assert (= 0.45 (r:exposure-value (r::renderer-exposure-control (r:viewer-renderer viewer)))))

@@ -102,8 +102,8 @@
                        (setf (r:camera-position camera) (v:make-vec3 1032.5 1028.5 5.62)
                              (r:camera-field-of-view camera) old::+luvcraft-camera-vertical-field-of-view+
                              (r:viewer-pointer-captured-p owner) t
-                             (host::viewer-animals-initialized-p owner) t
-                             (host::viewer-agents-initialized-p owner) t)
+                             (host::world-animals-initialized-p (host:viewer-world owner)) t
+                             (host::world-agents-initialized-p (host:viewer-world owner)) t)
                        (setf (old:camera-position camera) (v:make-vec3 8.5 5.62 4.5)
                              (old:camera-field-of-view camera) old::+luvcraft-camera-vertical-field-of-view+
                              (old::luvcraft-session-pointer-captured-p owner) t))))

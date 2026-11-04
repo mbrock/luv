@@ -20,7 +20,7 @@
 (defmethod mcluv:remove-instrument ((viewer luvcraft-viewer) overlay)
   (render:remove-viewer-overlay viewer overlay))
 (defmethod mcluv:toggle-instrument-creative-mode ((viewer luvcraft-viewer))
-  (setf (viewer-creative-p viewer) (not (viewer-creative-p viewer))))
+  (toggle-creative-mode viewer))
 
 (defparameter *status-diagnostics-p* nil
   "Include engine telemetry in the game status line when explicitly enabled.")

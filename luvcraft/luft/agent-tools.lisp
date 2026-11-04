@@ -5,18 +5,19 @@
     (unless (typep agent 'inhabitant-agent) (error "This tool needs an embodied companion."))
     (let ((inhabitant (agent-inhabitant agent)))
       (when (inhabitant-retired-p inhabitant) (error "The game has closed."))
-      (values (luv.application-agent:application-agent-application agent) inhabitant))))
+      (let ((viewer (luv.application-agent:application-agent-application agent)))
+        (values (viewer-world viewer) inhabitant viewer)))))
 
 (defun material-from-name (name)
   (unless (string-equal name "air")
     (game:block-placement (luvcraft:block-kind-named (intern (string-upcase name) :keyword)))))
 
-(defun cell-name (viewer cell)
-  (let ((placement (terrain:scene-material-placement-at (render:viewer-source viewer) cell)))
+(defun cell-name (world cell)
+  (let ((placement (terrain:scene-material-placement-at (world-scene world) cell)))
     (if placement (string-downcase (symbol-name (terrain:material-placement-name placement))) "air")))
 
-(defun validate-agent-reach (viewer inhabitant cell)
-  (unless (cell-resident-p viewer (luft:site-x cell) (luft:site-y cell))
+(defun validate-agent-reach (world inhabitant cell)
+  (unless (cell-resident-p world (luft:site-x cell) (luft:site-y cell))
     (error "Cell is not resident; walk closer to the player."))
   (let* ((p (inhabitant-position inhabitant))
          (eye (vec3:make-vec3 (vec3:vec3-x p) (vec3:vec3-y p) (+ 1 (vec3:vec3-z p))))
@@ -27,7 +28,7 @@
     (when (> distance 6) (error "Cell is out of reach; walk closer first."))
     (when (> distance 0.01)
       (multiple-value-bind (face x y z point hit-distance)
-          (terrain:raycast-face (render:viewer-source viewer) eye
+          (terrain:raycast-face (world-scene world) eye
                                 (vec3:make-vec3 (/ dx distance) (/ dy distance) (/ dz distance))
                                 :max-distance distance)
         (declare (ignore point))
@@ -37,32 +38,40 @@
           (error "Another solid cell blocks the companion's reach.")))))
   t)
 
-(defun edit-agent-cell (viewer inhabitant cell placement)
-  (validate-agent-reach viewer inhabitant cell)
+(defun companion-edit (world cell placement)
+  "Edit CELL as WORLD's companions do: through its open view, else as its owner."
+  (if (world-editor world)
+      (funcall (world-editor world) cell placement)
+      (player-edit-world-cell world (world-owner world) cell placement)))
+
+(defun edit-agent-cell (world inhabitant cell placement)
+  (validate-agent-reach world inhabitant cell)
   ;; Do not let the player's per-instance held block leak into a tool edit.
-  (let ((held (viewer-held-block viewer)))
+  (let* ((player (world-owner world))
+         (held (player-held-block player)))
     (unwind-protect
          (progn
-           (setf (viewer-held-block viewer) nil)
-           (multiple-value-bind (edit status) (render:apply-viewer-world-edit viewer cell placement)
+           (setf (player-held-block player) nil)
+           (multiple-value-bind (edit status) (companion-edit world cell placement)
              (declare (ignore edit))
              (values (format nil "Cell (~D ~D ~D): ~A" (luft:site-x cell) (luft:site-y cell)
                              (luft:site-z cell) status)
                      status)))
-      (setf (viewer-held-block viewer) held))))
+      (setf (player-held-block player) held))))
 
 (clim:define-command (com-look-around :command-table luvcraft-world :name "Look Around") ()
   "Report your feet, player, inventory, walking status and nearby standing surfaces. Z is up."
-  (multiple-value-bind (viewer inhabitant) (companion-command-context)
+  (multiple-value-bind (world inhabitant) (companion-command-context)
     (let* ((p (inhabitant-position inhabitant))
-           (player (terrain:body-position (terrain:character-body (render:viewer-player viewer)))))
+           (owner (world-owner world))
+           (player (terrain:body-position (terrain:character-body (player-character owner)))))
       (format nil "~(~A~) feet (~,2F ~,2F ~,2F); player (~,2F ~,2F ~,2F). Z up.~%~
                    Creative: ~A. Inventory: ~{~A~^, ~}.~%Nearby foot cells: ~{~A~^; ~}"
               (inhabitant-kind inhabitant) (vec3:vec3-x p) (vec3:vec3-y p) (vec3:vec3-z p)
               (vec3:vec3-x player) (vec3:vec3-y player) (vec3:vec3-z player)
-              (viewer-creative-p viewer)
+              (luvcraft:player-creative-p owner)
               ;; A NIL quantity is unlimited supply, as in creative mode.
-              (loop for entry in (luvcraft:block-inventory-entries (viewer-inventory viewer))
+              (loop for entry in (luvcraft:block-inventory-entries (luvcraft:player-inventory owner))
                     for quantity = (luvcraft:block-inventory-entry-quantity entry)
                     when (or (null quantity) (plusp quantity))
                       collect (format nil "~(~A~)=~A"
@@ -71,28 +80,28 @@
               (loop for (dx dy) in '((0 0) (1 0) (-1 0) (0 1) (0 -1) (3 0) (0 3) (-3 0) (0 -3))
                     for x = (+ (floor (vec3:vec3-x p)) dx)
                     for y = (+ (floor (vec3:vec3-y p)) dy)
-                    when (cell-resident-p viewer x y)
+                    when (cell-resident-p world x y)
                       collect (multiple-value-bind (face hx hy hz)
                                   (terrain:raycast-face
-                                   (render:viewer-source viewer) (vec3:make-vec3 (+ x 0.5) (+ y 0.5) 254.0)
+                                   (world-scene world) (vec3:make-vec3 (+ x 0.5) (+ y 0.5) 254.0)
                                    (vec3:make-vec3 0.0 0.0 -1.0) :max-distance 254.0)
                                 (if face (format nil "(~D ~D ~D) above ~A" hx hy (1+ hz)
-                                                 (cell-name viewer (agent-cell viewer hx hy hz)))
+                                                 (cell-name world (agent-cell world hx hy hz)))
                                     "no ground")))))))
 
 (clim:define-command (com-cell-at :command-table luvcraft-world :name "Cell At")
     ((x 'integer) (y 'integer) (z 'integer))
   "Read a resident integer cell's material; Z is up."
-  (multiple-value-bind (viewer inhabitant) (companion-command-context)
+  (multiple-value-bind (world inhabitant) (companion-command-context)
     (declare (ignore inhabitant))
-    (unless (cell-resident-p viewer x y) (error "Cell is not resident (not known air)."))
-    (cell-name viewer (agent-cell viewer x y z))))
+    (unless (cell-resident-p world x y) (error "Cell is not resident (not known air)."))
+    (cell-name world (agent-cell world x y z))))
 
-(defun begin-inhabitant-walk (viewer inhabitant x y z &optional fetch)
-  (unless (cell-resident-p viewer x y) (error "Destination is not resident."))
+(defun begin-inhabitant-walk (world inhabitant x y z &optional fetch)
+  (unless (cell-resident-p world x y) (error "Destination is not resident."))
   (when (inhabitant-journey inhabitant) (error "Already walking."))
   (let* ((route (terrain:start-character-route (inhabitant-character inhabitant)
-                                              (render:viewer-source viewer) x y z))
+                                              (world-scene world) x y z))
          (journey (make-instance 'inhabitant-journey :route route :fetch fetch)))
     (setf (inhabitant-journey inhabitant) journey)
     journey))
@@ -100,35 +109,35 @@
 (clim:define-command (com-walk-to :command-table luvcraft-world :name "Walk To")
     ((x 'integer) (y 'integer) (z 'integer))
   "Walk your body through Luft terrain to the foot cell X Y Z; wait for arrival or failure."
-  (multiple-value-bind (viewer inhabitant) (companion-command-context)
-    (begin-inhabitant-walk viewer inhabitant x y z)))
+  (multiple-value-bind (world inhabitant) (companion-command-context)
+    (begin-inhabitant-walk world inhabitant x y z)))
 
 (clim:define-command (com-place-cell :command-table luvcraft-world :name "Place Cell")
     ((x 'integer) (y 'integer) (z 'integer) (material 'string))
   "Place one named material from the player's inventory within six cells; air mines and collects."
-  (multiple-value-bind (viewer inhabitant) (companion-command-context)
-    (values (edit-agent-cell viewer inhabitant (agent-cell viewer x y z) (material-from-name material)))))
+  (multiple-value-bind (world inhabitant) (companion-command-context)
+    (values (edit-agent-cell world inhabitant (agent-cell world x y z) (material-from-name material)))))
 
 (clim:define-command (com-fetch-block :command-table luvcraft-world :name "Fetch Block")
     ((x 'integer) (y 'integer) (z 'integer))
   "Walk beside a solid block, mine it and add it to the player's persistent inventory."
-  (multiple-value-bind (viewer inhabitant) (companion-command-context)
-    (let ((cell (agent-cell viewer x y z))
+  (multiple-value-bind (world inhabitant) (companion-command-context)
+    (let ((cell (agent-cell world x y z))
           (character (inhabitant-character inhabitant)))
-      (unless (and (cell-resident-p viewer x y) (not (string= "air" (cell-name viewer cell))))
+      (unless (and (cell-resident-p world x y) (not (string= "air" (cell-name world cell))))
         (error "No resident block to fetch."))
       (loop for (dx dy) in '((1 0) (-1 0) (0 1) (0 -1))
             do (multiple-value-bind (face hx hy hz)
-                   (terrain:raycast-face (render:viewer-source viewer)
+                   (terrain:raycast-face (world-scene world)
                                          (vec3:make-vec3 (+ x dx 0.5) (+ y dy 0.5) 254.0)
                                          (vec3:make-vec3 0.0 0.0 -1.0) :max-distance 254.0)
                  (when (and face
                             (not (eq :failed (terrain:walking-route-status
                                               (terrain::find-walking-route
-                                               character (render:viewer-source viewer)
-                                               (agent-cell viewer hx hy (1+ hz)))))))
+                                               character (world-scene world)
+                                               (agent-cell world hx hy (1+ hz)))))))
                    (return-from com-fetch-block
-                     (begin-inhabitant-walk viewer inhabitant hx hy (1+ hz) cell)))))
+                     (begin-inhabitant-walk world inhabitant hx hy (1+ hz) cell)))))
       (error "No walking route beside the block."))))
 
 ;;; Reuse the existing semantic approval lifecycle and off-canvas settlement.
@@ -139,15 +148,15 @@
    (original :initarg :original :reader approval-original)))
 
 (defmethod luvcraft.agent::validate-tool-approval ((approval companion-edit-approval))
-  (let ((viewer (luvcraft.agent::tool-approval-session approval)))
+  (let ((world (viewer-world (luvcraft.agent::tool-approval-session approval))))
     (unless (eq (approval-original approval)
-                (terrain:scene-material-placement-at (render:viewer-source viewer) (approval-cell approval)))
+                (terrain:scene-material-placement-at (world-scene world) (approval-cell approval)))
       (error "The proposed cell has changed; propose again."))
-    (validate-agent-reach viewer (luvcraft.agent::tool-approval-presence approval) (approval-cell approval))))
+    (validate-agent-reach world (luvcraft.agent::tool-approval-presence approval) (approval-cell approval))))
 
 (defmethod luvcraft.agent::commit-tool-approval ((approval companion-edit-approval))
   (multiple-value-bind (result status)
-      (edit-agent-cell (luvcraft.agent::tool-approval-session approval)
+      (edit-agent-cell (viewer-world (luvcraft.agent::tool-approval-session approval))
                        (luvcraft.agent::tool-approval-presence approval)
                        (approval-cell approval) (approval-placement approval))
     (unless (eq status :edited) (error "~A" result))))
@@ -163,16 +172,16 @@
 (clim:define-command (com-propose-cell :command-table luvcraft-world :name "Propose Cell")
     ((x 'integer) (y 'integer) (z 'integer) (material 'string))
   "Propose a cell edit without changing terrain; wait for the player's Y/N decision."
-  (multiple-value-bind (viewer inhabitant) (companion-command-context)
+  (multiple-value-bind (world inhabitant viewer) (companion-command-context)
     (when (inhabitant-approval inhabitant) (error "An edit is already proposed."))
-    (let* ((cell (agent-cell viewer x y z))
+    (let* ((cell (agent-cell world x y z))
            (approval (make-instance 'companion-edit-approval
                                     :session viewer :presence inhabitant
                                     :agent luv.application-agent:*current-agent*
                                     :cell cell :placement (material-from-name material)
                                     :original (terrain:scene-material-placement-at
-                                               (render:viewer-source viewer) cell))))
-      (validate-agent-reach viewer inhabitant cell)
+                                               (world-scene world) cell))))
+      (validate-agent-reach world inhabitant cell)
       (setf (inhabitant-approval inhabitant) approval)
       (when (luv.workbench:application-workbench viewer)
         (luv.workbench:show-workbench-message
@@ -200,7 +209,8 @@
          (turn (and provider (luv.application-agent:application-agent-current-turn provider))))
     (cond
       ((render:viewer-modal-focus viewer) nil)
-      ((viewer-ball-in-hand-p viewer) (call-next-method))
+      ((player-ball-in-hand-p (viewer-local-player viewer))
+       "Ball · left throw · right marbles · B put away")
       ((and inhabitant (inhabitant-approval inhabitant))
        "Proposed edit · Y approve · N decline · T revise")
       ((and inhabitant (inhabitant-opening inhabitant)) "Opening conversation…")
@@ -231,7 +241,8 @@
                                           :name "Talk to Companion" :keystroke (:t)) ()
   (let* ((viewer (render:viewer-command-viewer))
          (inhabitant (or (viewer-conversation-agent viewer)
-                         (first (viewer-agents viewer)) (summon-inhabitant viewer))))
+                         (first (world-agents (viewer-world viewer)))
+                         (summon-inhabitant viewer))))
     (setf (viewer-conversation-agent viewer) inhabitant)
     (if (inhabitant-approval inhabitant)
         (luv.workbench:open-workbench-prompt
@@ -247,7 +258,7 @@
 (clim:define-command (com-next-companion :command-table luvcraft-world
                                        :name "Next Companion" :keystroke (:f7)) ()
   (let* ((viewer (render:viewer-command-viewer))
-         (agents (viewer-agents viewer)))
+         (agents (world-agents (viewer-world viewer))))
     (setf (viewer-conversation-agent viewer)
           (or (second (member (viewer-conversation-agent viewer) agents)) (first agents)))
     (when (viewer-conversation-agent viewer)

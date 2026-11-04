@@ -4,25 +4,7 @@
 ;;;; The host brings walking, flight, first person, the workbench, and
 ;;;; streaming; this file brings only what is Luvcraft's (#J3WZZS).
 
-(defpackage #:luvcraft.luft.game
-  (:use #:cl)
-  (:local-nicknames (#:render #:luft.render)
-                    (#:terrain #:luft.terrain)
-                    (#:game #:luvcraft.luft)
-                    (#:vec3 #:luv.arithmetic.lisp.vec3))
-  (:documentation "The Luvcraft on Luft host: its frame, keys, hotbar, and saves.")
-  (:export #:play
-           #:luvcraft-viewer
-           #:luvcraft-viewer-hotbar
-           #:*starting-hotbar*))
-
 (in-package #:luvcraft.luft.game)
-
-(defparameter *starting-hotbar*
-  '(:grass :dirt :planks :bricks :red-wool :yellow-wool :blue-wool
-    :crystal :flowers :stone)
-  "The blocks on the number row when a game starts, as Luvcraft's own
-quickbar begins: things to build a house with, colours, and a lamp.")
 
 (defparameter *title*
   "Luvcraft — click to play · WASD walk · Space jump, twice to fly · left mine · right or E place · C pick · 1–0 blocks · F1 keys · Esc release")
@@ -38,208 +20,119 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 (clim:define-command-table luvcraft-world-release
   :inherit-from (render:luft-play-release) :inherit-menu t)
 
-(defclass ball-game-state ()
-  ((physics :initform nil :accessor viewer-physics)
-   (physics-clock :initform 0d0 :accessor viewer-physics-clock)
-   (springs :initform nil :accessor viewer-springs)
-   (springs-initialized-p :initform nil :accessor viewer-springs-initialized-p)
-   (ball-hand :initform (make-instance 'luvcraft::ball) :reader viewer-ball-hand)
-   (ball-in-hand-p :initform nil :accessor viewer-ball-in-hand-p)
-   (ball-previous-centers :initform (make-hash-table) :reader viewer-ball-previous-centers)))
-
-(defclass feedback-game-state ()
-  ((particles :initform (make-instance 'luvcraft::block-particle-system)
-              :reader viewer-particles)))
-
-(clim:define-application-frame luvcraft-viewer (feedback-game-state ball-game-state render:game-host)
-  ((luvcraft-world :initarg :luvcraft-world :reader luvcraft-viewer-world
-                   :documentation "Luvcraft's own world: its source and edits as read.")
-   (resume :initarg :resume :initform nil :reader luvcraft-viewer-resume)
-   (sky-clock :initform (make-instance 'luvcraft::sky-clock) :reader viewer-sky-clock)
-   (sky-profile :initform (luvcraft::make-default-sky-profile) :reader viewer-sky-profile)
-   (sky-elapsed :initform 0.0 :accessor viewer-sky-elapsed)
-   (sky-origin-offset :initarg :sky-origin-offset :initform 0.0 :reader viewer-sky-origin-offset)
-   (sun-orbit-tilt :initform 0.44 :accessor viewer-sun-orbit-tilt)
+;;; A view of one world through its local player's eyes (#32DUBY). The host
+;;; owns the camera and controls; this frame adds overlays and particles, and
+;;; refers to its world and local player for everything they own.
+(clim:define-application-frame luvcraft-viewer (render:game-host)
+  ((world :initarg :world :reader viewer-world)
+   (local-player :initarg :local-player :reader viewer-local-player)
+   (particles :initform (make-instance 'luvcraft::block-particle-system)
+              :reader viewer-particles)
    (sky-light :initform (make-luvcraft-light) :reader viewer-sky-light)
-   (inhabitants :initarg :inhabitants :initform nil
-                :reader luvcraft-viewer-inhabitants)
-   (animals :initform nil :accessor viewer-animals)
-   (animal-count :initform 6 :accessor viewer-animal-count)
-   (rider-intent :initform (luvcraft:make-movement-intent) :reader viewer-rider-intent)
-   (body :initform (make-instance 'luvcraft::player-body) :reader viewer-body)
-   (animal-previous-figures :initform (make-hash-table :test #'eq)
-                            :reader viewer-animal-previous-figures)
-   (animals-initialized-p :initform nil :accessor viewer-animals-initialized-p)
-   (agents :initform nil :accessor viewer-agents)
-   (agents-initialized-p :initform nil :accessor viewer-agents-initialized-p)
-   (conversation-agent :initform nil :accessor viewer-conversation-agent)
-   (hotbar :initarg :hotbar :accessor luvcraft-viewer-hotbar)
-   (inventory :accessor viewer-inventory)
-   (creative-p :initform nil :accessor viewer-creative-p)
-   (held-block :initform nil :accessor viewer-held-block))
+   (body :initform (make-instance 'luvcraft::player-body) :reader viewer-body
+         :documentation "The first-person hands, bob, and held item that this view draws.")
+   (conversation-agent :initform nil :accessor viewer-conversation-agent
+                       :documentation "The companion this view addresses with T, Y, and N."))
   (:command-table (luvcraft-viewer
                    :inherit-from (luvcraft-window render:luft-window-release
                                   luvcraft-world luvcraft-world-release)
                    :inherit-menu t))
   (:menu-bar nil))
 
+(defmethod initialize-instance :around
+    ((viewer luvcraft-viewer) &rest initargs
+     &key world local-player source simulation player luvcraft-world resume inhabitants
+       (hotbar (starting-hotbar-placements)) sky-origin-offset
+     &allow-other-keys)
+  ;; A viewer always views a world. Without one, LUVCRAFT-WORLD, RESUME,
+  ;; INHABITANTS, and HOTBAR describe a fresh world and its only player.
+  (let* ((world (or world
+                    (make-luvcraft-world
+                     :block-world luvcraft-world :inhabitants inhabitants
+                     :sky-origin-offset sky-origin-offset
+                     :simulation (or simulation
+                                     (terrain:make-world-simulation
+                                      (or source (error "A Luvcraft viewer needs a scene.")))))))
+         (local-player (or local-player (make-luvcraft-player :resume resume :hotbar hotbar))))
+    (when player
+      (setf (player-character local-player) player))
+    (add-world-player world local-player)
+    (apply #'call-next-method viewer :world world :local-player local-player
+           :simulation (world-simulation world) initargs)))
+
 (defmethod initialize-instance :after ((viewer luvcraft-viewer) &key)
-  ;; After the viewer's own method, which chose the vocabulary's first member.
-  (let* ((resume (luvcraft-viewer-resume viewer))
-         (inventory (restore-inventory resume))
-         (selected (getf resume :selected-block)))
-    (setf (viewer-inventory viewer) inventory
-          (viewer-creative-p viewer) (getf resume :creative-p)
-          (viewer-held-block viewer)
-          (and selected
-               (find selected (luvcraft:block-inventory-blocks inventory)
-                     :key #'luvcraft::block-save-description :test #'equal)))
-    (setf (render:viewer-edit-material viewer)
-          (or (and selected
-                   (ignore-errors
-                    (game:block-placement
-                     (luvcraft::restore-block-value selected))))
-              (first (luvcraft-viewer-hotbar viewer))))
-    (put-on-hotbar viewer (render:viewer-edit-material viewer))
-    (when (render:viewer-canvas viewer)
-      (attach-player-instruments viewer))
-    ;; Preferences choose a new player's kit; an actual world resume keeps
-    ;; its own bar, mode, stock, and selected per-instance block.
-    (when (getf resume :quickbar)
-      (luvcraft:arrange-luvcraft-quickbar viewer (getf resume :quickbar)))
-    (when (member :simple-inventory-p resume)
-      (setf (luvcraft::block-inventory-simple-p inventory)
-            (getf resume :simple-inventory-p)
-            (luvcraft::block-inventory-kit inventory)
-            (mapcar #'luvcraft::restore-block-value (getf resume :building-kit))))
-    (when selected
-      (setf (luvcraft:player-selected-block viewer)
-            (luvcraft::restore-block-value selected)))
-    (luvcraft:update-player-instruments viewer))
+  ;; After the host's own method, which installed the player's character.
+  (setf (world-editor (viewer-world viewer))
+        (lambda (cell placement) (render:apply-viewer-world-edit viewer cell placement)))
+  (when (render:viewer-canvas viewer)
+    (render:add-viewer-overlay viewer (make-instance 'target-marker))
+    (attach-player-instruments viewer)
+    (restore-player-kit (viewer-local-player viewer)))
   (install-luvcraft-motor (render:viewer-player viewer)))
 
-(defun restore-inventory (resume)
-  (let ((inventory (luvcraft:make-block-inventory
-                    :blocks (remove-duplicates
-                             (append (mapcar #'luvcraft:block-kind-named *starting-hotbar*)
-                                     (luvcraft:placeable-block-kinds))
-                             :from-end t))))
-    ;; Materials are unlimited, as in the original game; only carried blocks
-    ;; keep counts, so stock saved while every material was finite is dropped.
-    (if (member :inventory resume)
-        (setf (luvcraft:block-inventory-entries inventory)
-              (loop for (description quantity) in (getf resume :inventory)
-                    for block = (luvcraft::restore-block-value description)
-                    for count = (and (luvcraft:block-kind-carried-p block) (or quantity 0))
-                    do (check-type count (or null (integer 0)))
-                    collect (make-instance 'luvcraft:block-inventory-entry
-                                           :block block :quantity count)))
-        (dolist (description (getf resume :carried))
-          (luvcraft:add-block-to-inventory
-           inventory (luvcraft::restore-block-value description))))
-    inventory))
+(defmethod (setf render:viewer-player) :after (character (viewer luvcraft-viewer))
+  (install-luvcraft-motor character)
+  (setf (player-character (viewer-local-player viewer)) character))
 
-(defun inventory-resume (viewer)
-  (let ((resume (copy-list (luvcraft-viewer-resume viewer))))
-    (setf (getf resume :inventory)
-          (loop for entry in (luvcraft:block-inventory-entries (viewer-inventory viewer))
-                collect (list (luvcraft::block-save-description
-                               (luvcraft:block-inventory-entry-block entry))
-                              (luvcraft:block-inventory-entry-quantity entry)))
-          (getf resume :carried)
-          (mapcar #'luvcraft::block-save-description
-                  (luvcraft:block-inventory-carried-blocks (viewer-inventory viewer)))
-          (getf resume :creative-p) (viewer-creative-p viewer)
-          (getf resume :simple-inventory-p)
-          (luvcraft::block-inventory-simple-p (viewer-inventory viewer))
-          (getf resume :building-kit)
-          (mapcar #'luvcraft::block-save-description
-                  (luvcraft::block-inventory-kit (viewer-inventory viewer)))
-          (getf resume :selected-block)
-          (luvcraft::block-save-description
-           (selected-block viewer (render:viewer-edit-material viewer)))
-          (getf resume :quickbar)
-          (mapcar #'terrain:material-placement-name (luvcraft-viewer-hotbar viewer)))
-    resume))
+;;; The host's selection and hotbar are the local player's.
 
-(defun selected-block (viewer placement)
-  (let ((held (viewer-held-block viewer)))
-    (if (and held (eq placement (game:block-placement held))) held
-        (or (game::luvcraft-block-for-placement placement)
-            (find placement (luvcraft:block-inventory-blocks (viewer-inventory viewer))
-                  :key #'game:block-placement)))))
+(defmethod render:viewer-edit-material ((viewer luvcraft-viewer))
+  (player-placement (viewer-local-player viewer)))
+
+(defmethod (setf render:viewer-edit-material) (placement (viewer luvcraft-viewer))
+  (setf (player-placement (viewer-local-player viewer)) placement))
+
+(defmethod render:viewer-hotbar ((viewer luvcraft-viewer))
+  (player-hotbar (viewer-local-player viewer)))
+
+(defmethod luvcraft:player-inventory ((viewer luvcraft-viewer))
+  (luvcraft:player-inventory (viewer-local-player viewer)))
+
+(defmethod luvcraft:player-selected-block ((viewer luvcraft-viewer))
+  (luvcraft:player-selected-block (viewer-local-player viewer)))
+
+(defmethod (setf luvcraft:player-selected-block) (block (viewer luvcraft-viewer))
+  (setf (luvcraft:player-selected-block (viewer-local-player viewer)) block))
+
+(defmethod luvcraft:player-creative-p ((viewer luvcraft-viewer))
+  (luvcraft:player-creative-p (viewer-local-player viewer)))
+
+(defmethod luvcraft:update-player-instruments ((viewer luvcraft-viewer))
+  (luvcraft:update-player-instruments (viewer-local-player viewer)))
+
+(defun toggle-creative-mode (viewer)
+  (let ((player (viewer-local-player viewer)))
+    (setf (luvcraft:player-creative-p player) (not (luvcraft:player-creative-p player)))))
+
+;;; The world's time and edits, as this view sees them.
+
+(defmethod render::advance-viewer-sky ((viewer luvcraft-viewer) seconds)
+  (advance-world-sky (viewer-world viewer) seconds))
+
+(defmethod render:advance-viewer-game ((viewer luvcraft-viewer) seconds)
+  ;; The host has stepped the world's characters; the rest of it follows.
+  (advance-world-populations (viewer-world viewer) seconds)
+  (luvcraft::advance-block-particles (viewer-particles viewer) seconds)
+  (advance-viewer-companions viewer seconds))
+
+(defmethod render:viewer-figures ((viewer luvcraft-viewer))
+  (append (call-next-method) (animal-figure-list viewer)
+          (ball-figures viewer) (particle-figures viewer)))
 
 (defmethod render:apply-viewer-world-edit :around
     ((viewer luvcraft-viewer) cell placement)
-  ;; Commit inventory changes only after the engine accepts the edit.  Undo
-  ;; and redo pass through this same boundary, so they conserve stock too.
-  ;; As in the original game, materials are unlimited and only carried
-  ;; blocks, such as films, are picked up and spent.
-  (when (and placement (companion-occupies-cell-p viewer cell))
-    (setf (render:viewer-last-edit-status viewer) :occupied)
-    (return-from render:apply-viewer-world-edit (values nil :occupied)))
-  (let* ((inventory (viewer-inventory viewer))
-         (block (and placement (selected-block viewer placement)))
-         (entry (and block (luvcraft:block-inventory-entry-for inventory block)))
-         (finite-p (and block (luvcraft:block-kind-carried-p block)))
-         (old (terrain:scene-material-placement-at (render:viewer-source viewer) cell))
-         (coordinate (game:site-luvcraft-cell (streaming-source viewer) cell))
-         (overlay (luvcraft:little-world-source-edits
-                   (luvcraft:block-world-source (luvcraft-viewer-world viewer))))
-         (original (gethash coordinate (luvcraft::block-edit-overlay-entries overlay)))
-         (old-block (and old (or (and original
-                                       (eq old (game:block-placement original)) original)
-                                 (game::luvcraft-block-for-placement old)))))
-    (when (and finite-p
-               (or (null entry) (zerop (luvcraft:block-inventory-entry-quantity entry))))
-      (setf (render:viewer-last-edit-status viewer) :empty)
-      (return-from render:apply-viewer-world-edit (values nil :empty)))
-    (multiple-value-bind (edit status) (call-next-method)
-      (when edit
-        (when finite-p
-          (luvcraft:remove-block-from-inventory inventory block))
-        (when (and old-block (luvcraft:block-kind-carried-p old-block))
-          (luvcraft:add-block-to-inventory inventory old-block))
-        ;; Keep per-instance kinds in Luvcraft's overlay: Luft's palette is
-        ;; deliberately only a visual identity (all films share one reel).
-        (apply #'luvcraft::record-block-edit overlay block coordinate)
-        (when (and old-block (null placement))
-          (luvcraft::smash-block-particles
-           (viewer-particles viewer) old-block
-           (apply #'luvcraft.world:make-world-coordinate coordinate))
-          (when (luvcraft:block-kind-carried-p old-block)
-            (setf (viewer-held-block viewer) old-block)
-            (put-on-hotbar viewer old))))
-      (values edit status))))
-
-(defun put-on-hotbar (viewer placement)
-  "Select PLACEMENT, replacing the selected slot when it is not on the bar."
-  (let ((block (selected-block viewer placement)))
-    (when block
-      (luvcraft:add-block-to-inventory (viewer-inventory viewer) block 0)
-      (luvcraft:put-luvcraft-block-on-quickbar viewer block))))
-
-(defmethod luvcraft:player-inventory ((viewer luvcraft-viewer))
-  (viewer-inventory viewer))
-
-(defmethod luvcraft:player-selected-block ((viewer luvcraft-viewer))
-  (selected-block viewer (render:viewer-edit-material viewer)))
-
-(defmethod (setf luvcraft:player-selected-block) (block (viewer luvcraft-viewer))
-  (setf (viewer-held-block viewer) block
-        (render:viewer-edit-material viewer) (game:block-placement block))
-  block)
-
-(defmethod luvcraft:player-creative-p ((viewer luvcraft-viewer))
-  (viewer-creative-p viewer))
-
-(defmethod luvcraft:update-player-instruments ((viewer luvcraft-viewer))
-  (setf (luvcraft-viewer-hotbar viewer)
-        (mapcar #'game:block-placement
-                (luvcraft:block-inventory-quickbar-blocks (viewer-inventory viewer)))))
-
-(defmethod render:viewer-hotbar ((viewer luvcraft-viewer))
-  (luvcraft-viewer-hotbar viewer))
+  ;; The local player edits the world; the host's own edit, which schedules
+  ;; meshing, is the scene edit.
+  (multiple-value-bind (edit status mined)
+      (player-edit-world-cell (viewer-world viewer) (viewer-local-player viewer) cell placement
+                       :scene-edit (lambda () (call-next-method)))
+    (setf (render:viewer-last-edit-status viewer) status)
+    (when mined
+      (luvcraft::smash-block-particles
+       (viewer-particles viewer) mined
+       (apply #'luvcraft.world:make-world-coordinate
+              (game:site-luvcraft-cell (streaming-source viewer) cell))))
+    (values edit status)))
 
 (defmethod luv:handle-canvas-event
     ((viewer luvcraft-viewer) canvas (event luv:canvas-pointer-wheel-event))
@@ -252,16 +145,13 @@ quickbar begins: things to build a house with, colours, and a lamp.")
   nil)
 
 (defmethod render:viewer-pick-material ((viewer luvcraft-viewer) placement)
-  (let* ((inspection (render::viewer-inspection viewer))
-         (coordinate (and inspection
-                          (game:site-luvcraft-cell
-                           (streaming-source viewer)
-                           (render::site-inspection-cell inspection))))
-         (overlay (luvcraft:little-world-source-edits
-                   (luvcraft:block-world-source (luvcraft-viewer-world viewer)))))
-    (setf (viewer-held-block viewer)
-          (gethash coordinate (luvcraft::block-edit-overlay-entries overlay))))
-  (put-on-hotbar viewer placement)
+  (let ((inspection (render::viewer-inspection viewer))
+        (player (viewer-local-player viewer)))
+    (setf (player-held-block player)
+          (and inspection
+               (world-authored-block (viewer-world viewer)
+                                     (render::site-inspection-cell inspection))))
+    (put-on-hotbar player placement))
   (setf (render:viewer-last-edit-status viewer) :selected))
 
 (defmethod render:viewer-key-event-tables
@@ -298,8 +188,7 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 
 (clim:define-command (com-creative :command-table luvcraft-window
                                  :name "Creative Mode" :keystroke (:f6)) ()
-  (let ((viewer (render:viewer-command-viewer)))
-    (setf (viewer-creative-p viewer) (not (viewer-creative-p viewer)))))
+  (toggle-creative-mode (render:viewer-command-viewer)))
 
 (defmethod mcluv:palette-visible-p ((viewer luvcraft-viewer))
   (declare (ignore viewer))
@@ -345,29 +234,16 @@ quickbar begins: things to build a house with, colours, and a lamp.")
   (declare (ignore arguments table))
   "choose a block")
 
-;;; Saves: format 2, a vocabulary table and columns (#Y3S82T); format 1 still loads.
+;;; Saves: the world's, with this view's player and look.
 
 (defun streaming-source (viewer)
-  (terrain:streaming-scene-source (render:viewer-source viewer)))
+  (world-source (viewer-world viewer)))
 
 (defmethod render:viewer-world-description ((viewer luvcraft-viewer))
-  (let ((player (render:viewer-player viewer))
-        (camera (render:viewer-camera viewer)))
-    (game:luvcraft-save-description
-     (streaming-source viewer) (luvcraft-viewer-world viewer)
-     :resume (inventory-resume viewer)
-     :inhabitants (agent-inhabitant-descriptions
-                   viewer (viewer-inhabitant-descriptions viewer))
-     :position (and player
-                    (let ((position (render:body-position
-                                     (render:character-body player))))
-                      (list (vec3:vec3-x position) (vec3:vec3-y position)
-                            (vec3:vec3-z position))))
-     :yaw (render:camera-yaw camera)
-     :pitch (render:camera-pitch camera)
-     :flying-p (and player (terrain:character-flying-p player))
-     :selected-block (selected-block viewer (render:viewer-edit-material viewer))
-     :selected (render:viewer-edit-material viewer))))
+  (let ((camera (render:viewer-camera viewer)))
+    (luvcraft-world-save-description
+     (viewer-world viewer) (viewer-local-player viewer)
+     :yaw (render:camera-yaw camera) :pitch (render:camera-pitch camera))))
 
 (defmethod render:write-viewer-world-description
     ((viewer luvcraft-viewer) description pathname)
@@ -392,18 +268,21 @@ The resident window spans seven 64-cell chunks per side; the streaming
 metabar can adjust its radius without changing the world's collision rules.
 Other keys go to LUFT.RENDER:START-GAME-HOST."
   (let ((loaded-p (and pathname (null seed) (probe-file pathname))))
-    (multiple-value-bind (world resume inhabitants)
+    (multiple-value-bind (block-world resume inhabitants)
         (if loaded-p
             (luvcraft:read-luvcraft-save pathname)
             (luvcraft:make-empty-little-block-world
              :seed (or seed 1) :relief relief :chunk-height world-height))
-      (let ((source (game:luvcraft-world-luft-source world)))
+      (let* ((source (game:luvcraft-world-luft-source block-world))
+             (world (make-luvcraft-world
+                     :block-world block-world :inhabitants inhabitants
+                     :scene (game:make-luvcraft-streaming-scene
+                             source :residency-radius 3
+                             :mesh-preparer render:+render-population-preparer+))))
         (multiple-value-bind (position yaw pitch flying-p)
             (and resume (game:luvcraft-resume-luft-pose source resume))
           (apply #'render:start-game-host
-                 :solid (game:make-luvcraft-streaming-scene
-                         source :residency-radius 3
-                         :mesh-preparer render:+render-population-preparer+)
+                 :solid (world-scene world)
                  :title *title*
                  :terrain-bevels-p terrain-bevels-p
                  :sky-factory 'make-luvcraft-sky-drawing
@@ -420,13 +299,7 @@ Other keys go to LUFT.RENDER:START-GAME-HOST."
                                          :flying-p flying-p))
                  :frame-class 'luvcraft-viewer
                  :frame-initargs
-                 (list :luvcraft-world world :resume resume
-                       :sky-origin-offset (game:luvcraft-world-source-offset source)
-                       :inhabitants inhabitants
-                       :hotbar (mapcar (lambda (name)
-                                         (game:block-placement
-                                          (luvcraft:block-kind-named name)))
-                                       *starting-hotbar*))
+                 (list :world world :local-player (make-luvcraft-player :resume resume))
                  (alexandria:remove-from-plist
                   viewer-arguments :pathname :seed :relief :world-height
                   :terrain-bevels-p)))))))
