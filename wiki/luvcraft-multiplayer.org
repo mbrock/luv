@@ -295,7 +295,7 @@ network worker and mailbox, discovery, and an in-memory loopback transport.
 endpoints in one image find each other by broadcast and by name, and trade
 reliable and unreliable messages over real sockets and over loopback.
 
-** WAIT Tag the world, and hash its chunks
+** DONE Tag the world, and hash its chunks
 :PROPERTIES:
 :ID: JHWV75
 :END:
@@ -307,9 +307,12 @@ machines.
 one seed's hashes have been compared between macOS and Linux, with any
 disagreement traced or recorded.
 
-/Waiting on./ The macOS half.  Tags, chunk hashes, and
-=scripts/luv fingerprint= are in, stable across fresh processes, and Linux's
-output for seed 121 is #QTXNY0; diff a Mac's against it.
+/Result./ Tags, chunk hashes, and =scripts/luv fingerprint= are in and
+stable across fresh processes.  On 4 November an arm64 macOS run of
+=scripts/luv fingerprint= printed output byte-identical to Linux's #QTXNY0
+for seed 121: recipe, vocabulary digest, tag, spawn (including its
+=atan= yaw), and all nine chunk hashes.  The generator itself uses only
+integer hashes, rational double arithmetic, and correctly rounded =sqrt=.
 
 ** TODO Steer players by input frames on a phase-locked clock
 :PROPERTIES:
