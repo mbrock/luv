@@ -229,7 +229,8 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; The birthday meadow's save kind lives with the party; its saves play too.
-  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "alexandria")
+  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "luvcraft-wire/net"
+               "alexandria")
   :serial t
   :components ((:file "luvcraft/luft/game-package")
                (:file "luvcraft/luft/world")
@@ -246,7 +247,9 @@
                (:file "luvcraft/luft/feedback")
                (:file "luvcraft/luft/body-drawing")
                (:file "luvcraft/luft/riding")
-               (:file "luvcraft/luft/locomotion"))
+               (:file "luvcraft/luft/locomotion")
+               (:file "luvcraft/luft/remote-track")
+               (:file "luvcraft/luft/session"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"
@@ -256,7 +259,8 @@
   :components ((:file "luvcraft/luft/game-tests")
                (:file "luvcraft/luft/ball-tests")
                (:file "luvcraft/luft/riding-tests")
-               (:file "luvcraft/luft/knob-tests"))
+               (:file "luvcraft/luft/knob-tests")
+               (:file "luvcraft/luft/session-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package

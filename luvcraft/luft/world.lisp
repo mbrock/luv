@@ -40,7 +40,9 @@ quickbar begins: things to build a house with, colours, and a lamp.")
    (rider-intent :initform (luvcraft:make-movement-intent) :reader player-rider-intent
                  :documentation "Riding steers the original game's intent, not the walking controller.")
    (ball-hand :initform (make-instance 'luvcraft::ball) :reader player-ball-hand)
-   (ball-in-hand-p :initform nil :accessor player-ball-in-hand-p))
+   (ball-in-hand-p :initform nil :accessor player-ball-in-hand-p)
+   (track :initarg :track :initform nil :accessor player-track
+          :documentation "A remote player's snapshot track (#VM5TN6); NIL for one simulated here."))
   (:documentation "One person in a Luvcraft world: their character, stock, and hands."))
 
 (defmethod print-object ((player luvcraft-player) stream)
@@ -201,7 +203,9 @@ actors, such as companions, edit through it when one is open.")
    (springs-initialized-p :initform nil :accessor world-springs-initialized-p)
    (ball-previous-centers :initform (make-hash-table) :reader world-ball-previous-centers)
    (authored-sequence :initform nil :accessor world-authored-sequence
-                      :documentation "The journal sequence Luvcraft's overlay of authored blocks is current at."))
+                      :documentation "The journal sequence Luvcraft's overlay of authored blocks is current at.")
+   (session :initform nil :accessor world-session
+            :documentation "The host or guest session joining this world to others (session.lisp), or NIL."))
   (:documentation "A Luvcraft world and everything that lives in it, without a window."))
 
 (defun make-luvcraft-world (&key block-world scene
@@ -301,6 +305,8 @@ as by STEER-LUVCRAFT-PLAYER with a tape's or a bot's next frame."
   (advance-world-sky world seconds)
   (terrain:advance-world-simulation (world-simulation world) seconds
                                     :before-tick before-tick)
+  (when (world-session world)
+    (advance-world-session (world-session world) seconds))
   (advance-world-populations world seconds)
   world)
 
@@ -391,7 +397,11 @@ conserve stock too."
               (and finite-p
                    (or (null entry) (zerop (luvcraft:block-inventory-entry-quantity entry)))))
       (return-from player-edit-world-cell (values nil :empty nil)))
-    (multiple-value-bind (edit status) (funcall scene-edit block)
+    (multiple-value-bind (edit status)
+        ;; A guest's world asks its host's sequencer instead (#8EZK9F).
+        (if (world-session world)
+            (session-edit-world-cell (world-session world) player cell block scene-edit)
+            (funcall scene-edit block))
       (when (and edit (world-physics world))
         (luvcraft::wake-physics-bodies-near
          (world-physics world) (- (luft:site-x cell) 1024) (luft:site-z cell)

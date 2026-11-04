@@ -29,7 +29,16 @@
              (true (eq expected target))
              (true (eq fullscreen fullscreen-p))))
   (fail (sly-client::parse-play-arguments '("luvcraft" "luvcraft-old")) 'error)
-  (fail (sly-client::parse-play-arguments '("--unknown")) 'error))
+  (fail (sly-client::parse-play-arguments '("--unknown")) 'error)
+  ;; Multiplayer options become PLAY keywords, for Luvcraft on Luft only.
+  (true (equal '(:player-id "guest" :join "localhost:47475")
+               (nth-value 2 (sly-client::parse-play-arguments
+                             '("luvcraft" "--join" "localhost:47475" "--player-id" "guest")))))
+  (true (equal '(:seed 121 :host t)
+               (nth-value 2 (sly-client::parse-play-arguments '("--host" "--seed" "121")))))
+  (fail (sly-client::parse-play-arguments '("--host" "--join" "localhost")) 'error)
+  (fail (sly-client::parse-play-arguments '("luft" "--host")) 'error)
+  (fail (sly-client::parse-play-arguments '("--join")) 'error))
 
 (define-test stale-ready-lisps-are-not-running
   (let* ((endpoint-probed-p nil)

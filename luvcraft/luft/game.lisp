@@ -114,12 +114,20 @@
 
 (defmethod render:advance-viewer-game ((viewer luvcraft-viewer) seconds)
   ;; The host has stepped the world's characters; the rest of it follows.
+  (let ((session (world-session (viewer-world viewer)))
+        (camera (render:viewer-camera viewer)))
+    (when session
+      (unless (session-viewer session)
+        (setf (session-viewer session) viewer))
+      (advance-world-session session seconds :yaw (render:camera-yaw camera)
+                                             :pitch (render:camera-pitch camera))))
   (advance-world-populations (viewer-world viewer) seconds)
   (luvcraft::advance-block-particles (viewer-particles viewer) seconds)
   (advance-viewer-companions viewer seconds))
 
 (defmethod render:viewer-figures ((viewer luvcraft-viewer))
-  (append (call-next-method) (animal-figure-list viewer)
+  (append (call-next-method) (remote-player-figures (viewer-world viewer))
+          (animal-figure-list viewer)
           (ball-figures viewer) (particle-figures viewer)))
 
 (defmethod render:viewer-world-actor ((viewer luvcraft-viewer))
@@ -256,12 +264,35 @@
     ((viewer luvcraft-viewer) description pathname)
   (luvcraft::write-luvcraft-save-description description pathname))
 
+(defun start-luvcraft-view (world local-player viewer-arguments &key world-pathname saved-world
+                                                                     terrain-bevels-p)
+  "Open a view of WORLD through LOCAL-PLAYER's eyes and return it."
+  (apply #'render:start-game-host
+         :solid (world-scene world)
+         :title *title*
+         :terrain-bevels-p terrain-bevels-p
+         :sky-factory 'make-luvcraft-sky-drawing
+         :terrain-factory 'make-luvcraft-terrain-drawing
+         :torch-factory 'make-luvcraft-torch-drawing
+         :finishing-factory 'make-luvcraft-image-finishing
+         :exposure-factory 'make-luvcraft-exposure
+         :figure-factory 'make-creature-figure-drawing
+         :world-pathname world-pathname
+         :saved-world saved-world
+         :frame-class 'luvcraft-viewer
+         :frame-initargs (list :world world :local-player local-player)
+         (alexandria:remove-from-plist
+          viewer-arguments :pathname :seed :relief :world-height :terrain-bevels-p
+          :host :join :port :player-id :name)))
+
 (defun play (&rest viewer-arguments
              &key (pathname (luvcraft::default-luvcraft-world-pathname)
                             pathname-p)
                seed (relief :alpine)
                (world-height luvcraft::*little-world-height*)
                (terrain-bevels-p nil)
+               host join (port wire:+default-port+)
+               (player-id (default-player-identity)) (name (default-player-name))
              &allow-other-keys)
   "Play Luvcraft on Luft and return its viewer.
 
@@ -273,7 +304,27 @@ PATHNAME given explicitly, never over the player's save. Terrain starts with
 plain cube faces; TERRAIN-BEVELS-P opts in, and the metabar switches it live.
 The resident window spans seven 64-cell chunks per side; the streaming
 metabar can adjust its radius without changing the world's collision rules.
-Other keys go to LUFT.RENDER:START-GAME-HOST."
+
+HOST true opens the world to guests on PORT (TCP and UDP 47475 by default)
+and announces it on the LAN.  JOIN, \"host[:port]\", plays the world that
+host serves instead: nothing is read from or written to this machine's
+saves.  Either way the local player is PLAYER-ID, called NAME.  Other keys
+go to LUFT.RENDER:START-GAME-HOST."
+  (when join
+    (return-from play
+      (multiple-value-bind (world player session pose)
+          (join-luvcraft-world join :identity player-id :name name
+                                    :scene-initargs
+                                    (list :residency-radius 3
+                                          :mesh-preparer render:+render-population-preparer+))
+        (declare (ignore session))
+        (start-luvcraft-view
+         world player viewer-arguments
+         :terrain-bevels-p terrain-bevels-p
+         :saved-world (list :player (coerce (wire:pose-position pose) 'list)
+                            :yaw (coerce (wire:pose-yaw pose) 'single-float)
+                            :pitch (coerce (wire:pose-pitch pose) 'single-float)
+                            :flying-p (wire:pose-flying pose))))))
   (let ((loaded-p (and pathname (null seed) (probe-file pathname))))
     (multiple-value-bind (block-world resume inhabitants journal)
         (if loaded-p
@@ -286,28 +337,26 @@ Other keys go to LUFT.RENDER:START-GAME-HOST."
                      :block-world block-world :inhabitants inhabitants
                      :scene (game:make-luvcraft-streaming-scene
                              source :residency-radius 3
-                             :mesh-preparer render:+render-population-preparer+))))
+                             :mesh-preparer render:+render-population-preparer+)))
+             (player (if host
+                         (make-luvcraft-player :resume resume :id player-id :name name)
+                         (make-luvcraft-player :resume resume))))
+        (when host
+          (host-luvcraft-world world player :port port :name name
+                                            :announce (format nil "~A's world" name)))
         (multiple-value-bind (position yaw pitch flying-p)
             (and resume (game:luvcraft-resume-luft-pose source resume))
-          (apply #'render:start-game-host
-                 :solid (world-scene world)
-                 :title *title*
-                 :terrain-bevels-p terrain-bevels-p
-                 :sky-factory 'make-luvcraft-sky-drawing
-                 :terrain-factory 'make-luvcraft-terrain-drawing
-                 :torch-factory 'make-luvcraft-torch-drawing
-                 :finishing-factory 'make-luvcraft-image-finishing
-                 :exposure-factory 'make-luvcraft-exposure
-                 :figure-factory 'make-creature-figure-drawing
-                 :world-pathname (and (or loaded-p pathname-p
-                                          (and pathname (null seed)))
-                                      pathname)
-                 :saved-world (and position
-                                   (list :player position :yaw yaw :pitch pitch
-                                         :flying-p flying-p))
-                 :frame-class 'luvcraft-viewer
-                 :frame-initargs
-                 (list :world world :local-player (make-luvcraft-player :resume resume))
-                 (alexandria:remove-from-plist
-                  viewer-arguments :pathname :seed :relief :world-height
-                  :terrain-bevels-p)))))))
+          (start-luvcraft-view
+           world player viewer-arguments
+           :terrain-bevels-p terrain-bevels-p
+           :world-pathname (and (or loaded-p pathname-p
+                                    (and pathname (null seed)))
+                                pathname)
+           :saved-world (and position
+                             (list :player position :yaw yaw :pitch pitch
+                                   :flying-p flying-p))))))))
+
+(defmethod render::quiesce-viewer-services :after ((viewer luvcraft-viewer))
+  ;; Guests are told goodbye before the window and its world go.
+  (let ((session (world-session (viewer-world viewer))))
+    (when session (close-world-session session))))
