@@ -669,7 +669,7 @@
    :aperture 0.85))
 
 ;;; The traveler.  Both plates hold the animation clock still: a character
-;;; recipe that cannot ask for the same pose twice is not a recipe. #TR4VLR
+;;; recipe that cannot ask for the same pose twice is not a recipe.
 
 (defun capture-luft-traveler
     (pathname &key (character-time 0.5) (yaw 2.2455373) (pitch -0.5165006)
@@ -819,7 +819,7 @@
   (film-luft-wizard-bridge-walk pathname))
 
 ;;; The streamed highlands. These two cameras retain the regional read and the
-;;; citadel-scale read that caught the old sine terrain's repetition. #H1GHLD
+;;; citadel-scale read that caught the old sine terrain's repetition.
 
 (defun wait-for-luft-landscape-residency (viewer)
   (let ((canvas (luft.render::viewer-canvas viewer))

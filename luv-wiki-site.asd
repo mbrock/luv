@@ -32,6 +32,7 @@
                  (:file "luft-rendering-campaign")
                  (:file "luft-far-field")
                  (:file "mathematical-shaders")
+                 (:file "hlsl-and-shaderc")
                  (:file "slug-bezier")
                  (:file "metal-backend")
                  (:file "moppe-legacy")
