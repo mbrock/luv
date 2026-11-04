@@ -171,7 +171,7 @@
                         "float4 clip_position [[position, invariant]];"
                         "float4 clip_position [[position]];")
                     source))
-      (parachute:is eq nil (metal-compiler-diagnostics source)))))
+      (metal-compiles source))))
 
 (define-test mesh-position-invariance-lowers-to-metal-and-spir-v
   (dolist (annotation '(nil (:invariant nil) (:invariant t)))
@@ -196,7 +196,7 @@
                       annotations :test #'equal)))
         (parachute:is eq nil (spir-v-validation-diagnostics
                              specification :environment "vulkan1.2"))
-        (parachute:is eq nil (metal-compiler-diagnostics source))))))
+        (metal-compiles source)))))
 
 (define-test task-and-mesh-specifications-retain-their-workgroup-contracts
   (let* ((task (msl-task-probe))
@@ -611,30 +611,29 @@
 ;;; Integers, booleans, and bits.  #CAI3RP
 
 (defun metal-compiler-diagnostics (source)
-  "Compile MSL SOURCE with Apple's metal when Xcode is present.  Return NIL
-on success or without the compiler, else its report."
-  (let ((xcrun (if (probe-file "/usr/bin/xcrun")
-                   '("env" "-u" "DEVELOPER_DIR" "-u" "SDKROOT"
-                     "/usr/bin/xcrun" "-sdk" "macosx")
-                   '("xcrun" "-sdk" "macosx"))))
-    (when (ignore-errors
-           (zerop (nth-value 2 (uiop:run-program
-                                (append xcrun '("--find" "metal"))
-                                :ignore-error-status t))))
-      (uiop:with-temporary-file (:pathname metal :type "metal" :keep nil
-                                 :stream stream :direction :output)
-        (write-string source stream)
-        :close-stream
-        (uiop:with-temporary-file (:pathname air :type "air" :keep nil)
-          (multiple-value-bind (output error-output status)
-              (uiop:run-program
-               (append xcrun (list "metal" "-std=metal4.0" "-c"
-                                   "-fpreserve-invariance"
-                                   (uiop:native-namestring metal)
-                                   "-o" (uiop:native-namestring air)))
-               :output :string :error-output :string :ignore-error-status t)
-            (unless (zerop status)
-              (format nil "~A~A~%~A" output error-output source))))))))
+  "Compile MSL SOURCE with Apple's offline metal.  Return NIL on success,
+else its report."
+  (uiop:with-temporary-file (:pathname metal :type "metal" :keep nil
+                             :stream stream :direction :output)
+    (write-string source stream)
+    :close-stream
+    (uiop:with-temporary-file (:pathname air :type "air" :keep nil)
+      (multiple-value-bind (output error-output status)
+          (uiop:run-program
+           (luv.test-support:xcrun-command
+            "-sdk" "macosx" "metal" "-std=metal4.0" "-c"
+            "-fpreserve-invariance"
+            (uiop:native-namestring metal)
+            "-o" (uiop:native-namestring air))
+           :output :string :error-output :string :ignore-error-status t)
+        (unless (zerop status)
+          (format nil "~A~A~%~A" output error-output source))))))
+
+(defun metal-compiles (source)
+  "Check that Apple's offline metal accepts MSL SOURCE, or skip, saying why,
+where the compiler is unavailable."
+  (luv.test-support:with-metal-compiler
+    (parachute:is eq nil (metal-compiler-diagnostics source))))
 
 ;;; A depth texture's texel is a scalar in Metal; the language's texel-load
 ;;; result is a vec4 on every target, as HLSL's Load widens it.
@@ -653,7 +652,7 @@ on success or without the compiler, else its report."
     (true (search "float4 texel = float4(depth.read(uint2(uint(1.0f), uint(2.0f))));"
                   source)
           "the scalar read widens to float4: ~A" source)
-    (parachute:is eq nil (metal-compiler-diagnostics source))))
+    (metal-compiles source)))
 
 ;;; A LET* that rebinds a name in one scope, which C cannot redeclare.
 (shader:define-shader msl-rebinding-probe
@@ -670,7 +669,7 @@ on success or without the compiler, else its report."
     (true (search "float shade_2 = (shade + (shade * stage_in.value));"
                   source)
           "the rebinding takes a name of its own: ~A" source)
-    (parachute:is eq nil (metal-compiler-diagnostics source))))
+    (metal-compiles source)))
 
 (define-test integers-and-booleans-lower-to-metal
   (let ((source (msl:msl-document-source
@@ -692,7 +691,7 @@ on success or without the compiler, else its report."
     (true (search "bool inside = (all(near) && (!(halved == 0)));" source))
     (true (search "|| false)" source))
     (true (search "all((near == bool2(spread)))" source))
-    (parachute:is eq nil (metal-compiler-diagnostics source))))
+    (metal-compiles source)))
 
 (define-test matrices-lower-to-metal-column-major-products
   ;; #QEHEEE
@@ -707,7 +706,7 @@ on success or without the compiler, else its report."
     (true (search "(transpose(basis) * corner.xyz)" source))
     (true (search "((2.0f * float2x2(" source))
     (true (search "frame.view_projection[3].w" source))
-    (parachute:is eq nil (metal-compiler-diagnostics source))))
+    (metal-compiles source)))
 
 (define-test structures-lower-to-metal-device-structs
   ;; #V16OXI
@@ -733,7 +732,7 @@ on success or without the compiler, else its report."
     (true (search "ProbeHit{normalize(" source))
     (true (search "ProbeParticle fold_state_1 = " source))
     (true (search "if (hit.inside)" source))
-    (parachute:is eq nil (metal-compiler-diagnostics source))))
+    (metal-compiles source)))
 
 ;;; Textures, fragment built-ins, and compute effects in MSL.
 
@@ -743,7 +742,7 @@ on success or without the compiler, else its report."
     (true (search "uint primitive [[primitive_id]]" source))
     (true (search "result.value = primitive;" source))
     (false (search "stage_in.primitive" source))
-    (false (metal-compiler-diagnostics source))))
+    (metal-compiles source)))
 
 (define-test texture-kinds-and-fragment-built-ins-lower-to-metal
   (let* ((document (msl:compile-msl (texture-kinds-fragment-probe)))
@@ -770,7 +769,7 @@ on success or without the compiler, else its report."
                     "discard_fragment();"
                     "result.depth = pixel.z;"))
       (true (search text source)))
-    (false (metal-compiler-diagnostics source))))
+    (metal-compiles source)))
 
 (define-test workgroup-effects-lower-to-metal-atomics-and-simdgroups
   (let* ((document (msl:compile-msl (workgroup-effects-probe)))
@@ -799,4 +798,4 @@ on success or without the compiler, else its report."
                     "image.write(neighbour, texel);"
                     "uint2(image.get_width(), image.get_height())"))
       (true (search text source)))
-    (false (metal-compiler-diagnostics source))))
+    (metal-compiles source)))

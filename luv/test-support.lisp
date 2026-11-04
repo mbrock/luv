@@ -9,7 +9,10 @@
            #:suite-failed-package
            #:suite-failed-report
            #:test-root-count
-           #:test-package))
+           #:test-package
+           #:xcrun-command
+           #:metal-compiler-unavailable
+           #:with-metal-compiler))
 
 (in-package #:luv.test-support)
 
@@ -30,6 +33,69 @@
         ((< seconds 600) (format nil "~Ds" (round seconds)))
         (t (multiple-value-bind (minutes secs) (floor (round seconds) 60)
              (format nil "~D:~2,'0D" minutes secs)))))
+
+;;; Apple's offline Metal compiler
+
+(defun xcrun-command (&rest arguments)
+  "Apple's xcrun with ARGUMENTS.  Nix shells put xcbuild's xcrun first and
+point DEVELOPER_DIR at a bare SDK; Metal's compiler lives in Xcode's."
+  (if (probe-file "/usr/bin/xcrun")
+      (list* "env" "-u" "DEVELOPER_DIR" "-u" "SDKROOT" "/usr/bin/xcrun"
+             arguments)
+      (list* "xcrun" arguments)))
+
+(defvar *metal-compiler-unavailable* :unprobed)
+
+(defun probe-metal-compiler ()
+  "Compile an empty Metal 4 kernel; NIL on success, else why not."
+  (uiop:with-temporary-file (:pathname source :type "metal" :keep nil
+                             :stream stream :direction :output)
+    (write-line "kernel void luv_probe() {}" stream)
+    :close-stream
+    (uiop:with-temporary-file (:pathname air :type "air" :keep nil)
+      (multiple-value-bind (output error-output status)
+          (ignore-errors
+           (uiop:run-program
+            (xcrun-command "-sdk" "macosx" "metal" "-std=metal4.0" "-c"
+                           (uiop:native-namestring source)
+                           "-o" (uiop:native-namestring air))
+            :output :string :error-output :string :ignore-error-status t))
+        (cond ((null status) "xcrun is not available")
+              ((zerop status) nil)
+              (t (let ((report (string-trim '(#\Space #\Tab #\Newline)
+                                            (concatenate 'string
+                                                         error-output output))))
+                   ;; xcrun repeats the tool's own "error: " prefix.
+                   (loop while (uiop:string-prefix-p "error: " report)
+                         do (setf report (subseq report 7)))
+                   (if (string= report "")
+                       (format nil "xcrun metal exited with status ~D" status)
+                       (subseq report 0 (position #\Newline report))))))))))
+
+(defun metal-compiler-unavailable ()
+  "NIL when Apple's offline Metal compiler compiles, else why it cannot.
+Probes once per image, and says so once when tests will skip."
+  (when (eq *metal-compiler-unavailable* :unprobed)
+    (setf *metal-compiler-unavailable* (probe-metal-compiler))
+    (when *metal-compiler-unavailable*
+      (format t "~&Skipping offline Metal compilation: ~A.~%"
+              *metal-compiler-unavailable*)))
+  *metal-compiler-unavailable*)
+
+(defmacro with-metal-compiler (&body body)
+  "Run BODY's checks with Apple's offline Metal compiler, or record one
+skipped result that gives the reason it is unavailable."
+  ;; PARACHUTE:SKIP reports its forced checks as passed; this result is
+  ;; counted under Skipped.
+  (let ((reason (gensym "REASON")))
+    `(let ((,reason (metal-compiler-unavailable)))
+       (if ,reason
+           (parachute:eval-in-context
+            parachute:*context*
+            (make-instance 'parachute:result
+                           :expression 'with-metal-compiler
+                           :status :skipped :description ,reason))
+           (progn ,@body)))))
 
 (defun test-roots (package)
   (remove-if #'parachute:parent

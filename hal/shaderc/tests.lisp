@@ -9,6 +9,8 @@
 (defpackage #:luv.shaderc.tests
   (:use #:cl)
   (:import-from #:parachute #:define-test #:true #:false #:is #:fail)
+  (:import-from #:luv.test-support #:xcrun-command
+                #:metal-compiler-unavailable #:with-metal-compiler)
   (:local-nicknames (#:shader #:luv.shader)
                     (#:shaderc #:luv.shaderc)
                     (#:hlsl #:luv.hlsl)
@@ -28,14 +30,6 @@
 (defun tool-available-p (&rest command)
   (ignore-errors
    (zerop (nth-value 2 (uiop:run-program command :ignore-error-status t)))))
-
-(defun xcrun-command (&rest arguments)
-  "Apple's xcrun with ARGUMENTS.  Nix shells put xcbuild's xcrun first and
-point DEVELOPER_DIR at a bare SDK; Metal's compiler lives in Xcode's."
-  (if (probe-file "/usr/bin/xcrun")
-      (list* "env" "-u" "DEVELOPER_DIR" "-u" "SDKROOT" "/usr/bin/xcrun"
-             arguments)
-      (list* "xcrun" arguments)))
 
 (defun run-tool (command)
   "Run COMMAND; return NIL on success, else its diagnostics."
@@ -76,8 +70,7 @@ reflection header; NIL on success or without a C++ compiler."
 return their failures."
   (let ((base (format nil "~A.~A" program stage))
         (failures nil))
-    (when (apply #'tool-available-p
-                 (xcrun-command "-sdk" "macosx" "--find" "metal"))
+    (unless (metal-compiler-unavailable)
       (push (run-tool
              (xcrun-command
               "-sdk" "macosx" "metal" "-std=metal4.0" "-c"
@@ -341,8 +334,7 @@ return their failures."
                (true (search "@group(2) @binding(3) var shadow_compare: sampler_comparison;"
                              fragment-wgsl)))
              (is eq nil (wgsl-program-diagnostics directory))
-             (when (apply #'tool-available-p
-                          (xcrun-command "-sdk" "macosx" "--find" "metal"))
+             (with-metal-compiler
                (dolist (stage '("vertex" "fragment"))
                  (is eq nil
                      (run-tool
@@ -456,8 +448,7 @@ return their failures."
                  (is eq nil (run-tool
                              (list "spirv-val" "--target-env" "vulkan1.0"
                                    (uiop:native-namestring spir-v)))))
-               (when (apply #'tool-available-p
-                            (xcrun-command "-sdk" "macosx" "--find" "metal"))
+               (with-metal-compiler
                  (is eq nil
                      (run-tool
                       (xcrun-command
@@ -490,8 +481,7 @@ return their failures."
 Metal, DXC, and the C++ compiler when present.  Return the failures."
   (let ((failures nil)
         (name (shaderc:compiled-program-name compiled))
-        (metal-p (apply #'tool-available-p
-                        (xcrun-command "-sdk" "macosx" "--find" "metal")))
+        (metal-p (not (metal-compiler-unavailable)))
         (dxc (let ((dxc (or (uiop:getenv "LUV_DXC") "dxc")))
                (and (tool-available-p dxc "--version") dxc)))
         (compiler (let ((compiler (or (uiop:getenv "CXX") "c++")))
