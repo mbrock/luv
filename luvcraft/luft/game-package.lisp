@@ -24,6 +24,8 @@
            #:advance-world-sky
            #:advance-world-populations
            #:player-edit-world-cell
+           #:world-edit-actor
+           #:*world-edit-actor*
            #:luvcraft-world-save-description
            #:save-luvcraft-world
            ;; A player in it.

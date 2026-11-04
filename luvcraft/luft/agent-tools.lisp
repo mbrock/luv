@@ -38,11 +38,13 @@
           (error "Another solid cell blocks the companion's reach.")))))
   t)
 
-(defun companion-edit (world cell placement)
-  "Edit CELL as WORLD's companions do: through its open view, else as its owner."
-  (if (world-editor world)
-      (funcall (world-editor world) cell placement)
-      (player-edit-world-cell world (world-owner world) cell placement)))
+(defun companion-edit (world inhabitant cell placement)
+  "Edit CELL as INHABITANT, from its owner's stock: through WORLD's open view, else directly.
+The journal names INHABITANT as the actor, so its edits undo on their own."
+  (let ((*world-edit-actor* inhabitant))
+    (if (world-editor world)
+        (funcall (world-editor world) cell placement)
+        (player-edit-world-cell world (world-owner world) cell placement))))
 
 (defun edit-agent-cell (world inhabitant cell placement)
   (validate-agent-reach world inhabitant cell)
@@ -52,7 +54,7 @@
     (unwind-protect
          (progn
            (setf (player-held-block player) nil)
-           (multiple-value-bind (edit status) (companion-edit world cell placement)
+           (multiple-value-bind (edit status) (companion-edit world inhabitant cell placement)
              (declare (ignore edit))
              (values (format nil "Cell (~D ~D ~D): ~A" (luft:site-x cell) (luft:site-y cell)
                              (luft:site-z cell) status)

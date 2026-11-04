@@ -305,21 +305,31 @@ under its own residency and focus rules, before this."
           (luvcraft:block-world-source (world-block-world world)))
          block (game:site-luvcraft-cell (world-source world) cell)))
 
-(defun apply-world-scene-edit (world cell placement)
-  "Edit WORLD's scene directly, as a headless world does: it has no meshes to schedule."
+(defvar *world-edit-actor* nil
+  "The journal actor of the edit in progress when it is not the editing
+player's own, such as a companion building for its player.")
+
+(defun world-edit-actor (player)
+  "The principal whose journal event an edit by or for PLAYER is."
+  (or *world-edit-actor* (player-id player)))
+
+(defun apply-world-scene-edit (world player cell placement)
+  "Sequence PLAYER's edit in WORLD's scene, as a headless world does: no view meshes it."
   (if (and placement
            (some (lambda (body) (terrain:body-overlaps-cell-p body cell))
                  (terrain:simulation-bodies (world-simulation world))))
       (values nil :occupied)
-      (multiple-value-bind (edit status) (terrain:edit-streaming-scene-cell
-                                          (world-scene world) cell placement)
-        (values edit status))))
+      (terrain:edit-world-cell (world-scene world) cell placement
+                               :actor (world-edit-actor player))))
 
 (defun player-edit-world-cell (world player cell placement
-                               &key (scene-edit (lambda () (apply-world-scene-edit world cell placement))))
+                               &key (scene-edit (lambda ()
+                                                  (apply-world-scene-edit
+                                                   world player cell placement))))
   "Change CELL to PLACEMENT, or mine it when PLACEMENT is NIL, as PLAYER.
 
-Return the edit, its status, and the block mined, if any.  As in the original
+Return the journal event, its status (:EDITED, or :QUEUED while a mesh
+cohort is in flight), and the block mined, if any.  As in the original
 game, materials are unlimited and only carried blocks, such as films, are
 picked up and spent; PLAYER's stock changes only after SCENE-EDIT, a function
 of no arguments returning an edit and status, accepts the change.  A headless

@@ -615,4 +615,14 @@
                                               (v:vec3-z (terrain:body-position body)))))
                        1d-6))
               (true (< (abs (- yaw 0.75)) 1e-6))
-              (true (< (abs (- pitch -0.12)) 1e-6)))))))))
+              (true (< (abs (- pitch -0.12)) 1e-6))))))
+      ;; Undo is per player: Ada's undo takes back her film, not Bea's stone.
+      (let ((guest (host:add-world-player
+                    world (host:make-luvcraft-player
+                           :id "bea" :character (terrain:make-walking-character
+                                                 :position (v:make-vec3 980.5d0 1036.5d0 12d0)))))
+            (stone (game:block-placement luvcraft::*stone-block*)))
+        (is eq :edited (nth-value 1 (host:player-edit-world-cell world guest mined stone)))
+        (is eq :edited (nth-value 1 (terrain:undo-world-events scene "ada")))
+        (is eq nil (terrain:scene-material-placement-at scene built))
+        (is eq stone (terrain:scene-material-placement-at scene mined))))))

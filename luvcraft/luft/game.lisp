@@ -119,6 +119,10 @@
   (append (call-next-method) (animal-figure-list viewer)
           (ball-figures viewer) (particle-figures viewer)))
 
+(defmethod render:viewer-world-actor ((viewer luvcraft-viewer))
+  ;; Undo is per player: each takes back only its own edits.
+  (world-edit-actor (viewer-local-player viewer)))
+
 (defmethod render:apply-viewer-world-edit :around
     ((viewer luvcraft-viewer) cell placement)
   ;; The local player edits the world; the host's own edit, which schedules
