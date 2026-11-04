@@ -283,13 +283,26 @@ format-2 save reader (#Y3S82T).
 identity is an offset and optional entity, and a format-1 save with films
 loads intact.
 
-** NEXT Speak the wire protocol
+** DONE Speak the wire protocol
 :PROPERTIES:
 :ID: H6A8P4
 :END:
 
 /Intent./ Realize #A8LXLK as its own system: the codec, both channels, the
 network worker and mailbox, discovery, and an in-memory loopback transport.
+
+/Evidence./ =luvcraft-wire= is a codec of typed records and fourteen
+message types, with no game dependency; =luvcraft-wire/net= adds endpoints
+whose one worker owns the sockets.  Its tests round-trip a rich sample of
+every registered type, refuse every truncation of each, and refuse patched
+NaNs, infinities, a non-unit quaternion, pitch, yaw, speed, site, offset,
+enumeration, boolean, and UTF-8 faults.  Two endpoints in one image find
+each other by beacon and by =host:port= on real sockets, and by name on a
+loopback network, then trade the handshake, chat, events, poses, and entity
+snapshots by datagram, or by the stream when datagrams are off.  Open:
+the shape of block entities, the inventory, and the chunk content encoding
+are placeholders for #JH74JS, #7V3536, and #JHWV75 to settle; there is no
+reconnection or lobby entry yet.
 
 /Done when./ Every message round-trips and malformed input is refused; two
 endpoints in one image find each other by broadcast and by name, and trade
