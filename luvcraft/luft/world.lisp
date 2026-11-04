@@ -235,6 +235,11 @@ actors, such as companions, edit through it when one is open.")
   (nth-value 1 (gethash (luft:chunk-key-at x y)
                         (terrain:streaming-scene-store (world-scene world)))))
 
+(defun ground-resident-p (world x y)
+  "Whether WORLD's collision knows column X, Y.  More chunks are resident for
+meshing than collide, so whatever falls waits where this is false (#I6O4J6)."
+  (terrain:scene-collision-resident-p (world-scene world) x y))
+
 (defun find-world-player (world id)
   (find id (world-players world) :key #'player-id :test #'equal))
 
@@ -276,11 +281,11 @@ and flies by it, and its rider intent reins whatever it rides by the same axes."
   player)
 
 (defun player-ground-resident-p (world player)
-  "Whether PLAYER's character stands on a resident chunk of WORLD's scene."
+  "Whether PLAYER's character stands where WORLD's scene has collision."
   (let ((character (player-character player)))
     (and character
          (let ((p (terrain:body-position (terrain:character-body character))))
-           (cell-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))))))
+           (ground-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))))))
 
 ;;; Time.
 

@@ -143,7 +143,8 @@
       (let ((p (animal-luft-position animal)))
         ;; Unknown chunks are air to queries. Freeze inhabitants there rather
         ;; than dropping them through the absent world or forgetting them.
-        (when (cell-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
+        ;; A chunk resident only for meshing has no collision either.
+        (when (ground-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
           (luvcraft::advance-critter animal contact seconds))))))
 
 (defun animal-figures (animal)

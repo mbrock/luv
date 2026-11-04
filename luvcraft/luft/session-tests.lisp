@@ -392,3 +392,55 @@ and their resident chunk hashes are equal."
     (remhash edge (terrain:streaming-scene-loaded scene))
     (is = 1 (terrain:apply-queued-world-events scene nil nil))
     (true (terrain:scene-material-placement-at scene target))))
+
+;;; Interest (#I6O4J6).  More chunks are resident for meshing than collide.
+
+(define-test creatures-wait-where-their-ground-has-no-collision
+  ;; After a seam crossing, or as a save loads, a creature can stand in a
+  ;; chunk that is resident for meshing but outside every collision window.
+  ;; Absent collision is air, so it used to fall there forever.
+  (let* ((block-world (luvcraft:make-empty-little-block-world :seed 291 :chunk-height 16))
+         (source (game:luvcraft-world-luft-source block-world))
+         (near (luft:chunk-key-at 1024 1024))
+         (far (luft:chunk-key-at 1152 1024))
+         (scene (make-resident (game:make-luvcraft-streaming-scene source)
+                               (list near (luft:chunk-key-at 1088 1024) far)
+                               (list near)))
+         (world (host:make-luvcraft-world :block-world block-world :scene scene))
+         (x 1182) (y 1050)
+         (z (ground world x y))
+         (turtle (make-instance 'luvcraft::turtle :seed 3
+                                :position (v:make-vec3 (- x 1024 -0.5d0) (float z 1d0)
+                                                       (- y 1024 -0.5d0))))
+         (gnome (host::make-inhabitant world :gnome
+                                       (v:make-vec3 (+ x 3.5d0) (+ y 0.5d0)
+                                                    (float (ground world (+ x 3) y) 1d0))))
+         ;; Controls: in collision, one of each drops from the air to the ground.
+         (falling-turtle (make-instance 'luvcraft::turtle :seed 4
+                                        :position (v:make-vec3 30.5d0 (+ 3d0 (ground world 1054 1030))
+                                                               6.5d0)))
+         (falling-gnome (host::make-inhabitant world :gnome
+                                               (v:make-vec3 1040.5d0 1040.5d0
+                                                            (+ 3d0 (ground world 1040 1040))))))
+    (setf (host::world-animals world) (list turtle falling-turtle)
+          (host::world-animals-initialized-p world) t
+          (host::world-agents world) (list gnome falling-gnome)
+          (host::world-agents-initialized-p world) t)
+    (true (host::cell-resident-p world x y) "the far chunk is resident for meshing")
+    (true (not (terrain:scene-collision-resident-p scene x y)) "but has no collision")
+    (flet ((advance (seconds)
+             (dotimes (i (round seconds 1/60))
+               (host::advance-world-animals world 1/60)
+               (host::advance-world-companions world 1/60)))
+           (turtle-z (turtle) (v:vec3-y (luvcraft::critter-position turtle)))
+           (gnome-z (gnome) (v:vec3-z (host::inhabitant-position gnome))))
+      (advance 2)
+      (is = z (turtle-z turtle))
+      (is = (ground world (+ x 3) y) (gnome-z gnome))
+      (true (< (abs (- (ground world 1054 1030) (turtle-z falling-turtle))) 0.01))
+      (true (< (abs (- (ground world 1040 1040) (gnome-z falling-gnome))) 0.01))
+      ;; Once collision covers them, they stand on it.
+      (terrain:install-streaming-collision scene (list near far))
+      (advance 2)
+      (true (< (abs (- z (turtle-z turtle))) 0.01))
+      (true (< (abs (- (ground world (+ x 3) y) (gnome-z gnome))) 0.01)))))
