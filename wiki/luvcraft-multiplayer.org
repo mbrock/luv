@@ -248,7 +248,7 @@ landing small commits on =main=.  The split (#7V3536) lands first; the
 journal (#48I94O) rebases its viewer edit hunk onto it.  The clock
 (#X56QS3) waits for the split.  The others share no files.
 
-** NEXT Split the game into world, player, and view
+** DONE Split the game into world, player, and view
 :PROPERTIES:
 :ID: 7V3536
 :END:
@@ -258,6 +258,27 @@ journal (#48I94O) rebases its viewer edit hunk onto it.  The clock
 /Done when./ Every =luvcraft-viewer= slot has moved to its world, player, or
 view; a headless world with one player advances, edits, and saves in tests;
 and the game plays and captures as before.
+
+/Evidence./ A [[lisp:luvcraft.luft.game:luvcraft-world]] holds the block
+world, the simulation and its streaming scene, turtles, balls and springs,
+companions, the sky, and an ordered players table keyed by stable id
+([[lisp:luvcraft.luft.game:add-world-player]],
+[[lisp:luvcraft.luft.game:find-world-player]]).  A
+[[lisp:luvcraft.luft.game:luvcraft-player]] owns its character, inventory and
+hotbar, the placement and exact block in hand, creative mode, rider intent,
+and the ball hand.  The viewer keeps its camera, controls, overlays,
+particles, and first-person body, and refers to =viewer-world= and
+=viewer-local-player=; its host protocols forward to them.
+[[lisp:luvcraft.luft.game:advance-luvcraft-world]] steps a headless world, and
+every edit is [[lisp:luvcraft.luft.game:player-edit-world-cell]], whose stock
+accounting the view's =apply-viewer-world-edit= forwards to.  Edits are
+journal events of the player's id, or of a companion building for its owner,
+so undo is per actor (#3F0SCZ).  A test advances, edits, and saves a world
+with one player, raises a second world from that save in the same image, and
+checks that one player's undo leaves another's edit.  The original save loads,
+plays at 60 FPS, and resumes exactly.  Turtles in a nearby chunk still fall
+through the floor when the player crosses a chunk seam; that predates the
+split, and #I6O4J6's residency for every player is where to look.
 
 ** DONE Keep one journal of events, and queue sequenced edits
 :PROPERTIES:
