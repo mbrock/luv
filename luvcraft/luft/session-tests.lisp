@@ -444,3 +444,94 @@ and their resident chunk hashes are equal."
       (advance 2)
       (true (< (abs (- z (turtle-z turtle))) 0.01))
       (true (< (abs (- (ground world (+ x 3) y) (gnome-z gnome))) 0.01)))))
+
+(defun stream-scene (scene producer x y &key (until (constantly t)) (seconds 20))
+  "Retarget SCENE around X, Y on PRODUCER and install every result, as a view's
+frames would, until UNTIL holds with nothing in flight."
+  (let ((deadline (+ (get-internal-real-time) (* seconds internal-time-units-per-second))))
+    (flet ((idle-p ()
+             (and (zerop (hash-table-count (terrain:streaming-scene-load-outstanding scene)))
+                  (null (terrain:streaming-scene-replacement scene)))))
+      (loop
+        ;; Settled when a retarget with nothing in flight demands nothing.
+        (let* ((idle-p (idle-p))
+               (quiet-p (null (terrain:retarget-streaming-scene scene producer 1 x y))))
+          (when (and idle-p quiet-p (idle-p) (funcall until)) (return t)))
+        (loop for (result present-p)
+                = (multiple-value-list (luv.production:receive-production-result-no-hang producer))
+              while present-p
+              do (if (typep (luv.production:production-result-request result)
+                            'terrain::streaming-mesh-request)
+                     (terrain::receive-streaming-mesh-result scene result)
+                     (terrain::receive-streaming-source-result scene result)))
+        (let ((replacement (terrain:streaming-scene-replacement scene)))
+          (when (and replacement (terrain:streaming-replacement-result replacement))
+            (when (terrain:streaming-replacement-request replacement)
+              (setf (terrain:streaming-scene-mesh-cache scene)
+                    (terrain:streaming-mesh-result-mesh-cache
+                     (terrain:streaming-replacement-result replacement))))
+            (setf (terrain:streaming-scene-replacement scene) nil)))
+        (when (> (get-internal-real-time) deadline) (return nil))
+        (sleep 0.005)))))
+
+(define-test the-host-collides-beside-a-distant-guest
+  (let ((producer (luv.production:make-single-worker-production-system :name "interest")))
+    (unwind-protect
+         (with-host (world session network)
+           (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
+             (let* ((scene (host:world-scene world))
+                    (ada (terrain:body-position
+                          (terrain:character-body (host:player-character
+                                                   (host:find-world-player world "ada")))))
+                    ;; Five chunks east of Ada: outside her collision and her view.
+                    (x 1380) (y 1060)
+                    (far (luft:chunk-key-at x y))
+                    (z (progn (make-resident (host:world-scene guest-world) (list far))
+                              (ground guest-world x y)))
+                    (body (terrain:character-body
+                           (setf (host:player-character bea) (terrain:make-walking-character)))))
+               (flet ((stream (&rest arguments)
+                        (apply #'stream-scene scene producer (v:vec3-x ada) (v:vec3-y ada)
+                               arguments)))
+                 (true (stream))
+                 (true (not (terrain:scene-collision-resident-p scene x y)))
+                 ;; Bea walks there; her poses declare her focus on the host.
+                 (setf (v:vec3-x (terrain:body-position body)) (+ x 0.5d0)
+                       (v:vec3-y (terrain:body-position body)) (+ y 0.5d0)
+                       (v:vec3-z (terrain:body-position body)) (float z 1d0))
+                 (true (pump (list session guest)
+                             :until (lambda ()
+                                      (eql far (gethash "bea" (terrain:streaming-scene-interest
+                                                               scene))))))
+                 (true (stream :until (lambda () (terrain:scene-collision-resident-p scene x y))))
+                 ;; Collision is resident around both players; publication
+                 ;; follows only Ada.
+                 (true (terrain:scene-collision-resident-p scene (+ x 64) y))
+                 (true (terrain:scene-collision-resident-p scene (floor (v:vec3-x ada)) (floor (v:vec3-y ada))))
+                 (true (every (lambda (key)
+                                (<= (abs (- (luft:chunk-key-x key) (luft:chunk-key-x *session-chunk*))) 1))
+                              (terrain::streaming-scene-loaded-source-keys scene)))
+                 (true (not (nth-value 1 (gethash far (terrain:streaming-scene-loaded scene)))))
+                 ;; A body walking beside Bea in the host's simulation stays on
+                 ;; the ground the guest sees there.
+                 (let ((walker (terrain:make-walking-character
+                                :position (v:make-vec3 (+ x 0.5d0) (+ y 0.5d0) (+ z 2d0))))
+                       (simulation (host:world-simulation world)))
+                   (terrain:add-simulation-character simulation walker)
+                   (terrain:set-character-movement walker 1d0 0d0)
+                   (dotimes (i 60) (terrain:advance-world-simulation simulation 1/60))
+                   (let ((p (terrain:body-position (terrain:character-body walker))))
+                     (true (> (v:vec3-x p) (+ x 2)))
+                     (true (terrain:body-grounded-p (terrain:character-body walker)))
+                     (is = (ground guest-world (floor (v:vec3-x p)) (floor (v:vec3-y p)))
+                         (round (v:vec3-z p))))
+                   (terrain:remove-simulation-character simulation walker))
+                 ;; When she leaves, her focus and its collision go.
+                 (host:close-world-session guest)
+                 (true (pump (list session)
+                             :until (lambda ()
+                                      (null (terrain:streaming-scene-interest-keys scene)))))
+                 (true (stream :until (lambda ()
+                                        (not (terrain:scene-collision-resident-p scene x y)))))
+                 (true (not (nth-value 1 (gethash far (terrain:streaming-scene-store scene)))))))))
+      (luv.production:stop-production-system producer))))

@@ -574,6 +574,7 @@ beacon on UDP 47474."
   (let ((player (guest-peer-player session peer)))
     (when player
       (setf (session-guests session) (remove peer (session-guests session) :key #'car))
+      (terrain:remove-streaming-scene-interest (session-scene session) (player-id player))
       (let ((pose (player-last-pose session player)))
         (when pose (setf (gethash (player-id player) (session-departed session)) pose))
         (forget-remote-player session (player-id player))
@@ -642,6 +643,11 @@ beacon on UDP 47474."
     ;; A guest speaks only for its own body.
     (when (and player (equal (player-id player) (wire:pose-message-player message)))
       (receive-pose session message)
+      ;; The host simulates around every guest: its collision follows each
+      ;; guest's latest pose (#I6O4J6).  A guest keeps only its own focus.
+      (let ((position (wire:pose-position (wire:pose-message-pose message))))
+        (terrain:set-streaming-scene-interest
+         (session-scene session) (player-id player) (aref position 0) (aref position 1)))
       (dolist (guest (session-guests session))
         (unless (eq (car guest) peer)
           (net:send-message (session-endpoint session) message (car guest)))))))
@@ -1000,6 +1006,7 @@ and PITCH are the local player's look, when a view knows it."
     (setf (session-state session) :closed))
   (net:stop-endpoint (session-endpoint session))
   (dolist (player (session-remote-players session))
+    (terrain:remove-streaming-scene-interest (session-scene session) (player-id player))
     (remove-world-player (session-world session) player))
   (when (eq (world-session (session-world session)) session)
     (setf (world-session (session-world session)) nil))
