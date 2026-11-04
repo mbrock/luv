@@ -64,7 +64,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; Nothing here draws.  The renderer and the ateliers sit on this layer.
-  :depends-on ("luft" "luv" "luv/production")
+  :depends-on ("luft" "luv" "luv/production" "sb-md5")
   :serial t
   :components ((:module "terrain"
                 :pathname "luft/terrain"
@@ -83,7 +83,8 @@
                              (:file "streamed-light")
                              (:file "streaming")
                              (:file "streaming-mesh")
-                             (:file "streaming-publication"))))
+                             (:file "streaming-publication")
+                             (:file "world-tag"))))
   :in-order-to ((test-op (test-op "luft/terrain/test"))))
 
 (defsystem "luft/terrain/test"

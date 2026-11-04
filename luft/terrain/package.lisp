@@ -310,4 +310,12 @@ this package draws; the renderer and the ateliers use it.")
            #:world-source-edit-at
            #:world-source-edits
            #:world-source-material-vocabulary
-           #:world-source-spawn))
+           #:world-source-spawn
+           ;; World tags and chunk hashes (#RELI34).
+           #:canonical-recipe-text
+           #:material-vocabulary-digest
+           #:resident-cell-chunk-hash
+           #:streaming-scene-chunk-hash
+           #:world-source-chunk-hash
+           #:world-source-recipe
+           #:world-source-tag))

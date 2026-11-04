@@ -12,6 +12,8 @@
   (format stream "             [--day-start R] [--day-step R] [--difference-scale R]~%")
   (format stream "             [--shadow-only 1]~%")
   (format stream "  eval FORM [--package PACKAGE]~%")
+  (format stream "  fingerprint [--seed N] [--relief alpine|meadow] [--radius N]~%")
+  (format stream "              (a Luvcraft-on-Luft world's tag and chunk hashes)~%")
   (format stream "  web [--host HOST] [--port PORT]~%")
   (format stream "  lobby get KEY | put KEY [VALUE] | rm KEY | ls | host~%")
   (format stream "        (the tailnet lobby's value store; put without VALUE reads stdin)~%")
@@ -132,6 +134,8 @@
      (command-gazetteer arguments))
     ((string= command "eval")
      (command-eval arguments))
+    ((string= command "fingerprint")
+     (command-fingerprint arguments))
     ((string= command "lobby")
      (command-lobby arguments))
     (t

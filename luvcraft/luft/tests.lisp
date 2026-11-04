@@ -3,7 +3,7 @@
 
 (defpackage #:luvcraft.luft.tests
   (:use #:cl)
-  (:import-from #:parachute #:define-test #:true #:is)
+  (:import-from #:parachute #:define-test #:true #:false #:is)
   (:local-nicknames (#:game #:luvcraft.luft)
                     (#:terrain #:luft.terrain)))
 
@@ -383,3 +383,70 @@ Unlike SXHASH this freezes a portable, independently captured baseline."
         (dolist (x '(960 1024))
           (dolist (y '(1024 1088))
             (is = 0 (compare-luft-chunk 7 :alpine 64 (luft:chunk-key-at x y) edits))))))))
+
+(define-test a-world-tag-names-the-recipe-and-the-palette
+  (flet ((tag (&rest initargs)
+           (terrain:world-source-tag (apply #'game:make-luvcraft-world-source initargs))))
+    (is string= (tag :seed 121) (tag :seed 121))
+    (dolist (other (list (tag :seed 122) (tag :seed 121 :relief :meadow)
+                         (tag :seed 121 :height 32) (tag :seed 121 :offset 1040)
+                         (tag :seed 121 :little-class 'luvcraft.birthday:birthday-world-source)))
+      (false (string= (tag :seed 121) other))))
+  ;; Edits travel as events, not in the tag.
+  (let ((source (game:make-luvcraft-world-source :seed 121)))
+    (setf (gethash (game:luvcraft-cell-site source 0 40 0) (terrain:world-source-edits source))
+          (game:block-placement luvcraft::*stone-block*))
+    (is string= (terrain:world-source-tag (game:make-luvcraft-world-source :seed 121))
+        (terrain:world-source-tag source))))
+
+(define-test seed-121-hashes-as-it-did-on-linux
+  ;; Captured on Linux at the commit that introduced the tag.  A change here
+  ;; means the generator, palette, or hash changed: bump
+  ;; +LUVCRAFT-GENERATOR-VERSION+ for a generator change and recapture, or,
+  ;; on another platform, trace the disagreement (#RELI34).
+  (let ((source (game:make-luvcraft-world-source :seed 121 :relief :alpine)))
+    (is string= "1d237aa077766f3d461e1d8b8046f4af" (terrain:world-source-tag source))
+    (is string= "531b4d83896da5b7c81603911042e182"
+        (terrain:world-source-chunk-hash source (luft:chunk-key-at 1024 1024)))))
+
+(define-test a-chunk-hash-is-its-content-not-its-history
+  (let* ((source (game:make-luvcraft-world-source :seed 121 :relief :meadow :height 32))
+         (domain (terrain:world-source-domain source))
+         (key (luft:chunk-key-at 1024 1024))
+         (scene (game:make-luvcraft-streaming-scene source)))
+    (multiple-value-bind (baseline resident) (terrain:world-source-chunk-hash source key)
+      (setf (gethash key (terrain:streaming-scene-store scene)) resident)
+      (terrain:rebuild-authored-world-resident-values scene (list key))
+      (is string= baseline (terrain:streaming-scene-chunk-hash scene key))
+      (labels ((top (x y)
+                 (loop for z from 31 downto 0
+                       when (= 1 (luft:fiber-store-cell-bit (terrain:scene-solid scene) x y z))
+                         return z))
+               (edit (x y z placement)
+                 (is eq :edited
+                     (nth-value 1 (terrain:edit-streaming-scene-cell
+                                   scene (luft:make-site domain x y z luft:+cell-extent+ 1)
+                                   placement)))))
+        ;; A removal, a stone in the air, and a lantern, which becomes an
+        ;; attachment appended to the live chunk's list.
+        (edit 1030 1030 (top 1030 1030) nil)
+        (edit 1040 1030 (+ 3 (top 1040 1030)) (game:block-placement luvcraft::*stone-block*))
+        (edit 1050 1030 (1+ (top 1050 1030)) (game:block-placement luvcraft::*lantern-block*)))
+      (let ((live (terrain:streaming-scene-chunk-hash scene key)))
+        (false (string= baseline live))
+        ;; A peer raising the chunk from the recipe and the edits agrees.
+        (is string= live (terrain:world-source-chunk-hash source key))
+        ;; So does one whose material table filled in another order.
+        (let* ((resident (gethash key (terrain:streaming-scene-store scene)))
+               (materials (terrain:resident-cell-chunk-material-cells resident))
+               (reversed (make-hash-table :test #'eql)))
+          (is = 1 (length (terrain:resident-cell-chunk-attachments resident)))
+          (dolist (cell (sort (loop for cell being the hash-keys of materials
+                                    collect cell)
+                              #'>))
+            (setf (gethash cell reversed) (gethash cell materials)))
+          (is string= live
+              (terrain:resident-cell-chunk-hash
+               (terrain:%make-resident-cell-chunk
+                key 99 (terrain:resident-cell-chunk-fibers resident) reversed
+                (reverse (terrain:resident-cell-chunk-attachments resident))))))))))

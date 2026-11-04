@@ -138,6 +138,52 @@ transcendental functions, so macOS and Linux may disagree; a mismatch makes
 the host ship that chunk's content and is logged as a determinism bug, as
 moppe's world fingerprint does for its own stages.
 
+** Seed 121's fingerprint on Linux
+:PROPERTIES:
+:ID: QTXNY0
+:END:
+
+=terrain:world-source-tag= hashes the recipe that
+=terrain:world-source-recipe= returns -- for Luvcraft,
+=:luvcraft-little-world=, =+luvcraft-generator-version+=, seed, relief,
+height, little class, offset, and domain -- with
+=terrain:material-vocabulary-digest=, the placement names, kind names, and
+attachment forms in offset order.  =terrain:resident-cell-chunk-hash=
+hashes a resident chunk's key, fiber words, material cells by ascending
+site, and attachments by ascending clearance cell; a live-edited chunk and
+one raised again from the recipe and its edits hash alike.  Both are MD5
+over canonical octets: a checksum between honest peers, not a defence.
+=scripts/luv fingerprint [--seed N] [--relief R] [--radius N]= prints them
+without a window.  On Linux x86-64 (chapel, SBCL 2.6.7), twice in fresh
+processes:
+
+#+begin_example
+luvcraft world fingerprint 1
+recipe (:LUVCRAFT-LITTLE-WORLD 1 :SEED 121 :RELIEF :ALPINE :HEIGHT 64 :LITTLE-CLASS LUVCRAFT:LITTLE-WORLD-SOURCE :OFFSET 1024 :DOMAIN (11 11))
+vocabulary 2d08ef2d194e2a1aa1740b183fa17330 73
+tag 1d237aa077766f3d461e1d8b8046f4af
+spawn 1056 1024 14 0.6287963
+chunk 15 15 cells 54637 cea3b207c4ecb0b8ab37340fe0618579
+chunk 16 15 cells 47203 91f06ef856ba8168721e20f502bdb320
+chunk 17 15 cells 65371 38d0111d702ec3980c05409bfde65710
+chunk 15 16 cells 57593 90c202248ccb2c070aa01c8f15e650b1
+chunk 16 16 cells 54988 531b4d83896da5b7c81603911042e182
+chunk 17 16 cells 68787 43dd0002f103be3bfc9dcb7a3a8eda43
+chunk 15 17 cells 57875 f9492b298f858359a0342f669cd2ff62
+chunk 16 17 cells 61928 b1ef9ca87215684fc4a9f61f1b2a8ccc
+chunk 17 17 cells 87962 91c43c343edb224e6180c42e6f2640ed
+#+end_example
+
+The chunk generator itself calls no libm function: Luvcraft's terrain is
+integer coordinate hashes and IEEE double =+=, =-=, =*=, and =/=, and the
+birthday meadow adds only =sqrt=, which IEEE rounds exactly.  The one libm
+call on the way is =atan= in =little-world-summit-yaw=, which only turns
+the spawn's yaw, printed above as a single float.  The birthday gazebo's
+=cos= and =sin= (=luvcraft/birthday/gazebo.lisp=) choose cells by rounding,
+but the gazebo arrives as edits, so it travels with the journal rather than
+being regenerated.  The test =seed-121-hashes-as-it-did-on-linux= pins the
+tag and chunk (16, 16), so =make test= on a Mac is the comparison.
+
 * The wire: a sans-IO codec over two channels
 :PROPERTIES:
 :ID: A8LXLK
@@ -249,7 +295,7 @@ network worker and mailbox, discovery, and an in-memory loopback transport.
 endpoints in one image find each other by broadcast and by name, and trade
 reliable and unreliable messages over real sockets and over loopback.
 
-** NEXT Tag the world, and hash its chunks
+** WAIT Tag the world, and hash its chunks
 :PROPERTIES:
 :ID: JHWV75
 :END:
@@ -260,6 +306,10 @@ machines.
 /Done when./ The world tag and chunk hashes are stable across restarts, and
 one seed's hashes have been compared between macOS and Linux, with any
 disagreement traced or recorded.
+
+/Waiting on./ The macOS half.  Tags, chunk hashes, and
+=scripts/luv fingerprint= are in, stable across fresh processes, and Linux's
+output for seed 121 is #QTXNY0; diff a Mac's against it.
 
 ** TODO Steer players by input frames on a phase-locked clock
 :PROPERTIES:

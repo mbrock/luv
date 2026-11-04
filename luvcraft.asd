@@ -135,7 +135,7 @@
   :description "One-shot command-line tools for luvcraft development."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "mqtt/net" "uiop")
+  :depends-on ("luvcraft/core" "luvcraft/luft" "mqtt/net" "uiop")
   :build-operation "program-op"
   :build-pathname "build/luv"
   :entry-point "luvcraft.tools:main"
@@ -147,7 +147,8 @@
                  (:file "runner")
                  (:file "block-world")
                  (:file "gazetteer")
-                 (:file "lobby")))))
+                 (:file "lobby")
+                 (:file "fingerprint")))))
 
 (defsystem "luvcraft/lobby"
   :description "Luvcraft ownership of the shared application lobby radio."
@@ -219,7 +220,8 @@
                 :serial t
                 :components ((:file "package")
                              (:file "palette")
-                             (:file "world-source"))))
+                             (:file "world-source")
+                             (:file "fingerprint"))))
   :in-order-to ((test-op (test-op "luvcraft/luft/test"))))
 
 (defsystem "luvcraft/luft/game"

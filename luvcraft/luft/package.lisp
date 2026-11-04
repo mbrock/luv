@@ -26,4 +26,6 @@ terrain's worker, so the old program stays the oracle until it is deleted.")
            #:luvcraft-save-world-source
            #:luvcraft-save-description
            #:luvcraft-resume-luft-pose
-           #:make-luvcraft-streaming-scene))
+           #:make-luvcraft-streaming-scene
+           #:+luvcraft-generator-version+
+           #:write-luvcraft-world-fingerprint))
