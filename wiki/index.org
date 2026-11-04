@@ -233,6 +233,9 @@ The following are starting paths rather than a table of settled doctrine.
   renderer, and physics layers, materials as a protocol a game fills in, and
   a plan that first separates the engine, proves it with the isometric
   wizard, and then moves Luvcraft across feature by feature.
+- [[file:luvcraft-multiplayer.org][Two players in one Luvcraft world]] plans LAN
+  multiplayer: a host that sequences one journal of events, players who own
+  their bodies, a world split from its views, and the wire between them.
 - [[file:luft-world-model.org][The local voxel world: volume, margin, and generations]] is the conceptual
   reference for that world: two lattice scales, finite chunk windows, compact
   volumetric fields, the mixed-star active margin, atlas realization, derived

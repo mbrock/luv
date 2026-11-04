@@ -1,0 +1,302 @@
+#+title: Two players in one Luvcraft world
+#+startup: overview
+
+Luvcraft on Luft (#J3WZZS) is played mostly by two people on one local
+network: one machine hosts the world and its save, another joins it.  Both
+play at full frame rate, both see every block, and both meet the same
+turtles, balls, sky, and companions.  This page is the design and the work
+plan.  Moppe already plays two players over the LAN (its commit =637d1754=,
+=companion_link=); its lessons carry over for bodies, but a block world must
+also agree on an unbounded, ordered set of edits, which moppe never had to.
+
+* A host sequences the world; each player owns a body
+:PROPERTIES:
+:ID: 8EZK9F
+:END:
+
+Block edits do not merge: two people filling one cell need exactly one
+winner, and the save has one home.  So the host runs a /sequencer/ that
+gives every authored event its place in one journal (#3F0SCZ), while each
+player remains authoritative for their own body, look, and gait, which
+travel as 30 Hz pose snapshots, as in moppe.
+
+| thing                          | authority                     | travels as                        |
+|--------------------------------+-------------------------------+-----------------------------------|
+| terrain baseline               | the recipe                    | a world tag checked on join       |
+| block edits                    | the host's sequencer          | reliable ordered events           |
+| a player's body, look, gait    | that player                   | unreliable pose snapshots         |
+| inventory and hotbar           | the player, from confirmed events | the host's players table      |
+| turtles, balls, springs, sky   | the host                      | entity snapshots                  |
+| companions                     | the host (provider and tools) | speech and journey events         |
+| particles and sounds           | derived from confirmed events | nothing                           |
+
+On a LAN the round trip is a few milliseconds, so only one's own body is
+predicted.  An edit appears when the host confirms it.  The host's own edits
+take the same path through its local sequencer, so playing alone exercises
+the multiplayer path.  Edit prediction becomes worth having only for
+tailnet play, and the checked before/after values of #3F0SCZ make it a
+small addition then.
+
+* The game is a world, its players, and their views
+:PROPERTIES:
+:ID: 32DUBY
+:END:
+
+Today the =luvcraft-viewer= application frame is the game: shared
+populations, one player's body and inventory, and that player's camera live
+in one CLIM object.  Multiplayer needs three owners.
+
+- A /world/ owns the source, the journal, the streaming scene, the
+  =world-simulation=, the populations, the sky clock, and a players table.
+  It runs without a window.
+- A /player/ owns an identity, a character and body, an inventory and
+  hotbar, the held block, creative mode, and rider intent; a remote player
+  also owns its snapshot track (#VM5TN6).
+- A /view/ owns a camera, controls, overlays, particles, and a reference to
+  its world and local player.
+
+The game-host protocols become forwards to the world, and two worlds can
+run in one image for tests.
+
+* One journal of events is the authority for authored change
+:PROPERTIES:
+:ID: 3F0SCZ
+:END:
+
+Every authored change is an event: sequence, tick, actor, transaction,
+site, before, after, cause, as #OVEP9A proposes.  Before and after are
+block identities (#FBU3TF), not visual placements.  The sequencer applies
+an event only if its before still holds, and otherwise rejects it with a
+reason; a transaction applies whole.  An actor is a principal: a player, an
+inhabitant, or an import.
+
+Luft's =world-source-edits= and Luvcraft's =block-edit-overlay= become
+derived views of this journal rather than two ledgers kept in step.  Undo
+belongs to an actor: it appends the inverse of that actor's own last event
+when its after still holds, so building together never undoes someone
+else's work.
+
+* A sequenced event is never refused
+:PROPERTIES:
+:ID: QQT86P
+:END:
+
+=edit-streaming-scene-cell= answers =:busy= while a mesh cohort is in
+flight.  A click may see that, but a sequenced event has already happened.
+The scene owner keeps a queue of sequenced events and applies them at a
+frame boundary; an in-flight cohort is rescheduled as the next edit's
+cohort would be.
+
+* Blocks need names that fit on the wire
+:PROPERTIES:
+:ID: FBU3TF
+:END:
+
+An event names its before and after.  Films are block-kind instances
+outside =*block-kinds*=, so the material vocabulary does not close and a
+block has no integer name.  #R7MAN5 closes it: one static film material,
+with per-film state in sparse site-keyed entities.  A block identity is then
+a vocabulary offset and an optional entity.  The join handshake carries the
+vocabulary table, and the guest resolves it into a remap (#FTDOCV), the same
+seam a save migration uses.
+
+* Input is a value per tick, on a phase-locked clock
+:PROPERTIES:
+:ID: 3QHL50
+:END:
+
+The viewer makes one plain input frame per tick -- movement axes, look
+delta, jump and flight edges -- and that frame steers the local player.  The
+clock adopts moppe's =simulation_clock=: 120 Hz steps rounded to the
+nearest step and at most six steps of catch-up.  Tick numbers are the
+shared time base that snapshots carry, and recorded input frames are the
+tapes that soak bots replay.
+
+* Interest, not focus
+:PROPERTIES:
+:ID: I6O4J6
+:END:
+
+A streaming scene follows one focus.  The host must also simulate a turtle
+beside a distant guest, so the scene keeps a set of interest foci, one per
+player the host simulates for, and keeps collision residency for their
+union.  Meshes, light, and GPU publication still follow only the local
+camera.  A guest's interest is its own focus; remote players outside it are
+drawn from snapshots and need no collision.  This answers the
+"distant-actor residency" left open by the simulation boundary of the Luft page.
+
+* Peers agree on the world by hash, chunk by chunk
+:PROPERTIES:
+:ID: RELI34
+:END:
+
+A world tag hashes the generator version, the recipe, and the vocabulary
+digest; every message carries it, and a peer in another world is told so.
+Each resident chunk also has a content hash over its fibers and materials
+after edits, which peers compare lazily.  Luvcraft's generator calls
+transcendental functions, so macOS and Linux may disagree; a mismatch makes
+the host ship that chunk's content and is logged as a determinism bug, as
+moppe's world fingerprint does for its own stages.
+
+* The wire: a sans-IO codec over two channels
+:PROPERTIES:
+:ID: A8LXLK
+:END:
+
+Messages are pure encode/decode functions over octet vectors, tested without
+sockets, as =mqtt/= is.  Every message carries a magic, a protocol version,
+the world tag, and a session.  Decoding is strict: finite numbers, unit
+directions, sites inside the domain, offsets inside the vocabulary.
+
+One TCP connection carries the reliable stream -- handshake, catch-up,
+events, requests, chat -- and one UDP socket carries pose and entity
+snapshots, falling back to TCP when no datagram arrives.  One network
+worker owns both sockets and posts decoded messages to a mailbox that the
+world drains at a frame boundary.  Discovery is a LAN broadcast, an explicit
+=--join host=, and optionally a retained session entry in the tailnet lobby.
+
+* Joining is catch-up, then subscription
+:PROPERTIES:
+:ID: 2SGDU2
+:END:
+
+The guest says hello with its protocol, stable player identity, and name.
+The host welcomes it with the session, recipe, vocabulary table, journal
+watermark N, the edit set compacted at N, an entity snapshot, and the
+guest's player record and resume pose.  The guest raises the world from the
+recipe, installs the edit set, and receives events strictly after N: the
+checked handoff of #8DQ18B, which neither drops nor repeats an event.
+
+* A remote player is drawn a little behind time
+:PROPERTIES:
+:ID: VM5TN6
+:END:
+
+Moppe's =CompanionTrack= is the model: thirty-two snapshots, an adaptive
+playback delay of 0.05 to 0.3 seconds steered toward the sender's tick, a
+spline between snapshots, 0.2 seconds of extrapolation, eased corrections,
+and a leap detector for teleports.  The body uses the skinned creature
+pipeline with a held block and a nameplate.  Remote bodies also enter local
+physics read-only, so balls bounce off them and nobody places a block
+inside them.
+
+* A save is recipe, vocabulary, journal, and players
+:PROPERTIES:
+:ID: Y3S82T
+:END:
+
+The host's save becomes format 2: the recipe, the vocabulary table, the
+edit set compacted at a watermark with the recent journal tail, a players
+table of last pose, inventory, and hotbar by stable identity, and the
+populations.  Format 1 loads through the remap and is written as format 2.
+Legacy Luvcraft no longer reads what this game writes; that was decided
+deliberately.  A guest's own saves are untouched by joining.
+
+* The plan
+:PROPERTIES:
+:ID: PN7O4Z
+:END:
+
+Phase 0 builds foundations in parallel, each workstream with one owner,
+landing small commits on =main=.  The split (#7V3536) lands first; the
+journal (#48I94O) rebases its viewer edit hunk onto it.  The clock
+(#X56QS3) waits for the split.  The others share no files.
+
+** NEXT Split the game into world, player, and view
+:PROPERTIES:
+:ID: 7V3536
+:END:
+
+/Intent./ Realize #32DUBY without changing behaviour.
+
+/Done when./ Every =luvcraft-viewer= slot has moved to its world, player, or
+view; a headless world with one player advances, edits, and saves in tests;
+and the game plays and captures as before.
+
+** NEXT Keep one journal of events, and queue sequenced edits
+:PROPERTIES:
+:ID: 48I94O
+:END:
+
+/Intent./ Realize #3F0SCZ and #QQT86P in the terrain engine, with
+actor-owned undo.
+
+/Done when./ Edits are journal events with checked before values, the two
+ledgers are derived views, a queued event survives a busy cohort, and two
+actors' interleaved edits undo independently.
+
+** NEXT Give every block a name that fits on the wire
+:PROPERTIES:
+:ID: JH74JS
+:END:
+
+/Intent./ Realize #FBU3TF by doing #R7MAN5, with a vocabulary remap and a
+format-2 save reader (#Y3S82T).
+
+/Done when./ Films are entities over one film material, every block
+identity is an offset and optional entity, and a format-1 save with films
+loads intact.
+
+** NEXT Speak the wire protocol
+:PROPERTIES:
+:ID: H6A8P4
+:END:
+
+/Intent./ Realize #A8LXLK as its own system: the codec, both channels, the
+network worker and mailbox, discovery, and an in-memory loopback transport.
+
+/Done when./ Every message round-trips and malformed input is refused; two
+endpoints in one image find each other by broadcast and by name, and trade
+reliable and unreliable messages over real sockets and over loopback.
+
+** NEXT Tag the world, and hash its chunks
+:PROPERTIES:
+:ID: JHWV75
+:END:
+
+/Intent./ Realize #RELI34, with a fingerprint command comparable across
+machines.
+
+/Done when./ The world tag and chunk hashes are stable across restarts, and
+one seed's hashes have been compared between macOS and Linux, with any
+disagreement traced or recorded.
+
+** TODO Steer players by input frames on a phase-locked clock
+:PROPERTIES:
+:ID: X56QS3
+:END:
+
+/Intent./ Realize #3QHL50 after #7V3536 lands.
+
+/Done when./ The local player is steered only by input frames, the clock
+rounds to the nearest step, and a recorded tape replays the same walk.
+
+** TODO Two players build one house
+:PROPERTIES:
+:ID: OLWSWF
+:END:
+
+/Intent./ Phase 1: join #8EZK9F, #2SGDU2, and #VM5TN6 into a host and a
+guest.
+
+/Done when./ Two worlds in one image pass the join, catch-up, conflict,
+undo, and reconnect tests, and two windows on one Mac build a house
+together with equal chunk hashes.
+
+** TODO Share the living world
+:PROPERTIES:
+:ID: EA88ON
+:END:
+
+/Intent./ Phase 2: #I6O4J6, host-owned populations and sky as entity
+snapshots, rides, companions spoken to by either player, the players table
+of #Y3S82T, and remote players as physics strangers.
+
+** TODO Make company comfortable
+:PROPERTIES:
+:ID: 3JTHM3
+:END:
+
+/Intent./ Phase 3: sessions in the lobby, nameplates and chat, a provenance
+inspector and age lens (#OVEP9A), lossless reconnection, a soak bot, and
+edit prediction for tailnet play.
