@@ -282,10 +282,29 @@ Give page names to restrict."
                   (definition-place definition)))
         (unless (or backlinks references) (format t "  (nowhere)~%"))))))
 
+(defparameter *unpublished-pages* '()
+  "Wiki pages deliberately left out of luv-wiki-site, as (NAME . REASON).")
+
+(defun unlisted-pages ()
+  "Names of wiki/*.org pages neither in luv-wiki-site nor *UNPUBLISHED-PAGES*."
+  (ensure-systems)
+  (let ((listed (mapcar #'asdf:component-name
+                        (wiki::system-org-files
+                         (asdf:find-system "luv-wiki-site")))))
+    (loop for pathname in (directory (merge-pathnames "wiki/*.org" (root)))
+          for name = (pathname-name pathname)
+          unless (or (member name listed :test #'string=)
+                     (assoc name *unpublished-pages* :test #'string=))
+            collect name)))
+
 (define-command dangling (&rest arguments)
-  "Mentions in pages and code that no figure resolves."
+  "Mentions in pages and code that no figure resolves, and unpublished pages."
   (declare (ignore arguments))
   (let ((site (site)))
+    ;; A page the site omits leaves every link into it dangling on the web.
+    (dolist (name (sort (unlisted-pages) #'string<))
+      (format t "~&~A.org: not in luv-wiki-site.asd or *UNPUBLISHED-PAGES*~%"
+              name))
     (loop for (document . ids) in (wiki:dangling-mentions site)
           do (format t "~&~A.org: ~{~A~^ ~}~%" (wiki:document-name document) ids))
     (loop for (definition . ids) in (wiki:dangling-code-mentions site)
