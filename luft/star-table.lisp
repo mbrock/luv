@@ -18,6 +18,13 @@
 ;;; therefore tiles the surface of any solid exactly once; the tests
 ;;; close that surface over every star block and pseudorandom solids.
 
+;;; The tables are built under "The loaded tables" below, from the
+;;; functions in between; these declare them special before their readers.
+(defvar *star-atlas-families*)
+(defvar *star-atlas-parts*)
+(defvar *star-atlas-owned-triangles*)
+(defvar *star-atlas-owned-appearance-masks*)
+
 (defun %star-atlas-family-table (atlas)
   (unless (eq (first atlas) :width-one-star-atlas)
     (error "*STAR-ATLAS* is not a star atlas."))

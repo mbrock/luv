@@ -61,6 +61,9 @@
                      (list image))))
    #'<))
 
+;;; Filled at the end of this file, once the table builders exist.
+(defvar *star-canonical-forms*)
+
 (defun star-canonical-form (star &key reflections complement)
   "Return the least equivalent star and a transformation carrying it to STAR."
   (%check-star star)
