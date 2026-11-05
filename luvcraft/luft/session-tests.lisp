@@ -634,8 +634,8 @@ frames would, until UNTIL holds with nothing in flight."
 
 (define-test a-remote-rider-sits-on-its-turtle
   ;; Bea rides the host's turtle from her world; the host seats her body
-  ;; astride it, facing its way and not walking, and stands her on her feet
-  ;; again when she gets off (#AVKN70).
+  ;; astride it, facing its way and not walking, in the avatar's Sit pose,
+  ;; and stands her on her feet again when she gets off (#AVKN70).
   (with-host (world session network)
     (let ((turtle (first (host-turtles world))))
       (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
@@ -652,7 +652,24 @@ frames would, until UNTIL holds with nothing in flight."
                  (placement ()
                    (let ((rider (host:find-world-player world "bea")))
                      (host::remote-body-placement world rider
-                                                  (host:track-shown (host:player-track rider))))))
+                                                  (host:track-shown (host:player-track rider)))))
+                 (knee-reach ()
+                   ;; How far forward of its feet the body the host draws reaches,
+                   ;; in figure units: a sitter's knees, a stander's toes.
+                   (let* ((rider (host:find-world-player world "bea"))
+                          (avatar (make-instance 'host::remote-avatar
+                                                 :session nil :x 0 :y 0 :z 0
+                                                 :position (v:make-vec3 0 0 0)))
+                          (mesh (luvcraft.agent::companion-mesh :avatar))
+                          (palette (make-array (* 12 (luvcraft.agent::companion-mesh-bone-count mesh))
+                                               :element-type 'single-float))
+                          (skinned (make-array (* 12 (truncate (length (luvcraft.agent::companion-mesh-vertices mesh)) 9))
+                                               :element-type 'single-float)))
+                     (host::pose-remote-avatar world avatar rider
+                                               (host:track-shown (host:player-track rider)) 1)
+                     (luvcraft.agent::sample-agent-palette avatar mesh palette)
+                     (luvcraft.agent::skin-companion-palette mesh palette skinned)
+                     (loop for i from 2 below (length skinned) by 12 maximize (aref skinned i)))))
             (true (live-until (list world guest-world)
                               (lambda () (equal "bea" (host::turtle-rider-id world turtle)))
                               :each #'rein))
@@ -666,9 +683,16 @@ frames would, until UNTIL holds with nothing in flight."
                          0.6))
                 (true (< (abs (- facing (luvcraft::critter-yaw turtle))) 0.2))
                 (is eq nil walking-p)))
-            (host::end-world-ride guest-world bea mount)
-            (true (live-until (list world guest-world)
-                              (lambda () (null (host::turtle-rider-id world turtle)))))
+            (let ((seated (knee-reach)))
+              (host::end-world-ride guest-world bea mount)
+              (true (live-until (list world guest-world)
+                                (lambda () (null (host::turtle-rider-id world turtle)))))
+              ;; Until the track shows her still, her last poses walk with the turtle.
+              (live (list world guest-world) 0.5)
+              (let ((standing (knee-reach)))
+                ;; Knees forward over the shell, not an Idle stance's toes.
+                (true (> seated (+ standing 0.25)))
+                (true (< standing 0.3))))
             ;; Off the turtle, her body stands where her pose says.
             (let ((seat (placement))
                   (shown (host:track-shown (host:player-track (host:find-world-player world "bea")))))

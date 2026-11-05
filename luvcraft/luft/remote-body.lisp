@@ -9,7 +9,9 @@
 
 ;;; The avatar wears the companion body protocol, but no provider, motor, or
 ;;; dialogue: only its body overlay is ever added to a view.
-(defclass remote-avatar (luvcraft.agent:embodied-agent) ()
+(defclass remote-avatar (luvcraft.agent:embodied-agent)
+  ((rest-pose :initform nil :accessor luvcraft.agent::companion-rest-pose
+              :documentation "NIL to stand at rest, :SIT astride a turtle."))
   (:documentation "A remote player's skinned body, as one view draws it."))
 
 (defmethod luvcraft.agent::embodied-agent-save-kind ((avatar remote-avatar))
@@ -104,11 +106,14 @@ avatar's walk covers its stride, so the feet plant where they land."
                (luvcraft.agent::companion-mesh-stride mesh)))
          1d0)))
 
-(defun pose-remote-avatar (viewer avatar player shown seconds)
-  "Place AVATAR as PLAYER's body stands in VIEWER's world, walking by SHOWN's gait."
+(defun pose-remote-avatar (world avatar player shown seconds)
+  "Place AVATAR as PLAYER's body stands in WORLD, walking by SHOWN's
+gait, or sitting on the turtle it rides."
   (multiple-value-bind (position facing walking-p)
-      (remote-body-placement (viewer-world viewer) player shown)
-    (setf (luvcraft.agent::embodied-agent-position avatar) position
+      (remote-body-placement world player shown)
+    (setf (luvcraft.agent::companion-rest-pose avatar)
+          (and (remote-ridden-turtle world player) :sit)
+          (luvcraft.agent::embodied-agent-position avatar) position
           (luvcraft.agent::embodied-agent-facing-yaw avatar) facing
           (luvcraft.agent::companion-walk-phase avatar) (remote-body-walk-phase shown))
     (let ((blend (luvcraft.agent::companion-walk-blend avatar)))
@@ -133,7 +138,7 @@ it, and take down the bodies of those gone."
                                                  :session viewer :x 0 :y 0 :z 0
                                                  :position (vec3:make-vec3 0 0 0))))))
             (push player seen)
-            (pose-remote-avatar viewer avatar player shown seconds)
+            (pose-remote-avatar (viewer-world viewer) avatar player shown seconds)
             (luvcraft.agent::ensure-embodied-agent-body avatar)))))
     (loop for player being the hash-keys of avatars using (hash-value avatar)
           unless (member player seen)
@@ -147,18 +152,18 @@ it, and take down the bodies of those gone."
 (defmethod render:advance-viewer-game :after ((viewer luvcraft-viewer) seconds)
   (sync-remote-avatars viewer seconds))
 
-;;; The block in hand: a box at the right palm, as the walk swings it.
+;;; The block in hand: a box at the right palm, as the walk swings it or the
+;;; seat holds it.
 
 (defparameter *held-block-half-size* 0.12)
 
 (defun remote-held-block-figure (viewer avatar block)
   (let* ((mesh (luvcraft.agent::companion-mesh :avatar))
          (palm (luvcraft.agent::companion-rig-palm (luvcraft.agent::companion-mesh-rig mesh)))
-         (palette (luvcraft.agent::sample-companion-palette
-                   mesh (luvcraft.agent::companion-walk-phase avatar)
-                   (luvcraft.agent::companion-walk-blend avatar)
-                   (make-array (* 12 (luvcraft.agent::companion-mesh-bone-count mesh))
-                               :element-type 'single-float)))
+         ;; The pose the body is drawn in, seated or walking.
+         (palette (luvcraft.agent::sample-agent-palette
+                   avatar mesh (make-array (* 12 (luvcraft.agent::companion-mesh-bone-count mesh))
+                                           :element-type 'single-float)))
          (local (luvcraft.agent::companion-palette-point palette (car palm) (cdr palm)))
          ;; Hold it below the palm and a little forward, not through the fist.
          (grip (luvcraft.agent::ik-offset local (vec3:make-vec3 0 -0.1 0.08)))

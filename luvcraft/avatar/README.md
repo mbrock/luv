@@ -10,7 +10,7 @@ skeleton to move around, work at terminals, and build things.
 | --- | --- |
 | `build-avatar.py` | the source of truth — the whole avatar as one script |
 | `claude-avatar.blend` | generated Blender scene (mesh, rig, materials, clips, lighting) |
-| `claude-avatar.glb` | generated glTF 2.0 export: skinned mesh + 3 animations |
+| `claude-avatar.glb` | generated glTF 2.0 export: skinned mesh + 4 animations |
 | `preview.png` | generated contact sheet |
 | `export-fmesh.py` | writes `claude-avatar.fmesh` and `.rig`, the runtime body a remote player wears |
 
@@ -34,8 +34,9 @@ From a live Blender session (how it is normally iterated on), run
   `clavicle`, `upper_arm`, `forearm`, `hand`, `fingers`, `thumb`, `thigh`,
   `shin`, `foot`, `toe`. Bind pose is an A-pose so the hands hang clear of the
   coat.
-- **3 clips**: `Idle` (120f breathing sway), `Wave` (52f), `Walk` (25f loop,
-  with hip drop so the feet plant on the floor rather than skating).
+- **4 clips**: `Idle` (120f breathing sway), `Wave` (52f), `Walk` (25f loop,
+  with hip drop so the feet plant on the floor rather than skating), `Sit`
+  (one frame astride a turtle: a remote rider's rest pose).
 
 ## How it is built
 
@@ -66,7 +67,7 @@ without a renderer. To get the figure into the world:
    renderer in `luft/`).
 2. An avatar entity driven from `./sly` — walk to a place, look at something,
    use a terminal wall.
-3. More clips as they are needed: typing, mining, carrying, sitting.
+3. More clips as they are needed: typing, mining, carrying.
 
 Baking the 13 materials down to one texture atlas would cut the draw calls, but
 keeping them separate is friendlier while the texturing style is still moving.

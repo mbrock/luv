@@ -5,7 +5,7 @@
 ;;; sidecar let the game solve its own legs against the actual terrain.
 (defstruct companion-mesh vertices joints weights indices poses bone-count frame-count stride rig)
 (defstruct companion-leg name bones hip knee ankle pole phase)
-(defstruct companion-rig stance legs palm)
+(defstruct companion-rig stance legs palm poses)
 (defstruct companion-foot point heading from from-heading target target-heading
            (progress 1d0) swing-p distance-driven-p supported-p (stance-p t))
 (defstruct companion-pose mesh palette feet position (pelvis 0d0) moving-p scale)
@@ -55,6 +55,8 @@
             "Stale IK rig ~A. Re-run luvcraft/agent/export-rig.py on its .blend." path)
     (make-companion-rig
      :stance (getf data :stance)
+     ;; Still poses stored after the Walk loop, by name, as rest poses.
+     :poses (getf data :poses)
      ;; Where a held thing sits: a bone and a point in the rest frame.
      :palm (let ((palm (getf data :palm)))
              (and palm (cons (getf palm :bone) (apply #'make-vec3 (getf palm :point)))))
@@ -104,12 +106,25 @@
           (let ((index (word)))
             (assert (< index vertex-count))
             (setf (aref indices i) index)))
-        (let ((poses (floats (* (1+ frame-count) bone-count 12))))
+        (let* ((rig (load-companion-rig (companion-mesh-path kind) bone-count))
+               (poses (floats (* (+ 1 frame-count (length (companion-rig-poses rig)))
+                                 bone-count 12))))
           (assert (null (read-byte stream nil nil)))
           (make-companion-mesh :vertices vertices :joints joints :weights weights
                                :indices indices :poses poses :bone-count bone-count
-                               :frame-count frame-count :stride stride
-                               :rig (load-companion-rig (companion-mesh-path kind) bone-count)))))))
+                               :frame-count frame-count :stride stride :rig rig))))))
+
+(defun companion-rest-pose-index (mesh name)
+  "Where MESH's rest pose NAME starts in its poses: 0, the Idle pose, for NIL."
+  (if name
+      (let ((position (position name (companion-rig-poses (companion-mesh-rig mesh)))))
+        (assert position () "No ~S pose in this companion mesh." name)
+        (* 12 (companion-mesh-bone-count mesh) (+ 1 (companion-mesh-frame-count mesh) position)))
+      0))
+
+(defgeneric companion-rest-pose (agent)
+  (:documentation "The still pose AGENT's body rests in when it is not walking: NIL for Idle.")
+  (:method (agent) (declare (ignore agent)) nil))
 
 (defun companion-mesh (kind)
   (or (gethash kind *companion-meshes*)
@@ -142,10 +157,12 @@
 (defmethod luvcraft:advance-luvcraft-overlay :after ((agent embodied-agent) session seconds)
   (update-companion-gait agent seconds session))
 
-(defun sample-companion-palette (mesh phase blend palette)
-  "Sample the authored animation; live IK may replace legs before skinning."
+(defun sample-companion-palette (mesh phase blend palette &optional (rest 0))
+  "Sample the authored animation, blending from the rest pose at index REST;
+live IK may replace legs before skinning."
   (declare (optimize (speed 3))
            (type single-float blend)
+           (type fixnum rest)
            (type (simple-array single-float (*)) palette))
   (let* ((poses (companion-mesh-poses mesh))
          (size (* 12 (companion-mesh-bone-count mesh)))
@@ -156,11 +173,16 @@
     (declare (type (simple-array single-float (*)) poses))
     ;; Closely sampled rigid matrices interpolate smoothly, including the seam.
     (dotimes (i size)
-      (let* ((idle (aref poses i))
+      (let* ((idle (aref poses (+ rest i)))
              (walk (+ (aref poses (+ a i))
                       (* fraction (- (aref poses (+ b i)) (aref poses (+ a i)))))))
         (setf (aref palette i) (+ idle (* blend (- walk idle)))))))
   palette)
+
+(defun sample-agent-palette (agent mesh palette)
+  "AGENT's authored pose now: its walk, blended from the pose it rests in."
+  (sample-companion-palette mesh (companion-walk-phase agent) (companion-walk-blend agent)
+                            palette (companion-rest-pose-index mesh (companion-rest-pose agent))))
 
 (defun skin-companion-palette (mesh palette output)
   "Write interleaved position, normal, colour and bind point into OUTPUT.
@@ -308,9 +330,7 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
          (pose (companion-kinematics agent))
          (palette (if (and pose (eq mesh (companion-pose-mesh pose)))
                       (companion-pose-palette pose)
-                      (sample-companion-palette mesh (companion-walk-phase agent)
-                                                (companion-walk-blend agent)
-                                                (companion-body-palette overlay))))
+                      (sample-agent-palette agent mesh (companion-body-palette overlay))))
          (frame (companion-body-frame overlay session surface-texture)))
     (setf (aref instance 0) (coerce (luvcraft::body-x agent) 'single-float)
           (aref instance 1) (coerce (luvcraft::body-y agent) 'single-float)

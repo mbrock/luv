@@ -628,8 +628,9 @@ a distant guest walks; the live run above kept the creatures near the host.
 place of phase 1's wizard figure.
 
 /Evidence./ The avatar of =luvcraft/avatar= is exported by its
-=export-fmesh.py= as FNT1 (12,054 vertices, 25 bones, the Idle pose and a
-24-frame Walk loop) with a =.rig= naming the right palm. Each view gives
+=export-fmesh.py= as FNT1 (12,054 vertices, 25 bones, the Idle pose, a
+24-frame Walk loop, and a Sit pose) with a =.rig= naming the right palm and
+the still poses after the Walk loop. Each view gives
 every remote player whose track draws it a =remote-avatar=: an embodied
 agent with only its companion body overlay, so it is skinned in the vertex
 shader like the gnome. The snapshot's gait turns its Walk loop by distance
@@ -663,15 +664,23 @@ delay and the newest pose's age, not a fixed 3 cells.
 
 A remote rider sits astride its turtle (#U4TBMP): =remote-body-placement=
 puts the avatar's hips on the shell, at the seat a local rider's eyes are
-over, facing the turtle's way and not walking. Its nameplate and block go
-with it. =a-remote-rider-sits-on-its-turtle= checks the seat on the host
-and the feet once she gets off.
+over, facing the turtle's way and not walking. Its body rests in the
+avatar's Sit clip instead of Idle, thighs level and apart over the shell,
+shins down its flanks, the block in its right hand on the reins; the
+companion palette blends a walk from a body's rest pose
+(=luvcraft.agent::companion-rest-pose=), Idle for every other companion.
+Its nameplate and block go with it. =a-remote-rider-sits-on-its-turtle=
+checks the seat on the host, that the body the host draws reaches its
+knees forward (0.575 figure units, against an Idle stance's 0.232), and its
+feet once she gets off; posed with Idle, the reach check fails.
 
-/Open./ Both players wear the same avatar. The arm hangs at the side
-rather than carrying the block forward. With no sitting clip, the rider's
-legs go into the shell. The live captures predate the rebase onto 2A to 2C
-and the seating, which have no window yet: after the reboot, temple has
-no display, and Metal needs one.
+Live on one Mac at =9f2da4e= (port 47486), each window showed the other's
+body holding a block with a readable nameplate at about 4 and 26 cells,
+and the host saw Bea on turtle 3; a side-on capture after the Sit clip
+shows her astride the shell with the block in hand.
+
+/Open./ Both players wear the same avatar. Walking, the arm hangs at the
+side rather than carrying the block forward.
 
 ** TODO Make company comfortable
 :PROPERTIES:

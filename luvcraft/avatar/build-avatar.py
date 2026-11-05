@@ -620,6 +620,17 @@ def build_animations(arm):
         (19, passing(1), up), (25, contact(1), down),
     ])
 
+    # astride a turtle: thighs level and apart over the shell, shins hanging
+    # down its flanks, hands forward on the reins.  A positive X turn swings
+    # each of these limbs back (+Y), so forward is negative.
+    make_action(arm, "Sit", [
+        (1, {"thigh.L": (-82, 0, -16), "thigh.R": (-82, 0, 16),
+             "shin.L": (80, 0, 0), "shin.R": (80, 0, 0),
+             "upper_arm.L": (-24, 0, 6), "upper_arm.R": (-24, 0, -6),
+             "forearm.L": (-48, 0, 0), "forearm.R": (-48, 0, 0),
+             "spine": (-4, 0, 0)}),
+    ])
+
     arm.animation_data.action = bpy.data.actions["Idle"]
     bpy.ops.object.mode_set(mode="OBJECT")
 
