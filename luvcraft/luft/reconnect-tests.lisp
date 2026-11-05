@@ -14,21 +14,25 @@
   (and (luvcraft.wire.net:arrival-p item)
        (typep (luvcraft.wire.net:arrival-message item) 'luvcraft.wire:events-message)))
 
-(defun receive-first-events (guest)
-  "Act on what GUEST has received up to its first events message, and lose
-the rest in transit."
-  (let ((items (loop with deadline = (+ (get-internal-real-time) internal-time-units-per-second)
-                     for items = (luvcraft.wire.net:drain-mailbox (host:session-endpoint guest))
-                       then (append items (luvcraft.wire.net:drain-mailbox
-                                           (host:session-endpoint guest)))
-                     until (or (> (count-if #'events-message-p items) 1)
-                               (> (get-internal-real-time) deadline))
-                     do (sleep 0.01)
-                     finally (return items))))
+(defun cut-after-first-events (guest)
+  "Cut GUEST's link as a dropped connection does: it acts on what its stream
+carried up to the first events message, and nothing after it ever arrives.
+Its endpoint stops, so what was still in transit, however late, is gone."
+  (let* ((endpoint (host:session-endpoint guest))
+         (items (loop with deadline = (+ (get-internal-real-time) (* 5 internal-time-units-per-second))
+                      for items = (luvcraft.wire.net:drain-mailbox endpoint)
+                        then (append items (luvcraft.wire.net:drain-mailbox endpoint))
+                      until (or (find-if #'events-message-p items)
+                                (> (get-internal-real-time) deadline))
+                      do (sleep 0.01)
+                      finally (return items))))
+    (luvcraft.wire.net:stop-endpoint endpoint)
     (loop for item in items
           do (host::handle-session-message guest (luvcraft.wire.net:arrival-peer item)
                                            (luvcraft.wire.net:arrival-message item))
-          until (events-message-p item))))
+          until (events-message-p item))
+    ;; The guest hears its link drop; the host hears the stream end.
+    (host::lose-link guest nil :cut)))
 
 (defun caught-up-p (guest host-world)
   "Whether GUEST is linked and stands at HOST-WORLD's head.  A reply lost
@@ -56,8 +60,8 @@ with its link is never answered, so replies are not counted."
         (setf (host:player-held-block bea) film)
         ;; Ada builds three stones, one at a time, and the host sends each
         ;; on its own; then Bea places a film.  Bea's link drops after the
-        ;; first stone reached her: the other two, her own film's event,
-        ;; and its reply are lost in transit.
+        ;; first stone reached her: everything after it on that stream --
+        ;; the other two, her own film's event, and its reply -- is lost.
         (dolist (cell cells)
           (is eq :edited (nth-value 1 (host:player-edit-world-cell world ada cell stone)))
           (pump (list session) :seconds 0.05))
@@ -67,11 +71,10 @@ with its link is never answered, so replies are not counted."
                     :until (lambda ()
                              (= (+ from 4) (terrain:world-journal-head
                                             (terrain:world-source-journal (host:world-source world)))))))
-        (receive-first-events guest)
+        (cut-after-first-events guest)
         (let ((partway (host:session-applied guest))
               (head (terrain:world-journal-head (terrain:world-source-journal (host:world-source world)))))
           (true (< from partway head))
-          (drop-link session)
           ;; The host keeps her place while she is away; she dials again and
           ;; resumes from her own journal point.
           (true (pump (list session guest)
@@ -97,6 +100,29 @@ with its link is never answered, so replies are not counted."
                                (and (funcall (caught-up-p guest world))
                                     (terrain:scene-material-placement-at
                                      (host:world-scene guest-world) next))))))
+        (true (worlds-agree-p world guest-world from))
+        (host:close-world-session guest)))))
+
+(define-test a-guest-that-sees-a-gap-resumes-from-its-own-journal
+  ;; No stream skips an event, but a guest that is sent one anyway must not
+  ;; fail its frame: it takes the link for lost and resumes where it is.
+  (with-host (world session network)
+    (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
+      (declare (ignore bea))
+      (let* ((ada (host:find-world-player world "ada"))
+             (from (host:session-applied guest))
+             (stone (game:block-placement luvcraft::*stone-block*))
+             (journal (terrain:world-source-journal (host:world-source world))))
+        (dolist (x '(1030 1031))
+          (host:player-edit-world-cell world ada (air-cell world x 1056) stone))
+        (let ((second (aref (terrain:world-journal-events journal)
+                            (- (1+ from) (terrain:world-journal-watermark journal)))))
+          (host::handle-session-message
+           guest nil (luvcraft.wire:make-events-message
+                      :events (list (host::event-wire session second)))))
+        (is eq :reconnecting (host::session-state guest))
+        (is = from (host:session-applied guest))
+        (true (pump (list session guest) :until (caught-up-p guest world)))
         (true (worlds-agree-p world guest-world from))
         (host:close-world-session guest)))))
 

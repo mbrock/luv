@@ -834,8 +834,12 @@ set installed at its watermark, and the remap of the host's vocabulary."
                  ((<= sequence (session-applied session))
                   (session-log session "Dropped event ~D, which is already here." sequence))
                  ((/= sequence (1+ (session-applied session)))
-                  (error "The host sent event ~D after ~D: the journal would have a gap."
-                         sequence (session-applied session)))
+                  ;; One stream never skips an event, so this link is not
+                  ;; to be trusted: resume from what this journal holds.
+                  (session-log session "The host sent event ~D after ~D; resuming from ~D."
+                               sequence (session-applied session) (session-applied session))
+                  (lose-link session nil :gap)
+                  (return-from record-host-events nil))
                  (t
                   (let* ((first (first batch))
                          (recorded (terrain:record-world-events
@@ -858,7 +862,9 @@ set installed at its watermark, and the remap of the host's vocabulary."
 
 (defmethod handle-session-message ((session guest-session) peer (message wire:events-message))
   (declare (ignore peer))
-  (record-host-events session (wire:events-message-events message)))
+  ;; Events that follow a lost link in the same drain are not this journal's.
+  (when (eq (session-state session) :open)
+    (record-host-events session (wire:events-message-events message))))
 
 (defmethod handle-session-message ((session guest-session) peer (message wire:edit-reply-message))
   (declare (ignore peer))
