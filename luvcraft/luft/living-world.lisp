@@ -34,7 +34,10 @@
   (rides (make-hash-table) :read-only t)
   (snapshot-due 0d0)
   ;; The guest peers a host has told of the rides in progress.
-  (told nil))
+  (told nil)
+  ;; A guest's day settings it has asked its host for and not yet seen
+  ;; granted: setting -> (VALUE DEADLINE) (company.lisp).
+  (sky-wishes nil))
 
 (defstruct (replica (:constructor make-replica (track object)))
   "A guest's copy of one host entity: its track, and the turtle it moves, if any."
@@ -207,7 +210,8 @@ in the time of day so that the sky does not judder."
           (coerce (if (> (abs (- elapsed (world-sky-elapsed world))) 1d0)
                       elapsed
                       (+ (world-sky-elapsed world) (* 0.25d0 (- elapsed (world-sky-elapsed world)))))
-                  'single-float))))
+                  'single-float)))
+  (keep-sky-wishes world))
 
 (defun raise-replica (world kind id entity)
   (make-replica

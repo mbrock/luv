@@ -97,6 +97,8 @@ exactly what an encoder would have written.")
    #:companion-tell-message-companion #:companion-tell-message-text
    #:companion-pose-message #:make-companion-pose-message #:companion-pose-message-p
    #:companion-pose-message-companion #:companion-pose-message-pose
+   #:sky-request-message #:make-sky-request-message #:sky-request-message-p
+   #:sky-request-message-setting #:sky-request-message-value
    #:ride-message #:make-ride-message #:ride-message-p
    #:ride-message-rider #:ride-message-entity #:ride-message-action
    #:throw-message #:make-throw-message #:throw-message-p

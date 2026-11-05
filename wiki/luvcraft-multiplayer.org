@@ -728,3 +728,14 @@ opens a "Say:" prompt; the latest six lines show in the view's message
 pane for twelve seconds.  =both-players-read-each-line-of-chat-under-its-speakers-name=
 checks both sides' logs, and that a guest claiming another's name is heard
 under its own.
+
+A guest's day knobs (time of day, day length, freeze, orbit tilt) now set
+its own sky at once and send a =sky-request-message= (type 22) that the
+host checks and performs on its own clock; the host's next snapshots carry
+it back.  Until a snapshot shows the setting granted, or for a second at
+most, the guest holds what it asked for against snapshots that disagree,
+so the knob neither waits for the round trip nor springs back.  The host's
+own knobs take the same function.  =a-guests-day-knobs-ask-the-host-and-hold-meanwhile=
+turns Bea's knobs in a view of her world; without the request every host
+check fails, and without the hold a snapshot sent before the host heard
+her turns her clock back.

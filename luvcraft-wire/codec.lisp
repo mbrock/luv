@@ -533,6 +533,13 @@ at VELOCITY."
   (position :position (vector 0d0 0d0 0d0))
   (velocity :velocity (vector 0d0 0d0 0d0)))
 
+(define-message sky-request-message 22 :reliable
+  "A guest asking its host to set one of the day's SETTINGs to VALUE: the
+hour (0 to 24), the real minutes in a day, whether the clock is paused, or
+the sun's orbit tilt."
+  (setting (:enum :hour :minutes-per-day :paused :tilt) :hour)
+  (value :value nil))
+
 (define-message pose-message 32 :unreliable
   (player :string "")
   (pose :pose (make-pose)))

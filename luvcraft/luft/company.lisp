@@ -73,3 +73,73 @@
      :label "Say:"
      :function (lambda (text)
                  (call-companion-ui viewer (lambda () (say-in-world (viewer-world viewer) text)))))))
+
+;;; The day.  The host owns the clock and the day settings (#U4TBMP); a
+;;; guest's knobs ask it with a SKY-REQUEST-MESSAGE.  The guest sets its own
+;;; sky at once and keeps it so -- a wish -- against the host's snapshots
+;;; until one shows the host has granted it, or for a second at most, so the
+;;; knob neither waits for the round trip nor springs back meanwhile.
+
+(defparameter *sky-wish-seconds* 1d0
+  "How long a guest keeps its sky as it asked against snapshots that disagree.")
+
+(defun set-sky-setting (world setting value)
+  "Set WORLD's own SETTING of the day to VALUE."
+  (let ((clock (world-sky-clock world)))
+    (ecase setting
+      (:hour (setf (luvcraft::sky-clock-hour clock) value))
+      (:minutes-per-day (setf (luvcraft::sky-clock-minutes-per-day clock) (coerce value 'double-float)))
+      (:paused (setf (luvcraft::sky-clock-paused-p clock) (and value t)))
+      (:tilt (setf (world-sun-orbit-tilt world) (coerce value 'single-float))))
+    value))
+
+(defun sky-setting-holds-p (world setting value)
+  "Whether WORLD's sky already has SETTING at VALUE, as near as the wire tells."
+  (let ((clock (world-sky-clock world)))
+    (ecase setting
+      (:hour (< (abs (- (mod (+ (- (/ value 24d0) (luvcraft::sky-clock-day-fraction clock)) 0.5d0) 1d0)
+                        0.5d0))
+                1/240))
+      (:minutes-per-day (< (abs (- (luvcraft::sky-clock-minutes-per-day clock) value))
+                           (* 1d-4 (abs value))))
+      (:paused (eq (and value t) (and (luvcraft::sky-clock-paused-p clock) t)))
+      (:tilt (< (abs (- (world-sun-orbit-tilt world) value)) 1d-4)))))
+
+(defun valid-sky-setting-p (setting value)
+  (case setting
+    (:hour (and (realp value) (<= 0 value 24)))
+    (:minutes-per-day (and (realp value) (<= 0.1 value 1440)))
+    (:paused (typep value 'boolean))
+    (:tilt (and (realp value) (<= 0 value 1)))))
+
+(defun set-world-sky (world setting value)
+  "Set SETTING of WORLD's day to VALUE: in its own sky, and on a guest by
+asking the host too."
+  (set-sky-setting world setting value)
+  (when (replica-world-p world)
+    (let ((session (world-session world)))
+      (session-broadcast session (wire:make-sky-request-message
+                                  :setting setting
+                                  :value (if (realp value) (coerce value 'double-float) value)))
+      (setf (getf (living-sky-wishes (living world)) setting)
+            (list value (+ (wall-seconds) *sky-wish-seconds*)))))
+  value)
+
+(defun keep-sky-wishes (world)
+  "After a host's snapshot set WORLD's sky: hold each setting the guest has
+asked for and the host has not yet granted, and forget the rest."
+  (let ((living (living world)) (now (wall-seconds)))
+    (setf (living-sky-wishes living)
+          (loop for (setting (value deadline)) on (living-sky-wishes living) by #'cddr
+                unless (or (sky-setting-holds-p world setting value) (> now deadline))
+                  do (set-sky-setting world setting value)
+                  and collect setting and collect (list value deadline)))))
+
+(defmethod handle-session-message ((session host-session) peer (message wire:sky-request-message))
+  (let ((player (guest-peer-player session peer))
+        (setting (wire:sky-request-message-setting message))
+        (value (wire:sky-request-message-value message)))
+    (when player
+      (if (valid-sky-setting-p setting value)
+          (set-world-sky (session-world session) setting value)
+          (session-log session "Refused ~A's sky request ~S ~S." (player-id player) setting value)))))
