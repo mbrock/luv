@@ -665,7 +665,10 @@ beacon on UDP 47474."
            (unless (eq (session-state session) :closed)
              (setf (session-state session) :disconnected))
            (session-log session "The host closed the connection (~A)." (net:notice-detail notice)))))
-    (:refused (session-log session "Refused a message: ~A." (net:notice-detail notice)))))
+    (:refused (session-log session "Refused a message: ~A." (net:notice-detail notice)))
+    (:unannounced
+     (session-log session "Could not announce the world on the LAN (~A); still trying."
+                  (net:notice-detail notice)))))
 
 ;;; The guest.
 

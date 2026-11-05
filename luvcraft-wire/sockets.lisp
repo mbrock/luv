@@ -119,7 +119,9 @@ return the list of ready (FD . REVENTS)."
    (pipe :initform (open-wake-pipe) :reader socket-transport-pipe)
    (buffer :initform (make-array 65536 :element-type '(unsigned-byte 8))
            :reader socket-transport-buffer)
-   (last-beacon :initform 0 :accessor socket-transport-last-beacon)))
+   (last-beacon :initform 0 :accessor socket-transport-last-beacon)
+   (beacon-failure :initform nil :accessor socket-transport-beacon-failure
+                   :documentation "Why the last beacon could not be sent, or NIL.")))
 
 (defstruct socket-connection
   socket
@@ -323,10 +325,20 @@ return the list of ready (FD . REVENTS)."
                                           :port (endpoint-port endpoint)
                                           :world world
                                           :world-tag (endpoint-world-tag endpoint)))))
-        (dolist (address (socket-transport-broadcast-addresses transport))
-          (transport-send-datagram
-           transport endpoint
-           (cons address (socket-transport-announce-port transport)) octets))))))
+        ;; A broadcast can fail for a while -- macOS answers EHOSTUNREACH
+        ;; while an interface comes or goes, or where local network access
+        ;; is denied.  Say so once, and try again on the next beacon.
+        (let ((failure
+                (handler-case
+                    (dolist (address (socket-transport-broadcast-addresses transport))
+                      (sb-bsd-sockets:socket-send
+                       (socket-transport-udp transport) octets (length octets)
+                       :address (list address
+                                      (socket-transport-announce-port transport))))
+                  (sb-bsd-sockets:socket-error (condition) condition))))
+          (when (and failure (not (socket-transport-beacon-failure transport)))
+            (post endpoint (make-notice :kind :unannounced :detail failure)))
+          (setf (socket-transport-beacon-failure transport) failure))))))
 
 ;;;; Discovery
 

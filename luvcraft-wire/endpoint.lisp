@@ -27,8 +27,11 @@
   peer channel message)
 
 (defstruct notice
-  "A lifecycle event.  KIND is :CONNECTED, :DISCONNECTED, or :REFUSED; a
-refusal's DETAIL is the condition or a keyword such as :FOREIGN-WORLD."
+  "A lifecycle event.  KIND is :CONNECTED, :DISCONNECTED, :REFUSED, or
+:UNANNOUNCED; a refusal's DETAIL is the condition or a keyword such as
+:FOREIGN-WORLD, and :UNANNOUNCED's is why a host's beacon could not be sent.
+The host keeps trying and posts :UNANNOUNCED again only after a beacon
+has gone out."
   kind peer detail)
 
 ;;;; Peers
