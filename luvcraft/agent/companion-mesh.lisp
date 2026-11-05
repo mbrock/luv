@@ -5,7 +5,7 @@
 ;;; sidecar let the game solve its own legs against the actual terrain.
 (defstruct companion-mesh vertices joints weights indices poses bone-count frame-count stride rig)
 (defstruct companion-leg name bones hip knee ankle pole phase)
-(defstruct companion-rig stance legs palm poses)
+(defstruct companion-rig stance legs palm poses carry)
 (defstruct companion-foot point heading from from-heading target target-heading
            (progress 1d0) swing-p distance-driven-p supported-p (stance-p t))
 (defstruct companion-pose mesh palette feet position (pelvis 0d0) moving-p scale)
@@ -57,6 +57,10 @@
      :stance (getf data :stance)
      ;; Still poses stored after the Walk loop, by name, as rest poses.
      :poses (getf data :poses)
+     ;; (ANCHOR . BONES): the bones the Carry pose lays over any other, and
+     ;; the bone they hang from.
+     :carry (let ((carry (getf data :carry)))
+              (and carry (cons (getf carry :anchor) (getf carry :bones))))
      ;; Where a held thing sits: a bone and a point in the rest frame.
      :palm (let ((palm (getf data :palm)))
              (and palm (cons (getf palm :bone) (apply #'make-vec3 (getf palm :point)))))
@@ -179,10 +183,56 @@ live IK may replace legs before skinning."
         (setf (aref palette i) (+ idle (* blend (- walk idle)))))))
   palette)
 
+(defgeneric companion-carry-weight (agent)
+  (:documentation "How far AGENT's arm carries something before it, 0 to 1: its
+Carry pose laid over whatever else it is doing.")
+  (:method (agent) (declare (ignore agent)) 0.0))
+
+(defun lay-carry-pose (mesh palette weight)
+  "Lay MESH's Carry pose over PALETTE by WEIGHT: each carrying bone as it
+hangs from its anchor in the Carry pose, hung from the anchor as PALETTE has
+it, so the arm stays before the body as the body walks or sways."
+  (let* ((carry (companion-rig-carry (companion-mesh-rig mesh)))
+         (poses (companion-mesh-poses mesh))
+         (start (companion-rest-pose-index mesh :carry)))
+    (flet ((at (array base row column) (aref array (+ base (* 4 row) column))))
+      (let* ((anchor (* 12 (car carry)))
+             ;; The anchor in the Carry pose is rigid: its inverse is its
+             ;; rotation transposed, and the translation rotated back.
+             (inverse (make-array 12 :element-type 'single-float))
+             (relay (make-array 12 :element-type 'single-float)))
+        (dotimes (r 3)
+          (dotimes (c 3)
+            (setf (aref inverse (+ (* 4 r) c)) (at poses (+ start anchor) c r)))
+          (setf (aref inverse (+ (* 4 r) 3))
+                (- (loop for k below 3
+                         sum (* (at poses (+ start anchor) k r) (at poses (+ start anchor) k 3))))))
+        ;; RELAY = the anchor now * the Carry anchor's inverse.
+        (dotimes (r 3)
+          (dotimes (c 4)
+            (setf (aref relay (+ (* 4 r) c))
+                  (+ (loop for k below 3 sum (* (at palette anchor r k) (aref inverse (+ (* 4 k) c))))
+                     (if (= c 3) (at palette anchor r 3) 0.0)))))
+        (dolist (bone (cdr carry))
+          (let ((base (* 12 bone)))
+            (dotimes (r 3)
+              (dotimes (c 4)
+                (let ((carried (+ (loop for k below 3
+                                        sum (* (aref relay (+ (* 4 r) k)) (at poses (+ start base) k c)))
+                                  (if (= c 3) (aref relay (+ (* 4 r) 3)) 0.0)))
+                      (i (+ base (* 4 r) c)))
+                  (setf (aref palette i) (+ (aref palette i) (* weight (- carried (aref palette i))))))))))))
+    palette))
+
 (defun sample-agent-palette (agent mesh palette)
-  "AGENT's authored pose now: its walk, blended from the pose it rests in."
+  "AGENT's authored pose now: its walk, blended from the pose it rests in,
+with the Carry pose laid over it as far as it carries."
   (sample-companion-palette mesh (companion-walk-phase agent) (companion-walk-blend agent)
-                            palette (companion-rest-pose-index mesh (companion-rest-pose agent))))
+                            palette (companion-rest-pose-index mesh (companion-rest-pose agent)))
+  (let ((weight (companion-carry-weight agent)))
+    (when (and (plusp weight) (companion-rig-carry (companion-mesh-rig mesh)))
+      (lay-carry-pose mesh palette (coerce weight 'single-float))))
+  palette)
 
 (defun skin-companion-palette (mesh palette output)
   "Write interleaved position, normal, colour and bind point into OUTPUT.

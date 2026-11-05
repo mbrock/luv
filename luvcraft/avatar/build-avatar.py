@@ -631,6 +631,15 @@ def build_animations(arm):
              "spine": (-4, 0, 0)}),
     ])
 
+    # carrying a block in the right hand, out in front at the waist: the
+    # upper arm forward, the forearm level, the palm turned up under it.  Only
+    # the right arm is posed; the game lays it over any other pose, walking
+    # included, from the clavicle out.
+    make_action(arm, "Carry", [
+        (1, {"upper_arm.R": (-34, 0, -10), "forearm.R": (-62, 0, 0),
+             "hand.R": (0, 0, 8)}),
+    ])
+
     arm.animation_data.action = bpy.data.actions["Idle"]
     bpy.ops.object.mode_set(mode="OBJECT")
 

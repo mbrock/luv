@@ -764,3 +764,17 @@ a confirmed event of a companion it owns as it accounts its own.
 =a-guest-summons-a-companion-that-builds-from-her-stock= has Bea's gnome
 place one of her two films: hers drop to one on both sides, Ada's stay at
 two.  With the host's stock spent instead, it fails.
+
+The other player carries its block before it as it walks.  The avatar
+gains a one-frame Carry clip (=build-avatar.py=): the right upper arm
+forward, the forearm level, the hand turned under the block.  The export
+stores it after Sit, and the =.rig= names the bones it poses and the bone
+they hang from (=:carry (:anchor 11 :bones (12 13 14 15 16))=); every other
+pose is byte-for-byte what it was.  A body's =companion-carry-weight=
+lays that arm over whatever else it does, re-hung from the clavicle as the
+walk moves it, so the arm stays before a swaying body.  A remote avatar
+eases its weight to one while its pose holds a block and it is not riding,
+and the held block follows the same palette.  Over a walk loop its palm
+stays 0.46 figure units before it, varying by under 0.01; empty-handed it
+swings from 0.34 behind to 0.16 ahead.  =a-walking-avatar-carries-its-block-before-it=
+fails without the overlay.

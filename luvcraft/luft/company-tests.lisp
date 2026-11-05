@@ -158,3 +158,30 @@
                         :until (lambda () (eql 1 (funcall count (host:find-world-player world "bea")))))))
           (host:close-world-session guest)))
       (host:shutdown-luvcraft-world world))))
+
+(define-test a-walking-avatar-carries-its-block-before-it
+  ;; Walking with a block in hand, the other player's right palm stays
+  ;; before it at every step; with empty hands the arm swings back and forth.
+  (with-host (world session network)
+    (let* ((avatar (make-instance 'host::remote-avatar :session nil :x 0 :y 0 :z 0
+                                                       :position (v:make-vec3 0 0 0)))
+           (bea (host:make-luvcraft-player :id "bea" :name "Bea"))
+           (mesh (luvcraft.agent::companion-mesh :avatar))
+           (palm (luvcraft.agent::companion-rig-palm (luvcraft.agent::companion-mesh-rig mesh)))
+           (palette (make-array (* 12 (luvcraft.agent::companion-mesh-bone-count mesh))
+                                :element-type 'single-float)))
+      (flet ((reach (held)
+               ;; How far before its feet the palm is, over one walk loop, in figure units.
+               (loop for gait from 0d0 below (* 4 pi) by (/ pi 8)
+                     for shown = (host:make-pose-snapshot
+                                  :position (vector 1040d0 1040d0 20d0) :velocity (vector 1.5d0 0d0 0d0)
+                                  :gait gait :held held)
+                     do (host::pose-remote-avatar world avatar bea shown 1)
+                        (luvcraft.agent::sample-agent-palette avatar mesh palette)
+                     collect (v:vec3-z (luvcraft.agent::companion-palette-point
+                                        palette (car palm) (cdr palm))))))
+        (let ((carrying (reach luvcraft::*stone-block*))
+              (empty (reach nil)))
+          (true (> (reduce #'min carrying) 0.35))
+          (true (< (- (reduce #'max carrying) (reduce #'min carrying)) 0.05))
+          (true (< (reduce #'min empty) -0.2)))))))

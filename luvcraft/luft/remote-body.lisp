@@ -11,7 +11,9 @@
 ;;; dialogue: only its body overlay is ever added to a view.
 (defclass remote-avatar (luvcraft.agent:embodied-agent)
   ((rest-pose :initform nil :accessor luvcraft.agent::companion-rest-pose
-              :documentation "NIL to stand at rest, :SIT astride a turtle."))
+              :documentation "NIL to stand at rest, :SIT astride a turtle.")
+   (carry :initform 0.0 :accessor luvcraft.agent::companion-carry-weight
+          :documentation "How far its arm carries the block in hand before it."))
   (:documentation "A remote player's skinned body, as one view draws it."))
 
 (defmethod luvcraft.agent::embodied-agent-save-kind ((avatar remote-avatar))
@@ -116,10 +118,17 @@ gait, or sitting on the turtle it rides."
           (luvcraft.agent::embodied-agent-position avatar) position
           (luvcraft.agent::embodied-agent-facing-yaw avatar) facing
           (luvcraft.agent::companion-walk-phase avatar) (remote-body-walk-phase shown))
-    (let ((blend (luvcraft.agent::companion-walk-blend avatar)))
+    (let ((blend (luvcraft.agent::companion-walk-blend avatar))
+          (carry (luvcraft.agent::companion-carry-weight avatar))
+          (ease (coerce (- 1 (exp (* -10 seconds))) 'single-float)))
       (setf (luvcraft.agent::companion-walk-blend avatar)
-            (+ blend (* (coerce (- 1 (exp (* -10 seconds))) 'single-float)
-                        (- (if walking-p 1.0 0.0) blend))))))
+            (+ blend (* ease (- (if walking-p 1.0 0.0) blend)))
+            ;; A block in hand is carried before it; a rider's hands are on the reins.
+            (luvcraft.agent::companion-carry-weight avatar)
+            (+ carry (* ease (- (if (and (pose-snapshot-held shown)
+                                         (not (remote-ridden-turtle world player)))
+                                    1.0 0.0)
+                                carry))))))
   avatar)
 
 (defun sync-remote-avatars (viewer seconds)

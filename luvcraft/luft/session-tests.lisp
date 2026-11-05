@@ -667,6 +667,8 @@ frames would, until UNTIL holds with nothing in flight."
                                                :element-type 'single-float)))
                      (host::pose-remote-avatar world avatar rider
                                                (host:track-shown (host:player-track rider)) 1)
+                     ;; Legs only: a carrying arm reaches forward too (#LV16J7).
+                     (setf (luvcraft.agent::companion-carry-weight avatar) 0.0)
                      (luvcraft.agent::sample-agent-palette avatar mesh palette)
                      (luvcraft.agent::skin-companion-palette mesh palette skinned)
                      (loop for i from 2 below (length skinned) by 12 maximize (aref skinned i)))))
