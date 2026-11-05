@@ -744,10 +744,19 @@ TARGET interns any member it lacks, so the translation is always total."
       (error "Block content has ~D indices; domain ~S requires ~D."
              (length indices) domain (chunk-domain-cardinality domain)))
     (let ((cardinality (block-vocabulary-cardinality vocabulary)))
-      (dotimes (offset (length indices))
-        (unless (< (aref indices offset) cardinality)
-          (error "Vocabulary offset ~D at offset ~D exceeds cardinality ~D."
-                 (aref indices offset) offset cardinality))))))
+      (declare (type fixnum cardinality))
+      ;; Every chunk raised passes through here, so the usual simple array
+      ;; is scanned with its type known.
+      (macrolet ((scan (type)
+                   `(let ((indices indices))
+                      (declare (type ,type indices))
+                      (dotimes (offset (length indices))
+                        (unless (< (aref indices offset) cardinality)
+                          (error "Vocabulary offset ~D at offset ~D exceeds cardinality ~D."
+                                 (aref indices offset) offset cardinality))))))
+        (if (typep indices '(simple-array (unsigned-byte 16) (*)))
+            (scan (simple-array (unsigned-byte 16) (*)))
+            (scan (array (unsigned-byte 16) (*))))))))
 
 (defmethod fields:field-representation-domain ((column block-content-column))
   (block-content-column-domain column))
