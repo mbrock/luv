@@ -1179,7 +1179,31 @@
       (destroy encoder)
       (destroy device))))
 
+(defun sdl-video-unavailable ()
+  "NIL when SDL video initializes here, else SDL's reason: a Mac without a
+logged-in display, for one, has no displays to add."
+  (call-with-sdl-main-thread
+   (lambda ()
+     (trivial-main-thread:call-in-main-thread
+      (lambda ()
+        (luv::with-sdl-native-environment
+          (if (luv::initialize-sdl-video)
+              (progn (sdl3:quit) nil)
+              (sdl3:get-error))))
+      :blocking t))))
+
 (define-test luvcraft-metal-frame-resources-follow-the-drawable-pool
+  (let ((reason (sdl-video-unavailable)))
+    (if reason
+        (parachute:eval-in-context
+         parachute:*context*
+         (make-instance 'parachute:result
+                        :expression 'sdl-video
+                        :status :skipped
+                        :description (format nil "SDL video is unavailable: ~A" reason)))
+        (call-frame-resources-follow-the-drawable-pool))))
+
+(defun call-frame-resources-follow-the-drawable-pool ()
   (call-with-sdl-main-thread
    (lambda ()
      (let ((session nil))
