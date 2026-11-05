@@ -257,7 +257,8 @@
                (:file "luvcraft/luft/session-lobby")
                (:file "luvcraft/luft/remote-body")
                (:file "luvcraft/luft/company")
-               (:file "luvcraft/luft/history"))
+               (:file "luvcraft/luft/history")
+               (:file "luvcraft/luft/soak"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
 
 (defsystem "luvcraft/luft/game/test"
@@ -273,7 +274,8 @@
                (:file "luvcraft/luft/living-world-tests")
                (:file "luvcraft/luft/company-tests")
                (:file "luvcraft/luft/reconnect-tests")
-               (:file "luvcraft/luft/history-tests"))
+               (:file "luvcraft/luft/history-tests")
+               (:file "luvcraft/luft/soak-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package

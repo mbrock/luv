@@ -160,12 +160,23 @@ from the head when it opened, or NIL for the watermark."))
   ;; The local player edits the world; the host's own edit, which schedules
   ;; meshing, is the scene edit.
   ;; Particles follow from the journal's confirmed events, whoever made them.
-  (multiple-value-bind (edit status)
-      (player-edit-world-cell (viewer-world viewer)
-                              (or *world-edit-player* (viewer-local-player viewer)) cell placement
-                       :scene-edit (lambda (block) (call-next-method viewer cell block)))
-    (setf (render:viewer-last-edit-status viewer) status)
-    (values edit status)))
+  (let* ((player (or *world-edit-player* (viewer-local-player viewer)))
+         (cause render::*viewer-world-edit-cause*)
+         ;; Taken before the edit: mining puts what it mined in hand.
+         (block (and placement (eq cause :edit) (selected-block player placement))))
+    (multiple-value-bind (edit status)
+        (player-edit-world-cell (viewer-world viewer) player cell placement
+                                :scene-edit (lambda (block) (call-next-method viewer cell block)))
+      (setf (render:viewer-last-edit-status viewer) status)
+      (let ((tape (render:viewer-input-tape viewer)))
+        ;; The local player's tape replays its edits as soak.lisp's actions do.
+        (when (and tape (null *world-edit-player*) (or edit (eq status :requested)))
+          (terrain:record-input-action
+           tape (if (eq cause :edit)
+                    (list :edit (luft:site-x cell) (luft:site-y cell) (luft:site-z cell)
+                          (luvcraft::block-save-description block))
+                    (list cause)))))
+      (values edit status))))
 
 (defmethod luv:handle-canvas-event
     ((viewer luvcraft-viewer) canvas (event luv:canvas-pointer-wheel-event))
