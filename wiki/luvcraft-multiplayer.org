@@ -834,3 +834,59 @@ tried.  The live join called =lobby-join= with the row's entry, which the
 pane's pointer handler calls; no real mouse click was tried.  Reconnection
 was checked by closing the host's side of the link, not by pulling a
 cable.
+*** DONE Keep history across saves, and show who made what
+:PROPERTIES:
+:ID: NK0OC8
+:END:
+
+/Intent./ Phase 3C: a save keeps a tail of recent events after its
+compacted edit set (#4D3QFJ), so each player's undo survives a save and
+reload; every authored cell can say who placed it and when; and an age
+lens and an in-world inspector show it (#OVEP9A).
+
+/Evidence./ The compaction rule is a count:
+=terrain:*journal-tail-events*= (4096) of the newest events, cut at the
+earliest transaction boundary that keeps at most that many
+([[lisp:luft.terrain::world-journal-compaction-watermark]]), and never in
+the middle of a transaction.  The save writes the edit set as it stood at
+that watermark, replayed from the set the journal was installed from, and
+the events after it as (sequence transaction actor tick time (x y z)
+before after cause), values coded like the edit columns.  An =:actors=
+table names each principal -- a player id, =(:inhabitant ID)=, =:import=
+-- and an edit-column =:provenance= says who last authored each compacted
+cell, so authorship outlives the events.  Reading replays the tail:
+Luvcraft's block world stands at the head, and the Luft journal installs
+the set at the watermark and replays the events with their own sequence
+and transaction numbers, so numbering continues and undo histories are
+rebuilt.  History that names a compacted transaction is dropped, so undo
+reaches exactly into the tail.  A guest's welcome is unchanged: the set
+compacted at the head, no events.  Events now record wall time, and the
+journal keeps each site's latest provenance, including removals
+([[lisp:luft.terrain::world-cell-provenance]]).
+
+L toggles the lens ([[lisp:luvcraft.luft.game::toggle-history-lens]]).
+Authored blocks within 40 cells get a tint on their open faces, by the log
+of their age: yellow-orange today, magenta for days, blue past a month,
+grey when the time is unknown.  A plate in the open cell before the block
+at the crosshair reads "placed by Ada, Tuesday".  Both are world-text
+panels, depth-tested against the scene.
+
+Tests: Bea's undo after a host save and reload takes back her edit and
+leaves Ada's later one (both fail if the tail is compacted away); a
+companion's edit keeps its actor, sequence, and time across a reload, both
+from the tail and from the compacted provenance column; five edits saved
+with a tail of two compact at 3, undo reaches exactly two, and numbering
+goes on at 6; the compaction rule never splits a two-event transaction.
+Live on temple (two images, seed 121, 5 November): a wall built by Ada and
+Bea survived a reload with journal head 36; after the save's event times
+were shifted back by hand for the bottom rows, the lens showed three
+bands, and the inspector read "placed by Bea, today at 16:06", "placed by
+Ada, Tuesday", and "placed by Ada, 15 October".  Bea's undo after the
+reload appended event 37, =(:undo 36)=, removing her own last plank.  The
+seed-121 fingerprint (#QTXNY0) is unchanged.
+
+/Open./ A guest's inspector knows only the events since it joined: the
+welcome carries no provenance for the compacted set.  An emptied cell
+remembers who emptied it, but the crosshair cannot point at air, so
+nothing shows it yet.  Compaction is by count alone; an age rule could
+join it.
