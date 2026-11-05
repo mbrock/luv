@@ -661,10 +661,17 @@ or slower under load, and =poses-travel-stamped-with-the-simulation-tick=
 drew Bea 3.16 cells behind. Its bound is now her speed times the track's
 delay and the newest pose's age, not a fixed 3 cells.
 
-/Open./ A rider's pose will carry its turtle (2B); =remote-body-walking-p=
-and the avatar's position are where the body sits instead of walking. Both
-players wear the same avatar. The arm hangs at the side rather than
-carrying the block forward.
+A remote rider sits astride its turtle (#U4TBMP): =remote-body-placement=
+puts the avatar's hips on the shell, at the seat a local rider's eyes are
+over, facing the turtle's way and not walking. Its nameplate and block go
+with it. =a-remote-rider-sits-on-its-turtle= checks the seat on the host
+and the feet once she gets off.
+
+/Open./ Both players wear the same avatar. The arm hangs at the side
+rather than carrying the block forward. With no sitting clip, the rider's
+legs go into the shell. The live captures predate the rebase onto 2A to 2C
+and the seating, which have no window yet: after the reboot, temple has
+no display, and Metal needs one.
 
 ** TODO Make company comfortable
 :PROPERTIES:

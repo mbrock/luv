@@ -55,14 +55,44 @@
     (luv.slug:release-slug-glyph-cache (presences-glyph-cache state))
     (setf (presences-glyph-cache state) nil)))
 
-;;; The pose.  A rider's pose will name what it rides (#EA88ON); then the
-;;; body sits on its saddle and does not walk, which REMOTE-BODY-WALKING-P
-;;; and the position below are the places to say so.
+;;; The pose: on its feet where the track shows it, or astride the turtle it
+;;; rides (#U4TBMP), which a rider's pose carries.
+
+(defparameter *avatar-hip-height* 0.8
+  "The avatar's hips above its soles, in figure units: what sits on a shell.")
+
+(defun remote-ridden-turtle (world player)
+  "The turtle WORLD knows PLAYER to ride, or NIL."
+  (loop for id being the hash-keys of (living-rides (living world)) using (hash-value rider)
+        when (equal rider (player-id player))
+          return (find-world-turtle world id)))
 
 (defun remote-body-walking-p (shown)
   (let ((v (pose-snapshot-velocity shown)))
     (and (not (pose-snapshot-flying shown))
          (> (+ (expt (svref v 0) 2) (expt (svref v 1) 2)) 0.09d0))))
+
+(defun remote-body-placement (world player shown)
+  "Where PLAYER's body stands, in presentation (Y-up) axes, its facing, and
+whether it walks.  A rider sits in the seat a local rider's eyes are over,
+hips on the shell, and does not walk; its legs go into the shell."
+  (let ((turtle (remote-ridden-turtle world player)))
+    (if turtle
+        (multiple-value-bind (sway-lift sway-yaw) (luvcraft::critter-sway turtle)
+          (let ((yaw (luvcraft::critter-yaw turtle))
+                (setback luvcraft::*critter-ride-seat-offset*))
+            (values (vec3:make-vec3
+                     (+ (luvcraft::critter-x turtle) (* setback (sin yaw)))
+                     (+ (luvcraft::critter-y turtle) (luvcraft::critter-height turtle) sway-lift
+                        (- (* *avatar-hip-height* (luvcraft.agent::companion-stature :avatar))))
+                     (+ (luvcraft::critter-z turtle) (* setback (cos yaw))))
+                    (+ yaw sway-yaw) nil)))
+        (let ((p (pose-snapshot-position shown))
+              (offset (game::luvcraft-world-source-offset (world-source world))))
+          ;; Luft's yaw turns from +x toward +y; a companion's from +z toward +x.
+          (values (vec3:make-vec3 (- (svref p 0) offset) (svref p 2) (- (svref p 1) offset))
+                  (- (/ pi 2) (pose-snapshot-yaw shown))
+                  (remote-body-walking-p shown))))))
 
 (defun remote-body-walk-phase (shown)
   "The Walk loop's phase for SHOWN's gait.  The gait turns by pi each half
@@ -74,19 +104,18 @@ avatar's walk covers its stride, so the feet plant where they land."
                (luvcraft.agent::companion-mesh-stride mesh)))
          1d0)))
 
-(defun pose-remote-avatar (viewer avatar shown seconds)
-  "Stand AVATAR where SHOWN is, facing its look and walking by its gait."
-  (let ((p (pose-snapshot-position shown)))
-    (setf (luvcraft.agent::embodied-agent-position avatar)
-          (presentation-position viewer (vec3:make-vec3 (svref p 0) (svref p 1) (svref p 2)))
-          ;; Luft's yaw turns from +x toward +y; a companion's from +z toward +x.
-          (luvcraft.agent::embodied-agent-facing-yaw avatar) (- (/ pi 2) (pose-snapshot-yaw shown))
+(defun pose-remote-avatar (viewer avatar player shown seconds)
+  "Place AVATAR as PLAYER's body stands in VIEWER's world, walking by SHOWN's gait."
+  (multiple-value-bind (position facing walking-p)
+      (remote-body-placement (viewer-world viewer) player shown)
+    (setf (luvcraft.agent::embodied-agent-position avatar) position
+          (luvcraft.agent::embodied-agent-facing-yaw avatar) facing
           (luvcraft.agent::companion-walk-phase avatar) (remote-body-walk-phase shown))
     (let ((blend (luvcraft.agent::companion-walk-blend avatar)))
       (setf (luvcraft.agent::companion-walk-blend avatar)
             (+ blend (* (coerce (- 1 (exp (* -10 seconds))) 'single-float)
-                        (- (if (remote-body-walking-p shown) 1.0 0.0) blend)))))
-    avatar))
+                        (- (if walking-p 1.0 0.0) blend))))))
+  avatar)
 
 (defun sync-remote-avatars (viewer seconds)
   "Give each remote player VIEWER can see a body, posed as its track draws
@@ -104,7 +133,7 @@ it, and take down the bodies of those gone."
                                                  :session viewer :x 0 :y 0 :z 0
                                                  :position (vec3:make-vec3 0 0 0))))))
             (push player seen)
-            (pose-remote-avatar viewer avatar shown seconds)
+            (pose-remote-avatar viewer avatar player shown seconds)
             (luvcraft.agent::ensure-embodied-agent-body avatar)))))
     (loop for player being the hash-keys of avatars using (hash-value avatar)
           unless (member player seen)
@@ -228,7 +257,10 @@ and UP at EM cells to the em, addressing ATLAS, which holds its glyphs."
           for track = (player-track player)
           for shown = (and track (track-shown track))
           when shown
-            collect (let* ((p (pose-snapshot-position shown))
+            ;; Over the body where it stands, or sits on its turtle.
+            collect (let* ((p (let ((feet (host-position viewer (remote-body-placement
+                                                                  (viewer-world viewer) player shown))))
+                                (vector (vec3:vec3-x feet) (vec3:vec3-y feet) (vec3:vec3-z feet))))
                            (dx (- (vec3:vec3-x eye) (svref p 0)))
                            (dy (- (vec3:vec3-y eye) (svref p 1)))
                            (flat (max 1d-6 (sqrt (+ (* dx dx) (* dy dy)))))

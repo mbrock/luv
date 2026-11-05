@@ -631,3 +631,46 @@ frames would, until UNTIL holds with nothing in flight."
         (is eq :occupied (nth-value 1 (host:player-edit-world-cell
                                        guest-world bea (cell guest-world 1051 1060 ground) stone)))
         (host:close-world-session guest)))))
+
+(define-test a-remote-rider-sits-on-its-turtle
+  ;; Bea rides the host's turtle from her world; the host seats her body
+  ;; astride it, facing its way and not walking, and stands her on her feet
+  ;; again when she gets off (#AVKN70).
+  (with-host (world session network)
+    (let ((turtle (first (host-turtles world))))
+      (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
+        (let* ((mount (replica-of guest-world world turtle))
+               (character (terrain:make-walking-character
+                           :position (host::animal-luft-position mount))))
+          (setf (host:player-character bea) character)
+          (terrain:add-simulation-character (host:world-simulation guest-world) character)
+          (host::begin-world-ride guest-world bea mount)
+          (flet ((rein ()
+                   (luvcraft::urge-critter mount 1d0 0.4d0 1/60)
+                   (setf (terrain:body-position (terrain:character-body character))
+                         (host::animal-luft-position mount)))
+                 (placement ()
+                   (let ((rider (host:find-world-player world "bea")))
+                     (host::remote-body-placement world rider
+                                                  (host:track-shown (host:player-track rider))))))
+            (true (live-until (list world guest-world)
+                              (lambda () (equal "bea" (host::turtle-rider-id world turtle)))
+                              :each #'rein))
+            (live (list world guest-world) 0.5 :each #'rein)
+            (multiple-value-bind (seat facing walking-p) (placement)
+              (let ((back (+ (luvcraft::critter-y turtle) (luvcraft::critter-height turtle))))
+                ;; Hips on the shell: the soles sink below its back, not to the ground.
+                (true (< (- back 1) (v:vec3-y seat) (- back 0.5)))
+                (true (< (distance (list (v:vec3-x seat) (v:vec3-z seat))
+                                   (list (luvcraft::critter-x turtle) (luvcraft::critter-z turtle)))
+                         0.6))
+                (true (< (abs (- facing (luvcraft::critter-yaw turtle))) 0.2))
+                (is eq nil walking-p)))
+            (host::end-world-ride guest-world bea mount)
+            (true (live-until (list world guest-world)
+                              (lambda () (null (host::turtle-rider-id world turtle)))))
+            ;; Off the turtle, her body stands where her pose says.
+            (let ((seat (placement))
+                  (shown (host:track-shown (host:player-track (host:find-world-player world "bea")))))
+              (is = (aref (host:pose-snapshot-position shown) 2) (v:vec3-y seat))))
+          (host:close-world-session guest))))))
