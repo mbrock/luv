@@ -81,6 +81,50 @@ does in Luvcraft."
      (luvcraft::block-chunk-load-payload-content payload))
     (luvcraft::world-chunk-at world chunk-x 0 chunk-z)))
 
+(defparameter *luvcraft-generation-threads*
+  (max 1 (1- (serapeum:count-cpus :default 2)))
+  "How many threads raise the sixteen Luvcraft chunks of one Luft chunk:
+every core but one, which stays with the window.
+
+Each Luvcraft chunk is a pure function of its source, so they are computed
+apart and their cells handed to the terrain in the same order as from one
+thread; 1 generates them all on the calling thread.")
+
+(defun luvcraft-chunk-content (little world chunk-x chunk-z)
+  "The dense content Luvcraft's own load request raises for CHUNK-X, CHUNK-Z.
+WORLD is only read, for its chunk shape, so threads may share it."
+  (luvcraft::block-chunk-load-payload-content
+   (luv.production:perform-production-request
+    (luvcraft:make-block-chunk-load-request
+     little world (list chunk-x 0 chunk-z) 1 0))))
+
+(defun map-luvcraft-chunk-indices (function count)
+  "A vector of FUNCTION's values for 0 below COUNT, computed by up to
+*LUVCRAFT-GENERATION-THREADS* threads; the first error is resignalled."
+  (let ((results (make-array count))
+        (next (list 0))
+        (threads (max 1 (min count *luvcraft-generation-threads*))))
+    (flet ((work ()
+             (handler-case
+                 ;; ATOMIC-INCF returns the value before its increment.
+                 (loop for index = (sb-ext:atomic-incf (car next))
+                       while (< index count)
+                       do (setf (aref results index) (funcall function index))
+                       finally (return nil))
+               (error (condition)
+                 ;; Stop the others early; the caller resignals this.
+                 (setf (car next) count)
+                 condition))))
+      (let* ((helpers (loop repeat (1- threads)
+                            collect (sb-thread:make-thread
+                                     #'work :name "Luvcraft chunk generator")))
+             (failure (work)))
+        (dolist (helper helpers)
+          (let ((condition (sb-thread:join-thread helper)))
+            (setf failure (or failure condition))))
+        (when failure (error failure))
+        results))))
+
 (defmethod terrain:generate-world-source-chunk
     ((source luvcraft-world-source) key place)
   (let* ((offset (luvcraft-world-source-offset source))
@@ -90,6 +134,15 @@ does in Luvcraft."
          (x0 (- (luft:chunk-origin-x key) offset))
          (z0 (- (luft:chunk-origin-y key) offset))
          (span (floor luft:+chunk-size+ +luvcraft-chunk-size+))
+         (contents
+           (map-luvcraft-chunk-indices
+            (lambda (index)
+              (multiple-value-bind (i j) (floor index span)
+                (luvcraft-chunk-content
+                 little world
+                 (+ (floor x0 +luvcraft-chunk-size+) i)
+                 (+ (floor z0 +luvcraft-chunk-size+) j))))
+            (* span span)))
          (placements (make-hash-table :test #'eq)))
     (flet ((placement (block)
              (or (gethash block placements)
@@ -98,12 +151,11 @@ does in Luvcraft."
         (dotimes (j span)
           (let* ((chunk-x (+ (floor x0 +luvcraft-chunk-size+) i))
                  (chunk-z (+ (floor z0 +luvcraft-chunk-size+) j))
-                 (chunk (load-luvcraft-chunk little world chunk-x chunk-z))
                  (base-x (+ offset (* chunk-x +luvcraft-chunk-size+)))
                  (base-y (+ offset (* chunk-z +luvcraft-chunk-size+))))
             ;; Read the dense storage directly; X varies fastest, then Y.
             (luvcraft.world:with-block-content-storage (domain palette indices)
-                chunk
+                (aref contents (+ (* i span) j))
               (declare (ignore domain))
               (dotimes (lx +luvcraft-chunk-size+)
                 (dotimes (lz +luvcraft-chunk-size+)

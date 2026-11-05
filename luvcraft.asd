@@ -214,7 +214,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; Luvcraft's generator is the oracle and runs as is; only the terrain is Luft's.
-  :depends-on ("luvcraft/core" "luft/terrain")
+  :depends-on ("luvcraft/core" "luft/terrain" "serapeum")
   :serial t
   :components ((:module "luvcraft/luft"
                 :serial t
