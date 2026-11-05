@@ -455,12 +455,21 @@ only), :UNRELIABLE (a datagram, or the stream as fallback), or :DATAGRAM."
 (defun message-type-for-code (code) (aref *message-types* code))
 
 (define-message hello-message 1 :reliable
-  "A guest's first words (#2SGDU2).  Its session is zero."
+  "A guest's first words (#2SGDU2).  Its session is zero.  A guest whose
+link dropped says hello again with the EPOCH of the host that welcomed it
+and RESUME, the last sequence its journal holds, and is sent only the events
+after it."
   (identity :string "")
-  (name :string ""))
+  (name :string "")
+  (resume (:optional :u64) nil)
+  (epoch :u64 0))
 
 (define-message welcome-message 2 :reliable
-  "Catch-up: everything a guest needs to raise the world at watermark N."
+  "Catch-up: everything a guest needs to raise the world at watermark N.
+EPOCH names the host's session, so a guest that reconnects resumes only the
+journal it was welcomed into; resuming, WATERMARK is the guest's own and
+EDITS is empty."
+  (epoch :u64 0)
   (recipe :recipe (make-recipe))
   (vocabulary :vocabulary nil)
   (watermark :u64 0)

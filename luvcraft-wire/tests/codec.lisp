@@ -41,9 +41,11 @@
     (flet ((in-world (message)
              (stamp-message message :world-tag world :session #xfedcba9876543210)))
       (list
-       (make-hello-message :identity "c2f0-player-ida" :name "Ida Åkesson")
+       (make-hello-message :identity "c2f0-player-ida" :name "Ida Åkesson"
+                           :resume 4100 :epoch #x0123456789abcdef)
        (in-world
         (make-welcome-message
+         :epoch #x0123456789abcdef
          :recipe (make-recipe :generator "luvcraft" :version 3 :seed 1234567
                               :parameters '(:sea-level 64 :roughness 0.75d0
                                             :biomes ("hills" "fjord")))

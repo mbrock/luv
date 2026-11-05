@@ -253,6 +253,7 @@
                (:file "luvcraft/luft/player-table")
                (:file "luvcraft/luft/companion-session")
                (:file "luvcraft/luft/living-world")
+               (:file "luvcraft/luft/session-reconnect")
                (:file "luvcraft/luft/remote-body")
                (:file "luvcraft/luft/company"))
   :in-order-to ((test-op (test-op "luvcraft/luft/game/test"))))
@@ -268,7 +269,8 @@
                (:file "luvcraft/luft/session-tests")
                (:file "luvcraft/luft/player-table-tests")
                (:file "luvcraft/luft/living-world-tests")
-               (:file "luvcraft/luft/company-tests"))
+               (:file "luvcraft/luft/company-tests")
+               (:file "luvcraft/luft/reconnect-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package

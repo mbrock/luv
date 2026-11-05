@@ -54,7 +54,8 @@
 
 (defclass world-session ()
   ((world :initarg :world :reader session-world)
-   (endpoint :initarg :endpoint :reader session-endpoint)
+   (endpoint :initarg :endpoint :accessor session-endpoint
+             :documentation "The current link; a guest that reconnects gets a new one.")
    (local-player :initarg :local-player :reader session-local-player)
    (viewer :initform nil :accessor session-viewer
            :documentation "The view whose frames apply queued events and mesh
@@ -89,6 +90,11 @@ them; without one, the session applies them itself.")
                    :documentation "The journal sequence every guest has been sent.")
    (guests :initform nil :accessor session-guests
            :documentation "(PEER . PLAYER) for every welcomed guest.")
+   (epoch :initform (1+ (random (1- (ash 1 64)) (make-random-state t))) :reader session-epoch
+          :documentation "This session's name in welcomes: a guest resumes only into it.")
+   (away :initform nil :accessor session-away
+         :documentation "(PLAYER . DEADLINE) for every guest whose link dropped,
+whose place is kept until DEADLINE (session-reconnect.lisp).")
    (remap :initform (own-remap) :reader session-wire-remap
           :documentation "This image's own vocabulary, which the host's offsets name."))
   (:documentation "The session of the world that sequences everyone's edits."))
@@ -105,6 +111,10 @@ them; without one, the session applies them itself.")
             :documentation "The host's sequence of the last event recorded here.")
    (transactions :initform (make-hash-table) :reader session-transactions
                  :documentation "The host's transaction ids -> this journal's.")
+   (epoch :initarg :epoch :reader session-epoch
+          :documentation "The host session that welcomed this one.")
+   (link :initform nil :accessor session-link
+         :documentation "While the host is lost, how reconnecting goes (session-reconnect.lisp).")
    (next-request :initform 0 :accessor session-next-request)
    (replies :initform nil :accessor session-replies
             :documentation "The host's edit replies, newest first."))
@@ -539,6 +549,7 @@ beacon on UDP 47474."
       (net:send-message
        endpoint
        (wire:make-welcome-message
+        :epoch (session-epoch session)
         :recipe (world-wire-recipe (world-source world))
         :vocabulary (map 'list #'symbol-name (luvcraft:material-vocabulary-table))
         :watermark (session-journal-head session)
@@ -567,16 +578,22 @@ beacon on UDP 47474."
   (let ((player (guest-peer-player session peer)))
     (when player
       (setf (session-guests session) (remove peer (session-guests session) :key #'car))
-      (terrain:remove-streaming-scene-interest (session-scene session) (player-id player))
-      (let ((pose (player-last-pose session player)))
-        (keep-departed-player session player)
-        (forget-remote-player session (player-id player))
-        (dolist (guest (session-guests session))
-          (net:send-message (session-endpoint session)
-                            (wire:make-player-update-message
-                             :presence :left :player (player-wire-record session player pose))
-                            (car guest))))
-      (session-log session "~A left (~A)." (player-name player) reason))))
+      (depart-player session player reason))))
+
+(defun depart-player (session player reason)
+  "Let the guest PLAYER go from SESSION's world, keeping its record, and tell
+the other guests."
+  (setf (session-away session) (remove player (session-away session) :key #'car))
+  (terrain:remove-streaming-scene-interest (session-scene session) (player-id player))
+  (let ((pose (player-last-pose session player)))
+    (keep-departed-player session player)
+    (forget-remote-player session (player-id player))
+    (dolist (guest (session-guests session))
+      (net:send-message (session-endpoint session)
+                        (wire:make-player-update-message
+                         :presence :left :player (player-wire-record session player pose))
+                        (car guest))))
+  (session-log session "~A left (~A)." (player-name player) reason))
 
 (defun broadcast-journal (session)
   "Send every guest the events recorded since the last broadcast."
@@ -647,13 +664,9 @@ beacon on UDP 47474."
 
 (defun handle-session-notice (session notice)
   (case (net:notice-kind notice)
-    (:disconnected
-     (if (typep session 'host-session)
-         (part-guest session (net:notice-peer notice) (net:notice-detail notice))
-         (progn
-           (unless (eq (session-state session) :closed)
-             (setf (session-state session) :disconnected))
-           (session-log session "The host closed the connection (~A)." (net:notice-detail notice)))))
+    ;; A dropped link is not a goodbye: the host keeps a guest's place, and
+    ;; a guest reconnects (session-reconnect.lisp).
+    (:disconnected (lose-link session (net:notice-peer notice) (net:notice-detail notice)))
     (:refused (session-log session "Refused a message: ~A." (net:notice-detail notice)))
     (:unannounced
      (session-log session "Could not announce the world on the LAN (~A); still trying."
@@ -747,6 +760,7 @@ set installed at its watermark, and the remap of the host's vocabulary."
       (let ((session (make-instance 'guest-session
                                     :world world :endpoint endpoint :local-player player
                                     :peer peer :remap remap :host-offsets offsets
+                                    :epoch (wire:welcome-message-epoch welcome)
                                     :watermark watermark :applied watermark)))
         (setf (world-session world) session
               ;; The host's turtles arrive in its snapshots; none are seeded here.
@@ -982,6 +996,7 @@ point, and log every one that differs."
 local pose when due, and move remote players' tracks on by SECONDS.  YAW
 and PITCH are the local player's look, when a view knows it."
   (drain-session session)
+  (advance-session-link session)
   (finish-chunk-hashes session)
   (when (typep session 'host-session)
     (broadcast-journal session)
@@ -1015,6 +1030,7 @@ and PITCH are the local player's look, when a view knows it."
        (send-player-record session :force t))
      (session-broadcast session (wire:make-bye-message :reason reason :text "Goodbye.")))
     (setf (session-state session) :closed))
+  (abandon-reconnection session)
   (net:stop-endpoint (session-endpoint session))
   (dolist (player (session-remote-players session))
     (terrain:remove-streaming-scene-interest (session-scene session) (player-id player))
@@ -1033,6 +1049,8 @@ and PITCH are the local player's look, when a view knows it."
         :player (player-id (session-local-player session))
         :port (net:endpoint-port (session-endpoint session))
         :peers (mapcar #'player-id (session-remote-players session))
+        :away (and (typep session 'host-session)
+                   (mapcar (lambda (away) (player-id (car away))) (session-away session)))
         :head (session-journal-head session)
         :matched-chunks (session-matched-chunks session)
         :mismatched-chunks (length (session-mismatched-chunks session))))

@@ -67,8 +67,9 @@ exactly what an encoder would have written.")
    #:message-type-code #:message-channel #:message-type-for-code
    #:hello-message #:make-hello-message #:hello-message-p
    #:hello-message-identity #:hello-message-name
+   #:hello-message-resume #:hello-message-epoch
    #:welcome-message #:make-welcome-message #:welcome-message-p
-   #:welcome-message-recipe #:welcome-message-vocabulary
+   #:welcome-message-epoch #:welcome-message-recipe #:welcome-message-vocabulary
    #:welcome-message-watermark #:welcome-message-edits
    #:welcome-message-entities #:welcome-message-player
    #:events-message #:make-events-message #:events-message-p
