@@ -708,7 +708,7 @@ side rather than carrying the block forward.
 inspector and age lens (#OVEP9A), lossless reconnection, a soak bot, and
 edit prediction for tailnet play.
 
-*** NEXT Talk, carry, and share the day
+*** DONE Talk, carry, and share the day
 :PROPERTIES:
 :ID: LV16J7
 :END:
@@ -724,7 +724,7 @@ defined and nothing yet sent).  A guest's line goes to its host, which
 names the speaker itself, shows the line, and sends it to every guest, the
 speaker included, so each side shows it once the host has it, as an edit
 shows once confirmed.  The host's own lines go out the same way.  Slash
-opens a "Say:" prompt; the latest six lines show in the view's message
+(the key =:/=) opens a "Say:" prompt; the latest six lines show in the view's message
 pane for twelve seconds.  =both-players-read-each-line-of-chat-under-its-speakers-name=
 checks both sides' logs, and that a guest claiming another's name is heard
 under its own.
@@ -778,6 +778,19 @@ and the held block follows the same palette.  Over a walk loop its palm
 stays 0.46 figure units before it, varying by under 0.01; empty-handed it
 swings from 0.34 behind to 0.16 ahead.  =a-walking-avatar-carries-its-block-before-it=
 fails without the overlay.
+
+Live on one Mac (host and the guest Bea, both from this checkout): each
+window showed the same four lines under their speakers' names; Slash,
+typing "hej", and Return in Bea's window put "Bea: hej" in both.  Bea's
+time-of-day and freeze knobs set the host's clock to 12.0 h and froze it,
+and both clocks then read 12.0.  Walking past the host's camera, Bea's body
+held its block out before it; standing, too.  Bea's G summoned a gnome
+that the host keeps with Bea as its owner, and her window addressed it.
+
+/Open./ A ride's hand-back was checked over loopback, not in two windows.
+Chat is the latest six lines for twelve seconds; there is no history pane.
+The Carry pose is one still frame, so the carrying arm does not sway with
+the walk, and a block's held pose is the same for every block.
 
 *** DONE Find a game, and come back to it
 :PROPERTIES:
