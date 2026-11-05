@@ -464,7 +464,7 @@ tests:
 Still to do: a skinned body with a held block, remote bodies in local
 physics, and a shared clock of day (each window keeps its own).
 
-** TODO Share the living world
+** DONE Share the living world
 :PROPERTIES:
 :ID: EA88ON
 :END:
@@ -472,6 +472,23 @@ physics, and a shared clock of day (each window keeps its own).
 /Intent./ Phase 2: #I6O4J6, host-owned populations and sky as entity
 snapshots, rides, companions spoken to by either player, the players table
 of #Y3S82T, and remote players as physics strangers.
+
+/Evidence./ All four parts landed on =main=: collision around every player
+(#7CY5VW), the players table and shared companions (#6RAX26), host-owned
+turtles, balls, rides, and sky (#U4TBMP), and the other player's body
+(#AVKN70). Each has loopback tests. On 5 November two windowed images on
+one Mac checked them live at =9f2da4e=. On port 47493, Bea left with two
+films, a film in hotbar slot 1 and in hand, creative on, at (1028.5,
+1027.5, 5); her record waited in the host's absent table, and she rejoined
+with exactly that. She asked the host's gnome to build a bench by the pond,
+and both images reported the same reply, attending to =bea=, in both
+windows' dialogue boxes. On port 47486 each window showed the other
+player's body with its block and a readable nameplate at about 4 and 26
+cells, and Bea rode a host turtle that the host recorded as hers. The two
+sky clocks, read back to back, were 13.3083 h and 13.3543 h with the reads
+2.5 s apart; at 20 minutes a day that is the 2.3 s between the reads, so
+the shared hour agrees to about 0.1 s, and the 10:19 and 10:24 of one pair
+of screenshots was capture skew.
 
 *** DONE Keep collision around every player
 :PROPERTIES:
