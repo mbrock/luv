@@ -297,6 +297,7 @@ their own, and keep their author across saves."
                (:g '(com-summon-companion))
                (:t '(com-talk-to-companion))
                (:f7 '(com-next-companion))
+               (:slash (when (world-session (viewer-world viewer)) '(com-chat)))
                (:y (when (and agent (inhabitant-approval agent)) '(com-approve-companion)))
                (:n (when (and agent (inhabitant-approval agent)) '(com-deny-companion)))))))
     (if command

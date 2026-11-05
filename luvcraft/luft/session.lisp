@@ -79,6 +79,8 @@ them; without one, the session applies them itself.")
    (record-sent :initform nil :accessor session-record-sent)
    (record-due :initform 0d0 :accessor session-record-due)
    (companions-sent :initform (make-hash-table :test #'equal) :reader session-companions-sent)
+   (chat :initform nil :accessor session-chat-lines
+         :documentation "What players have said, newest first (company.lisp).")
    (log :initform nil :accessor session-log-lines))
   (:documentation "A world joined to others through a wire endpoint."))
 
@@ -609,10 +611,6 @@ beacon on UDP 47474."
 (defmethod handle-session-message ((session world-session) peer message)
   (declare (ignore peer))
   (session-log session "Ignored a ~(~A~)." (type-of message)))
-
-(defmethod handle-session-message ((session world-session) peer (message wire:chat-message))
-  (declare (ignore peer))
-  (session-log session "~A: ~A" (wire:chat-message-speaker message) (wire:chat-message-text message)))
 
 (defmethod handle-session-message ((session host-session) peer (message wire:hello-message))
   (if (guest-peer-player session peer)

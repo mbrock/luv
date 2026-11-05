@@ -707,3 +707,24 @@ side rather than carrying the block forward.
 /Intent./ Phase 3: sessions in the lobby, nameplates and chat, a provenance
 inspector and age lens (#OVEP9A), lossless reconnection, a soak bot, and
 edit prediction for tailnet play.
+
+*** NEXT Talk, carry, and share the day
+:PROPERTIES:
+:ID: LV16J7
+:END:
+
+/Intent./ Phase 3B: a line of chat both windows show under its speaker's
+name; the other player's avatar carrying its block forward as it walks; a
+guest's day knobs asking the host instead of being overwritten; a turtle
+handed back without a step back when a ride ends; and a guest who summons
+its own companion, which builds from that guest's stock.
+
+/Evidence./ Chat is the wire's =chat-message= (type 7, which phase 0
+defined and nothing yet sent).  A guest's line goes to its host, which
+names the speaker itself, shows the line, and sends it to every guest, the
+speaker included, so each side shows it once the host has it, as an edit
+shows once confirmed.  The host's own lines go out the same way.  Slash
+opens a "Say:" prompt; the latest six lines show in the view's message
+pane for twelve seconds.  =both-players-read-each-line-of-chat-under-its-speakers-name=
+checks both sides' logs, and that a guest claiming another's name is heard
+under its own.
