@@ -61,6 +61,10 @@
             path = ./nix/cl-sdl3-no-mixer.patch;
             name = "cl-sdl3-no-mixer.patch";
           };
+          trivialMainThreadPatch = builtins.path {
+            path = ./nix/trivial-main-thread-lost-wakeup.patch;
+            name = "trivial-main-thread-lost-wakeup.patch";
+          };
           tracyContext = builtins.path {
             path = ./nix/tracy-context.cpp;
             name = "luv-tracy-context.cpp";
@@ -333,7 +337,12 @@
               ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
                 lispPackages.deploy
                 lispPackages.float-features
-                lispPackages.trivial-main-thread
+                # Its runner drained the queue only when a wait returned
+                # notified, so a task queued between waits stayed queued and
+                # a blocking caller polled forever.
+                (lispPackages.trivial-main-thread.overrideLispAttrs (previous: {
+                  patches = (previous.patches or [ ]) ++ [ trivialMainThreadPatch ];
+                }))
               ];
           lisp = sbcl.withPackages lispLibrariesFor;
           # The shipped programs record the source directory of every Lisp

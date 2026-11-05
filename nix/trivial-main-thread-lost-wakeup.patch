@@ -1,0 +1,19 @@
+--- a/main-thread.lisp	2026-11-04 22:01:03
++++ b/main-thread.lisp	2026-11-04 22:01:16
+@@ -74,8 +74,15 @@
+       (handler-bind ((error #'main-error-handler))
+         (let (tasks)
+           (unwind-protect
++               ;; Wait only while the queue is empty, deciding under the lock.
++               ;; CALL-IN-MAIN-THREAD notifies after releasing it, so a task
++               ;; queued while this loop was not yet waiting had no waiter to
++               ;; wake; trusting the wait's result left it queued forever.
+                (loop (when (bt:with-lock-held (*task-lock*)
+-                             (bt:condition-wait *task-cvar* *task-lock* :timeout 0.5))
++                             (or (plusp (length *task-queue*))
++                                 (progn
++                                   (bt:condition-wait *task-cvar* *task-lock* :timeout 0.5)
++                                   (plusp (length *task-queue*)))))
+                        (setf tasks (bt:with-lock-held (*task-lock*)
+                                      (shiftf *task-queue* (make-array 32 :fill-pointer 0))))
+                        (dotimes (i (length tasks))
