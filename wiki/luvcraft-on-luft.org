@@ -1684,6 +1684,103 @@ existing host knob contract; a broader quantity audit is not part of this
 pass. Tests cover source lifecycle and phase, terminal geometry and focus,
 help bindings and shared knob identity in addition to the native captures.
 
+* DONE See through a cut gem: translucent kinds
+:PROPERTIES:
+:ID: LNRIRA
+:END:
+
+Crystal was an opaque lamp. It is now glass with a light in it: the world
+behind a gem stays visible, its glow and its neighbours' light pass
+through, and it stays solid underfoot. The mechanism is general. Any
+material whose coverage is below one takes the same path, so glass, ice,
+or water need only a palette entry.
+
+/Coverage is a third optical fact./ #HYBFRT's material kind already
+carried light opacity (what a cell costs a propagating voxel field) and
+emission. Coverage is neither: how much of what lies behind a surface it
+hides. material-kind-coverage defaults to one. The descriptor's spare eighth
+word holds its complement, transmission, so every existing material's word
+stays zero and reads as opaque. A game fills it in. Luvcraft's
+*block-optics* gives crystal coverage 0.3 and voxel-light opacity 3, and
+lowers its Luft surface glow to 0.45, because a glow seen through glass
+arrives whole over whatever is behind it.
+
+/Two sheets per chunk, one mesh./ The star mesher already turns fixture
+cells into air for the opaque world. Translucent cells take the same
+route. The opaque sheet sees them as air, so stone beside a gem keeps the
+face a viewer looks through the gem at. A second sheet meshes the
+translucent cells alone, so a gem against stone has its own face too and
+neither hides the other. Its sites follow the opaque ones in the same
+surface mesh, with their codes in the same appearance stream. Between two
+translucent cells no face is meshed, as in the August experiment's
+same-kind rule. Two different translucent kinds therefore also merge
+without a face between them. That is right for a stack of one gem and a
+known limitation for glass against water. Chunks with no translucent cell
+within one chunk skip the second pass entirely.
+
+/The renderer tells sheets apart by code./ A population marks each site
+whose sampled codes are translucent. Upload sorts those sites after every
+opaque one, into runs of their own. The visibility pass, the forward
+scene, and the sun's shadow (merged rectangles are built from opaque sites
+only) never see them. A glass block throws light through itself, not a
+black square on the ground.
+
+/One blended pass after the opaque world./ The translucent program is
+the scene's own vertex stage and star material under the same host
+treatments, with premultiplied blending, depth testing without depth
+writes, and its far faces discarded. Discarding the far faces means a
+convex gem is seen once, so the sites inside one resident need no sort.
+Residents draw back to front by their boxes. Coverage rises toward grazing
+views, a cheap Fresnel term. Only diffuse reflection is thinned by
+coverage. Highlights and glow are the surface's own.
+
+/Temporal reconstruction./ Depth and motion stay those of the opaque
+surface behind the glass: the pane writes motion over it, and what is seen
+through the pane moves at a parallax no single vector describes. The
+blended pass therefore also writes a reactive mask (0.8 × coverage). It
+is the MetalFX scaler's reactiveMaskTexture, created with the scaler; the
+HAL grows a REACTIVE argument on encode-temporal-scale. A temporal frame
+runs the sheet in its own pass with three attachments, because no opaque
+pipeline names the mask. A frame without translucent residents only clears
+the mask. Walking past a gem and a three-high stack in the live game
+showed no trails, doubled edges, or smeared terrain behind the glass. The
+portable shader resolve does not read the mask yet.
+
+/Cost./ Measured on yawl (M5, Metal 4, MetalFX at 1280x720 from a 960x540
+scene, fixed exposure, dynamic resolution off) at the live seed-7 alpine
+view, against a detached base checkout at 27f27a2. These are serialized GPU
+completion timings, not displayed FPS. Seed 7's generated terrain already
+holds crystal: 34,050 translucent sites in all 64 residents. With the shadow
+and scene passes repeated six times per frame to hold the GPU clock,
+interleaved base and translucent runs gave 14.4-15.0 ms before and
+15.6-16.2 ms after, about 0.2 ms per repetition. Unrepeated frames, 6.1-7.8
+ms either way, sit within clock noise. Replacing a 24x24x4 block of terrain
+with crystal instead of stone stayed within that noise. Clearing the
+reactive mask only when it was last written did not move these numbers.
+Meshing a chunk's translucent sheet adds a second mesher pass there; its CPU
+cost was not measured.
+
+Screenshots at the time of writing (./sly play luvcraft --seed 121): day and
+night in front of terrain, the stack and a floating gem against cloud and
+stars, and mid-walk frames past them.
+
+The material vocabulary digest names placements, kinds, and attachment
+forms, not optics, so the world fingerprint (#QTXNY0) is unchanged.
+
+** NEXT Sort and tint more than one translucent kind
+:PROPERTIES:
+:ID: 0LLSFH
+:END:
+
+Glass, ice, and water want three things crystal did not. First, a face
+between two different translucent kinds: mesh one sheet per kind, or keep
+the same-kind rule in the mesher. Second, a site-level back-to-front order
+within a resident, once non-convex arrangements of different kinds overlap.
+Third, transmission that tints what lies behind (multiplicative blending)
+rather than only covering it. The shader resolve should read the reactive
+mask the way MetalFX does. Water also wants its own surface: a top face
+lower than the cell, and no sides against more water.
+
 * NEXT Diagnose corrupt pixels from world-companion SDF drawing
 :PROPERTIES:
 :ID: O9H3CW
