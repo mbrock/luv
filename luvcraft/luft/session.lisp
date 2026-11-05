@@ -65,6 +65,8 @@ them; without one, the session applies them itself.")
    (hash-cursor :initform 0 :accessor session-hash-cursor)
    (hash-job :initform nil :accessor session-hash-job
              :documentation "The worker hashing chunks, or NIL.")
+   (hash-queue :initform nil :accessor session-hash-queue
+               :documentation "(RESIDENTS . FINISH) jobs waiting for the worker, oldest first.")
    (hash-results :initform (sb-concurrency:make-mailbox :name "chunk hashes")
                  :reader session-hash-results)
    (matched-chunks :initform 0 :accessor session-matched-chunks
@@ -865,19 +867,22 @@ set installed at its watermark, and the remap of the host's vocabulary."
     (and (typep value 'terrain:resident-cell-chunk) value)))
 
 (defun hash-in-background (session residents finish)
-  "Hash RESIDENTS, a list of (KEY . RESIDENT), on a worker; the next frame
-calls FINISH with the list of (KEY . HEX)."
-  (unless (session-hash-job session)
-    (setf (session-hash-job session)
-          (sb-thread:make-thread
-           (lambda ()
-             (let ((hashes (handler-case
-                               (loop for (key . resident) in residents
-                                     collect (cons key (terrain:resident-cell-chunk-hash resident)))
-                             (error (condition) condition))))
-               (sb-concurrency:send-message (session-hash-results session)
-                                            (cons finish hashes))))
-           :name "luvcraft chunk hashes"))))
+  "Hash RESIDENTS, a list of (KEY . RESIDENT), on a worker; a later frame
+calls FINISH with the list of (KEY . HEX).  While the worker is busy the job
+waits its turn: a peer's report that arrives then is still compared."
+  (if (session-hash-job session)
+      (setf (session-hash-queue session)
+            (append (session-hash-queue session) (list (cons residents finish))))
+      (setf (session-hash-job session)
+            (sb-thread:make-thread
+             (lambda ()
+               (let ((hashes (handler-case
+                                 (loop for (key . resident) in residents
+                                       collect (cons key (terrain:resident-cell-chunk-hash resident)))
+                               (error (condition) condition))))
+                 (sb-concurrency:send-message (session-hash-results session)
+                                              (cons finish hashes))))
+             :name "luvcraft chunk hashes"))))
 
 (defun finish-chunk-hashes (session)
   "Act on what the hashing worker has posted."
@@ -887,14 +892,16 @@ calls FINISH with the list of (KEY . HEX)."
         do (setf (session-hash-job session) nil)
            (if (typep hashes 'error)
                (session-log session "Chunk hashing failed: ~A" hashes)
-               (funcall finish hashes))))
+               (funcall finish hashes))
+           (let ((next (pop (session-hash-queue session))))
+             (when next (hash-in-background session (car next) (cdr next))))))
 
 (defun report-chunk-hashes (session)
   "Send peers the hashes of a few resident chunks, in turn, at this world's
-journal point.  NIL while events wait to be applied or a hash is running."
+journal point.  NIL while events wait to be applied."
   (let* ((scene (session-scene session))
          (watermark (session-watermark-now session))
-         (keys (and watermark (not (session-hash-job session))
+         (keys (and watermark
                     (sort (loop for key being the hash-keys of (terrain:streaming-scene-store scene)
                                 when (resident-chunk scene key) collect key)
                           #'<))))

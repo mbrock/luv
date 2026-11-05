@@ -351,6 +351,33 @@ and their resident chunk hashes are equal."
       (is = *session-chunk* (first (first (host:session-mismatched-chunks session))))
       (host:close-world-session guest))))
 
+(define-test a-peer-report-arriving-mid-hash-is-still-compared
+  ;; Both peers report every two seconds from their start, so a guest's
+  ;; report often lands while the host is hashing its own.
+  (with-host (world session network)
+    (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
+      (declare (ignore guest-world bea))
+      (true (pump (list session guest) :until (applied-p guest world)))
+      (flet ((posted-p (s) (lambda () (plusp (sb-concurrency:mailbox-count
+                                              (host::session-hash-results s))))))
+        (dolist (s (list session guest))
+          (true (pump (list s) :until (lambda () (null (host::session-hash-job s)))))
+          (setf (host::session-hash-due s) 1d12))
+        ;; The host's own report is hashed but not yet taken up by a frame.
+        (true (host:report-chunk-hashes session))
+        (true (pump nil :until (posted-p session)))
+        (true (host:report-chunk-hashes guest))
+        (true (pump nil :until (posted-p guest)))
+        (host:advance-world-session guest 0)
+        ;; One host frame receives the guest's report while its job runs.
+        (host:advance-world-session session 0)
+        (true (pump nil :until (lambda ()
+                                 (host::finish-chunk-hashes session)
+                                 (plusp (host:session-matched-chunks session)))
+                    :seconds 2))
+        (is eq nil (host:session-mismatched-chunks session)))
+      (host:close-world-session guest))))
+
 (define-test a-guest-builds-where-the-host-has-no-collision
   ;; The host simulates only its own player's neighbourhood; a guest may
   ;; build in any chunk the host shows.
