@@ -337,10 +337,19 @@ plist of parameters as wire values."
   (before :block-identity (make-block-identity))
   (after :block-identity (make-block-identity)))
 
+(define-wire-record provenance ()
+  "Who last authored a cell and when (#OVEP9A): the event at SEQUENCE, by
+ACTOR, at TICK and universal TIME, each zero when unknown."
+  (actor :principal (make-principal))
+  (sequence :u64 0)
+  (tick :u64 0)
+  (time :u64 0))
+
 (define-wire-record placement ()
-  "One cell of a compacted edit set."
+  "One cell of a compacted edit set, and who authored it when that is known."
   (site :site (make-site 0 0 0))
-  (block :block-identity (make-block-identity)))
+  (block :block-identity (make-block-identity))
+  (author (:optional :provenance) nil))
 
 (define-wire-record event ()
   "One sequenced journal event (#3F0SCZ)."
@@ -422,7 +431,7 @@ empty for the host's."
   (digest :digest (make-octets 32)))
 
 ;; Record names double as field types; field types are keywords.
-(dolist (name '(block-identity recipe principal edit placement event pose
+(dolist (name '(block-identity recipe principal edit provenance placement event pose
                 entity-state entity-snapshot stack player-record companion-record chunk-hash))
   (let ((keyword (intern (symbol-name name) '#:keyword)))
     (setf (get keyword 'wire-fields) (get name 'wire-fields)

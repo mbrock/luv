@@ -51,7 +51,10 @@
                                             :biomes ("hills" "fjord")))
          :vocabulary '("air" "stone" "glass" "luvcraft:film")
          :watermark 4096
-         :edits (list (make-placement :site (make-site 1 -2 3) :block (stone))
+         :edits (list (make-placement :site (make-site 1 -2 3) :block (stone)
+                                      :author (make-provenance
+                                               :actor (make-principal :kind :player :id "ada")
+                                               :sequence 17 :time 4002876413))
                       (make-placement :site (make-site -100 64 7) :block (film)))
          :entities (sample-entities)
          :player (sample-player)))
@@ -150,7 +153,7 @@
       (group (context "magic")
         (fail (decode-message (with-octet 0 (char-code #\X))) 'malformed-message))
       (group (context "another protocol version is its own condition")
-        (fail (decode-message (with-octet 5 2)) 'unsupported-version))
+        (fail (decode-message (with-octet 5 (1+ +protocol-version+))) 'unsupported-version))
       (group (context "an unknown type")
         (fail (decode-message (with-octet 6 200)) 'malformed-message))
       (group (context "a body length that disagrees with the octets")

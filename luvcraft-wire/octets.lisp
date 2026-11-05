@@ -12,7 +12,8 @@
 (defun make-octets (length)
   (make-array length :element-type 'octet :initial-element 0))
 
-(defconstant +protocol-version+ 1)
+(defconstant +protocol-version+ 2
+  "2: a welcome's placements carry their provenance.")
 (defconstant +world-tag-length+ 16
   "A world tag is the 16-octet MD5 of recipe and vocabulary (#RELI34).")
 (defconstant +header-length+ 35

@@ -85,6 +85,39 @@
                                 (format nil "~2,'0D:~2,'0D" hour minute)))
                 (host::cell-history-phrase again cell))))))))
 
+(define-test a-guest-joining-after-a-reload-sees-who-placed-a-compacted-cell
+  (uiop:with-temporary-file (:pathname pathname :type "sexp")
+    (let ((cell nil)
+          (stone (game:block-placement luvcraft::*stone-block*)))
+      (let* ((world (session-test-world))
+             (ada (host:find-world-player world "ada")))
+        (setf cell (air-cell world 1037 1048))
+        (is eq :edited (nth-value 1 (host:player-edit-world-cell world ada cell stone)))
+        ;; Compacted into the edit set: no event of it is left in the save.
+        (let ((terrain:*journal-tail-events* 0))
+          (host:save-luvcraft-world world ada pathname)))
+      (let* ((network (luvcraft.wire.net:make-loopback-network))
+             (world (world-from-save pathname))
+             (session (host:host-luvcraft-world world (host:find-world-player world "ada")
+                                                :loopback network :name "host")))
+        (unwind-protect
+             (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
+               (declare (ignore bea))
+               (true (pump (list session guest)
+                           :until (lambda () (host:find-world-player guest-world "ada"))))
+               (let ((there (host::world-cell-provenance world cell))
+                     (here (host::world-cell-provenance guest-world cell)))
+                 (true here)
+                 (is equal "ada" (terrain:cell-provenance-actor here))
+                 (is eql (terrain:cell-provenance-sequence there)
+                     (terrain:cell-provenance-sequence here))
+                 (is eql (terrain:cell-provenance-time there) (terrain:cell-provenance-time here)))
+               (is equal (host::cell-history-phrase world cell)
+                   (host::cell-history-phrase guest-world cell))
+               (true (eql 0 (search "placed by Ada" (host::cell-history-phrase guest-world cell))))
+               (host:close-world-session guest))
+          (host:close-world-session session))))))
+
 (define-test the-inspector-says-when-as-a-person-would
   ;; From noon on Thursday 5 November 2026.
   (let ((now (encode-universal-time 0 0 12 5 11 2026)))

@@ -510,15 +510,37 @@ beacon on UDP 47474."
                              :flying (pose-snapshot-flying shown))))
       (local-pose session)))
 
+(defun provenance-wire (session provenance)
+  (and provenance
+       (wire:make-provenance
+        :actor (actor-principal session (terrain:cell-provenance-actor provenance))
+        :sequence (or (terrain:cell-provenance-sequence provenance) 0)
+        :tick (or (terrain:cell-provenance-tick provenance) 0)
+        :time (or (terrain:cell-provenance-time provenance) 0))))
+
+(defun wire-provenance (author)
+  "A wire AUTHOR as the author plist a Luft source installs, or NIL."
+  (flet ((known (value) (and (plusp value) value)))
+    (and author
+         (list :actor (principal-actor (wire:provenance-actor author))
+               :sequence (known (wire:provenance-sequence author))
+               :tick (known (wire:provenance-tick author))
+               :time (known (wire:provenance-time author))))))
+
 (defun compacted-edit-set (session)
-  "The host journal's edit set at its head, as wire placements by site."
-  (let ((placements nil))
+  "The host journal's edit set at its head, as wire placements by site, each
+with who authored it (#OVEP9A), so a guest's inspector matches the host's."
+  (let ((placements nil)
+        (journal (session-journal session)))
     (maphash (lambda (site value)
                (let ((identity (identity-wire (values (journal-value-block value)))))
                  (when identity
-                   (push (wire:make-placement :site (site-wire site) :block identity)
+                   (push (wire:make-placement
+                          :site (site-wire site) :block identity
+                          :author (provenance-wire
+                                   session (terrain:world-cell-provenance journal site)))
                          placements))))
-             (terrain:world-journal-edits (session-journal session)))
+             (terrain:world-journal-edits journal))
     (sort placements (lambda (a b)
                        (let ((a (wire:placement-site a)) (b (wire:placement-site b)))
                          (or (< (wire:site-x a) (wire:site-x b))
@@ -728,15 +750,21 @@ set installed at its watermark, and the remap of the host's vocabulary."
              (remap (luvcraft:resolve-material-vocabulary
                      (map 'simple-vector (lambda (name) (intern name '#:keyword))
                           (wire:welcome-message-vocabulary welcome))))
-             (overlay (luvcraft:little-world-source-edits little)))
+             (overlay (luvcraft:little-world-source-edits little))
+             (provenance (make-hash-table :test #'equal)))
         (dolist (placement (wire:welcome-message-edits welcome))
-          (let ((site (wire:placement-site placement)))
-            (luvcraft::record-block-edit overlay (wire-identity (wire:placement-block placement) remap)
-                                         (- (wire:site-x site) offset) (wire:site-z site)
-                                         (- (wire:site-y site) offset))))
+          (let* ((site (wire:placement-site placement))
+                 (coordinate (list (- (wire:site-x site) offset) (wire:site-z site)
+                                   (- (wire:site-y site) offset)))
+                 (author (wire-provenance (wire:placement-author placement))))
+            (apply #'luvcraft::record-block-edit overlay
+                   (wire-identity (wire:placement-block placement) remap) coordinate)
+            (when author
+              (setf (gethash coordinate provenance) author))))
         (let ((source (game:luvcraft-world-luft-source
                        block-world :offset offset
-                                   :watermark (wire:welcome-message-watermark welcome))))
+                                   :journal (list :watermark (wire:welcome-message-watermark welcome)
+                                                  :provenance provenance))))
           (unless (string= (terrain:world-source-tag source)
                            (tag-hex (wire:message-world-tag welcome)))
             (error "This image raises world ~A from the host's recipe, but the host plays ~A."

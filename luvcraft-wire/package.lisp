@@ -39,7 +39,9 @@ exactly what an encoder would have written.")
    #:site #:make-site #:site-p #:site-x #:site-y #:site-z
    #:edit #:make-edit #:edit-p #:edit-site #:edit-before #:edit-after
    #:placement #:make-placement #:placement-p #:placement-site
-   #:placement-block
+   #:placement-block #:placement-author
+   #:provenance #:make-provenance #:provenance-p #:provenance-actor
+   #:provenance-sequence #:provenance-tick #:provenance-time
    #:event #:make-event #:event-p #:event-sequence #:event-tick #:event-actor
    #:event-transaction #:event-site #:event-before #:event-after #:event-cause
    #:pose #:make-pose #:pose-p #:pose-tick #:pose-position #:pose-velocity

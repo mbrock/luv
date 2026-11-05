@@ -885,8 +885,10 @@ Ada, Tuesday", and "placed by Ada, 15 October".  Bea's undo after the
 reload appended event 37, =(:undo 36)=, removing her own last plank.  The
 seed-121 fingerprint (#QTXNY0) is unchanged.
 
-/Open./ A guest's inspector knows only the events since it joined: the
-welcome carries no provenance for the compacted set.  An emptied cell
-remembers who emptied it, but the crosshair cannot point at air, so
-nothing shows it yet.  Compaction is by count alone; an age rule could
-join it.
+A welcome's placements carry their provenance (wire protocol 2), so a
+guest's inspector says what the host's does about cells compacted before
+it joined; =a-guest-joining-after-a-reload-sees-who-placed-a-compacted-cell=
+fails without it.  Compaction stays by count alone, as decided.
+
+/Open./ An emptied cell remembers who emptied it, but the crosshair cannot
+point at air, so nothing shows it; that waits, as decided.
