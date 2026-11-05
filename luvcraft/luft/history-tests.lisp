@@ -85,6 +85,18 @@
                                 (format nil "~2,'0D:~2,'0D" hour minute)))
                 (host::cell-history-phrase again cell))))))))
 
+(define-test the-inspector-says-when-as-a-person-would
+  ;; From noon on Thursday 5 November 2026.
+  (let ((now (encode-universal-time 0 0 12 5 11 2026)))
+    (flet ((on (day month year &optional (hour 9) (minute 30))
+             (host::when-phrase (encode-universal-time 0 minute hour day month year) now)))
+      (is equal "today at 09:30" (on 5 11 2026))
+      (is equal "yesterday" (on 4 11 2026 23 59))
+      (is equal "Tuesday" (on 3 11 2026))
+      (is equal "Friday" (on 30 10 2026))
+      (is equal "29 October" (on 29 10 2026))
+      (is equal "5 November 2025" (on 5 11 2025)))))
+
 (define-test a-save-keeps-the-newest-transactions-and-undo-reaches-only-them
   (uiop:with-temporary-file (:pathname pathname :type "sexp")
     (let* ((world (session-test-world))
