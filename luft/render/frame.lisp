@@ -377,18 +377,23 @@ final pass."
                            :color #(0.0 0.0 0.0 0.0)))
           (setf (renderer-target-generation-reactive-dirty-p generation) nil))
         (let ((pass
-                (begin-render-pass
-                 encoder
-                 (make-render-pass-descriptor
-                  :label "luft translucent sheet"
-                  :color-attachments
-                  `((:view ,(renderer-scene-view renderer) :load-op :load :store-op :store)
-                    (:view ,(renderer-motion-view renderer) :load-op :load :store-op :store)
-                    (:view ,(renderer-reactive-view renderer) :load-op :clear :store-op :store
-                     :clear-value #(0.0 0.0 0.0 0.0)))
-                  :depth-stencil-attachment
-                  `(:view ,(renderer-depth-view renderer)
-                    :depth-load-op :load :depth-store-op :store)))))
+                (progn
+                  ;; Vulkan passes share one colour load op, and the scene
+                  ;; and motion must load, so the mask is cleared beforehand.
+                  (encode encoder (make-gpu-clear-texture-command
+                                   :texture (renderer-reactive-texture renderer)
+                                   :color #(0.0 0.0 0.0 0.0)))
+                  (begin-render-pass
+                   encoder
+                   (make-render-pass-descriptor
+                    :label "luft translucent sheet"
+                    :color-attachments
+                    `((:view ,(renderer-scene-view renderer) :load-op :load :store-op :store)
+                      (:view ,(renderer-motion-view renderer) :load-op :load :store-op :store)
+                      (:view ,(renderer-reactive-view renderer) :load-op :load :store-op :store))
+                    :depth-stencil-attachment
+                    `(:view ,(renderer-depth-view renderer)
+                      :depth-load-op :load :depth-store-op :store))))))
           (draw-renderer-translucent-residents renderer frame pass residents)
           (end-pass pass)
           (setf (renderer-target-generation-reactive-dirty-p generation) t)))))
