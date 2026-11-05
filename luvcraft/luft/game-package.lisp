@@ -30,6 +30,7 @@
            #:*world-edit-actor*
            #:luvcraft-world-save-description
            #:save-luvcraft-world
+           #:shutdown-luvcraft-world
            ;; Sessions joining worlds over the wire (#OLWSWF).
            #:world-session
            #:host-session

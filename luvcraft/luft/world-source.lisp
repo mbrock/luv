@@ -270,44 +270,54 @@ An edit sequenced as a bare placement is read as its material."
       (luvcraft-block-for-placement value)
       (values value t)))
 
+(defun luft-pose-resume-fields (source position yaw pitch flying-p)
+  "A resume's pose fields for feet at Luft POSITION in SOURCE, looking along
+Luft camera YAW and PITCH: Luvcraft's coordinates, as format 1 kept them.
+LUVCRAFT-RESUME-LUFT-POSE reads them back."
+  (destructuring-bind (x y z) position
+    (let ((offset (luvcraft-world-source-offset source)))
+      (list :player-position (list (coerce (- x offset) 'double-float)
+                                   (coerce z 'double-float)
+                                   (coerce (- y offset) 'double-float))
+            :look (list :yaw (luft-yaw-to-luvcraft yaw)
+                        :pitch (coerce pitch 'double-float))
+            ;; Without it, a save made in the air drops the player out of
+            ;; the sky at the next start.
+            :flying (and flying-p t)))))
+
 (defun luvcraft-save-description
-    (source world &key resume inhabitants position yaw pitch flying-p selected selected-block)
+    (source world &key resume players inhabitants position yaw pitch flying-p
+                    selected selected-block)
   "The format-2 save of WORLD with SOURCE's edits.
 
-POSITION is the player's feet in Luft cells, YAW and PITCH the Luft camera's,
-FLYING-P whether the player was in flight there, and SELECTED the placement in
-hand. SELECTED-BLOCK may name its exact carried instance. Without POSITION the
-supplied RESUME stays unchanged."
+PLAYERS is the players table, records of block identities (#Y3S82T).  A
+RESUME is written only when given, as older saves kept the player: POSITION
+is the player's feet in Luft cells, YAW and PITCH the Luft camera's,
+FLYING-P whether the player was in flight there, and SELECTED the placement
+in hand. SELECTED-BLOCK may name its exact carried instance. Without
+POSITION the supplied RESUME stays unchanged."
   (let ((overlay (merged-luvcraft-edit-overlay
-                  source (luvcraft:block-world-source world)))
-        (offset (luvcraft-world-source-offset source)))
+                  source (luvcraft:block-world-source world))))
     (luvcraft::make-luvcraft-format-2-save-description
      world
      :overlay overlay
      ;; The edit set is the journal's view at its head, so nothing follows it.
      :watermark (terrain:world-journal-head (terrain:world-source-journal source))
      :journal '()
+     :players players
      :inhabitants inhabitants
      :resume
-     (if position
-         (destructuring-bind (x y z) position
-           (let ((updated (copy-list resume)))
-             (setf (getf updated :player-position)
-                   (list (coerce (- x offset) 'double-float)
-                         (coerce z 'double-float)
-                         (coerce (- y offset) 'double-float))
-                   (getf updated :look)
-                   (list :yaw (luft-yaw-to-luvcraft yaw)
-                         :pitch (coerce pitch 'double-float))
-                   ;; Without it, a save made in the air drops the
-                   ;; player out of the sky at the next start.
-                   (getf updated :flying) (and flying-p t)
-                   (getf updated :selected-block)
-                   (luvcraft::block-save-description
-                    (or selected-block
-                        (and selected (luvcraft-block-for-placement selected))
-                        luvcraft::*stone-block*)))
-             updated))
+     (if (and resume position)
+         (let ((updated (copy-list resume)))
+           (loop for (key value) on (luft-pose-resume-fields source position yaw pitch flying-p)
+                   by #'cddr
+                 do (setf (getf updated key) value))
+           (setf (getf updated :selected-block)
+                 (luvcraft::block-save-description
+                  (or selected-block
+                      (and selected (luvcraft-block-for-placement selected))
+                      luvcraft::*stone-block*)))
+           updated)
          resume))))
 
 (defun luvcraft-resume-luft-pose (source resume)

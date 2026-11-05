@@ -116,38 +116,47 @@
     (luvcraft:add-block-to-inventory inventory luvcraft::*planks-block* 7)
     (luvcraft:add-block-to-inventory inventory film 2)
     (setf (luvcraft:player-creative-p player) t
-          (host:player-held-block player) film
-          (host:player-hotbar player) (list (game:block-placement film))
-          (host:player-placement player) (game:block-placement film))
+          (host:player-held-block player) film)
+    ;; Choosing the film puts it on the number row, in place of slot one.
+    (host::put-on-hotbar player (game:block-placement film))
+    (true (member (game:block-placement film) (host:player-hotbar player)))
     ;; Exercise the game's actual save protocol, then Luvcraft's reader.
-    ;; A player pose also checks that refreshing it does not drop inventory.
     (uiop:with-temporary-file (:pathname pathname :type "sexp")
       (host:save-luvcraft-world world player pathname)
-      (multiple-value-bind (restored-world resume) (luvcraft:read-luvcraft-save pathname)
+      (multiple-value-bind (restored-world resume inhabitants journal)
+          (luvcraft:read-luvcraft-save pathname)
+        (declare (ignore inhabitants))
         (true restored-world)
-        (let ((restored (host::restore-inventory resume)))
+        ;; The player is the players table's first record, not a resume.
+        (is eq nil resume)
+        (let* ((record (first (getf journal :players)))
+               (restored (host::restore-inventory record))
+               (again (host:make-luvcraft-player :record record)))
+          (is equal "local" (getf record :id))
           ;; Materials are unlimited; stock counted for them is not restored.
           (is eq nil (luvcraft:block-inventory-entry-quantity
                       (luvcraft:block-inventory-entry-for restored luvcraft::*planks-block*)))
           (is = 2 (luvcraft:block-inventory-entry-quantity
                    (luvcraft:block-inventory-entry-for restored film)))
-          (is equal (luvcraft::block-save-description film)
-              (getf resume :selected-block))
-          (is equal (list (luvcraft::block-save-description film)) (getf resume :carried))
-          (is equal '(:film) (getf resume :quickbar))
-          (true (getf resume :creative-p)))
-        (let* ((next-source (game:luvcraft-world-luft-source restored-world))
-               (next (game:luvcraft-save-description
-                      next-source restored-world :resume resume
-                      :position '(1024d0 1024d0 9d0) :yaw 0d0 :pitch 0d0
-                      :selected-block film)))
-          (is equal (getf resume :inventory)
-              (getf (getf (rest next) :resume) :inventory)))))))
+          (is eq film (getf record :selected-block))
+          (is eq film (host:player-held-block again))
+          (true (getf record :creative-p))
+          (is equal (host:player-hotbar player) (host:player-hotbar again))
+          ;; Written again, the record is what it was.
+          (is equal (getf (rest (host:luvcraft-world-save-description world player)) :players)
+              (getf (rest (host:luvcraft-world-save-description
+                           world (progn (host:remove-world-player world player)
+                                        (host:add-world-player
+                                         world (host:make-luvcraft-player
+                                                :record record
+                                                :character (host:player-character player))))))
+                    :players)))))))
 
 (define-test legacy-carried-blocks-enter-finite-storage
   (let* ((film (luvcraft::ensure-film "legacy-inventory"))
          (inventory (host::restore-inventory
-                     (list :carried (list (luvcraft::block-save-description film))))))
+                     (host::resume-player-record
+                      (list :carried (list (luvcraft::block-save-description film)))))))
     (is = 1 (luvcraft:block-inventory-entry-quantity
              (luvcraft:block-inventory-entry-for inventory film)))
     (is eq nil (luvcraft:block-inventory-entry-quantity
@@ -158,9 +167,10 @@
   ;; a carried film keeps its count.
   (let* ((film (luvcraft::ensure-film "zero-stock-save"))
          (inventory (host::restore-inventory
-                     (list :inventory
-                           (list (list (luvcraft::block-save-description luvcraft::*grass-block*) 0)
-                                 (list (luvcraft::block-save-description film) 0))))))
+                     (host::resume-player-record
+                      (list :inventory
+                            (list (list (luvcraft::block-save-description luvcraft::*grass-block*) 0)
+                                  (list (luvcraft::block-save-description film) 0)))))))
     (true (luvcraft:remove-block-from-inventory inventory luvcraft::*grass-block*))
     (true (not (luvcraft:remove-block-from-inventory inventory film)))))
 
@@ -391,13 +401,16 @@
       (terrain:rebuild-authored-world-resident-values scene keys)
       scene)))
 
-(defun hollow-walk-test-viewer (world resume &key (watermark 0))
-  "Real source materialization and game motor, without a canvas or renderer."
+(defun hollow-walk-test-viewer (world resume &key (watermark 0) record)
+  "Real source materialization and game motor, without a canvas or renderer.
+The player is format 1's RESUME, or a players-table RECORD."
   (let* ((scene (hollow-walk-test-scene world :watermark watermark))
          (source (terrain:streaming-scene-source scene)))
-    (multiple-value-bind (position yaw pitch) (game:luvcraft-resume-luft-pose source resume)
+    (multiple-value-bind (position yaw pitch)
+        (game:luvcraft-resume-luft-pose source (or record resume))
       (let ((viewer (make-instance
-                     'host:luvcraft-viewer :source scene :luvcraft-world world :resume resume
+                     'host:luvcraft-viewer :source scene :luvcraft-world world
+                                           :resume resume :record record
                      :camera (render:make-fly-camera :yaw yaw :pitch pitch)
                      :player (terrain:make-walking-character :position (apply #'v:make-vec3 position))
                      :hotbar (list (game:block-placement luvcraft::*stone-block*)))))
@@ -488,13 +501,17 @@
       (setf (render:camera-yaw (render:viewer-camera viewer)) 0.75
             (render:camera-pitch (render:viewer-camera viewer)) -0.12)
       (let* ((saved (render:viewer-world-description viewer))
-             (resume (getf (rest saved) :resume)))
+             (record (first (getf (rest saved) :players))))
         (uiop:with-temporary-file (:pathname pathname :type "sexp")
           (render:write-viewer-world-description viewer saved pathname)
           (multiple-value-bind (restored restored-resume inhabitants journal)
               (luvcraft:read-luvcraft-save pathname)
             (declare (ignore inhabitants))
-            (is equalp resume restored-resume)
+            (is eq nil restored-resume)
+            ;; The walker's pose is the players table's first record's.
+            (dolist (key '(:player-position :look :flying))
+              (true (member key record))
+              (is equalp (getf record key) (getf (first (getf journal :players)) key)))
             (is = 2 (getf (rest saved) :format-version))
             (is equal (getf (rest saved) :recipe) (luvcraft::world-recipe-description restored))
             ;; Mining and building are the journal's first two events.
@@ -503,7 +520,8 @@
                 (getf (rest (luvcraft::make-luvcraft-format-2-save-description
                              restored :watermark (getf journal :watermark)))
                       :edits))
-            (let* ((again (hollow-walk-test-viewer restored restored-resume
+            (let* ((again (hollow-walk-test-viewer restored nil
+                                                   :record (first (getf journal :players))
                                                    :watermark (getf journal :watermark)))
                    (next-scene (render:viewer-source again)))
               ;; Drop all four derived chunks, including collision, then
@@ -599,19 +617,21 @@
       ;; Save, then raise a second world from it in the same image.
       (uiop:with-temporary-file (:pathname pathname :type "sexp")
         (host:save-luvcraft-world world player pathname :yaw 0.75 :pitch -0.12)
-        (multiple-value-bind (restored restored-resume inhabitants journal)
+        (multiple-value-bind (restored resume inhabitants journal)
             (luvcraft:read-luvcraft-save pathname)
+          (declare (ignore resume))
           ;; The edit set is compacted at the journal's head; numbering goes on.
           (is = (terrain:world-journal-head (terrain:world-source-journal source))
               (getf journal :watermark))
           (true (plusp (getf journal :watermark)))
           (is eq nil (getf journal :journal))
-          (let* ((again (host:make-luvcraft-world
+          (let* ((restored-resume (first (getf journal :players)))
+                 (again (host:make-luvcraft-world
                          :block-world restored :inhabitants inhabitants
                          :scene (hollow-walk-test-scene
                                  restored :watermark (getf journal :watermark))))
                  (next (host:add-world-player
-                        again (host:make-luvcraft-player :id "ada" :resume restored-resume)))
+                        again (host:make-luvcraft-player :id "ada" :record restored-resume)))
                  (next-source (host:world-source again)))
             (true (not (eq player next)))
             (is = (getf journal :watermark)

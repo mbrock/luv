@@ -24,11 +24,12 @@ quickbar begins: things to build a house with, colours, and a lamp.")
 (defclass luvcraft-player ()
   ((id :initarg :id :reader player-id
        :documentation "A stable identity, the key of the world's players table.")
-   (name :initarg :name :reader player-name)
+   (name :initarg :name :accessor player-name)
    (character :initarg :character :initform nil :accessor player-character
               :documentation "The walking character whose body the world simulates.")
-   (resume :initarg :resume :initform nil :reader player-resume
-           :documentation "The player's saved record, with fields this game does not read.")
+   (record :initarg :record :initform nil :accessor player-saved-record
+           :documentation "The player's record in the players table (#Y3S82T), with
+fields this game does not read.  A remote player's is the latest it sent.")
    (inventory :initarg :inventory :reader luvcraft:player-inventory)
    (hotbar :initarg :hotbar :accessor player-hotbar
            :documentation "The placements on the number row, published from the inventory.")
@@ -49,7 +50,26 @@ quickbar begins: things to build a house with, colours, and a lamp.")
   (print-unreadable-object (player stream :type t :identity t)
     (format stream "~S" (player-id player))))
 
-(defun restore-inventory (resume)
+;;; A player's record (#Y3S82T) is a resume: a plist of pose fields in
+;;; Luvcraft's coordinates (:PLAYER-POSITION, :LOOK, :FLYING), :CREATIVE-P,
+;;; the ordered :INVENTORY of (BLOCK QUANTITY) whose first ten entries are
+;;; the hotbar, :SIMPLE-INVENTORY-P and its :BUILDING-KIT, and the
+;;; :SELECTED-BLOCK in hand, all as block identities.  The save writes the
+;;; blocks as vocabulary offsets; format 1's resume names them symbolically.
+
+(defun resume-player-record (resume)
+  "Format 1's symbolic RESUME as a player record of block identities."
+  (flet ((restore (description) (luvcraft::restore-block-value description)))
+    (loop for (key value) on resume by #'cddr
+          collect key
+          collect (case key
+                    (:inventory (loop for (description quantity) in value
+                                      collect (list (restore description) quantity)))
+                    ((:carried :building-kit) (mapcar #'restore value))
+                    (:selected-block (and value (restore value)))
+                    (t value)))))
+
+(defun restore-inventory (record)
   (let ((inventory (luvcraft:make-block-inventory
                     :blocks (remove-duplicates
                              (append (mapcar #'luvcraft:block-kind-named *starting-hotbar*)
@@ -57,38 +77,37 @@ quickbar begins: things to build a house with, colours, and a lamp.")
                              :from-end t))))
     ;; Materials are unlimited, as in the original game; only carried blocks
     ;; keep counts, so stock saved while every material was finite is dropped.
-    (if (member :inventory resume)
+    (if (getf record :inventory)
         (setf (luvcraft:block-inventory-entries inventory)
-              (loop for (description quantity) in (getf resume :inventory)
-                    for block = (luvcraft::restore-block-value description)
+              (loop for (block quantity) in (getf record :inventory)
                     for count = (and (luvcraft:block-kind-carried-p block) (or quantity 0))
                     do (check-type count (or null (integer 0)))
                     collect (make-instance 'luvcraft:block-inventory-entry
                                            :block block :quantity count)))
-        (dolist (description (getf resume :carried))
-          (luvcraft:add-block-to-inventory
-           inventory (luvcraft::restore-block-value description))))
+        (dolist (block (getf record :carried))
+          (luvcraft:add-block-to-inventory inventory block)))
     inventory))
 
 (defun make-luvcraft-player (&key (id "local") (name id) resume
+                               (record (resume-player-record resume))
                                (hotbar (starting-hotbar-placements)) character)
-  "A player restored from RESUME, Luvcraft's saved player record, or a new one
-whose number row starts as HOTBAR."
-  (let* ((inventory (restore-inventory resume))
-         (selected (getf resume :selected-block))
+  "A player restored from RECORD, its record in the players table, or from
+RESUME, format 1's symbolic one; or a new one whose number row starts as HOTBAR."
+  (let* ((inventory (restore-inventory record))
+         (selected (getf record :selected-block))
          (player (make-instance
                   'luvcraft-player
-                  :id id :name name :resume resume :character character
+                  :id id :name name :record record :character character
                   :inventory inventory :hotbar hotbar
-                  :creative-p (getf resume :creative-p)
+                  :creative-p (getf record :creative-p)
                   :held-block
                   (and selected
-                       (find selected (luvcraft:block-inventory-blocks inventory)
+                       ;; Restored separately, an entity may be a twin of its stock's.
+                       (find (luvcraft::block-save-description selected)
+                             (luvcraft:block-inventory-blocks inventory)
                              :key #'luvcraft::block-save-description :test #'equal)))))
     (setf (player-placement player)
-          (or (and selected
-                   (ignore-errors
-                    (game:block-placement (luvcraft::restore-block-value selected))))
+          (or (and selected (ignore-errors (game:block-placement selected)))
               (first hotbar)))
     (put-on-hotbar player (player-placement player))
     (restore-player-kit player)
@@ -99,19 +118,17 @@ whose number row starts as HOTBAR."
 Preferences choose a new player's kit; an actual world resume keeps its own
 bar, mode, stock, and selected per-instance block, so a view that applies
 preferences restores the kit again after them."
-  (let ((resume (player-resume player))
+  (let ((record (player-saved-record player))
         (inventory (luvcraft:player-inventory player)))
-    (when (getf resume :quickbar)
-      (luvcraft:arrange-luvcraft-quickbar player (getf resume :quickbar)))
-    (when (member :simple-inventory-p resume)
-      (setf (luvcraft::block-inventory-simple-p inventory)
-            (getf resume :simple-inventory-p)
-            (luvcraft::block-inventory-kit inventory)
-            (mapcar #'luvcraft::restore-block-value (getf resume :building-kit))))
-    (let ((selected (getf resume :selected-block)))
+    (when (getf record :quickbar)
+      ;; Format 1 named its bar; a record's inventory is in bar order.
+      (luvcraft:arrange-luvcraft-quickbar player (getf record :quickbar)))
+    (when (member :simple-inventory-p record)
+      (setf (luvcraft::block-inventory-simple-p inventory) (getf record :simple-inventory-p)
+            (luvcraft::block-inventory-kit inventory) (getf record :building-kit)))
+    (let ((selected (getf record :selected-block)))
       (when selected
-        (setf (luvcraft:player-selected-block player)
-              (luvcraft::restore-block-value selected))))
+        (setf (luvcraft:player-selected-block player) selected)))
     (luvcraft:update-player-instruments player)
     player))
 
@@ -143,28 +160,33 @@ preferences restores the kit again after them."
         (mapcar #'game:block-placement
                 (luvcraft:block-inventory-quickbar-blocks (luvcraft:player-inventory player)))))
 
-(defun player-save-record (player)
-  "PLAYER's record as Luvcraft's save resume, keeping the fields it did not read."
-  (let ((resume (copy-list (player-resume player)))
+(defun player-stock-record (player)
+  "PLAYER's record with its stock, mode, and hands as they are now, keeping
+the fields it did not read; its pose fields are as last recorded."
+  (let ((record (loop for (key value) on (player-saved-record player) by #'cddr
+                      ;; Format 1's derived fields: the inventory is the bar.
+                      unless (member key '(:carried :quickbar))
+                        collect key and collect value))
         (inventory (luvcraft:player-inventory player)))
-    (setf (getf resume :inventory)
+    (setf (getf record :id) (player-id player)
+          (getf record :name) (player-name player)
+          (getf record :creative-p) (and (luvcraft:player-creative-p player) t)
+          (getf record :inventory)
           (loop for entry in (luvcraft:block-inventory-entries inventory)
-                collect (list (luvcraft::block-save-description
-                               (luvcraft:block-inventory-entry-block entry))
+                collect (list (luvcraft:block-inventory-entry-block entry)
                               (luvcraft:block-inventory-entry-quantity entry)))
-          (getf resume :carried)
-          (mapcar #'luvcraft::block-save-description
-                  (luvcraft:block-inventory-carried-blocks inventory))
-          (getf resume :creative-p) (luvcraft:player-creative-p player)
-          (getf resume :simple-inventory-p) (luvcraft::block-inventory-simple-p inventory)
-          (getf resume :building-kit)
-          (mapcar #'luvcraft::block-save-description
-                  (luvcraft::block-inventory-kit inventory))
-          (getf resume :selected-block)
-          (luvcraft::block-save-description (luvcraft:player-selected-block player))
-          (getf resume :quickbar)
-          (mapcar #'terrain:material-placement-name (player-hotbar player)))
-    resume))
+          (getf record :simple-inventory-p) (luvcraft::block-inventory-simple-p inventory)
+          (getf record :building-kit) (copy-list (luvcraft::block-inventory-kit inventory))
+          (getf record :selected-block) (luvcraft:player-selected-block player))
+    record))
+
+(defun record-with-pose (record source position yaw pitch flying-p)
+  "RECORD with its pose fields for feet at Luft POSITION in SOURCE."
+  (let ((record (copy-list record)))
+    (loop for (key value) on (game::luft-pose-resume-fields source position yaw pitch flying-p)
+            by #'cddr
+          do (setf (getf record key) value))
+    record))
 
 ;;; A world.
 
@@ -177,6 +199,11 @@ preferences restores the kit again after them."
                :documentation "The streaming scene's simulation of every character in it.")
    (players :initform nil :accessor world-players
             :documentation "The players table, in the order they joined; ids are stable keys.")
+   (absent-records :initarg :player-records :initform nil :accessor world-absent-records
+                   :documentation "The saved records of players not here now (#Y3S82T),
+in the players table's order: whoever joins again under one of their ids gets it back.")
+   (views :initform nil :accessor world-views
+          :documentation "The views open on this world; when the last closes, the world shuts down.")
    (editor :initform nil :accessor world-editor
            :documentation "A view's edit function of CELL and PLACEMENT, or NIL to edit the scene.
 A view's edit also schedules meshing and makes feedback, so a world's own
@@ -210,10 +237,12 @@ actors, such as companions, edit through it when one is open.")
 
 (defun make-luvcraft-world (&key block-world scene
                               (simulation (terrain:make-world-simulation scene))
-                              inhabitants sky-origin-offset)
-  "A world playing BLOCK-WORLD on SCENE, with its saved INHABITANTS."
+                              inhabitants player-records sky-origin-offset)
+  "A world playing BLOCK-WORLD on SCENE, with its saved INHABITANTS and the
+PLAYER-RECORDS of players who are not here yet."
   (make-instance 'luvcraft-world
                  :block-world block-world :simulation simulation :inhabitants inhabitants
+                 :player-records player-records
                  :sky-origin-offset
                  (or sky-origin-offset
                      (let ((scene (terrain:simulation-source simulation)))
@@ -425,24 +454,71 @@ conserve stock too."
           (put-on-hotbar player old)))
       (values edit status (and edit (null placement) old-block)))))
 
-;;; Saves: format 2, a vocabulary table and columns (#Y3S82T); format 1 still
-;;; loads.  A save holds one player's record.
+;;; Saves: format 2, a vocabulary table and columns, with a players table
+;;; (#Y3S82T); format 1 still loads, its resume becoming its player's record.
+
+(defun absent-player-record (world id)
+  (find id (world-absent-records world) :key (lambda (record) (getf record :id)) :test #'equal))
+
+(defun take-absent-player-record (world id)
+  "The saved record of the player ID, which is no longer absent once taken."
+  (let ((record (absent-player-record world id)))
+    (when record
+      (setf (world-absent-records world) (remove record (world-absent-records world))))
+    record))
+
+(defun keep-absent-player-record (world record)
+  "Remember RECORD for when its player joins again."
+  (setf (world-absent-records world)
+        (append (remove (getf record :id) (world-absent-records world)
+                        :key (lambda (other) (getf other :id)) :test #'equal)
+                (list record)))
+  record)
+
+(defun adopt-saved-players (records resume id)
+  "The record the local player ID takes from a save's players table RECORDS,
+or from its format-1 RESUME, and the records of everyone else.  The local
+player takes its own record, else the first, the world's owner, as a
+format-1 save had one player."
+  (if records
+      (let ((own (or (find id records :key (lambda (record) (getf record :id)) :test #'equal)
+                     (first records))))
+        (values own (remove own records)))
+      (values (resume-player-record resume) nil)))
+
+(defun player-table-record (world player &key yaw pitch)
+  "PLAYER's record in WORLD's players table, posed where it is now: YAW and
+PITCH are its look, when a view knows it.  A remote player's stock is its
+own, so its record is the one it last sent (player-table.lisp)."
+  (let ((character (player-character player)))
+    (cond ((player-track player) (remote-player-table-record world player))
+          (character
+           (let ((position (terrain:body-position (terrain:character-body character))))
+             (record-with-pose (player-stock-record player) (world-source world)
+                               (list (vec3:vec3-x position) (vec3:vec3-y position)
+                                     (vec3:vec3-z position))
+                               (or yaw (atan (terrain:character-heading-y character)
+                                             (terrain:character-heading-x character)))
+                               (or pitch 0.0)
+                               (terrain:character-flying-p character))))
+          (t (player-stock-record player)))))
+
+(defun world-player-records (world player &key yaw pitch)
+  "WORLD's players table, PLAYER, who saves it, first: everyone here, then
+everyone who has been."
+  (append (list (player-table-record world player :yaw yaw :pitch pitch))
+          (loop for other in (world-players world)
+                unless (eq other player)
+                  collect (player-table-record world other))
+          (remove-if (lambda (record) (find-world-player world (getf record :id)))
+                     (world-absent-records world))))
 
 (defun luvcraft-world-save-description (world player &key (yaw 0.0) (pitch 0.0))
-  "WORLD's save with PLAYER as its player, looking along YAW and PITCH."
-  (let ((character (player-character player)))
-    (game:luvcraft-save-description
-     (world-source world) (world-block-world world)
-     :resume (player-save-record player)
-     :inhabitants (world-inhabitant-descriptions world)
-     :position (and character
-                    (let ((position (terrain:body-position (terrain:character-body character))))
-                      (list (vec3:vec3-x position) (vec3:vec3-y position)
-                            (vec3:vec3-z position))))
-     :yaw yaw :pitch pitch
-     :flying-p (and character (terrain:character-flying-p character))
-     :selected-block (luvcraft:player-selected-block player)
-     :selected (player-placement player))))
+  "WORLD's save with PLAYER, looking along YAW and PITCH, first in its players table."
+  (game:luvcraft-save-description
+   (world-source world) (world-block-world world)
+   :players (world-player-records world player :yaw yaw :pitch pitch)
+   :inhabitants (world-inhabitant-descriptions world)))
 
 (defun save-luvcraft-world (world player pathname &rest look)
   "Write WORLD's save with PLAYER as its player to PATHNAME, atomically."

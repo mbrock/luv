@@ -5,8 +5,11 @@
     (unless (typep agent 'inhabitant-agent) (error "This tool needs an embodied companion."))
     (let ((inhabitant (agent-inhabitant agent)))
       (when (inhabitant-retired-p inhabitant) (error "The game has closed."))
-      (let ((viewer (luv.application-agent:application-agent-application agent)))
-        (values (viewer-world viewer) inhabitant viewer)))))
+      (let ((application (luv.application-agent:application-agent-application agent)))
+        ;; A headless host's companion runs its tools in the world itself.
+        (if (typep application 'luvcraft-world)
+            (values application inhabitant nil)
+            (values (viewer-world application) inhabitant application))))))
 
 (defun material-from-name (name)
   (unless (string-equal name "air")
@@ -40,8 +43,9 @@
 
 (defun companion-edit (world inhabitant cell placement)
   "Edit CELL as INHABITANT, from its owner's stock: through WORLD's open view, else directly.
-The journal names INHABITANT as the actor, so its edits undo on their own."
-  (let ((*world-edit-actor* inhabitant))
+The journal names INHABITANT's stable id as the actor, so its edits undo on
+their own, and keep their author across saves."
+  (let ((*world-edit-actor* (inhabitant-actor inhabitant)))
     (if (world-editor world)
         (funcall (world-editor world) cell placement)
         (player-edit-world-cell world (world-owner world) cell placement))))
@@ -66,7 +70,9 @@ The journal names INHABITANT as the actor, so its edits undo on their own."
   (multiple-value-bind (world inhabitant) (companion-command-context)
     (let* ((p (inhabitant-position inhabitant))
            (owner (world-owner world))
-           (player (terrain:body-position (terrain:character-body (player-character owner)))))
+           ;; The player is whoever spoke last; the stock is the owner's.
+           (player (or (companion-attention-position world inhabitant)
+                       (terrain:body-position (terrain:character-body (player-character owner))))))
       (format nil "~(~A~) feet (~,2F ~,2F ~,2F); player (~,2F ~,2F ~,2F). Z up.~%~
                    Creative: ~A. Inventory: ~{~A~^, ~}.~%Nearby foot cells: ~{~A~^; ~}"
               (inhabitant-kind inhabitant) (vec3:vec3-x p) (vec3:vec3-y p) (vec3:vec3-z p)
@@ -82,7 +88,7 @@ The journal names INHABITANT as the actor, so its edits undo on their own."
               (loop for (dx dy) in '((0 0) (1 0) (-1 0) (0 1) (0 -1) (3 0) (0 3) (-3 0) (0 -3))
                     for x = (+ (floor (vec3:vec3-x p)) dx)
                     for y = (+ (floor (vec3:vec3-y p)) dy)
-                    when (cell-resident-p world x y)
+                    when (ground-resident-p world x y)
                       collect (multiple-value-bind (face hx hy hz)
                                   (terrain:raycast-face
                                    (world-scene world) (vec3:make-vec3 (+ x 0.5) (+ y 0.5) 254.0)
@@ -100,7 +106,7 @@ The journal names INHABITANT as the actor, so its edits undo on their own."
     (cell-name world (agent-cell world x y z))))
 
 (defun begin-inhabitant-walk (world inhabitant x y z &optional fetch)
-  (unless (cell-resident-p world x y) (error "Destination is not resident."))
+  (unless (ground-resident-p world x y) (error "Destination has no collision yet; walk closer to a player."))
   (when (inhabitant-journey inhabitant) (error "Already walking."))
   (let* ((route (terrain:start-character-route (inhabitant-character inhabitant)
                                               (world-scene world) x y z))
@@ -126,7 +132,7 @@ The journal names INHABITANT as the actor, so its edits undo on their own."
   (multiple-value-bind (world inhabitant) (companion-command-context)
     (let ((cell (agent-cell world x y z))
           (character (inhabitant-character inhabitant)))
-      (unless (and (cell-resident-p world x y) (not (string= "air" (cell-name world cell))))
+      (unless (and (ground-resident-p world x y) (not (string= "air" (cell-name world cell))))
         (error "No resident block to fetch."))
       (loop for (dx dy) in '((1 0) (-1 0) (0 1) (0 -1))
             do (multiple-value-bind (face hx hy hz)
@@ -206,26 +212,22 @@ The journal names INHABITANT as the actor, so its edits undo on their own."
        :error-p t :seconds 10))))
 
 (defmethod mcluv:palette-hint :around ((viewer luvcraft-viewer))
-  (let* ((inhabitant (viewer-conversation-agent viewer))
-         (provider (and inhabitant (inhabitant-provider inhabitant)))
-         (turn (and provider (luv.application-agent:application-agent-current-turn provider))))
-    (cond
-      ((render:viewer-modal-focus viewer) nil)
-      ((player-ball-in-hand-p (viewer-local-player viewer))
-       "Ball · left throw · right marbles · B put away")
-      ((and inhabitant (inhabitant-approval inhabitant))
-       "Proposed edit · Y approve · N decline · T revise")
-      ((and inhabitant (inhabitant-opening inhabitant)) "Opening conversation…")
-      ((and turn (member (luv.application-agent:turn-status turn) '(:thinking :working)))
-       (format nil "~(~A~): ~A · T talk"
-               (inhabitant-kind inhabitant)
-               (let ((call (first (luv.application-agent:turn-calls turn))))
-                 (if call (luv.application-agent:tool-call-name call) "thinking…"))))
-      ((eq :empty (render:viewer-last-edit-status viewer)) "No blocks left · mine to collect")
-      (inhabitant (format nil "~(~A~) · T talk · F7 next · I inventory" (inhabitant-kind inhabitant)))
-      (t (if (render:viewer-pointer-captured-p viewer)
-             "B ball · G gnome · T talk · F1 keys"
-             "Click to play · B ball · G gnome · F1 keys")))))
+  (let ((inhabitant (viewer-conversation-agent viewer)))
+    (multiple-value-bind (activity tool) (if inhabitant (inhabitant-activity inhabitant) :idle)
+      (cond
+        ((render:viewer-modal-focus viewer) nil)
+        ((player-ball-in-hand-p (viewer-local-player viewer))
+         "Ball · left throw · right marbles · B put away")
+        ((and inhabitant (inhabitant-approval inhabitant))
+         "Proposed edit · Y approve · N decline · T revise")
+        ((eq activity :opening) "Opening conversation…")
+        ((member activity '(:thinking :working))
+         (format nil "~(~A~): ~A · T talk" (inhabitant-kind inhabitant) (or tool "thinking…")))
+        ((eq :empty (render:viewer-last-edit-status viewer)) "No blocks left · mine to collect")
+        (inhabitant (format nil "~(~A~) · T talk · F7 next · I inventory" (inhabitant-kind inhabitant)))
+        (t (if (render:viewer-pointer-captured-p viewer)
+               "B ball · G gnome · T talk · F1 keys"
+               "Click to play · B ball · G gnome · F1 keys"))))))
 
 (clim:define-command (com-summon-companion :command-table luvcraft-world
                                          :name "Summon Companion" :keystroke (:g)) ()

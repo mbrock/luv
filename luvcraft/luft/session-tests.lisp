@@ -112,9 +112,12 @@ and their resident chunk hashes are equal."
     (values world player guest pose)))
 
 (defun applied-p (guest host-world)
+  "Whether GUEST has every reply it asked for and stands at HOST-WORLD's head.
+Until the host has its requests, both stand at the same old head."
   (lambda ()
-    (= (host:session-applied guest)
-       (terrain:world-journal-head (terrain:world-source-journal (host:world-source host-world))))))
+    (and (= (length (host::session-replies guest)) (host::session-next-request guest))
+         (= (host:session-applied guest)
+            (terrain:world-journal-head (terrain:world-source-journal (host:world-source host-world)))))))
 
 (define-test a-guest-catches-up-while-the-host-builds
   (with-host (world session network)

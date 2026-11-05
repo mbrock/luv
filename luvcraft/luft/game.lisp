@@ -41,11 +41,12 @@
 
 (defmethod initialize-instance :around
     ((viewer luvcraft-viewer) &rest initargs
-     &key world local-player source simulation player luvcraft-world resume inhabitants
+     &key world local-player source simulation player luvcraft-world resume record inhabitants
        (hotbar (starting-hotbar-placements)) sky-origin-offset
      &allow-other-keys)
-  ;; A viewer always views a world. Without one, LUVCRAFT-WORLD, RESUME,
-  ;; INHABITANTS, and HOTBAR describe a fresh world and its only player.
+  ;; A viewer always views a world. Without one, LUVCRAFT-WORLD, RECORD (or
+  ;; format 1's RESUME), INHABITANTS, and HOTBAR describe a fresh world and
+  ;; its only player.
   (let* ((world (or world
                     (make-luvcraft-world
                      :block-world luvcraft-world :inhabitants inhabitants
@@ -53,7 +54,9 @@
                      :simulation (or simulation
                                      (terrain:make-world-simulation
                                       (or source (error "A Luvcraft viewer needs a scene.")))))))
-         (local-player (or local-player (make-luvcraft-player :resume resume :hotbar hotbar))))
+         (local-player (or local-player
+                           (make-luvcraft-player :record (or record (resume-player-record resume))
+                                                 :hotbar hotbar))))
     (when player
       (setf (player-character local-player) player))
     (add-world-player world local-player)
@@ -64,6 +67,7 @@
   ;; After the host's own method, which installed the player's character.
   (setf (world-editor (viewer-world viewer))
         (lambda (cell placement) (render:apply-viewer-world-edit viewer cell placement)))
+  (pushnew viewer (world-views (viewer-world viewer)))
   (when (render:viewer-canvas viewer)
     (render:add-viewer-overlay viewer (make-instance 'target-marker))
     (attach-player-instruments viewer)
@@ -331,32 +335,36 @@ go to LUFT.RENDER:START-GAME-HOST."
             (luvcraft:read-luvcraft-save pathname)
             (luvcraft:make-empty-little-block-world
              :seed (or seed 1) :relief relief :chunk-height world-height))
-      (let* ((source (game:luvcraft-world-luft-source
-                      block-world :watermark (getf journal :watermark 0)))
-             (world (make-luvcraft-world
-                     :block-world block-world :inhabitants inhabitants
-                     :scene (game:make-luvcraft-streaming-scene
-                             source :residency-radius 3
-                             :mesh-preparer render:+render-population-preparer+)))
-             (player (if host
-                         (make-luvcraft-player :resume resume :id player-id :name name)
-                         (make-luvcraft-player :resume resume))))
-        (when host
-          (host-luvcraft-world world player :port port :name name
-                                            :announce (format nil "~A's world" name)))
-        (multiple-value-bind (position yaw pitch flying-p)
-            (and resume (game:luvcraft-resume-luft-pose source resume))
-          (start-luvcraft-view
-           world player viewer-arguments
-           :terrain-bevels-p terrain-bevels-p
-           :world-pathname (and (or loaded-p pathname-p
-                                    (and pathname (null seed)))
-                                pathname)
-           :saved-world (and position
-                             (list :player position :yaw yaw :pitch pitch
-                                   :flying-p flying-p))))))))
+      (multiple-value-bind (record others)
+          (adopt-saved-players (getf journal :players) resume player-id)
+        (let* ((source (game:luvcraft-world-luft-source
+                        block-world :watermark (getf journal :watermark 0)))
+               (world (make-luvcraft-world
+                       :block-world block-world :inhabitants inhabitants :player-records others
+                       :scene (game:make-luvcraft-streaming-scene
+                               source :residency-radius 3
+                               :mesh-preparer render:+render-population-preparer+)))
+               (player (make-luvcraft-player :record record :id player-id :name name)))
+          (when host
+            (host-luvcraft-world world player :port port :name name
+                                              :announce (format nil "~A's world" name)))
+          (multiple-value-bind (position yaw pitch flying-p)
+              (and record (game:luvcraft-resume-luft-pose source record))
+            (start-luvcraft-view
+             world player viewer-arguments
+             :terrain-bevels-p terrain-bevels-p
+             :world-pathname (and (or loaded-p pathname-p
+                                      (and pathname (null seed)))
+                                  pathname)
+             :saved-world (and position
+                               (list :player position :yaw yaw :pitch pitch
+                                     :flying-p flying-p)))))))))
 
 (defmethod render::quiesce-viewer-services :after ((viewer luvcraft-viewer))
-  ;; Guests are told goodbye before the window and its world go.
-  (let ((session (world-session (viewer-world viewer))))
-    (when session (close-world-session session))))
+  ;; The view has let go of its companions' conversations (agents.lisp).  The
+  ;; world goes with its last view: its companions retire, and guests are
+  ;; told goodbye.
+  (let ((world (viewer-world viewer)))
+    (setf (world-views world) (remove viewer (world-views world)))
+    (unless (world-views world)
+      (shutdown-luvcraft-world world))))

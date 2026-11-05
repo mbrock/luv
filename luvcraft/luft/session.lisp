@@ -74,6 +74,11 @@ them; without one, the session applies them itself.")
    (mismatched-chunks :initform nil :accessor session-mismatched-chunks
                       :documentation "(KEY OURS THEIRS WATERMARK) for every chunk hash that differed.")
    (actor-names :initform (make-hash-table :test #'eq) :reader session-actor-names)
+   ;; The players table and companions on the wire (player-table.lisp,
+   ;; companion-session.lisp).
+   (record-sent :initform nil :accessor session-record-sent)
+   (record-due :initform 0d0 :accessor session-record-due)
+   (companions-sent :initform (make-hash-table :test #'equal) :reader session-companions-sent)
    (log :initform nil :accessor session-log-lines))
   (:documentation "A world joined to others through a wire endpoint."))
 
@@ -82,8 +87,6 @@ them; without one, the session applies them itself.")
                    :documentation "The journal sequence every guest has been sent.")
    (guests :initform nil :accessor session-guests
            :documentation "(PEER . PLAYER) for every welcomed guest.")
-   (departed :initform (make-hash-table :test #'equal) :reader session-departed
-             :documentation "The last pose of every guest that has left, by identity.")
    (remap :initform (own-remap) :reader session-wire-remap
           :documentation "This image's own vocabulary, which the host's offsets name."))
   (:documentation "The session of the world that sequences everyone's edits."))
@@ -480,15 +483,9 @@ beacon on UDP 47474."
 (defun guest-peer-player (session peer)
   (cdr (assoc peer (session-guests session))))
 
-(defun player-wire-record (session player pose)
-  (declare (ignore session))
-  (wire:make-player-record :identity (player-id player) :name (player-name player)
-                           :pose (or pose (wire:make-pose))
-                           :creative (and (luvcraft:player-creative-p player) t)))
-
 (defun spawn-pose (session identity)
   "Where a guest named IDENTITY starts: where it left, or the world's spawn."
-  (or (gethash identity (session-departed session))
+  (or (saved-player-pose session identity)
       (let ((world (session-world session)))
         (multiple-value-bind (x y z yaw) (terrain:world-source-spawn (world-source world))
           (wire:make-pose :tick (world-tick world)
@@ -544,7 +541,7 @@ beacon on UDP 47474."
     ;; the edit set there, and every later event follows on the same stream.
     (broadcast-journal session)
     (let* ((pose (spawn-pose session identity))
-           (player (ensure-remote-player session identity name))
+           (player (admit-player-record session (ensure-remote-player session identity name)))
            (record (player-wire-record session player pose)))
       (net:send-message
        endpoint
@@ -568,6 +565,7 @@ beacon on UDP 47474."
         (net:send-message endpoint (wire:make-player-update-message :presence :joined :player record)
                           (car guest)))
       (push (cons peer player) (session-guests session))
+      (welcome-companions session peer)
       (session-log session "~A (~A) joined at sequence ~D." name identity
                    (session-journal-head session))
       player)))
@@ -578,7 +576,7 @@ beacon on UDP 47474."
       (setf (session-guests session) (remove peer (session-guests session) :key #'car))
       (terrain:remove-streaming-scene-interest (session-scene session) (player-id player))
       (let ((pose (player-last-pose session player)))
-        (when pose (setf (gethash (player-id player) (session-departed session)) pose))
+        (keep-departed-player session player)
         (forget-remote-player session (player-id player))
         (dolist (guest (session-guests session))
           (net:send-message (session-endpoint session)
@@ -744,7 +742,11 @@ set installed at its watermark, and the remap of the host's vocabulary."
   (multiple-value-bind (block-world source remap) (raise-welcomed-world welcome)
     (let* ((scene (apply #'game:make-luvcraft-streaming-scene source scene-initargs))
            (world (make-luvcraft-world :block-world block-world :scene scene))
-           (player (add-world-player world (make-luvcraft-player :id identity :name name)))
+           (player (add-world-player
+                    world (make-luvcraft-player
+                           :id identity :name name
+                           ;; Its stock and hands, where it left them.
+                           :record (wire-record source remap (wire:welcome-message-player welcome)))))
            (offsets (make-hash-table :test #'eq))
            (watermark (wire:welcome-message-watermark welcome)))
       (loop for name in (wire:welcome-message-vocabulary welcome)
@@ -987,7 +989,8 @@ and PITCH are the local player's look, when a view knows it."
   (drain-session session)
   (finish-chunk-hashes session)
   (when (typep session 'host-session)
-    (broadcast-journal session))
+    (broadcast-journal session)
+    (broadcast-companion-changes session))
   (unless (session-viewer session)
     ;; A view applies queued events in its own frame and meshes them.
     (terrain:apply-queued-world-events (session-scene session) nil nil))
@@ -998,7 +1001,9 @@ and PITCH are the local player's look, when a view knows it."
         (when pose
           (session-broadcast session
                              (wire:make-pose-message
-                              :player (player-id (session-local-player session)) :pose pose)))))
+                              :player (player-id (session-local-player session)) :pose pose))))
+      (broadcast-companion-poses session))
+    (advance-player-record session now)
     (when (>= now (session-hash-due session))
       (setf (session-hash-due session) (+ now *chunk-hash-period*))
       (report-chunk-hashes session)))
@@ -1009,11 +1014,15 @@ and PITCH are the local player's look, when a view knows it."
   "Say goodbye, stop the endpoint, and detach SESSION from its world."
   (unless (eq (session-state session) :closed)
     (ignore-errors
+     (when (typep session 'guest-session)
+       (send-player-record session :force t))
      (session-broadcast session (wire:make-bye-message :reason reason :text "Goodbye.")))
     (setf (session-state session) :closed))
   (net:stop-endpoint (session-endpoint session))
   (dolist (player (session-remote-players session))
     (terrain:remove-streaming-scene-interest (session-scene session) (player-id player))
+    (when (typep session 'host-session)
+      (keep-departed-player session player))
     (remove-world-player (session-world session) player))
   (when (eq (world-session (session-world session)) session)
     (setf (world-session (session-world session)) nil))
