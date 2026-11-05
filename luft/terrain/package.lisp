@@ -346,6 +346,19 @@ this package draws; the renderer and the ateliers use it.")
            #:world-event-sequence
            #:world-event-site
            #:world-event-tick
+           #:world-event-time
+           #:make-world-event
+           #:cell-provenance
+           #:make-cell-provenance
+           #:cell-provenance-sequence
+           #:cell-provenance-actor
+           #:cell-provenance-tick
+           #:cell-provenance-time
+           #:world-cell-provenance
+           #:replay-world-events
+           #:*journal-tail-events*
+           #:world-journal-compaction-watermark
+           #:world-journal-compacted
            #:world-event-transaction
            #:world-journal
            #:world-journal-edits

@@ -731,6 +731,61 @@
                 (aref (terrain:world-journal-events journal)
                       (1- (length (terrain:world-journal-events journal))))))))))))
 
+(define-test a-journal-compacts-at-a-transaction-boundary-and-replays-its-tail
+  (call-with-journal-scene
+   (lambda (scene system cell)
+     (declare (ignore scene system))
+     (let ((journal (terrain:make-world-journal))
+           (a (funcall cell 1 1 1)) (b (funcall cell 2 1 1)) (c (funcall cell 3 1 1)))
+       (terrain:record-world-events journal (list (list a nil *stone*)) :actor "alice")
+       (terrain:record-world-events journal (list (list b nil *glow*) (list c nil *stone*))
+                                    :actor "bob" :tick 40)
+       (terrain:record-world-events journal (list (list a *stone* *glow*)) :actor "alice")
+       (terrain:record-world-events journal (list (list c *stone* nil) (list b *glow* nil))
+                                    :actor "bob" :cause (list :undo 2))
+       ;; Bob's two-event transaction is never split: a tail of at most four
+       ;; events starts after it, as one of at most three does.
+       (is equal '(6 6 4 3 3 0)
+           (loop for limit in '(0 1 2 3 4 6)
+                 collect (terrain:world-journal-compaction-watermark journal limit)))
+       (multiple-value-bind (edits provenance tail) (terrain:world-journal-compacted journal 3)
+         (is equal '(4 5 6) (mapcar #'terrain:world-event-sequence tail))
+         (is eq *stone* (gethash a edits))
+         (is eq *glow* (gethash b edits))
+         (is eq *stone* (gethash c edits))
+         (is = 1 (terrain:cell-provenance-sequence (gethash a provenance)))
+         (is eql 40 (terrain:cell-provenance-tick (gethash c provenance)))
+         (let ((again (terrain:make-world-journal)))
+           (terrain:install-world-edit-set
+            again (loop for site in (list a b c)
+                        collect (list site (gethash site edits) (gethash site provenance)))
+            3)
+           (terrain:replay-world-events again tail)
+           (is = 6 (terrain:world-journal-head again))
+           (is = 3 (terrain:world-journal-watermark again))
+           (dolist (site (list a b c))
+             (is eq (gethash site (terrain:world-journal-edits journal))
+                 (gethash site (terrain:world-journal-edits again))))
+           ;; An emptied cell remembers who emptied it, and when.
+           (let ((emptied (terrain:world-cell-provenance again b)))
+             (is = 6 (terrain:cell-provenance-sequence emptied))
+             (is equal "bob" (terrain:cell-provenance-actor emptied))
+             (true (integerp (terrain:cell-provenance-time emptied))))
+           ;; Alice can still undo her tail transaction; Bob's undo named one
+           ;; compacted away, so there is nothing for him to redo.
+           (is = 3 (terrain:world-journal-undoable-transaction again "alice"))
+           (is eq nil (terrain:world-journal-redoable-transaction again "bob"))
+           (is eq nil (terrain:world-journal-undoable-transaction again "bob"))
+           ;; Numbering goes on from the tail.
+           (let ((next (first (terrain:record-world-events
+                               again (list (list c nil *glow*)) :actor "alice"))))
+             (is = 7 (terrain:world-event-sequence next))
+             (is = 5 (terrain:world-event-transaction next)))
+           ;; A tail that does not continue its edit set is refused.
+           (true (handler-case
+                     (progn (terrain:replay-world-events (terrain:make-world-journal) tail) nil)
+                   (error () t)))))))))
+
 (define-test a-source-scene-journal-reaches-chunks-it-has-not-shown
   (let* ((domain (luft:make-world-domain :x-bits 7 :y-bits 7))
          (source (make-instance 'flat-source :domain domain
