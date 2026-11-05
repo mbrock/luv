@@ -23,10 +23,17 @@
 
 (defun sample-player ()
   (make-player-record :identity "c2f0-player-ida" :name "Daniel"
-                      :pose (sample-pose) :creative t :selected 2
-                      :hotbar (list (stone) nil (film))
-                      :inventory (list (make-stack :block (stone) :count 64)
+                      :pose (sample-pose) :creative t :held (film) :simple t
+                      :kit (list (stone) (film))
+                      :inventory (list (make-stack :block (stone))
                                        (make-stack :block (film) :count 1))))
+
+(defun sample-companion ()
+  (make-companion-record :id "gnome-k3x9q" :kind :gnome :asked "Bygg en trappa"
+                         :said "Gärna — ett steg i taget." :said-serial 3
+                         :attending "c2f0-player-ida" :activity :working
+                         :tool "Walk To" :destination (make-site 1030 1031 12)
+                         :pose (sample-pose)))
 
 (defun sample-messages ()
   "One rich message of every type, with distinct values in every field."
@@ -82,6 +89,10 @@
                                              :digest (octets 9 9 9)
                                              :content (octets 0 255 17 34)))
        (in-world (make-bye-message :reason :foreign-world :text "wrong world"))
+       (in-world (make-companion-message :companion (sample-companion)))
+       (in-world (make-companion-tell-message :companion "gnome-k3x9q"
+                                              :text "Kan du hämta en sten?"))
+       (in-world (make-companion-pose-message :companion "gnome-k3x9q" :pose (sample-pose)))
        (in-world (make-pose-message :player "c2f0-player-ida" :pose (sample-pose)))
        (in-world (make-entity-snapshot-message :snapshot (sample-entities)))
        (in-world (make-probe-message :heard t))

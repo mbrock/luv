@@ -381,18 +381,39 @@ STATE is a wire value."
   (entities (:list :entity-state) nil))
 
 (define-wire-record stack ()
+  "One inventory entry: a block and how many, or NIL for unlimited supply."
   (block :block-identity (make-block-identity))
-  (count :u32 0))
+  (count (:optional :u32) nil))
 
 (define-wire-record player-record ()
-  "A player in the host's players table (#Y3S82T)."
+  "A player in the host's players table (#Y3S82T).  INVENTORY is in number
+row order, so its first ten stacks are the hotbar, or KIT is when SIMPLE;
+HELD is the exact block in hand.  An empty INVENTORY is a new player."
   (identity :string "")
   (name :string "")
   (pose :pose (make-pose))
   (creative :bool nil)
-  (selected :u8 0)
-  (hotbar (:list (:optional :block-identity)) nil)
+  (held (:optional :block-identity) nil)
+  (simple :bool nil)
+  (kit (:list :block-identity) nil)
   (inventory (:list :stack) nil))
+
+(define-wire-record companion-record ()
+  "A companion as every peer sees it (#EA88ON): its stable ID, what it was
+last asked and said (SAID-SERIAL counts its lines, so a repeated line is
+still news), the player it attends to, what it is doing, the foot cell it
+walks to, and its body."
+  (id :string "")
+  (kind :keyword :gnome)
+  (presence (:enum :present :left) :present)
+  (asked :string "")
+  (said :string "")
+  (said-serial :u32 0)
+  (attending :string "")
+  (activity (:enum :idle :opening :thinking :working) :idle)
+  (tool :string "")
+  (destination (:optional :site) nil)
+  (pose :pose (make-pose)))
 
 (define-wire-record chunk-hash ()
   (chunk :chunk (make-site 0 0 0))
@@ -400,7 +421,7 @@ STATE is a wire value."
 
 ;; Record names double as field types; field types are keywords.
 (dolist (name '(block-identity recipe principal edit placement event pose
-                entity-state entity-snapshot stack player-record chunk-hash))
+                entity-state entity-snapshot stack player-record companion-record chunk-hash))
   (let ((keyword (intern (symbol-name name) '#:keyword)))
     (setf (get keyword 'wire-fields) (get name 'wire-fields)
           (get keyword 'wire-constructor) (get name 'wire-constructor)
@@ -488,12 +509,27 @@ peer compares them only once it stands there too (#RELI34)."
   (reason :keyword :bye)
   (text :string ""))
 
+(define-message companion-message 16 :reliable
+  "The host's companion as it now is, sent when its words, attention, or
+journey change, and to a guest on joining."
+  (companion :companion-record (make-companion-record)))
+
+(define-message companion-tell-message 17 :reliable
+  "A guest asking the host's companion COMPANION something."
+  (companion :string "")
+  (text :string ""))
+
 (define-message pose-message 32 :unreliable
   (player :string "")
   (pose :pose (make-pose)))
 
 (define-message entity-snapshot-message 33 :unreliable
   (snapshot :entity-snapshot (make-entity-snapshot)))
+
+(define-message companion-pose-message 40 :unreliable
+  "A host companion's body, as a player's pose."
+  (companion :string "")
+  (pose :pose (make-pose)))
 
 (define-message probe-message 48 :datagram
   "Keeps the datagram path honest: HEARD says datagrams from the receiver

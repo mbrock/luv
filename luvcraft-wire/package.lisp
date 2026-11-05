@@ -53,8 +53,13 @@ exactly what an encoder would have written.")
    #:stack #:make-stack #:stack-p #:stack-block #:stack-count
    #:player-record #:make-player-record #:player-record-p
    #:player-record-identity #:player-record-name #:player-record-pose
-   #:player-record-creative #:player-record-selected
-   #:player-record-hotbar #:player-record-inventory
+   #:player-record-creative #:player-record-held #:player-record-simple
+   #:player-record-kit #:player-record-inventory
+   #:companion-record #:make-companion-record #:companion-record-p
+   #:companion-record-id #:companion-record-kind #:companion-record-presence
+   #:companion-record-asked #:companion-record-said #:companion-record-said-serial
+   #:companion-record-attending #:companion-record-activity #:companion-record-tool
+   #:companion-record-destination #:companion-record-pose
    #:chunk-hash #:make-chunk-hash #:chunk-hash-p #:chunk-hash-chunk
    #:chunk-hash-digest
    ;; messages
@@ -86,6 +91,12 @@ exactly what an encoder would have written.")
    #:chunk-content-message-digest #:chunk-content-message-content
    #:bye-message #:make-bye-message #:bye-message-p #:bye-message-reason
    #:bye-message-text
+   #:companion-message #:make-companion-message #:companion-message-p
+   #:companion-message-companion
+   #:companion-tell-message #:make-companion-tell-message #:companion-tell-message-p
+   #:companion-tell-message-companion #:companion-tell-message-text
+   #:companion-pose-message #:make-companion-pose-message #:companion-pose-message-p
+   #:companion-pose-message-companion #:companion-pose-message-pose
    #:pose-message #:make-pose-message #:pose-message-p
    #:pose-message-player #:pose-message-pose
    #:entity-snapshot-message #:make-entity-snapshot-message
