@@ -516,6 +516,56 @@ turtles and gnomes wait on uncollided ground and stand once it collides
 (fails without the fix); and a loopback guest five chunks from the host,
 beside whom a body walks on the host's ground.
 
+*** DONE Keep every player's record, and share the companions
+:PROPERTIES:
+:ID: 6RAX26
+:END:
+
+/Intent./ Fill #Y3S82T's players table, so a guest who joins again finds
+its stock where it left it, and let either player talk to the host's
+companions, whose edits keep one author across saves.
+
+/Done when./ Loopback tests show a guest's inventory, hotbar, held block,
+and pose surviving its leaving and a host save and reload; a guest's tell
+reaching the companion with both sides seeing its reply; and a companion's
+edits keeping their actor across a reload.  Two images on one Mac show a
+guest talking to the host's companion.
+
+/Evidence./ A format-2 save's =:players= is the table, the saving player
+first: per stable id, its name, the resume's pose fields
+(=:player-position=, =:look=, =:flying=), =:creative-p=, the =:inventory=
+of (block quantity) in number-row order, =:simple-inventory-p= and its
+=:building-kit=, and the =:selected-block=.  Blocks are written as offsets
+into the save's own vocabulary and entity tables -- an offset, or (offset
+entity-index) -- and read back as block identities.  A format-1 resume, or
+an older format 2's =:resume=, becomes the local player's record
+([[lisp:luvcraft.luft.game::adopt-saved-players]]); other records wait in
+the world's absent records until their player joins.  A guest tells its
+host its record when its stock or hands change, and as it leaves
+(=player-table.lisp=); the host keeps it, posed where the guest was last
+seen, and returns it in the next welcome.  A guest's own saves are never
+touched, and nothing of the remote world is kept on its machine.
+
+A companion has a stable id, saved with it, and its edits are events of
+=(:inhabitant ID)=, so they undo as its own after a reload.  The host keeps
+its provider and tools.  Each guest sees a mirror kept current by
+=companion-message= (asked, said with a serial, the player it attends to,
+activity and tool, walk destination) and =companion-pose-message= at
+30 Hz through a remote track (=companion-session.lisp=).  A guest's tell is
+a =companion-tell-message=; the host tells its companion as from that
+guest, which it then attends to, and both see the same reply.  Closing a
+view lets go of the providers whose tools run in its frame and of its
+presentations; the companion stays, and its conversation goes on with the
+next provider.  The world's shutdown, with its last view, retires its
+companions.  Companions are summoned, walk, and simulate only on ground
+with collision (#7CY5VW), and a companion that cannot be described -- one
+that fell out of the world -- is logged and left out of the save rather
+than failing it.
+
+/Open./ Companion bodies travel as their own pose messages rather than in
+#EA88ON's entity snapshots.  Only the host summons; a guest's G is refused.
+Companions build from the owner's stock, whoever asked.
+
 ** TODO Make company comfortable
 :PROPERTIES:
 :ID: 3JTHM3
