@@ -218,6 +218,7 @@
            #:status-bar-channel-value
            #:status-bar-application-name
            #:status-bar-lobby-client
+           #:hotbar-logical-extent
            #:status-bar-source-root
            #:status-bar-worktree-description
            #:refresh-status-bar

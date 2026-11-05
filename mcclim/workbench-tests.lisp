@@ -443,3 +443,19 @@
     ;; Control chords never type into the line.
     (prompt-key prompt :u (code-char 21) :modifiers '(:control) :unshifted #\u)
     (is string= "" (mcluv:prompt-text prompt))))
+
+(defclass bottom-band-application () ())
+
+(defmethod workbench:workbench-bottom-band ((application bottom-band-application) width)
+  ;; A 500-wide band reaching 96 above the bottom, as Luvcraft's hotbar does.
+  (declare (ignore width))
+  (values 500 96))
+
+(define-test the-lobby-card-rises-over-a-bottom-band-it-would-meet
+  (let ((application (make-instance 'bottom-band-application)))
+    ;; Wide enough that the band starts right of the card: the usual margin.
+    (is = 16 (workbench::lobby-bottom-margin application 1400))
+    ;; Narrower, the band would run under the card's right edge.
+    (is = 104 (workbench::lobby-bottom-margin application 1000))
+    ;; An application with no band keeps the margin at any width.
+    (is = 16 (workbench::lobby-bottom-margin nil 800))))

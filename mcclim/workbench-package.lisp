@@ -11,6 +11,7 @@
    #:workbench-application-canvas
    #:workbench-application-context
    #:workbench-application-stop-controller
+   #:workbench-bottom-band
    #:suspend-workbench-application-input
    #:resume-workbench-application-input
    #:workbench-frame

@@ -12,6 +12,14 @@
 (defgeneric workbench-application-canvas (application))
 (defgeneric workbench-application-context (application))
 (defgeneric workbench-application-stop-controller (application))
+(defgeneric workbench-bottom-band (application width)
+  (:documentation "The width of a band APPLICATION draws centred along the
+bottom of a view WIDTH logical pixels wide, such as a hotbar, and how far
+above the bottom it reaches; NIL when there is none.  Corner panes stay
+clear of it.")
+  (:method (application width)
+    (declare (ignore application width))
+    nil))
 (defgeneric suspend-workbench-application-input (application)
   (:documentation
    "Clear held input, release relative capture, and return an opaque token."))
@@ -99,9 +107,23 @@
        (clim:move-and-resize-sheet
         child luv.lobby.mcclim::+lobby-hud-margin+
         (max 0 (- height luv.lobby.mcclim::+lobby-hud-pane-height+
-                  luv.lobby.mcclim::+lobby-hud-margin+))
+                  (lobby-bottom-margin
+                   (let ((frame (clim:pane-frame child)))
+                     (and (typep frame 'workbench-frame) (frame-workbench-application frame)))
+                   width)))
         luv.lobby.mcclim::+lobby-hud-width+
         luv.lobby.mcclim::+lobby-hud-pane-height+)))))
+
+(defun lobby-bottom-margin (application width)
+  "How far above the bottom the lobby card sits in APPLICATION's view WIDTH
+wide: its margin, or clear above APPLICATION's bottom band where they meet."
+  (let ((margin luv.lobby.mcclim::+lobby-hud-margin+))
+    (multiple-value-bind (band-width reach) (and application (workbench-bottom-band application width))
+      (if (and band-width
+               (< (/ (- width band-width) 2)
+                  (+ margin luv.lobby.mcclim::+lobby-hud-width+ 8)))
+          (max margin (ceiling (+ reach 8)))
+          margin))))
 
 (defclass workbench-layout-pane
     (clime:never-repaint-background-mixin

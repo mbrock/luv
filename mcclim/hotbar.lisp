@@ -156,6 +156,14 @@
   (declare (ignore overlay))
   :hud)
 
+(defun hotbar-logical-extent (viewport-width)
+  "How wide the hotbar is drawn in a viewport VIEWPORT-WIDTH logical pixels
+wide, and how far above the viewport's bottom its top edge reaches.  It is
+centred, scaled down when the viewport is narrower than it, and sits 28
+pixels above the bottom, as HOTBAR-SCREEN-STATE places it."
+  (let ((scale (min 1.0 (/ (- viewport-width 24.0) +hotbar-width+))))
+    (values (* +hotbar-width+ scale) (+ 28.0 (* *hotbar-height* scale)))))
+
 (defun hotbar-screen-state (overlay)
   (let* ((source-size (widget-overlay-logical-size overlay))
          (viewport-size

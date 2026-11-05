@@ -66,6 +66,10 @@
   ;; pending kit replacement before it closes. Its existing handler owns both.
   (not (mcluv::inventory-simple-p (mcluv:widget-overlay-frame overlay))))
 
+(defmethod luv.workbench:workbench-bottom-band ((viewer luvcraft-viewer) width)
+  ;; The lobby card stays clear of the hotbar.
+  (mcluv:hotbar-logical-extent width))
+
 ;; Realize before the canvas starts: opening I never compiles a UI pipeline.
 (defun attach-player-instruments (viewer)
   (mcluv:open-luvcraft-inventory viewer)
