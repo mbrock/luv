@@ -905,3 +905,63 @@ fails without it.  Compaction stays by count alone, as decided.
 
 /Open./ An emptied cell remembers who emptied it, but the crosshair cannot
 point at air, so nothing shows it; that waits, as decided.
+
+*** DONE Soak two machines with bots that build
+:PROPERTIES:
+:ID: 3E8LY0
+:END:
+
+/Intent./ Phase 3D: input tapes as files, a soak bot whose headless guest
+and host must end with equal journals and chunk hashes, and a session
+between a Mac and a Linux machine.
+
+/Evidence./ An input tape ([[lisp:luft.terrain:input-tape]]) is one input
+frame per simulation tick and the actions between them, such as
+=(:edit X Y Z BLOCK)= and =(:undo)=.  Its file is one readable form, frames
+run-length coded, read back whole or refused
+([[lisp:luft.terrain:read-input-tape]]); numbers keep their exact type, so a
+replay steers by the same values.  A view records into one, and a
+Luvcraft view also records its player's edits.
+=a-recorded-input-tape-replays-the-same-walk= now replays the tape it saved.
+
+A soak bot ([[lisp:luvcraft.luft.game::make-soak-bot]]) plays first alone,
+in a scratch world of the same recipe, recording itself: it walks toward
+random waypoints near the spawn, jumps and tunnels when stuck, and every
+second or two digs the cell ahead, builds beside or across its way, takes
+down another's newest block, or undoes its last edit.  Every ten seconds
+both bots claim one flag cell on the same tick, so a guest asks from a
+stale view.  The soak writes each tape, reads it back, and replays it in a
+headless host and guest ([[lisp:luvcraft.luft.game::run-soak]]); then every
+journal event and every resident chunk hash must agree, and a divergence
+is reported as the first differing sequence and each differing chunk with
+the events in it.  =a-soaked-host-and-guest-agree= soaks for fifteen
+seconds; =scripts/luvcraft-soak= runs ten minutes, or =--host [--lobby]=
+and =--join HOST|lobby= on two machines.
+
+Ten minutes on chapel over TCP: 851 events (427 the host bot's, 424 the
+guest's), 944 live chunk-hash comparisons, nothing differed.
+
+Chapel (Linux) and temple (macOS) are not on one LAN: they sit behind
+different routers, 192.168.1.0/24 and 192.168.88.0/24, with different
+public addresses, and reach each other only over the tailnet.  On it, each
+side found the other through its lobby entry (chapel's 100.121.253.4,
+temple's 100.85.9.92).  Three minutes each way, a Linux host and a Mac
+guest, then a Mac host and a Linux guest: journal heads 261 and 262 with
+equal digests on both sides, all nine resident chunk hashes byte-identical,
+and 657 and 594 live comparisons, none differing.  A relay on chapel then
+cut the guest's link for ten seconds mid-build (resetting it and refusing
+reconnection) and later stalled it for ten.  The Mac guest lost the link at
+sequence 127 and resumed there, six events behind; the stall passed
+unnoticed, as TCP holds the stream.  After four minutes both journals stood
+at 354 with equal digests and every chunk hash agreed (882 comparisons);
+seven of the guest's edits fell in the cut.
+
+Chapel's firewall admits the tailnet (=trustedInterfaces=) but not the LAN:
+its =nixos-fw= chain accepts only ports 22 and 2022 there.  LAN play with
+chapel as host, and its beacons, need
+=networking.firewall.allowedTCPPorts = [ 47475 ];= and
+=networking.firewall.allowedUDPPorts = [ 47474 47475 ];=.
+
+/Open./ A guest's edits while it reconnects are refused as =:disconnected=
+rather than held for the resumed link.  The drop was made by a relay in
+user space, not by the kernel's firewall or a downed interface.
