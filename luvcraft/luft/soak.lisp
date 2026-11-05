@@ -121,6 +121,18 @@ returned.  After the tape PLAYER stands still."
 (defun wrap-angle (angle)
   (- angle (* 2 pi (round angle (* 2 pi)))))
 
+(defun newest-block-of-another (world player)
+  "The site of the newest block placed by someone other than PLAYER that is
+still there, or NIL."
+  (let ((events (terrain:world-journal-events (terrain:world-source-journal (world-source world)))))
+    (loop for index from (1- (length events)) downto (max 0 (- (length events) 20))
+          for event = (aref events index)
+          when (and (terrain:world-event-after event)
+                    (not (equal (terrain:world-event-actor event) (world-edit-actor player)))
+                    (terrain:scene-material-placement-at (world-scene world)
+                                                         (terrain:world-event-site event)))
+            return (terrain:world-event-site event))))
+
 (defun make-soak-bot (world player tape &key (seed 1) (radius 20))
   "A BEFORE-TICK function playing PLAYER in WORLD as a bot that wanders
 within RADIUS cells of where it starts, recording itself on TAPE."
@@ -128,6 +140,8 @@ within RADIUS cells of where it starts, recording itself on TAPE."
          (character (player-character player))
          (body (terrain:character-body character))
          (home (let ((p (terrain:body-position body))) (cons (vec3:vec3-x p) (vec3:vec3-y p))))
+         (flag (multiple-value-bind (x y) (terrain:world-source-spawn (world-source world))
+                 (list x (+ y 6) (soak-ground world x (+ y 6)))))
          (waypoint nil) (mark nil) (stuck 0) (ticks 0)
          (action-due (+ 60 (random 120 random))))
     (labels ((here () (terrain:body-position body))
@@ -163,8 +177,14 @@ within RADIUS cells of where it starts, recording itself on TAPE."
                     (let ((z (loop for z from feet below (+ feet 4)
                                    unless (soak-solid-p world side-x side-y z) return z)))
                       (when z (edit side-x side-y z block))))
+                   ;; Take down the newest block someone else placed:
+                   ;; replayed, the two often race for it.
+                   ((< roll 85)
+                    (let ((theirs (newest-block-of-another world player)))
+                      (when theirs
+                        (edit (luft:site-x theirs) (luft:site-y theirs) (luft:site-z theirs) nil))))
                    ;; Wall the way, to dig through later.
-                   ((< roll 90)
+                   ((< roll 92)
                     (unless (soak-solid-p world ahead-x ahead-y feet)
                       (edit ahead-x ahead-y feet block)))
                    (t
@@ -195,6 +215,18 @@ within RADIUS cells of where it starts, recording itself on TAPE."
             (setf mark (cons x y))
             (when (= stuck 3) (tunnel))
             (when (> stuck 8) (choose-waypoint)))
+          ;; Every ten seconds both bots claim the same flag cell with
+          ;; their own blocks, on the same tick of their tapes: replayed,
+          ;; the guest asks from a stale view and the host refuses it.
+          (when (zerop (mod ticks 1200))
+            (destructuring-bind (fx fy fz) flag
+              (let ((mine (game:block-placement
+                           (luvcraft:block-kind-named
+                            (elt *soak-blocks* (mod seed (length *soak-blocks*)))))))
+                (if (eq mine (terrain:scene-material-placement-at (world-scene world)
+                                                                  (soak-cell world fx fy fz)))
+                    (edit fx fy fz nil)
+                    (edit fx fy fz (game::luvcraft-block-for-placement mine))))))
           (when (>= ticks action-due)
             (act)
             (setf action-due (+ ticks 90 (random 150 random))))
@@ -468,9 +500,11 @@ while pumping the host; return the guest's world, player, and session."
    (merge-pathnames (format nil "~A-~D.tape" id seed) tape-directory)))
 
 (defun run-soak-host (&key (seconds 600) (seed 1) (relief :alpine) (radius 1) (bot-seed 7)
-                        (port wire:+default-port+) (tape-directory #p"build/soak/") (step 1/60))
+                        (port wire:+default-port+) (tape-directory #p"build/soak/") (step 1/60)
+                        lobby)
   "Host a soak on PORT: wait for a guest, play the host bot's tape while
-it plays, and summarize once it leaves.  Return whether no chunk differed."
+it plays, and summarize once it leaves.  LOBBY true lists the host in the
+tailnet lobby, as a hosting view does.  Return whether no chunk differed."
   (let* ((tape (soak-tape "soak-host" seconds :seed seed :relief relief :radius radius
                                               :bot-seed bot-seed :tape-directory tape-directory))
          (world (make-soak-world :seed seed :relief relief :radius radius))
@@ -478,24 +512,64 @@ it plays, and summarize once it leaves.  Return whether no chunk differed."
          (player (add-soak-character world (make-luvcraft-player :id "soak-host" :name "Host bot") 0))
          (session (host-luvcraft-world world player :port port))
          (*chunk-hashes-per-report* (length keys))
+         (client (and lobby (luv.lobby:make-lobby-client :name "Soak host")))
+         (advert-due 0d0) (listed nil)
          (replay nil) (start nil) (seen nil))
     (soak-log "Hosting seed ~D (~(~A~)), tag ~A, on port ~D; waiting for a guest."
               seed relief (terrain:world-source-tag (world-source world))
               (net:endpoint-port (session-endpoint session)))
+    (when client (luv.lobby:start-lobby-client client))
     (unwind-protect
          (progn
            (call-paced
             step (lambda ()
                    (advance-luvcraft-world world step :before-tick replay)
+                   (when (and client (> (wall-seconds) advert-due))
+                     (setf advert-due (+ (wall-seconds) *advert-period*))
+                     (let ((address (luv.lobby:lobby-client-local-address client))
+                           (key (concatenate 'string *session-advert-prefix*
+                                             (luv.lobby:lobby-client-id client))))
+                       (when (and address (not listed))
+                         (setf listed t)
+                         (soak-log "Listed in the lobby at ~A:~D." address
+                                   (net:endpoint-port (session-endpoint session))))
+                       (setf (luv.lobby:lobby-client-own-value client key)
+                             (and address (session-advert session address)))))
                    (when (and (null replay) (session-guests session))
                      (setf seen t start (world-tick world)
                            replay (tape-replayer world player tape))
                      (soak-log "A guest joined; the host bot plays."))
-                   (and seen (null (session-guests session))
+                   ;; A guest whose link dropped has its place kept a while.
+                   (and seen (null (session-guests session)) (null (session-away session))
                         (tape-finished-p world tape start))))
            (soak-log "The guest left at sequence ~D." (session-journal-head session))
            (print-soak-summary world keys 0 session))
+      (when client (luv.lobby:stop-lobby-client client))
       (close-world-session session))))
+
+(defun find-soak-host-in-lobby (&key (timeout 90))
+  "The \"address:port\" a soak host lists in the tailnet lobby."
+  (let ((client (luv.lobby:make-lobby-client :name "Soak guest"))
+        (deadline (+ (wall-seconds) timeout)))
+    (luv.lobby:start-lobby-client client)
+    (unwind-protect
+         (loop
+           (let ((present (mapcar #'luv.lobby:lobby-peer-id
+                                  (luv.lobby:lobby-snapshot-peers
+                                   (luv.lobby:lobby-client-snapshot client)))))
+             (loop for (key . text) in (luv.lobby:lobby-client-values-under
+                                        client *session-advert-prefix*)
+                   for advert = (parse-session-advert text)
+                   when (and advert (string= (getf advert :host) "Host bot")
+                             (member (subseq key (length *session-advert-prefix*)) present
+                                     :test #'string=))
+                     do (let ((target (format nil "~A:~D" (getf advert :address) (getf advert :port))))
+                          (soak-log "The lobby lists the soak host at ~A." target)
+                          (return-from find-soak-host-in-lobby target))))
+           (when (> (wall-seconds) deadline)
+             (error "No soak host in the lobby within ~D seconds." timeout))
+           (sleep 1/4))
+      (luv.lobby:stop-lobby-client client))))
 
 (defun run-soak-guest (target &key (seconds 600) (seed 1) (relief :alpine) (radius 1) (bot-seed 7)
                                 (tape-directory #p"build/soak/") (step 1/60))
@@ -503,7 +577,8 @@ it plays, and summarize once it leaves.  Return whether no chunk differed."
 wait for one comparison of every resident chunk with the host's before
 leaving.  Return whether no chunk differed."
   (let ((tape (soak-tape "soak-guest" seconds :seed seed :relief relief :radius radius
-                                              :bot-seed (1+ bot-seed) :tape-directory tape-directory)))
+                                              :bot-seed (1+ bot-seed) :tape-directory tape-directory))
+        (target (if (string-equal target "lobby") (find-soak-host-in-lobby) target)))
     (destructuring-bind (world player session pose)
         (multiple-value-list (join-luvcraft-world target :identity "soak-guest" :name "Guest bot"))
       (declare (ignore pose))
@@ -511,7 +586,7 @@ leaving.  Return whether no chunk differed."
            (let* ((keys (soak-chunk-keys world radius))
                   (*chunk-hashes-per-report* (length keys))
                   (start nil) (replay nil) (counts (list nil)))
-             (unless (equal (getf (rest (terrain:world-source-recipe (world-source world))) :seed) seed)
+             (unless (equal (getf (cddr (terrain:world-source-recipe (world-source world))) :seed) seed)
                (error "The host plays ~S; pass its --seed and --relief."
                       (terrain:world-source-recipe (world-source world))))
              (make-soak-resident world keys)
@@ -521,22 +596,27 @@ leaving.  Return whether no chunk differed."
              (soak-log "Joined ~A at sequence ~D; the guest bot plays." target (session-watermark session))
              (call-paced step (lambda ()
                                 (advance-luvcraft-world world step :before-tick replay)
+                                ;; A dropped link reconnects meanwhile.
                                 (or (tape-finished-p world tape start)
-                                    (not (eq (session-state session) :open)))))
+                                    (eq (session-state session) :closed))))
              (soak-log "Tape done: ~S.  Waiting for the host's events and a whole chunk comparison."
                        (car counts))
-             (let ((deadline (+ (wall-seconds) 60))
-                   (matched nil) (head nil))
+             (let ((deadline (+ (wall-seconds) 90))
+                   (matched nil) (head nil) (since 0d0))
                (call-paced
                 step (lambda ()
                        (advance-luvcraft-world world step)
                        (let ((now (session-watermark-now session)))
-                         ;; Count matches from the first report after the journal rests.
-                         (unless (and now (eql now head)
-                                      (= (length (session-replies session)) (session-next-request session)))
-                           (setf head now matched (session-matched-chunks session))))
-                       (or (>= (session-matched-chunks session) (+ matched (length keys)))
+                         ;; Count matches from the first report after the
+                         ;; journal has rested three seconds.
+                         (unless (and now (eql now head))
+                           (setf head now since (wall-seconds) matched nil))
+                         (when (and head (null matched) (> (wall-seconds) (+ since 3)))
+                           (setf matched (session-matched-chunks session))))
+                       (or (and matched
+                                (>= (session-matched-chunks session) (+ matched (length keys))))
                            (session-mismatched-chunks session)
+                           (eq (session-state session) :closed)
                            (> (wall-seconds) deadline)))))
              (soak-log "Rejected requests: ~S."
                        (let ((reasons nil))
@@ -569,13 +649,14 @@ leaving.  Return whether no chunk differed."
                    ((string= argument "--port") (setf (getf options :port) (number (value))))
                    ((string= argument "--join") (setf mode :guest target (value)))
                    ((string= argument "--loopback") (setf transport :loopback))
+                   ((string= argument "--lobby") (setf (getf options :lobby) t))
                    (t (error "Unknown argument ~A." argument))))))
     (let ((agreed (ecase mode
                     (:both (getf (apply #'run-soak :transport transport
-                                        (alexandria:remove-from-plist options :port))
+                                        (alexandria:remove-from-plist options :port :lobby))
                                  :agree))
                     (:host (apply #'run-soak-host options))
                     (:guest (apply #'run-soak-guest target
-                                   (alexandria:remove-from-plist options :port))))))
+                                   (alexandria:remove-from-plist options :port :lobby))))))
       (soak-log (if agreed "The peers agree." "The peers DIVERGED."))
       (uiop:quit (if agreed 0 1)))))

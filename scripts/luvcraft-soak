@@ -4,9 +4,10 @@
 #
 #   scripts/luvcraft-soak                       host and guest here, 10 minutes, TCP
 #   scripts/luvcraft-soak --minutes 1 --loopback
-#   scripts/luvcraft-soak --host [--port 47475] on one machine, and
-#   scripts/luvcraft-soak --join HOST[:PORT]    on another
+#   scripts/luvcraft-soak --host [--port 47475] [--lobby]   on one machine, and
+#   scripts/luvcraft-soak --join HOST[:PORT]|lobby          on another
 #
+# --lobby lists the host in the tailnet lobby; --join lobby dials what it lists.
 # Other options: --seconds N, --seed N, --relief alpine|meadow, --radius N
 # (resident chunks around the spawn), --bot-seed N, --tapes DIR (build/soak/).
 set -eu
@@ -16,6 +17,6 @@ project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project_root"
 exec sbcl --noinform --non-interactive --no-userinit \
   --eval '(require :asdf)' \
-  --eval '(handler-bind ((warning (function muffle-warning))) (asdf:load-system "luvcraft/luft/game"))' \
+  --eval '(let ((*compile-verbose* nil) (*compile-print* nil)) (handler-bind ((warning (function muffle-warning)) (sb-ext:compiler-note (function muffle-warning))) (asdf:load-system "luvcraft/luft/game")))' \
   --eval '(luvcraft.luft.game::soak-main (uiop:command-line-arguments))' \
   --end-toplevel-options "$@"

@@ -18,5 +18,7 @@
            ;; Both bots changed the world, the guest through the host.
            (true (< 10 (getf result :events)))
            (true (getf (getf result :host-actions) :edited))
-           (true (getf (getf result :guest-actions) :requested)))
+           (true (getf (getf result :guest-actions) :requested))
+           ;; Their flag cell sets the guest's stale view against the host.
+           (true (getf result :guest-rejected)))
       (uiop:delete-directory-tree directory :validate t :if-does-not-exist :ignore))))
