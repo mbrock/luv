@@ -17,11 +17,16 @@
            #:lobby-client-snapshot
            #:lobby-client-summary
            #:lobby-client-value
+           #:lobby-client-values-under
+           #:lobby-client-own-value
+           #:lobby-client-local-address
            #:lobby-transport
            #:mqtt-lobby-transport
            #:open-lobby-transport
            #:subscribe-lobby-transport
            #:publish-lobby-transport
+           #:publish-lobby-value-transport
+           #:lobby-transport-local-address
            #:next-lobby-publication
            #:close-lobby-transport
            #:make-lobby-client

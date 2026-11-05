@@ -254,6 +254,7 @@
                (:file "luvcraft/luft/companion-session")
                (:file "luvcraft/luft/living-world")
                (:file "luvcraft/luft/session-reconnect")
+               (:file "luvcraft/luft/session-lobby")
                (:file "luvcraft/luft/remote-body")
                (:file "luvcraft/luft/company")
                (:file "luvcraft/luft/history"))

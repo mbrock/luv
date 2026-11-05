@@ -1,6 +1,6 @@
 (defpackage #:luv.lobby.tests
   (:use #:cl)
-  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip))
+  (:import-from #:parachute #:define-test #:true #:false #:fail #:group #:skip #:is))
 
 (in-package #:luv.lobby.tests)
 
@@ -11,7 +11,9 @@
                :accessor scripted-transport-fail-opens)
    (opens :initform 0 :accessor scripted-transport-opens)
    (closes :initform 0 :accessor scripted-transport-closes)
-   (published :initform nil :accessor scripted-transport-published)))
+   (published :initform nil :accessor scripted-transport-published)
+   (stored :initform nil :accessor scripted-transport-stored
+           :documentation "(KEY . PAYLOAD) store publications, newest first.")))
 
 (defmethod luv.lobby:open-lobby-transport
     ((transport scripted-lobby-transport) client)
@@ -34,6 +36,17 @@
   (sb-thread:with-mutex ((scripted-transport-lock transport))
     (push payload (scripted-transport-published transport)))
   payload)
+
+(defmethod luv.lobby:publish-lobby-value-transport
+    ((transport scripted-lobby-transport) connection client key payload)
+  (declare (ignore connection client))
+  (sb-thread:with-mutex ((scripted-transport-lock transport))
+    (push (cons key payload) (scripted-transport-stored transport)))
+  payload)
+
+(defun scripted-stored (transport)
+  (sb-thread:with-mutex ((scripted-transport-lock transport))
+    (reverse (scripted-transport-stored transport))))
 
 (defmethod luv.lobby:next-lobby-publication
     ((transport scripted-lobby-transport) connection client)
@@ -192,3 +205,40 @@
                       0.25)))
            (true (zerop (scripted-transport-closes transport))))
       (ignore-errors (luv.lobby:stop-lobby-client client)))))
+
+(define-test lobby-client-keeps-its-own-values-published-while-it-runs
+  (let* ((transport (make-instance 'scripted-lobby-transport :fail-opens 1))
+         (client (luv.lobby:make-lobby-client :client-id-prefix "test" :transport transport))
+         (key "luvcraft/sessions/test-1"))
+    ;; Set before any connection: the first connection publishes it.
+    (setf (luv.lobby:lobby-client-own-value client key) "port=47475")
+    (unwind-protect
+         (progn
+           (luv.lobby:start-lobby-client client)
+           (true (wait-for-lobby-test
+                  (lambda () (equal (list (cons key "port=47475")) (scripted-stored transport)))))
+           ;; A change goes out once; an unchanged value does not.
+           (setf (luv.lobby:lobby-client-own-value client key) "port=47476")
+           (setf (luv.lobby:lobby-client-own-value client key) "port=47476")
+           (true (wait-for-lobby-test
+                  (lambda () (= 2 (length (scripted-stored transport))))))
+           (sleep 1/20)
+           (is equal (cons key "port=47476") (second (scripted-stored transport)))
+           (is = 2 (length (scripted-stored transport)))
+           ;; Stopping gracefully deletes what the client published.
+           (luv.lobby:stop-lobby-client client)
+           (is equal (cons key "") (car (last (scripted-stored transport))))
+           (is eq nil (luv.lobby:lobby-client-own-value client key)))
+      (ignore-errors (luv.lobby:stop-lobby-client client)))))
+
+(define-test lobby-store-keys-may-have-slashes
+  (let ((client (luv.lobby:make-lobby-client
+                 :client-id-prefix "test" :transport (make-instance 'scripted-lobby-transport))))
+    (luv.lobby:receive-lobby-publication client "luv/store/luvcraft/sessions/b" "two")
+    (luv.lobby:receive-lobby-publication client "luv/store/luvcraft/sessions/a" "one")
+    (luv.lobby:receive-lobby-publication client "luv/store/OPENAI_API_KEY" "secret")
+    (is equal '(("luvcraft/sessions/a" . "one") ("luvcraft/sessions/b" . "two"))
+        (luv.lobby:lobby-client-values-under client "luvcraft/sessions/"))
+    (luv.lobby:receive-lobby-publication client "luv/store/luvcraft/sessions/a" "")
+    (is equal '(("luvcraft/sessions/b" . "two"))
+        (luv.lobby:lobby-client-values-under client "luvcraft/sessions/"))))

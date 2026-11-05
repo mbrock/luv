@@ -9,7 +9,9 @@
 (defparameter +lobby-presence-prefix+ "luv/presence/")
 (defparameter +lobby-presence-filter+ "luv/presence/+")
 (defparameter +lobby-store-prefix+ "luv/store/")
-(defparameter +lobby-store-filter+ "luv/store/+")
+(defparameter +lobby-store-filter+ "luv/store/#"
+  "Every retained value, including keys with slashes such as
+luvcraft/sessions/ID.")
 (defparameter +lobby-offline-payload+ (string #\Null))
 
 (defvar *lobby-client-counter* 0)
@@ -41,6 +43,17 @@
 
 (defgeneric publish-lobby-transport (transport connection client payload)
   (:documentation "Publish CLIENT's retained presence PAYLOAD."))
+
+(defgeneric publish-lobby-value-transport (transport connection client key payload)
+  (:documentation "Publish retained PAYLOAD under the store's KEY; an empty
+PAYLOAD deletes it."))
+
+(defgeneric lobby-transport-local-address (transport connection)
+  (:documentation "The address CONNECTION speaks from, as a dotted string,
+or NIL: the address others on the lobby's network reach this machine at.")
+  (:method (transport connection)
+    (declare (ignore transport connection))
+    nil))
 
 (defgeneric next-lobby-publication (transport connection client)
   (:documentation
@@ -76,6 +89,12 @@ and bounded tightly enough for cooperative application shutdown."))
           :reader lobby-client-peers)
    (values :initform (make-hash-table :test #'equal)
            :reader lobby-client-values)
+   (owned :initform (make-hash-table :test #'equal) :reader lobby-client-owned
+          :documentation "KEY -> PAYLOAD this client publishes and keeps
+published across reconnections, or NIL once it should be deleted.")
+   (owned-dirty :initform nil :accessor lobby-client-owned-dirty
+                :documentation "Owned keys the worker has yet to publish.")
+   (local-address :initform nil :accessor %lobby-client-local-address)
    (revision :initform 0 :accessor lobby-client-revision)
    (connection :initform nil :accessor lobby-client-connection)
    (stopping-p :initform nil :accessor lobby-client-stopping-p)
@@ -219,6 +238,59 @@ peer identities continue to use LOBBY-CLIENT-SNAPSHOT."))
     (sb-thread:with-mutex ((lobby-client-lock client))
       (gethash key (lobby-client-values client)))))
 
+(defun lobby-client-values-under (client prefix)
+  "The current connection's retained (KEY . VALUE) pairs whose key starts
+with PREFIX, by key."
+  (when client
+    (sb-thread:with-mutex ((lobby-client-lock client))
+      (sort (loop for key being the hash-keys of (lobby-client-values client)
+                    using (hash-value value)
+                  when (lobby-topic-prefix-p prefix key)
+                    collect (cons key value))
+            #'string< :key #'car))))
+
+(defun lobby-client-local-address (client)
+  "The address CLIENT's connection speaks from, or NIL while it has none."
+  (when client
+    (sb-thread:with-mutex ((lobby-client-lock client))
+      (%lobby-client-local-address client))))
+
+(defun lobby-client-own-value (client key)
+  "The PAYLOAD CLIENT publishes under KEY, or NIL."
+  (sb-thread:with-mutex ((lobby-client-lock client))
+    (gethash key (lobby-client-owned client))))
+
+(defun (setf lobby-client-own-value) (payload client key)
+  "Publish PAYLOAD, retained, under the store's KEY for as long as CLIENT
+runs, again on every connection; NIL deletes it.  A client that stops
+gracefully deletes what it published.  Only the worker speaks; this never
+touches the transport."
+  (sb-thread:with-mutex ((lobby-client-lock client))
+    (let ((owned (lobby-client-owned client)))
+      (unless (and (equal payload (gethash key owned))
+                   (nth-value 1 (gethash key owned)))
+        (setf (gethash key owned) payload)
+        (pushnew key (lobby-client-owned-dirty client) :test #'equal))))
+  payload)
+
+(defun publish-owned-lobby-values (client connection &key all delete)
+  "On CLIENT's worker: publish its owned values that changed, or ALL of
+them; DELETE deletes them all instead."
+  (let ((changes
+          (sb-thread:with-mutex ((lobby-client-lock client))
+            (let* ((owned (lobby-client-owned client))
+                   (keys (if (or all delete)
+                             (loop for key being the hash-keys of owned collect key)
+                             (lobby-client-owned-dirty client))))
+              (setf (lobby-client-owned-dirty client) nil)
+              (loop for key in keys
+                    for payload = (and (not delete) (gethash key owned))
+                    unless payload do (remhash key owned)
+                    collect (cons key (or payload "")))))))
+    (loop for (key . payload) in changes
+          do (publish-lobby-value-transport (lobby-client-transport client) connection
+                                            client key payload))))
+
 (defgeneric receive-lobby-publication (client topic payload)
   (:documentation
    "Publish one transport TOPIC/PAYLOAD into CLIENT's semantic local state."))
@@ -286,6 +358,20 @@ peer identities continue to use LOBBY-CLIENT-SNAPSHOT."))
   (mqtt.net:publish connection (lobby-client-topic client) payload
                     :qos 1 :retain t))
 
+(defmethod publish-lobby-value-transport
+    ((transport mqtt-lobby-transport) connection (client lobby-client) key payload)
+  (declare (ignore transport))
+  (mqtt.net:publish connection (concatenate 'string +lobby-store-prefix+ key) payload
+                    :qos 1 :retain t))
+
+(defmethod lobby-transport-local-address
+    ((transport mqtt-lobby-transport) connection)
+  (declare (ignore transport))
+  (let ((address (ignore-errors
+                  (sb-bsd-sockets:socket-name (mqtt.net::connection-socket connection)))))
+    (and (vectorp address) (= 4 (length address))
+         (format nil "~{~D~^.~}" (coerce address 'list)))))
+
 (defmethod next-lobby-publication
     ((transport mqtt-lobby-transport) connection (client lobby-client))
   (declare (ignore client))
@@ -316,20 +402,26 @@ peer identities continue to use LOBBY-CLIENT-SNAPSHOT."))
     (unwind-protect
          (progn
            (setf connection (open-lobby-transport transport client))
-           (sb-thread:with-mutex ((lobby-client-lock client))
-             (setf (lobby-client-connection client) connection))
+           (let ((address (lobby-transport-local-address transport connection)))
+             (sb-thread:with-mutex ((lobby-client-lock client))
+               (setf (lobby-client-connection client) connection
+                     (%lobby-client-local-address client) address)))
            (subscribe-lobby-transport transport connection client)
            (publish-lobby-transport
             transport connection client (lobby-client-name client))
+           (publish-owned-lobby-values client connection :all t)
            (publish-lobby-status client :online)
            (loop until (lobby-client-stop-requested-p client)
                  do (multiple-value-bind (topic payload)
                         (next-lobby-publication transport connection client)
                       (when topic
-                        (receive-lobby-publication client topic payload)))))
+                        (receive-lobby-publication client topic payload)))
+                    (publish-owned-lobby-values client connection)))
       ;; Only the worker ever speaks on the connection, including graceful
       ;; presence deletion and close.  STOP merely publishes a local flag.
       (when connection
+        (ignore-errors
+         (publish-owned-lobby-values client connection :delete t))
         (ignore-errors
          (publish-lobby-transport transport connection client ""))
         (sb-thread:with-mutex ((lobby-client-lock client))

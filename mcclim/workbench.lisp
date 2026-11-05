@@ -98,10 +98,10 @@
       ((typep child 'luv.lobby.mcclim::lobby-hud-pane)
        (clim:move-and-resize-sheet
         child luv.lobby.mcclim::+lobby-hud-margin+
-        (max 0 (- height luv.lobby.mcclim::+lobby-hud-height+
+        (max 0 (- height luv.lobby.mcclim::+lobby-hud-pane-height+
                   luv.lobby.mcclim::+lobby-hud-margin+))
         luv.lobby.mcclim::+lobby-hud-width+
-        luv.lobby.mcclim::+lobby-hud-height+)))))
+        luv.lobby.mcclim::+lobby-hud-pane-height+)))))
 
 (defclass workbench-layout-pane
     (clime:never-repaint-background-mixin
@@ -173,7 +173,7 @@
        'luv.lobby.mcclim::lobby-hud-pane
        :background clim:+transparent-ink+
        :width luv.lobby.mcclim::+lobby-hud-width+
-       :height luv.lobby.mcclim::+lobby-hud-height+))))
+       :height luv.lobby.mcclim::+lobby-hud-pane-height+))))
    (transient
     (clim:make-pane
      'workbench-layer-pane :kind :transient
@@ -213,6 +213,10 @@
    (default
     (clim:make-pane 'workbench-layout-pane
                     :contents (list passive modeless transient modal)))))
+
+(defmethod luv.lobby.mcclim:lobby-hud-owner ((frame workbench-frame))
+  ;; The lobby pane lists what the application can join.
+  (frame-workbench-application frame))
 
 (defclass workbench-layer ()
   ((kind :initarg :kind :reader workbench-layer-kind)

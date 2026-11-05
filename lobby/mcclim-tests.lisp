@@ -60,11 +60,11 @@
          (half-width (aref state 4))
          (half-height (aref state 9)))
     (true (< (abs (- 320.0 (* half-width (first logical)))) 1.0e-4))
-    (true (< (abs (- 140.0 (* half-height (second logical)))) 1.0e-4))
+    (true (< (abs (- 196.0 (* half-height (second logical)))) 1.0e-4))
     ;; The same logical affine receives two physical samples per authored
-    ;; coordinate on a 2x drawable; there is no 320x140 panel raster.
+    ;; coordinate on a 2x drawable; there is no 320x196 panel raster.
     (true (< (abs (- 640.0 (* half-width (first drawable)))) 1.0e-4))
-    (true (< (abs (- 280.0 (* half-height (second drawable)))) 1.0e-4))))
+    (true (< (abs (- 392.0 (* half-height (second drawable)))) 1.0e-4))))
 
 (define-test lobby-hud-panel-is-opaque-analytic-media
   (let ((medium (make-instance 'mcluv:luv-gpu-medium)))
@@ -109,3 +109,26 @@
       (true (equal '("Daniel")
                    (mapcar #'luv.lobby:lobby-peer-name
                            (luv.lobby:lobby-snapshot-peers after)))))))
+
+(define-test lobby-join-rows-are-where-a-click-finds-them
+  (let ((frame (make-instance 'luv.lobby.mcclim::lobby-hud-state))
+        (entries (loop for name in '("Ada's world" "Bea's world")
+                       collect (luv.lobby.mcclim:make-lobby-join-entry
+                                :title name :detail "LAN" :target name))))
+    ;; Without a join list the card is as it was, and nothing is a row.
+    (true (= luv.lobby.mcclim::+lobby-hud-height+
+             (luv.lobby.mcclim::lobby-hud-card-height frame)))
+    (setf (luv.lobby.mcclim::lobby-hud-join-list-p frame) t
+          (luv.lobby.mcclim:lobby-hud-visible-entries frame) entries)
+    (let* ((height (luv.lobby.mcclim::lobby-hud-card-height frame))
+           (top (- luv.lobby.mcclim::+lobby-hud-pane-height+ height))
+           (first-row (+ top luv.lobby.mcclim::+lobby-join-top+))
+           (second-row (+ first-row luv.lobby.mcclim::+lobby-join-row-height+)))
+      ;; The card grows with its rows and still fits its pane.
+      (true (< luv.lobby.mcclim::+lobby-hud-height+ height
+               (1+ luv.lobby.mcclim::+lobby-hud-pane-height+)))
+      (true (eq (first entries) (luv.lobby.mcclim::lobby-hud-entry-at frame first-row)))
+      (true (eq (second entries) (luv.lobby.mcclim::lobby-hud-entry-at frame (+ second-row 5))))
+      (true (null (luv.lobby.mcclim::lobby-hud-entry-at
+                   frame (+ second-row luv.lobby.mcclim::+lobby-join-row-height+))))
+      (true (null (luv.lobby.mcclim::lobby-hud-entry-at frame (+ top 22)))))))

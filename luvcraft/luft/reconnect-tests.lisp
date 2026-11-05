@@ -1,5 +1,5 @@
-;;;; A dropped link is not a goodbye (#3JTHM3): a guest reconnects and
-;;;; resumes from its own journal point; its host keeps its place meanwhile.
+;;;; Company comes and goes (#3JTHM3): a guest whose link drops reconnects and
+;;;; resumes, its host keeping its place; a host lists itself in the lobby.
 (in-package #:luvcraft.luft.game.tests)
 
 (defun guest-host-peer (session)
@@ -132,3 +132,57 @@ with its link is never answered, so replies are not counted."
                (is eq nil (host:find-world-player world "bea")))
           (host:close-world-session again)))
       (host:close-world-session guest))))
+
+;;; Finding a game: a host's lobby entry, and the join list built from it.
+
+(defun lobby-test-client (&rest publications)
+  "A lobby client that has heard PUBLICATIONS, (TOPIC PAYLOAD) pairs."
+  (let ((client (luv.lobby:make-lobby-client
+                 :client-id-prefix "test" :transport (make-instance 'luv.lobby:lobby-transport))))
+    (loop for (topic payload) on publications by #'cddr
+          do (luv.lobby:receive-lobby-publication client topic payload))
+    client))
+
+(define-test a-hosts-lobby-entry-lists-it-to-join
+  (with-host (world session network)
+    ;; As on sockets: the loopback has no port of its own.
+    (setf (luvcraft.wire.net::endpoint-port (host:session-endpoint session)) 47475)
+    (let* ((advert (host::session-advert session "100.64.0.7"))
+           (parsed (host::parse-session-advert advert))
+           (tag (getf parsed :tag)))
+      (is equal "100.64.0.7" (getf parsed :address))
+      (is = 1 (getf parsed :players))
+      (is = 32 (length tag))
+      (is string= (host::tag-hex (luvcraft.wire.net:endpoint-world-tag
+                                  (host:session-endpoint session)))
+          tag)
+      ;; Junk is not an entry.
+      (is eq nil (host::parse-session-advert "address=x
+port=nope"))
+      ;; Another machine's world -- as this test's world with another port --
+      ;; is listed, dialled at its address, while its host's radio is
+      ;; present.  An entry left by a radio that is gone is not.
+      (let* ((theirs (format nil "address=100.64.0.9~%port=47476~%world=Bea's world~%tag=~A~%players=2~%" tag))
+             (client (lobby-test-client "luv/presence/bea-radio" "Bea"
+                                        "luv/store/luvcraft/sessions/bea-radio" theirs
+                                        "luv/store/luvcraft/sessions/dead-radio" theirs
+                                        "luv/store/luvcraft/sessions/ada-radio" advert
+                                        "luv/presence/ada-radio" "Ada"))
+             (entries (host::gather-join-entries client world nil)))
+        ;; Ada's own session is not one she can join.
+        (is = 1 (length entries))
+        (is string= "Bea's world" (luv.lobby.mcclim:lobby-join-entry-title (first entries)))
+        (is string= "100.64.0.9:47476" (luv.lobby.mcclim:lobby-join-entry-target (first entries)))
+        (is string= "2 players · tailnet" (luv.lobby.mcclim:lobby-join-entry-detail (first entries)))
+        ;; Heard on the LAN too, the same session is dialled there, once;
+        ;; a LAN host without an entry follows.
+        (let* ((near (luvcraft.wire.net::make-discovered-host
+                      :address "192.168.1.9" :port 47476 :name "Bea" :world "Bea's world"
+                      :world-tag (luvcraft.wire.net:endpoint-world-tag (host:session-endpoint session))))
+               (other (luvcraft.wire.net::make-discovered-host
+                       :address "192.168.1.11" :port 47475 :name "Cy" :world "Cy's world"
+                       :world-tag (luvcraft.wire:zero-world-tag)))
+               (entries (host::gather-join-entries client world (list near other))))
+          (is equal '("192.168.1.9:47476" "192.168.1.11:47475")
+              (mapcar #'luv.lobby.mcclim:lobby-join-entry-target entries))
+          (is string= "2 players · LAN" (luv.lobby.mcclim:lobby-join-entry-detail (first entries))))))))

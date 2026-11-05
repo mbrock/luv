@@ -139,6 +139,7 @@ from the head when it opened, or NIL for the watermark."))
         (setf (session-viewer session) viewer))
       (advance-world-session session seconds :yaw (render:camera-yaw camera)
                                              :pitch (render:camera-pitch camera))))
+  (advertise-viewer-session viewer)
   (remember-viewer-poses viewer)
   (advance-world-populations (viewer-world viewer) seconds)
   (derive-viewer-particles viewer)
@@ -388,6 +389,7 @@ a game that never started."
   ;; The view has let go of its companions' conversations (agents.lisp).  The
   ;; world goes with its last view: its companions retire, and guests are
   ;; told goodbye.
+  (forget-view-chores viewer)
   (let ((world (viewer-world viewer)))
     (setf (world-views world) (remove viewer (world-views world)))
     (unless (world-views world)

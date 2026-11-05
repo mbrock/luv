@@ -151,7 +151,8 @@
     (multiple-value-bind (x y)
         (clim:transform-position
          (clim:sheet-delta-transformation lobby modeless) 0 0)
-      (true (equal '(16 544) (list x y))))
+      ;; Bottom-left, with room above the card for a join list.
+      (true (equal '(16 488) (list x y))))
     (multiple-value-bind (x y)
         (clim:transform-position
          (clim:sheet-delta-transformation metabar transient) 0 0)
