@@ -246,3 +246,14 @@ once the player has gone.  The previous pose drawn stays in TRACK-PREVIOUS."
                       :state (pose-snapshot-state seen))))
           (setf (track-previous track) (or (track-shown track) drawn)
                 (track-shown track) drawn))))))
+
+(defun hand-track-from (track position)
+  "Draw TRACK's pose at POSITION now, and ease from there onto the track as
+a late correction is eased.  Return the pose drawn."
+  (let ((shown (track-shown track)))
+    (with-slots (slip) track
+      (let ((offset (map 'simple-vector #'- position (pose-snapshot-position shown))))
+        (setf slip (map 'simple-vector #'+ slip offset)
+              (pose-snapshot-position shown) (map 'simple-vector #'+ (pose-snapshot-position shown)
+                                                  offset))))
+    shown))

@@ -22,6 +22,9 @@
 (defparameter *entity-period* 1/25
   "Seconds between a host's entity snapshots.")
 
+(defparameter *hand-back-seconds* 1d0
+  "The longest a guest keeps a turtle it got off where its reins left it.")
+
 (defstruct (living-state (:conc-name living-))
   ;; Turtle -> its entity id, on the host and on a guest.
   (ids (make-hash-table :test #'eq) :read-only t)
@@ -37,7 +40,20 @@
   (told nil)
   ;; A guest's day settings it has asked its host for and not yet seen
   ;; granted: setting -> (VALUE DEADLINE) (company.lisp).
-  (sky-wishes nil))
+  (sky-wishes nil)
+  ;; A guest's turtles its own player has just got off: id -> HANDBACK.
+  (handbacks (make-hash-table) :read-only t)
+  ;; A host's turtles a remote rider has just got off: turtle -> the
+  ;; Luvcraft (X Y Z) it glides to, where the rider last said it was.
+  (glides (make-hash-table :test #'eq) :read-only t))
+
+(defstruct (handback (:constructor make-handback (position after deadline)))
+  "A turtle a guest rode, standing at POSITION, Luft cells, where its reins
+left it, until its track shows a moment after AFTER, on the host's clock,
+or until DEADLINE on this one."
+  (position nil :read-only t)
+  (after 0d0 :read-only t)
+  (deadline 0d0 :read-only t))
 
 (defstruct (replica (:constructor make-replica (track object)))
   "A guest's copy of one host entity: its track, and the turtle it moves, if any."
@@ -287,15 +303,44 @@ their tracks show them."
          (contact (make-instance 'animal-contact
                                  :solid (terrain::inspection-source-solid (world-scene world)))))
     (maphash (lambda (key replica)
-               (let ((shown (advance-remote-track (replica-track replica) now seconds))
-                     (turtle (replica-object replica)))
+               (let* ((track (replica-track replica))
+                      (shown (advance-remote-track track now seconds))
+                      (turtle (replica-object replica))
+                      (handback (and turtle (gethash (cdr key) (living-handbacks living)))))
                  (when turtle
                    (cond ((equal me (gethash (cdr key) (living-rides living)))
                           (let ((p (animal-luft-position turtle)))
                             (when (ground-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
                               (luvcraft::advance-critter turtle contact seconds))))
+                         ((and handback shown (< (pose-snapshot-sent shown) (handback-after handback))
+                               (< now (handback-deadline handback)))
+                          ;; Its track still shows the ride, behind time: it waits.
+                          (luvcraft::urge-critter turtle 0d0 0d0 0d0))
+                         (handback
+                          (remhash (cdr key) (living-handbacks living))
+                          (when shown
+                            (show-replica-turtle
+                             turtle (hand-track-from track (handback-position handback)))))
                          (shown (show-replica-turtle turtle shown))))))
              (living-replicas living))))
+
+(defun hand-back-turtle (world turtle)
+  "Keep a guest's TURTLE, just got off, where it stands until its track
+shows the host's turtle let go, then ease it from there onto the track.
+Back on its track at once, it would be drawn where it was a moment ago, a
+step back the way it came."
+  (let* ((id (gethash turtle (living-ids (living world))))
+         (replica (gethash (cons :turtle id) (living-replicas (living world))))
+         (snapshots (and replica (track-snapshots (replica-track replica)))))
+    (when (and snapshots (plusp (length snapshots)))
+      (setf (gethash id (living-handbacks (living world)))
+            (make-handback (let ((p (luvcraft::critter-position turtle)))
+                             (luft-vector (vec3:vec3-x p) (vec3:vec3-y p) (vec3:vec3-z p)))
+                           ;; The host lets go once it hears the end, after the
+                           ;; newest snapshot here; its next one shows that.
+                           (+ (pose-snapshot-sent (aref snapshots (1- (length snapshots))))
+                              (* 2 *entity-period*))
+                           (+ (wall-seconds) *hand-back-seconds*))))))
 
 ;;; Rides.
 
@@ -326,6 +371,8 @@ NIL when someone else is known to be riding it."
          (session (world-session world)))
     (when (and id (equal (gethash id (living-rides living)) (player-id player)))
       (remhash id (living-rides living))
+      (when (replica-world-p world)
+        (hand-back-turtle world turtle))
       (when session
         (session-broadcast session (wire:make-ride-message :rider (player-id player) :entity id
                                                            :action :end))))))
@@ -373,17 +420,37 @@ the rider's pose carries the turtle."
               (wire:pose-ride pose) (turtle-entity-id world turtle))))
     pose))
 
-(defun release-ridden-turtle (turtle rider)
-  "The ride is over: TURTLE stands where RIDER last said and has its mind back."
+(defparameter *glide-seconds* 0.08d0
+  "How quickly a host's turtle closes on where its rider got off.")
+
+(defun release-ridden-turtle (world turtle rider)
+  "The ride is over: TURTLE glides on to where RIDER last said it was, which
+its track has not yet drawn, and then has its mind back."
   (let* ((track (and rider (player-track rider)))
          (snapshots (and track (track-snapshots track))))
     (when (and snapshots (plusp (length snapshots)))
-      (destructuring-bind (x y z)
-          (luvcraft-vector (pose-snapshot-position (aref snapshots (1- (length snapshots)))))
-        (let ((p (luvcraft::critter-position turtle)))
-          (setf (vec3:vec3-x p) x (vec3:vec3-y p) y (vec3:vec3-z p) z)))))
+      (setf (gethash turtle (living-glides (living world)))
+            (luvcraft-vector (pose-snapshot-position (aref snapshots (1- (length snapshots))))))))
   (luvcraft::urge-critter turtle 0d0 0d0 0d0)
   turtle)
+
+(defun glide-turtle (world turtle seconds)
+  "Move TURTLE on toward where its rider got off; NIL once it is there and
+its own again."
+  (let* ((glides (living-glides (living world)))
+         (target (gethash turtle glides)))
+    (when target
+      (let* ((p (luvcraft::critter-position turtle))
+             (keep (exp (- (/ seconds *glide-seconds*))))
+             (left (loop for (axis value) in (list (list 0 (vec3:vec3-x p)) (list 1 (vec3:vec3-y p))
+                                                   (list 2 (vec3:vec3-z p)))
+                         collect (* keep (- (nth axis target) value)))))
+        (if (< (reduce #'+ left :key (lambda (x) (* x x))) 1d-6)
+            (progn (remhash turtle glides) nil)
+            (destructuring-bind (x y z) target
+              (setf (vec3:vec3-x p) (- x (first left)) (vec3:vec3-y p) (- y (second left))
+                    (vec3:vec3-z p) (- z (third left)))
+              t))))))
 
 ;;; Messages.
 
@@ -407,7 +474,7 @@ the rider's pose carries the turtle."
         (:end
          (when (equal (gethash id rides) (player-id player))
            (remhash id rides)
-           (when turtle (release-ridden-turtle turtle player))
+           (when turtle (release-ridden-turtle world turtle player))
            (session-broadcast session (wire:make-ride-message
                                        :rider (player-id player) :entity id :action :end))))
         (:refused)))))

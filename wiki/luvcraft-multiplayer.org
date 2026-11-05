@@ -739,3 +739,16 @@ own knobs take the same function.  =a-guests-day-knobs-ask-the-host-and-hold-mea
 turns Bea's knobs in a view of her world; without the request every host
 check fails, and without the hold a snapshot sent before the host heard
 her turns her clock back.
+
+A ride's end hands the turtle back without a step: the guest keeps the
+turtle it got off where its reins left it until its track shows a moment
+after the host let go (two snapshot periods past the newest snapshot it
+had at the end, or a second at most), then draws it from there and eases
+onto the track as a late correction is eased (=hand-track-from=).  Back on
+its track at once it was drawn about 0.09 cells behind, the way it had
+come.  The host no longer sets its turtle down where the rider's newest
+pose was, ahead of where its track drew it, but glides it there over
+about 0.1 s before its mind takes over.  =a-turtle-is-handed-back-without-a-step-back=
+rides for a second and gets off: with the old hand-back the guest's
+turtle steps 0.088 cells back in one frame; with the old set-down the
+host's moves twice a frame's ride.

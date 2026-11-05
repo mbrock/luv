@@ -145,6 +145,8 @@
         (cond
           ;; A guest's ride moves under its reins in the guest's world.
           (rider (carry-turtle-by-rider animal rider seconds))
+          ;; Just let go by one, it first closes on where the rider got off.
+          ((glide-turtle world animal seconds))
           ;; Unknown chunks are air to queries. Freeze inhabitants there rather
           ;; than dropping them through the absent world or forgetting them.
           ;; A chunk resident only for meshing has no collision either.
