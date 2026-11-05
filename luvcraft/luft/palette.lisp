@@ -182,6 +182,13 @@ The kind's tone is the elements'; mortar has its own.")
     (:fountain . :fountain) (:lava-spring . :lava-spring))
   "Block kinds drawn as fixture bodies rather than cubical surfaces.")
 
+(defparameter *block-optics*
+  ;; (name coverage light-opacity): kinds seen through (#LNRIRA).
+  '((:crystal 0.3 3))
+  "Block kinds the eye sees through, with how much each hides and how much
+voxel light it costs.  Coverage is not light opacity: a cut gem passes its
+own glow and its neighbours' as glass, and stays solid underfoot.")
+
 (defun block-pattern (name)
   (first (find name *block-patterns* :key #'rest :test #'member)))
 
@@ -202,10 +209,15 @@ The kind's tone is the elements'; mortar has its own.")
                (otherwise (block-face-tone kind :top)))
    :side-tone (block-face-tone kind :side)
    :bottom-tone (block-face-tone kind :bottom)
-   :light-opacity (luvcraft::block-kind-light-opacity kind)
+   :light-opacity (let ((optics (assoc (luvcraft:block-kind-name kind) *block-optics*)))
+                    (if optics (third optics) (luvcraft::block-kind-light-opacity kind)))
+   :coverage (or (second (assoc (luvcraft:block-kind-name kind) *block-optics*)) 1.0)
    :light-emission (block-light-emission-rgb kind)
    :surface-emission (case (luvcraft:block-kind-name kind)
                        ((:terminal :urbit) 0.8)
+                       ;; Seen through, a glow arrives whole over what lies
+                       ;; behind it; the voxel light carries the lamp.
+                       (:crystal 0.45)
                        (otherwise (luvcraft::block-kind-surface-emission kind)))
    ;; A lantern is drawn as a lantern standing on, or hanging from, its
    ;; neighbour rather than as a cube.
