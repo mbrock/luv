@@ -329,7 +329,69 @@ final pass."
                    :depth-store-op :store
                    :depth-clear-value 1.0)))))
         (encode-renderer-scene-drawings renderer frame pass player-p construction-p
-                                        repetition-p visibility-p)))))
+                                        repetition-p visibility-p)
+        ;; A temporal scene also writes the reactive mask, which no opaque
+        ;; pipeline names, so its translucent sheet gets a pass of its own.
+        (when (renderer-temporal-p renderer)
+          (encode-renderer-translucent-pass renderer frame encoder))))))
+
+;;; The translucent sheet (#LNRIRA).  Its sites draw after every opaque
+;;; surface, blended, testing but never writing depth.  A gem's far faces are
+;;; discarded in its fragment stage, so within one resident nothing needs
+;;; sorting for a single kind; residents go back to front by their boxes.
+
+(defun renderer-translucent-residents (renderer)
+  (let ((terrain (renderer-terrain renderer)))
+    (when (and (typep terrain 'terrain-drawing) (terrain-translucent-program terrain))
+      (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
+                            (renderer-slot-order renderer))
+            for resident = (mesh-slot-resident (gethash key (renderer-mesh-slots renderer)))
+            when (and (resident-population-translucent-runs resident)
+                      (resident-drawn-p resident nil))
+              collect resident))))
+
+(defun draw-renderer-translucent-residents (renderer frame pass residents)
+  (let* ((data *frame-uniform-data*)
+         (eye (if data (list (aref data 0) (aref data 1) (aref data 2)) '(0.0 0.0 0.0))))
+    (flet ((distance (resident)
+             (let ((bounds (resident-population-bounds resident)))
+               (loop for axis below 3
+                     sum (expt (- (* 0.5 (+ (aref bounds axis) (aref bounds (+ axis 3))))
+                                  (nth axis eye))
+                               2)))))
+      (dolist (resident (sort (copy-list residents) #'> :key #'distance))
+        (encode-terrain-translucent
+         (renderer-terrain renderer) pass
+         (renderer-frame-resident-bind-group renderer frame resident :translucent)
+         resident)))))
+
+(defun encode-renderer-translucent-pass (renderer frame encoder)
+  (let ((residents (renderer-translucent-residents renderer))
+        (generation (renderer-target-generation renderer)))
+    (if (null residents)
+        ;; Nothing to see through: the mask must read zero everywhere, which
+        ;; it keeps doing once cleared, so an opaque world pays nothing.
+        (when (renderer-target-generation-reactive-dirty-p generation)
+          (encode encoder (make-gpu-clear-texture-command
+                           :texture (renderer-reactive-texture renderer)
+                           :color #(0.0 0.0 0.0 0.0)))
+          (setf (renderer-target-generation-reactive-dirty-p generation) nil))
+        (let ((pass
+                (begin-render-pass
+                 encoder
+                 (make-render-pass-descriptor
+                  :label "luft translucent sheet"
+                  :color-attachments
+                  `((:view ,(renderer-scene-view renderer) :load-op :load :store-op :store)
+                    (:view ,(renderer-motion-view renderer) :load-op :load :store-op :store)
+                    (:view ,(renderer-reactive-view renderer) :load-op :clear :store-op :store
+                     :clear-value #(0.0 0.0 0.0 0.0)))
+                  :depth-stencil-attachment
+                  `(:view ,(renderer-depth-view renderer)
+                    :depth-load-op :load :depth-store-op :store)))))
+          (draw-renderer-translucent-residents renderer frame pass residents)
+          (end-pass pass)
+          (setf (renderer-target-generation-reactive-dirty-p generation) t)))))
 
 (defun encode-renderer-scene-drawings
     (renderer frame pass player-p construction-p &optional repetition-p visibility-p)
@@ -387,6 +449,11 @@ final pass."
                           (renderer-frame-lattice-bind-group renderer frame slot)
                           (make-gpu-draw-command :vertex-count 6
                                                  :instance-count (mesh-slot-lattice-point-count slot)))))))
+  ;; Without temporal targets the blended sheet ends the same pass.
+  (unless (renderer-temporal-p renderer)
+    (let ((residents (renderer-translucent-residents renderer)))
+      (when residents
+        (draw-renderer-translucent-residents renderer frame pass residents))))
   (end-pass pass))
 
 (defun encode-renderer-occlusion (renderer frame encoder)
@@ -424,7 +491,8 @@ final pass."
        ;; EXTENT here overstates it whenever temporal upscaling is active.
        (vector (* 0.5 (first render-extent) (aref jitter 0))
                (* 0.5 (second render-extent) (aref jitter 1)))
-       (not history-valid-p))
+       (not history-valid-p)
+       :reactive (renderer-reactive-texture renderer))
       (setf (renderer-previous-view renderer) view
             (renderer-history-valid-p renderer) t
             (renderer-history-used-p renderer) history-valid-p)))

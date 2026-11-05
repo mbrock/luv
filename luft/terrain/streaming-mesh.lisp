@@ -235,9 +235,16 @@ appearance reads authored cells directly and needs no meshed context owners."
          (descriptors
            (compile-terrain-material-descriptors (scene-material-vocabulary scene)))
          (body-table (material-body-table (scene-material-vocabulary scene)))
+         (translucency-table
+           (material-translucency-table (scene-material-vocabulary scene)))
          (materials (scene-material-cells scene))
          (body-cells (make-hash-table :test #'eql))
+         (translucent-cells (make-hash-table :test #'eql))
          (meshing-fibers (make-hash-table :test #'eql))
+         (translucent-fibers (make-hash-table :test #'eql))
+         ;; Which of a chunk's two sheets the mesher is building: the opaque
+         ;; world, or the translucent cells alone (#LNRIRA).
+         (translucent-sheet-p nil)
          (products nil))
     (labels ((chunk-body-cells (key)
                ;; Fixture bodies are drawn, not meshed (fixtures.lisp).
@@ -249,10 +256,63 @@ appearance reads authored cells directly and needs no meshed context owners."
                                 (material-chunk-body-cells
                                  body-table
                                  (gethash key (material-store-chunks materials))))))))
+             (chunk-translucent-cells (key)
+               (multiple-value-bind (cells present-p) (gethash key translucent-cells)
+                 (if present-p
+                     cells
+                     (setf (gethash key translucent-cells)
+                           (and translucency-table (typep materials 'material-store)
+                                (material-chunk-translucent-cells
+                                 translucency-table
+                                 (gethash key (material-store-chunks materials))))))))
              (fibers-for-meshing (key fibers)
-               (or (gethash key meshing-fibers)
-                   (setf (gethash key meshing-fibers)
-                         (fibers-without-cells fibers (chunk-body-cells key)))))
+               ;; The opaque sheet sees translucent cells as air, so whatever
+               ;; stands behind or beneath a gem keeps its own faces.  The
+               ;; translucent sheet sees only them: a gem against stone has
+               ;; the face a viewer could look through it at, never the other.
+               (if translucent-sheet-p
+                   (or (gethash key translucent-fibers)
+                       (setf (gethash key translucent-fibers)
+                             (let ((sheet (luft:make-chunk-fibers (scene-domain scene) key)))
+                               (dolist (entry (chunk-translucent-cells key) sheet)
+                                 (let ((cell (first entry)))
+                                   (setf (luft:fibers-cell-bit sheet (luft:site-x cell)
+                                                               (luft:site-y cell) (luft:site-z cell))
+                                         1))))))
+                   (or (gethash key meshing-fibers)
+                       (setf (gethash key meshing-fibers)
+                             (fibers-without-cells
+                              fibers (append (chunk-body-cells key)
+                                             (chunk-translucent-cells key)))))))
+             (mesh-sheets (key fibers)
+               ;; One surface mesh, opaque stars first and translucent ones
+               ;; after.  The renderer tells them apart by material code.
+               (let ((opaque (zone :luft/mesh-owner
+                               (luft:mesh-star-chunk
+                                (fibers-for-meshing key fibers) key
+                                :outside-domain-policy :air))))
+                 (if (notany #'chunk-translucent-cells
+                             (streaming-scene-dependency-guard-keys scene (list key) 1))
+                     opaque
+                     (let ((translucent
+                             (unwind-protect
+                                  (progn
+                                    (setf translucent-sheet-p t)
+                                    (zone :luft/mesh-translucent-owner
+                                      (luft:mesh-star-chunk
+                                       (fibers-for-meshing key fibers) key
+                                       :outside-domain-policy :air)))
+                               (setf translucent-sheet-p nil))))
+                       (let ((mesh (luft:make-surface-mesh
+                                    (scene-domain scene)
+                                    (concatenate '(simple-array (unsigned-byte 32) (*))
+                                                 (luft:surface-mesh-star-site-words opaque)
+                                                 (luft:surface-mesh-star-site-words translucent)))))
+                         (setf (luft::surface-mesh-edge-shaping mesh)
+                               (concatenate '(simple-array (unsigned-byte 32) (*))
+                                            (luft::surface-mesh-edge-shaping opaque)
+                                            (luft::surface-mesh-edge-shaping translucent)))
+                         mesh)))))
              (mesh-owner (key)
                (let* ((fibers (gethash key neighborhood))
                       (signature (streaming-owner-input-signature snapshot key))
@@ -273,10 +333,7 @@ appearance reads authored cells directly and needs no meshed context owners."
                              (luft:make-surface-mesh
                               (scene-domain scene)
                               (luft:surface-mesh-star-site-words old-mesh))
-                             (zone :luft/mesh-owner
-                               (luft:mesh-star-chunk
-                                (fibers-for-meshing key fibers) key
-                                :outside-domain-policy :air)))))
+                             (mesh-sheets key fibers))))
                    ;; New metadata shell: never change an installed mesh's light
                    ;; or attachment witnesses when borrowing immutable arrays.
                    (if old-mesh

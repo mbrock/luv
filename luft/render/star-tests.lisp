@@ -19,14 +19,24 @@
   (true (render::ensure-terrain-quantity-contract))
   (let* ((declaration (math:value-declaration-for 'terrain:compile-terrain-material-descriptors))
          (layout (math:declaration-quantity-layout declaration))
-         (emission (car (last (math:quantity-layout-projections layout))))
-         (specification (math:quantity-projection-specification emission)))
+         (projections (math:quantity-layout-projections layout))
+         (emission (find 216 projections
+                         :key (lambda (projection)
+                                (first (math:quantity-projection-positions projection)))))
+         (specification (math:quantity-projection-specification emission))
+         ;; The eighth word's low byte is what a translucent kind lets through.
+         (transmission (car (last projections))))
     (true (= 256 (math:repeated-quantity-layout-stride layout)))
     (true (equal '(216 217 218 219 220 221 222 223)
                  (math:quantity-projection-positions emission)))
     (true (= 4/255 (math:unit-conversion-factor
                    (math:quantity-specification-unit specification) :one)))
-    (true (eq 'quantities::surface-emission (math:quantity-specification-name specification))))
+    (true (eq 'quantities::surface-emission (math:quantity-specification-name specification)))
+    (true (equal '(224 225 226 227 228 229 230 231)
+                 (math:quantity-projection-positions transmission)))
+    (true (eq 'quantities::surface-transmission
+              (math:quantity-specification-name
+               (math:quantity-projection-specification transmission)))))
   ;; A raw vec4 cannot bypass the declared heterogeneous output contract.
   (true
    (handler-case

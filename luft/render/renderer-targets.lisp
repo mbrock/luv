@@ -26,6 +26,12 @@
    (motion-msaa-view :initform nil :reader renderer-target-generation-motion-msaa-view)
    (motion-texture :initform nil :reader renderer-target-generation-motion-texture)
    (motion-view :initform nil :reader renderer-target-generation-motion-view)
+   ;; How far temporal reconstruction should favour the current frame at
+   ;; each pixel; only translucent surfaces write it (#LNRIRA).
+   (reactive-texture :initform nil :reader renderer-target-generation-reactive-texture)
+   (reactive-view :initform nil :reader renderer-target-generation-reactive-view)
+   ;; Whether the mask may hold anything but zero: new, or written last.
+   (reactive-dirty-p :initform t :accessor renderer-target-generation-reactive-dirty-p)
    (resolved-texture :initform nil :reader renderer-target-generation-resolved-texture)
    (resolved-view :initform nil :reader renderer-target-generation-resolved-view)
    (history-texture :initform nil :reader renderer-target-generation-history-texture)
@@ -120,6 +126,14 @@
 
 (defun renderer-motion-view (renderer)
   (renderer-target-generation-motion-view
+   (renderer-target-generation renderer)))
+
+(defun renderer-reactive-texture (renderer)
+  (renderer-target-generation-reactive-texture
+   (renderer-target-generation renderer)))
+
+(defun renderer-reactive-view (renderer)
+  (renderer-target-generation-reactive-view
    (renderer-target-generation renderer)))
 
 ;;; The shader resolve keeps two output-sized images and alternates them:
@@ -290,7 +304,8 @@ starts over."
         (when (renderer-metalfx-temporal-p renderer)
           (setf scaler (own (make-temporal-scaler-descriptor
                              :label "luft MetalFX temporal scaler"
-                             :input-size render-extent :output-size extent))
+                             :input-size render-extent :output-size extent
+                             :reactive-format +translucent-reactive-format+))
                 (slot-value generation 'temporal-scaler) scaler))
         (image :depth :depth32-float render-extent
                (usage '(:render-attachment :texture-binding)
@@ -309,6 +324,9 @@ starts over."
           (image :motion :rg16-float render-extent
                  (usage (if shader-p '(:render-attachment :texture-binding) '(:render-attachment))
                         (and scaler (gpu-temporal-scaler-motion-usage scaler))))
+          (image :reactive +translucent-reactive-format+ render-extent
+                 (usage '(:render-attachment :texture-binding :copy-dst)
+                        (and scaler (gpu-temporal-scaler-reactive-usage scaler))))
           ;; RESOLVED and HISTORY trade roles each frame, and history is
           ;; cleared before its first use, a transfer on Vulkan.
           (image :resolved :rgba16-float extent

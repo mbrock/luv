@@ -965,6 +965,18 @@ NIL leaves the atelier's direct light unchanged.")
       `(,*terrain-blocklight-function* ,light ,gain)
       `(* ,gain (* ,light ,light))))
 
+(defvar *translucent-surface-p* nil
+  "True while the translucent sheet's material is parsed (#LNRIRA).")
+
+(define-shader-abstraction translucent-coverage (coverage normal view)
+  ;; Every opaque material, and the visibility material, expand to one, so
+  ;; the opaque world's arithmetic is unchanged by translucency.
+  (if *translucent-surface-p*
+      `(let* ((grazing (- 1.0 (abs (dot ,normal ,view)))))
+         (max 0.02 (mix (representation ,coverage) 1.0
+                        (* grazing grazing grazing grazing grazing))))
+      1.0))
+
 (define-live-shader star-fragment-specification
     (:stage :fragment
      :inputs ((world-position :vec3 :location 0
@@ -987,6 +999,8 @@ NIL leaves the atelier's direct light unchanged.")
                                :components #.(luft.terrain::terrain-varying-components :accent))
 
               (edge-shaping :vec4 :location 11 :interpolation :flat)
+              (material-coverage :float :location 12 :interpolation :flat
+                                 :quantity quantities::surface-coverage :unit :one)
               (voxel-light :vec4 :location 10
                            :components #.(luft.terrain::terrain-varying-components :light)))
      :outputs ((color-output :vec4 :location 0)
@@ -1087,12 +1101,24 @@ NIL leaves the atelier's direct light unchanged.")
          (ground (* (swizzle (representation voxel-light) :w)
                     (representation (swizzle ground-color-vector :xyz))))
          (environment (* (swizzle (representation voxel-light) :w) 0.38))
-         (radiance
+         ;; Coverage (#LNRIRA) is one for every opaque material.  A
+         ;; translucent surface hides more of what lies behind it toward a
+         ;; grazing view, as glass does, and only its diffuse share of the
+         ;; light is thinned by coverage: a highlight or a glow from inside
+         ;; is the surface's own, however clear the glass.
+         (coverage (translucent-coverage material-coverage normal view))
+         (reflected
            (+ (paper-surface-radiance
                (* tone (- 1.0 (* metal 0.9))) bent world visibility sun sun-color
                sky ground)
               (* metal tone (* 1.8 environment))
-              (* sun-color
+              ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
+              ;; and lava, warm by night and lost in the sun by day.  The
+              ;; square keeps a light's falloff from flattening into a wash.
+              (* tone (terrain-blocklight (swizzle (representation voxel-light) :xyz)
+                                         voxel-light-gain))))
+         (emitted
+           (+ (* sun-color
                  (mix (vec3 1.0 1.0 1.0) (+ (vec3 0.2 0.2 0.2) (* tone 5.0)) metal)
                  (* visibility (material-specular bent view sun roughness)))
               (face-pattern-glow (representation material-pattern) laid normal
@@ -1100,12 +1126,11 @@ NIL leaves the atelier's direct light unchanged.")
                                  fade)
               (if (< (swizzle (representation material-pattern) :x) 0.5)
                   (* tone (swizzle (representation material-accent) :w))
-                  (vec3 0.0 0.0 0.0))
-              ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
-              ;; and lava, warm by night and lost in the sun by day.  The
-              ;; square keeps a light's falloff from flattening into a wash.
-              (* tone (terrain-blocklight (swizzle (representation voxel-light) :xyz)
-                                         voxel-light-gain))))
+                  (vec3 0.0 0.0 0.0))))
+         ;; Premultiplied at the end, so the share of the pixel this surface
+         ;; claims is COVERAGE, its emitted light arrives whole, and the
+         ;; atmosphere in front of it is thinned with it.
+         (radiance (+ reflected (/ emitted coverage)))
          (final
            (atmospheric-surface
             radiance world
@@ -1116,9 +1141,44 @@ NIL leaves the atelier's direct light unchanged.")
             sun (representation fog-color-vector)
             (representation zenith-color-vector)
             atmosphere-parameters)))
-    (set-output color-output (vec4 final 1.0))
+    (set-output color-output (vec4 (* final coverage) coverage))
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
+
+(defun star-translucent-fragment-specification
+    (&optional (fragment (star-fragment-specification)) reactive-p)
+  "FRAGMENT for the translucent sheet's blended pass (#LNRIRA).
+
+The same material, under the same host treatments, with two additions.  A
+face turned from the eye is discarded: a gem shows the eye its near surface
+once, so its sites need no sorting among themselves and no pane is counted
+twice.  REACTIVE-P adds a third output, how far temporal reconstruction
+should trust this frame over its history here: what shows through a pane
+moves at a parallax the pane's own motion vector cannot describe."
+  (let* ((source (shader-object-source-form fragment))
+         (options (copy-tree (third source)))
+         (body (copy-tree (fourth source))))
+    (assert (eq (first body) 'let*))
+    (when reactive-p
+      (setf (getf options :outputs)
+            (append (getf options :outputs) '((reactive-output :float :location 2))))
+      (setf body (append body
+                         `((set-output reactive-output
+                                       (* ,*translucent-reactive-gain* coverage))))))
+    (let ((*translucent-surface-p* t))
+     (parse-shader-specification
+      'star-translucent-fragment options
+     `((let* ((facing-view
+                (mix (- (representation (swizzle camera-forward :xyz)))
+                     (- (swizzle (representation camera-position) :xyz)
+                        (representation world-position))
+                     (swizzle (representation render-parameters) :z))))
+         (when (< (dot (representation mesh-normal) facing-view) 0.0)
+           (discard))
+         ,body))))))
+
+(defparameter *translucent-reactive-gain* 0.8
+  "The reactive mask a fully covering translucent pixel writes, 0..1.")
 
 ;;; Terrain by instanced vertex pulling.  Every star has its own indexed
 ;;; patch in two shared tables: the scene's, whose vertices are shared only
@@ -1163,6 +1223,8 @@ NIL leaves the atelier's direct light unchanged.")
                                        :components #.(luft.terrain::terrain-varying-components :accent))
 
                (edge-shaping-output :vec4 :location 11 :interpolation :flat)
+               (material-coverage-output :float :location 12 :interpolation :flat
+                                         :quantity quantities::surface-coverage :unit :one)
                (voxel-light-output :vec4 :location 10
                                    :components #.(luft.terrain::terrain-varying-components :light)))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
@@ -1328,7 +1390,13 @@ NIL leaves the atelier's direct light unchanged.")
     (set-output material-pattern-output material-pattern)
     (set-output material-mortar-output material-mortar)
     (set-output material-accent-output material-accent)
-
+    ;; The eighth descriptor word holds what the material lets through.
+    (set-output material-coverage-output
+                (assume-quantity
+                 (- 1.0 (/ (float (ldb #.(luft.terrain::terrain-descriptor-byte :transmission)
+                                       (swizzle pattern-row :w)))
+                           #.(luft.terrain::terrain-descriptor-divisor :transmission)))
+                 :quantity quantities::surface-coverage :unit :one))
     (set-output voxel-light-output voxel-light)))
 
 (define-live-shader terrain-shadow-vertex-specification

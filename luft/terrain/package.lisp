@@ -175,6 +175,8 @@ this package draws; the renderer and the ateliers use it.")
            #:material-kind-attachment-form
            #:material-kind-base-tone
            #:material-kind-body
+           #:material-kind-coverage
+           #:material-kind-translucent-p
            #:material-kind-oriented-tones
            #:material-kind-pattern
            #:material-kind-surface-emission
@@ -191,6 +193,7 @@ this package draws; the renderer and the ateliers use it.")
            #:pack-terrain-pattern
            #:pack-terrain-surface
            #:pack-terrain-tone
+           #:terrain-descriptor-translucent-codes
            #:physical-body
            #:prepare-streamed-mesh
            #:ready-streaming-scene-meshes

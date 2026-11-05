@@ -40,6 +40,14 @@ top or bottom one.")
    (surface-emission :initarg :surface-emission :initform 0.0
                      :quantity (:quantity quantities::surface-emission :unit :one)
                      :reader material-kind-surface-emission)
+   (coverage :initarg :coverage :initform 1.0
+             :quantity (:quantity quantities::surface-coverage :unit :one)
+             :reader material-kind-coverage
+             :documentation
+             "How much of what lies behind the surface it hides, 0..1.
+A third optical fact beside light opacity and emission.  Below one the kind
+is translucent: its cells are meshed apart from the opaque world, drawn
+blended after it, and cast no sun shadow (#LNRIRA).")
    (attachment-form :initarg :attachment-form :initform nil
                     :type (member nil :torch :lantern)
                     :reader material-kind-attachment-form
@@ -190,8 +198,53 @@ accent (PACK-TERRAIN-PATTERN)."
                      (pack-terrain-pattern kind)
                    (setf (aref words (+ row 4)) pattern
                          (aref words (+ row 5)) mortar
-                         (aref words (+ row 6)) accent)))))
+                         (aref words (+ row 6)) accent
+                         (aref words (+ row 7)) (pack-terrain-transmission kind))))))
     words))
+
+(defun material-kind-translucent-p (kind)
+  "Whether KIND shows what lies behind it (#LNRIRA)."
+  (< (material-kind-coverage kind) 1.0))
+
+(defun pack-terrain-transmission (kind)
+  "KIND's transmission, one minus its coverage, as the unorm8 low byte of
+the eighth descriptor word.  Zero, the word every opaque kind has, is opaque."
+  (dpb (round (* 255 (- 1.0 (max 0.0 (min 1.0 (material-kind-coverage kind))))))
+       #.(terrain-descriptor-byte :transmission) 0))
+
+(defun terrain-descriptor-translucent-codes (descriptors)
+  "A bit vector by material code of the codes DESCRIPTORS draws translucent,
+or NIL when it draws none."
+  (let* ((count (floor (length descriptors) 8))
+         (codes (make-array count :element-type 'bit :initial-element 0)))
+    (dotimes (code count)
+      (unless (zerop (ldb #.(terrain-descriptor-byte :transmission)
+                          (aref descriptors (+ (* 8 code) 7))))
+        (setf (aref codes code) 1)))
+    (and (find 1 codes) codes)))
+
+(defun material-translucency-table (placement-vocabulary)
+  "A vector by placement offset of whether each placement is translucent, or
+NIL when none is."
+  (let* ((placements
+           (domains:identity-vocabulary-members placement-vocabulary))
+         (table (map 'simple-vector
+                     (lambda (placement)
+                       (material-kind-translucent-p
+                        (material-placement-kind placement)))
+                     placements)))
+    (and (find t table) table)))
+
+(defun material-chunk-translucent-cells (table material-chunk)
+  "The (CELL) of every translucent cell in MATERIAL-CHUNK, a cell table.
+The one-element lists match the (CELL . ENTRY) shape of body cells."
+  (let ((cells nil))
+    (when (and table material-chunk)
+      (maphash (lambda (cell offset)
+                 (when (and (< offset (length table)) (aref table offset))
+                   (push (list cell) cells)))
+               material-chunk))
+    cells))
 
 ;;; Published material fields share immutable per-chunk tables. Construction
 ;;; may fill a local table; an edit copies only that table and the chunk index.

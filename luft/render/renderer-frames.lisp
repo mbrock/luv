@@ -62,19 +62,21 @@ releases for retry, but those retired bindings must never be served again. #RBNW
      (make-renderer-frame-state renderer))))
 
 (defun renderer-frame-resident-bind-group (renderer frame resident shadow-p)
-  "Bind one immutable resident population to FRAME's camera upload."
+  "Bind one immutable resident population to FRAME's camera upload.
+SHADOW-P is true for the sun's pass, or :TRANSLUCENT for the blended sheet."
   (renderer-frame-component-binding
    frame (list :resident resident shadow-p (renderer-shadow-view renderer))
    (lambda ()
-     (make-terrain-binding
-      (renderer-terrain renderer) (renderer-device renderer)
-      (resident-population-instance-buffer resident) (renderer-frame-state-camera-buffer frame)
-      :appearances (resident-population-appearance-buffer resident)
-      :lights (resident-population-light-buffer resident)
-      :descriptors (resident-population-descriptor-buffer resident)
-      :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer)
-      :shadow-rectangles (resident-population-shadow-rectangle-buffer resident)
-      :shadow-p shadow-p))))
+     (apply #'make-terrain-binding
+            (renderer-terrain renderer) (renderer-device renderer)
+            (resident-population-instance-buffer resident) (renderer-frame-state-camera-buffer frame)
+            :appearances (resident-population-appearance-buffer resident)
+            :lights (resident-population-light-buffer resident)
+            :descriptors (resident-population-descriptor-buffer resident)
+            :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer)
+            :shadow-rectangles (resident-population-shadow-rectangle-buffer resident)
+            :shadow-p (eq shadow-p t)
+            (when (eq shadow-p :translucent) '(:translucent-p t))))))
 
 (defun renderer-frame-visibility-binding (renderer frame resident material-p)
   "Join immutable resident data to this generation's visibility images.

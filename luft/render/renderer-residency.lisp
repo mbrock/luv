@@ -167,6 +167,9 @@ cohort untouched. No frame can interleave with the owner-thread publication."
    (descriptor-buffer :accessor resident-population-descriptor-buffer)
    ;; (STAR FIRST COUNT) for each star present, over the star-sorted sites.
    (star-runs :initform nil :accessor resident-population-star-runs)
+   ;; The same, for the translucent sheet's sites, which follow every opaque
+   ;; one in the buffers.  Only the blended pass draws them (#LNRIRA).
+   (translucent-runs :initform nil :accessor resident-population-translucent-runs)
    (shadow-rectangle-buffer :initform nil :accessor resident-population-shadow-rectangle-buffer)
    (shadow-rectangle-count :initform 0 :accessor resident-population-shadow-rectangle-count)
    ;; World-cell box (MIN-X MIN-Y MIN-Z MAX-X MAX-Y MAX-Z) around the drawn
@@ -318,19 +321,23 @@ cell of it on every axis, so the box is the sites' extent grown by one."
     (instance-words appearance-words
      &optional (light-words (make-array (length instance-words)
                                         :element-type '(unsigned-byte 32)
-                                        :initial-element 0)))
+                                        :initial-element 0))
+       translucent-sites)
   "Return INSTANCE-WORDS and APPEARANCE-WORDS reordered by star, the runs,
-and LIGHT-WORDS reordered with them.
+LIGHT-WORDS reordered with them, and the translucent runs.
 
 Each site is four instance words ending in its star, two appearance words,
 and four light words; the arrays keep their one-for-one order.  The runs are
-(STAR FIRST COUNT) for every star present, the instances one draw covers."
+(STAR FIRST COUNT) for every star present, the instances one draw covers.
+Sites TRANSLUCENT-SITES marks sort after every other, into runs of their own."
   (declare (type (simple-array (unsigned-byte 32) (*))
                  instance-words appearance-words light-words)
+           (type (or null simple-bit-vector) translucent-sites)
            (optimize (speed 3) (safety 1)))
   (let* ((sites (floor (length instance-words) 4))
-         (counts (make-array 256 :element-type 'fixnum :initial-element 0))
-         (starts (make-array 256 :element-type 'fixnum :initial-element 0))
+         ;; Keys 0-255 are opaque stars, 256-511 translucent ones.
+         (counts (make-array 512 :element-type 'fixnum :initial-element 0))
+         (starts (make-array 512 :element-type 'fixnum :initial-element 0))
          (sorted-instances (make-array (length instance-words)
                                        :element-type '(unsigned-byte 32)))
          (sorted-appearances (make-array (length appearance-words)
@@ -340,15 +347,22 @@ and four light words; the arrays keep their one-for-one order.  The runs are
     (unless (= (length light-words) (length instance-words))
       (error "~D light words do not have four per site (~D instance words)."
              (length light-words) (length instance-words)))
-    (flet ((star (site) (logand #xff (aref instance-words (+ 3 (* 4 site))))))
+    (flet ((star (site)
+             (logior (logand #xff (aref instance-words (+ 3 (* 4 site))))
+                     (if (and translucent-sites (= 1 (sbit translucent-sites site)))
+                         256 0))))
       (dotimes (site sites) (incf (aref counts (star site))))
       (loop with next fixnum = 0
-            for star below 256
+            for star below 512
             do (setf (aref starts star) next)
                (incf next (aref counts star)))
       (let ((runs (loop for star below 256
                         when (plusp (aref counts star))
-                          collect (list star (aref starts star) (aref counts star)))))
+                          collect (list star (aref starts star) (aref counts star))))
+            (translucent-runs
+              (loop for key from 256 below 512
+                    when (plusp (aref counts key))
+                      collect (list (- key 256) (aref starts key) (aref counts key)))))
         (dotimes (site sites)
           (let ((slot (aref starts (star site))))
             (incf (aref starts (star site)))
@@ -358,7 +372,8 @@ and four light words; the arrays keep their one-for-one order.  The runs are
                      :start1 (* 2 slot) :start2 (* 2 site) :end2 (* 2 (1+ site)))
             (replace sorted-lights light-words
                      :start1 (* 4 slot) :start2 (* 4 site) :end2 (* 4 (1+ site)))))
-        (values sorted-instances sorted-appearances runs sorted-lights)))))
+        (values sorted-instances sorted-appearances runs sorted-lights
+                translucent-runs)))))
 
 (zdefun (%upload-render-population :zone :luft/upload-slot) (renderer population)
   "Own each buffer before uploading, so even a failed write rolls back."
@@ -373,10 +388,11 @@ and four light words; the arrays keep their one-for-one order.  The runs are
                  (when (plusp (length words)) (write-buffer buffer words))
                  buffer)))
         ;; One indexed draw per star covers a contiguous run of sites.
-        (multiple-value-bind (instances appearances runs lights)
+        (multiple-value-bind (instances appearances runs lights translucent-runs)
             (sort-sites-by-star (render-population-instance-words population)
                                 (render-population-appearance-words population)
-                                (render-population-light-words population))
+                                (render-population-light-words population)
+                                (render-population-translucent-sites population))
           (setf (resident-population-instance-buffer resident)
                 (upload "luft resident site instances" instances)
                 (resident-population-appearance-buffer resident)
@@ -387,6 +403,7 @@ and four light words; the arrays keep their one-for-one order.  The runs are
                 (upload "luft terrain material descriptors"
                         (render-population-descriptor-words population))
                 (resident-population-star-runs resident) runs
+                (resident-population-translucent-runs resident) translucent-runs
                 (resident-population-bounds resident) (site-bounds instances)))
         (when (terrain-merged-shadows-p (renderer-terrain renderer))
           (let ((rectangles (render-population-shadow-rectangles population)))

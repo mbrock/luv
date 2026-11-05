@@ -179,6 +179,13 @@
 (define-quantity pattern-aspect :kind :proportion :non-negative-p t)
 (define-quantity mortar-width :kind :proportion :non-negative-p t)
 (define-quantity tone-variance :kind :proportion :non-negative-p t)
+;;; Coverage is the share of what lies behind a surface that it hides.  It is
+;;; neither light opacity, which a propagating voxel field pays per cell,
+;;; nor emission: a cut gem can glow, pass light, and still be seen through.
+(defconstant surface-coverage 'surface-coverage)
+(defconstant surface-transmission 'surface-transmission)
+(define-quantity surface-coverage :kind :proportion :non-negative-p t)
+(define-quantity surface-transmission :kind :proportion :non-negative-p t)
 
 (defconstant monotonic-time 'monotonic-time)
 (defconstant simulation-time 'simulation-time)
@@ -223,7 +230,9 @@
     (:aspect 8 4 quantities::pattern-aspect 2.0)
     (:mortar-width 12 8 quantities::mortar-width 255.0)
     (:variance 20 8 quantities::tone-variance 255.0)
-    (:emission 24 8 quantities::surface-emission 63.75)))
+    (:emission 24 8 quantities::surface-emission 63.75)
+    ;; Stored as what a surface lets through, so a zero word is opaque.
+    (:transmission 0 8 quantities::surface-transmission 255.0)))
 
 (defun terrain-descriptor-field (name)
   (or (assoc name *terrain-descriptor-fields*)
@@ -245,7 +254,8 @@
           '((:red :green :blue) (:red :green :blue)
             (:red :green :blue) (:strength :roughness :wear)
             (:courses :aspect :mortar-width :variance)
-            (:red :green :blue) (:red :green :blue :emission))
+            (:red :green :blue) (:red :green :blue :emission)
+            (:transmission))
           for word from 0 do
       (dolist (name word-fields)
         (destructuring-bind (name offset width quantity divisor)

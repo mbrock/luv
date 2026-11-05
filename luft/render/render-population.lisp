@@ -65,7 +65,11 @@
              (:constructor %make-render-population
                  (instance-words appearance-words descriptor-words
                   site-count light-words &optional body-data
-                  (shadow-rectangles (merge-terrain-shadow-faces instance-words))))
+                  (translucent-sites
+                   (translucent-site-flags appearance-words descriptor-words))
+                  (shadow-rectangles
+                   (merge-terrain-shadow-faces
+                    (opaque-site-words instance-words translucent-sites)))))
              (:copier nil))
   "Geometry sites plus a one-for-one, independently replaceable appearance
 and voxel light."
@@ -88,7 +92,42 @@ and voxel light."
                      :type (simple-array single-float (*)) :read-only t)
   ;; Fixture bodies (LUFT.TERRAIN::PACK-FIXTURE-BODIES), drawn beside the stars.
   (body-data #.(make-array 0 :element-type 'single-float)
-             :type (simple-array single-float (*)) :read-only t))
+             :type (simple-array single-float (*)) :read-only t)
+  ;; One bit per site, set where the site's star belongs to the translucent
+  ;; sheet (#LNRIRA), or NIL when every site is opaque.
+  (translucent-sites nil :type (or null simple-bit-vector) :read-only t))
+
+(defun translucent-site-flags (appearance-words descriptor-words)
+  "One bit per site of APPEARANCE-WORDS, set where a sampled material code is
+translucent in DESCRIPTOR-WORDS; NIL when none is.
+
+The mesher builds translucent stars from translucent cells alone, so a site
+samples translucent codes only or opaque codes only; a code names its sheet."
+  (declare (type (simple-array (unsigned-byte 32) (*)) appearance-words))
+  (let ((codes (terrain-descriptor-translucent-codes descriptor-words)))
+    (when codes
+      (let* ((sites (floor (length appearance-words) 2))
+             (flags (make-array sites :element-type 'bit :initial-element 0)))
+        (dotimes (site sites)
+          (dotimes (lane 8)
+            (let ((code (ldb (byte 8 (* 8 (mod lane 4)))
+                             (aref appearance-words (+ (* 2 site) (floor lane 4))))))
+              (when (and (< code (length codes)) (= 1 (aref codes code)))
+                (setf (aref flags site) 1)))))
+        (and (find 1 flags) flags)))))
+
+(defun opaque-site-words (instance-words translucent-sites)
+  "INSTANCE-WORDS without the sites TRANSLUCENT-SITES marks."
+  (if (null translucent-sites)
+      instance-words
+      (let ((words (make-array (* 4 (count 0 translucent-sites))
+                               :element-type '(unsigned-byte 32)))
+            (next 0))
+        (dotimes (site (length translucent-sites) words)
+          (when (zerop (aref translucent-sites site))
+            (replace words instance-words :start1 next :start2 (* 4 site)
+                                          :end2 (* 4 (1+ site)))
+            (incf next 4))))))
 
 (defun ensure-population-quantity-declarations (population)
   "Check retained CPU writer contracts before GPU upload, never per lane."
@@ -364,6 +403,7 @@ unchanged over this mesh before sampling; otherwise repack and compare words."
               (render-population-site-count population)
               lights
               bodies
+              (render-population-translucent-sites population)
               (render-population-shadow-rectangles population)))))
       (prepare-render-mesh mesh)))
 

@@ -19,6 +19,7 @@
            #:torch-body-shadow-vertex-specification
            #:torch-body-fragment-specification
            #:star-fragment-specification
+           #:star-translucent-fragment-specification
            #:fixture-body-vertex-specification
            #:fixture-body-shadow-vertex-specification
            #:fixture-body-fragment-specification

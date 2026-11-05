@@ -20,6 +20,9 @@
    (merged-shadows-p :initarg :merged-shadows-p :initform nil
                      :reader terrain-merged-shadows-p)
    (scene-program :accessor terrain-scene-program)
+   ;; The scene program's material, blended over the finished opaque world
+   ;; for the translucent sheet's sites (#LNRIRA).
+   (translucent-program :initform nil :accessor terrain-translucent-program)
    (visibility-program :initform nil :accessor terrain-visibility-program)
    (material-program :initform nil :accessor terrain-material-program)
    (shadow-program :accessor terrain-shadow-program)
@@ -33,13 +36,16 @@
 
 (defmethod make-terrain-binding
     ((drawing terrain-drawing) device sites camera
-     &key appearances lights descriptors shadow-map shadow-sampler shadow-p shadow-rectangles)
+     &key appearances lights descriptors shadow-map shadow-sampler shadow-p shadow-rectangles
+       translucent-p)
   (when (and shadow-p (terrain-merged-shadows-p drawing))
     (return-from make-terrain-binding
       (make-program-binding (terrain-shadow-program drawing) device
                             :shadow-rectangles shadow-rectangles :camera-state camera)))
   (apply #'make-program-binding
-         (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing))
+         (cond (shadow-p (terrain-shadow-program drawing))
+               (translucent-p (terrain-translucent-program drawing))
+               (t (terrain-scene-program drawing)))
          device :sites sites :camera-state camera
          (if shadow-p
              (list :terrain-vertices (terrain-shadow-vertices drawing))
@@ -73,6 +79,19 @@
             when (plusp index-count)
               do (draw-indexed pass indices :uint32 index-count count
                                (aref range offset) 0 first)))))
+
+(defun encode-terrain-translucent (drawing pass binding resident)
+  "Draw RESIDENT's translucent sheet, blended over what the pass holds."
+  (let ((runs (resident-population-translucent-runs resident))
+        (ranges (terrain-star-ranges drawing)))
+    (when runs
+      (set-pipeline pass (program-pipeline (terrain-translucent-program drawing)))
+      (set-bind-group pass 0 binding)
+      (loop for (star first count) in runs
+            for range = (aref ranges star)
+            when (plusp (aref range 1))
+              do (draw-indexed pass (terrain-scene-indices drawing) :uint32
+                               (aref range 1) count (aref range 0) 0 first)))))
 
 (defun make-terrain-visibility-binding
     (drawing device resident camera &key sites primitives shadow-map shadow-sampler)
@@ -118,6 +137,9 @@ the original atlas triangle. Site/appearance/light publication is unchanged."
 ;;; GPU records unsigned.
 
 (defconstant +star-patch-coordinate-bias+ 8)
+
+(defparameter +translucent-reactive-format+ :r8-unorm
+  "The temporal reactive mask the translucent sheet writes (#LNRIRA).")
 
 ;;; The star tables as indexed patches.
 
@@ -349,6 +371,26 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
               :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
               :sample-count sample-count
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                               :depth-compare :less)))
+            (terrain-translucent-program drawing)
+            (own-gpu-object
+             drawing
+             (make-drawing-program
+              device :label "luft translucent sheet"
+              :vertex (shaders:terrain-vertex-specification)
+              :fragment (shaders:star-translucent-fragment-specification
+                         fragment (rest target-formats))
+              ;; Colour blends; motion and the reactive mask are the
+              ;; nearest pane's, replacing what lay behind it.
+              :targets (loop for format in (if (rest target-formats)
+                                               (append target-formats
+                                                       (list +translucent-reactive-format+))
+                                               target-formats)
+                             for first = t then nil
+                             collect `(:format ,format
+                                       ,@(when first '(:blend :premultiplied-alpha))))
+              :sample-count sample-count
+              :depth-stencil '(:format :depth32-float :depth-write-enabled nil
                                :depth-compare :less)))
             (terrain-shadow-program drawing)
             (own-gpu-object
