@@ -387,10 +387,10 @@
         (true (null (luvcraft.agent::companion-ground-height session 3.4d0 8.2d0 5.5d0 3d0)))
         (true (null (luvcraft.agent::companion-ground-height session 300.4d0 7.2d0 5.5d0 3d0)))))))
 
-(defun hollow-walk-test-scene (world &key (watermark 0))
+(defun hollow-walk-test-scene (world &key journal)
   "WORLD's real streaming scene with the Hollow Walk's four chunks resident."
   (multiple-value-bind (source dropped)
-      (game:luvcraft-world-luft-source world :watermark watermark)
+      (game:luvcraft-world-luft-source world :journal journal)
     (assert (zerop dropped))
     (let ((scene (game:make-luvcraft-streaming-scene source))
           (keys nil))
@@ -404,10 +404,10 @@
       (terrain:rebuild-authored-world-resident-values scene keys)
       scene)))
 
-(defun hollow-walk-test-viewer (world resume &key (watermark 0) record)
+(defun hollow-walk-test-viewer (world resume &key journal record)
   "Real source materialization and game motor, without a canvas or renderer.
 The player is format 1's RESUME, or a players-table RECORD."
-  (let* ((scene (hollow-walk-test-scene world :watermark watermark))
+  (let* ((scene (hollow-walk-test-scene world :journal journal))
          (source (terrain:streaming-scene-source scene)))
     (multiple-value-bind (position yaw pitch)
         (game:luvcraft-resume-luft-pose source (or record resume))
@@ -517,15 +517,15 @@ The player is format 1's RESUME, or a players-table RECORD."
               (is equalp (getf record key) (getf (first (getf journal :players)) key)))
             (is = 2 (getf (rest saved) :format-version))
             (is equal (getf (rest saved) :recipe) (luvcraft::world-recipe-description restored))
-            ;; Mining and building are the journal's first two events.
-            (is = 2 (getf journal :watermark))
-            (is equalp (getf (rest saved) :edits)
-                (getf (rest (luvcraft::make-luvcraft-format-2-save-description
-                             restored :watermark (getf journal :watermark)))
-                      :edits))
+            ;; Mining and building are the journal's first two events, kept
+            ;; in its tail after an empty edit set.
+            (is = 0 (getf journal :watermark))
+            (is equal '(1 2) (mapcar (lambda (event) (getf event :sequence))
+                                     (getf journal :journal)))
+            (is eq luvcraft::*crystal-block* (getf (second (getf journal :journal)) :after))
             (let* ((again (hollow-walk-test-viewer restored nil
                                                    :record (first (getf journal :players))
-                                                   :watermark (getf journal :watermark)))
+                                                   :journal journal))
                    (next-scene (render:viewer-source again)))
               ;; Drop all four derived chunks, including collision, then
               ;; regenerate from the restored source, never the constructor.
@@ -623,21 +623,20 @@ The player is format 1's RESUME, or a players-table RECORD."
         (multiple-value-bind (restored resume inhabitants journal)
             (luvcraft:read-luvcraft-save pathname)
           (declare (ignore resume))
-          ;; The edit set is compacted at the journal's head; numbering goes on.
+          ;; Every event fits in the tail after an empty edit set; numbering
+          ;; goes on from the head.
+          (is = 0 (getf journal :watermark))
           (is = (terrain:world-journal-head (terrain:world-source-journal source))
-              (getf journal :watermark))
-          (true (plusp (getf journal :watermark)))
-          (is eq nil (getf journal :journal))
+              (length (getf journal :journal)))
           (let* ((restored-resume (first (getf journal :players)))
                  (again (host:make-luvcraft-world
                          :block-world restored :inhabitants inhabitants
-                         :scene (hollow-walk-test-scene
-                                 restored :watermark (getf journal :watermark))))
+                         :scene (hollow-walk-test-scene restored :journal journal)))
                  (next (host:add-world-player
                         again (host:make-luvcraft-player :id "ada" :record restored-resume)))
                  (next-source (host:world-source again)))
             (true (not (eq player next)))
-            (is = (getf journal :watermark)
+            (is = (terrain:world-journal-head (terrain:world-source-journal source))
                 (terrain:world-journal-head (terrain:world-source-journal next-source)))
             (is equal (luvcraft::block-save-description film)
                 (luvcraft::block-save-description

@@ -8,8 +8,7 @@ with Ada, its owner, standing where her record says."
   (multiple-value-bind (block-world resume inhabitants journal) (luvcraft:read-luvcraft-save pathname)
     (multiple-value-bind (record others)
         (host::adopt-saved-players (getf journal :players) resume "ada")
-      (let* ((source (game:luvcraft-world-luft-source block-world
-                                                      :watermark (getf journal :watermark 0)))
+      (let* ((source (game:luvcraft-world-luft-source block-world :journal journal))
              (world (host:make-luvcraft-world
                      :block-world block-world :inhabitants inhabitants :player-records others
                      :scene (make-resident (game:make-luvcraft-streaming-scene source)

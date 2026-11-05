@@ -40,7 +40,7 @@
                           :documentation "Each ball's centre as this view last drew it, for motion.")
    (particle-sequence :initform nil :accessor viewer-particle-sequence
                       :documentation "The journal sequence this view's particles are derived up to,
-or NIL for the watermark."))
+from the head when it opened, or NIL for the watermark."))
   (:command-table (luvcraft-viewer
                    :inherit-from (luvcraft-window render:luft-window-release
                                   luvcraft-world luvcraft-world-release)
@@ -76,6 +76,12 @@ or NIL for the watermark."))
   (setf (world-editor (viewer-world viewer))
         (lambda (cell placement) (render:apply-viewer-world-edit viewer cell placement)))
   (pushnew viewer (world-views (viewer-world viewer)))
+  ;; Particles burst for what happens from now on: a reloaded journal's
+  ;; tail is history, not news.
+  (let ((scene (world-scene (viewer-world viewer))))
+    (when (typep scene 'terrain:streaming-scene)
+      (setf (viewer-particle-sequence viewer)
+            (terrain:world-journal-head (terrain:streaming-scene-journal scene)))))
   (when (render:viewer-canvas viewer)
     (render:add-viewer-overlay viewer (make-instance 'target-marker))
     (attach-player-instruments viewer)
@@ -345,8 +351,7 @@ go to LUFT.RENDER:START-GAME-HOST."
              :seed (or seed 1) :relief relief :chunk-height world-height))
       (multiple-value-bind (record others)
           (adopt-saved-players (getf journal :players) resume player-id)
-        (let* ((source (game:luvcraft-world-luft-source
-                        block-world :watermark (getf journal :watermark 0)))
+        (let* ((source (game:luvcraft-world-luft-source block-world :journal journal))
                (world (make-luvcraft-world
                        :block-world block-world :inhabitants inhabitants :player-records others
                        :scene (game:make-luvcraft-streaming-scene

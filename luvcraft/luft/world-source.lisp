@@ -220,29 +220,55 @@ WORLD is only read, for its chunk shape, so threads may share it."
 (defun luft-yaw-to-luvcraft (yaw)
   (coerce (- (/ pi 2) yaw) 'double-float))
 
-(defun little-world-luft-source (little height &key (offset 1024) (watermark 0))
+(defun saved-provenance (author)
+  "The terrain provenance of a save's AUTHOR plist, or NIL."
+  (and author
+       (terrain:make-cell-provenance :actor (getf author :actor) :sequence (getf author :sequence)
+                                     :tick (getf author :tick) :time (getf author :time))))
+
+(defun little-world-luft-source (little height &key (offset 1024) (watermark 0)
+                                                    events provenance
+                                                    (edits (luvcraft::block-edit-overlay-entries
+                                                            (luvcraft:little-world-source-edits
+                                                             little))))
   "A Luft source over Luvcraft source LITTLE, carrying its edits across.
 
-LITTLE's edits are the source journal's edit set, compacted at WATERMARK:
-the journal sequence its save was written at.  Edits outside the Luft
-domain are dropped and counted: the second value."
+EDITS, a hash table from coordinates to blocks, by default LITTLE's, are the
+source journal's edit set, compacted at WATERMARK: the journal sequence its
+save was written at.  PROVENANCE, a hash table of the same coordinates to
+author plists, says who made them, and EVENTS are the save's journal tail
+after WATERMARK, as RESTORE-LUVCRAFT-SAVE-DESCRIPTION reads them; the
+journal replays them to its head (#4D3QFJ).  Edits outside the Luft domain
+are dropped and counted: the second value."
   (let* ((source (make-luvcraft-world-source
                   :seed (luvcraft:little-world-source-seed little)
                   :relief (luvcraft:little-world-source-relief little)
                   :little-class (class-name (class-of little))
                   :height height :offset offset))
-         (edits nil)
+         (journal (terrain:world-source-journal source))
+         (installed nil)
          (dropped 0))
     (maphash (lambda (coordinate block)
                (destructuring-bind (x y z) coordinate
                  (let ((site (luvcraft-cell-site source x y z)))
                    (if site
-                       (push (list site block) edits)
+                       (push (list site block
+                                   (and provenance
+                                        (saved-provenance (gethash coordinate provenance))))
+                             installed)
                        (incf dropped)))))
-             (luvcraft::block-edit-overlay-entries
-              (luvcraft:little-world-source-edits little)))
-    (terrain:install-world-edit-set (terrain:world-source-journal source)
-                                    edits watermark)
+             edits)
+    (terrain:install-world-edit-set journal installed watermark)
+    (terrain:replay-world-events
+     journal
+     (loop for event in events
+           collect (terrain:make-world-event
+                    :sequence (getf event :sequence) :transaction (getf event :transaction)
+                    :actor (getf event :actor) :tick (getf event :tick) :time (getf event :time)
+                    :site (or (apply #'luvcraft-cell-site source (getf event :coordinate))
+                              (error "Journal event ~S is outside the Luft world." event))
+                    :before (getf event :before) :after (getf event :after)
+                    :cause (getf event :cause))))
     (values source dropped)))
 
 (defmethod terrain:world-source-baseline-value
@@ -255,14 +281,20 @@ domain are dropped and counted: the second value."
   (luvcraft::chunk-shape-height
    (luvcraft::voxel-space-chunk-shape (luvcraft::block-world-space world))))
 
-(defun luvcraft-world-luft-source (world &key (offset 1024) (watermark 0))
+(defun luvcraft-world-luft-source (world &key (offset 1024) journal
+                                              (watermark (getf journal :watermark 0)))
   "A Luft source over Luvcraft block WORLD's little-world source and edits,
-compacted at journal sequence WATERMARK."
+compacted at journal sequence WATERMARK.  JOURNAL, the plist a save's
+reader returns, supplies the watermark, the edit set there, the tail after
+it, and who authored the edits; WORLD itself stands at the tail's end."
   (let ((little (luvcraft:block-world-source world)))
     (unless (typep little 'luvcraft:little-world-source)
       (error "~S is not a little world; its source is ~S." world little))
-    (little-world-luft-source little (luvcraft-world-height world)
-                              :offset offset :watermark watermark)))
+    (apply #'little-world-luft-source little (luvcraft-world-height world)
+           :offset offset :watermark watermark
+           :events (getf journal :journal)
+           :provenance (getf journal :provenance)
+           (and (getf journal :edits) (list :edits (getf journal :edits))))))
 
 (defun luvcraft-save-world-source (pathname &key (offset 1024))
   "Read the Luvcraft save at PATHNAME as a Luft source with its edits.
@@ -272,8 +304,7 @@ description, and its inhabitants."
   (multiple-value-bind (world resume inhabitants journal)
       (luvcraft:read-luvcraft-save pathname)
     (multiple-value-bind (source dropped)
-        (luvcraft-world-luft-source world :offset offset
-                                          :watermark (getf journal :watermark 0))
+        (luvcraft-world-luft-source world :offset offset :journal journal)
       (values source dropped world resume inhabitants))))
 
 ;;; Saving back, as format 2 (#Y3S82T): the world's recipe, the material
@@ -297,11 +328,12 @@ stands on, names no block by itself."
             (values block t)
             (values nil nil)))))
 
-(defun merged-luvcraft-edit-overlay (source original)
+(defun merged-luvcraft-edit-overlay (source original
+                                     &optional (edits (terrain:world-source-edits source)))
   "Luvcraft's edit overlay for SOURCE's journal over ORIGINAL little source's.
 
-Inside the Luft domain the journal's block identities are the edits;
-outside it ORIGINAL's are kept as read."
+Inside the Luft domain the journal's block identities, EDITS, are the edits:
+by default its edit set at its head.  Outside it ORIGINAL's are kept as read."
   (let ((overlay (luvcraft::make-block-edit-overlay)))
     (maphash (lambda (coordinate block)
                (unless (apply #'luvcraft-cell-site source coordinate)
@@ -315,7 +347,7 @@ outside it ORIGINAL's are kept as read."
                        (apply #'luvcraft::record-block-edit overlay block coordinate)
                        (warn "Not saving ~S at ~S: Luvcraft has no such block."
                              value coordinate)))))
-             (terrain:world-source-edits source))
+             edits)
     overlay))
 
 (defun journal-value-block (value)
@@ -340,10 +372,62 @@ LUVCRAFT-RESUME-LUFT-POSE reads them back."
             ;; the sky at the next start.
             :flying (and flying-p t)))))
 
+(defun saved-journal-value-p (value)
+  "Whether a save can write journal VALUE: a block, air, or :UNRECORDED."
+  (or (eq value :unrecorded) (nth-value 1 (journal-value-block value))))
+
+(defun luvcraft-save-journal (source)
+  "SOURCE's journal as a save keeps it: the watermark its edit set is compacted
+at, that set, who authored it, and the tail of event plists after it.
+
+The tail is the newest TERRAIN:*JOURNAL-TAIL-EVENTS* events, cut at a
+transaction boundary, and after the last event a save could not write."
+  (let* ((journal (terrain:world-source-journal source))
+         (watermark (terrain:world-journal-compaction-watermark journal))
+         (events (terrain:world-journal-events journal))
+         (unsaved (position-if-not (lambda (event)
+                                     (and (saved-journal-value-p (terrain:world-event-before event))
+                                          (saved-journal-value-p (terrain:world-event-after event))))
+                                   events :from-end t)))
+    (when (and unsaved (> (+ (terrain:world-journal-watermark journal) unsaved 1) watermark))
+      ;; Past the end of that event's transaction.
+      (let ((transaction (terrain:world-event-transaction (aref events unsaved))))
+        (setf watermark (+ (terrain:world-journal-watermark journal)
+                           (or (position-if (lambda (event)
+                                              (/= transaction (terrain:world-event-transaction event)))
+                                            events :start unsaved)
+                               (length events))))))
+    (multiple-value-bind (edits provenance tail) (terrain:world-journal-compacted journal watermark)
+      (let ((authors (make-hash-table :test #'equal)))
+        (maphash (lambda (site author)
+                   (setf (gethash (site-luvcraft-cell source site) authors)
+                         (list :actor (terrain:cell-provenance-actor author)
+                               :sequence (terrain:cell-provenance-sequence author)
+                               :tick (terrain:cell-provenance-tick author)
+                               :time (terrain:cell-provenance-time author))))
+                 provenance)
+        (values watermark edits authors
+                (loop for event in tail
+                      collect (flet ((value (value)
+                                       (if (eq value :unrecorded)
+                                           value
+                                           (values (journal-value-block value)))))
+                                (list :sequence (terrain:world-event-sequence event)
+                                      :transaction (terrain:world-event-transaction event)
+                                      :actor (terrain:world-event-actor event)
+                                      :tick (terrain:world-event-tick event)
+                                      :time (terrain:world-event-time event)
+                                      :coordinate (site-luvcraft-cell source
+                                                                      (terrain:world-event-site event))
+                                      :before (value (terrain:world-event-before event))
+                                      :after (value (terrain:world-event-after event))
+                                      :cause (terrain:world-event-cause event)))))))))
+
 (defun luvcraft-save-description
     (source world &key resume players inhabitants position yaw pitch flying-p
                     selected selected-block)
-  "The format-2 save of WORLD with SOURCE's edits.
+  "The format-2 save of WORLD with SOURCE's edits: its journal compacted as
+LUVCRAFT-SAVE-JOURNAL keeps it.
 
 PLAYERS is the players table, records of block identities (#Y3S82T).  A
 RESUME is written only when given, as older saves kept the player: POSITION
@@ -351,14 +435,13 @@ is the player's feet in Luft cells, YAW and PITCH the Luft camera's,
 FLYING-P whether the player was in flight there, and SELECTED the placement
 in hand. SELECTED-BLOCK may name its exact carried instance. Without
 POSITION the supplied RESUME stays unchanged."
-  (let ((overlay (merged-luvcraft-edit-overlay
-                  source (luvcraft:block-world-source world))))
+  (multiple-value-bind (watermark edits provenance journal) (luvcraft-save-journal source)
     (luvcraft::make-luvcraft-format-2-save-description
      world
-     :overlay overlay
-     ;; The edit set is the journal's view at its head, so nothing follows it.
-     :watermark (terrain:world-journal-head (terrain:world-source-journal source))
-     :journal '()
+     :overlay (merged-luvcraft-edit-overlay source (luvcraft:block-world-source world) edits)
+     :watermark watermark
+     :journal journal
+     :provenance provenance
      :players players
      :inhabitants inhabitants
      :resume

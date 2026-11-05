@@ -348,13 +348,22 @@ such as gnomes, written only when there are some."
 ;;; tables, an offset or (OFFSET ENTITY-INDEX).  Inhabitants keep format 1's
 ;;; symbolic shape; a :RESUME is read from older saves and migrated.
 ;;;
+;;; Provenance (#OVEP9A): the actors table names every principal that
+;;; authored an edit, a player's id string, (:INHABITANT ID), or :IMPORT.
+;;; An edit's provenance is (ACTOR-INDEX SEQUENCE TICK TIME) or NIL when its
+;;; author is unknown; each journal event is (SEQUENCE TRANSACTION
+;;; ACTOR-INDEX TICK TIME (X Y Z) BEFORE AFTER CAUSE), BEFORE and AFTER
+;;; blocks as the columns write them, or :UNRECORDED.  Saves without these
+;;; fields read as having no known authors and an empty tail.
+;;;
 ;;;   (:luvcraft-world :format-version 2
 ;;;    :recipe (:block-world :space (...) :source (:little-world ... no edits))
 ;;;    :vocabulary #(:air :grass ...)       ; offset N names material N
 ;;;    :entities ((:film :video-id "..." ...) ...)
-;;;    :edits (:watermark 0 :sites #(x y z ...) :materials #(offset ...)
-;;;            :entities #(index-or-nil ...))
-;;;    :journal ()
+;;;    :actors #("ada@temple" (:inhabitant "gnome-k3x9q2") ...)
+;;;    :edits (:watermark 40 :sites #(x y z ...) :materials #(offset ...)
+;;;            :entities #(index-or-nil ...) :provenance #((0 17 nil 3971...) ...))
+;;;    :journal ((41 9 0 nil 3971... (x y z) 0 3 :edit) ...)
 ;;;    :players ((:id "ada@temple" :name "ada"
 ;;;               :player-position (x y z) :look (:yaw y :pitch p) :flying nil
 ;;;               :creative-p nil :simple-inventory-p nil
@@ -393,10 +402,27 @@ baseline, so a peer or a save can install the edits separately."
                   (:stacks (loop for (block quantity) in value
                                  collect (list (funcall function block) quantity))))))
 
-(defun encode-block-edit-columns (overlay &optional players)
+(defun portable-save-datum (datum)
+  "DATUM if a save can print and read it back as itself, else its printed form."
+  (labels ((portable-p (value depth)
+             (and (< depth 8)
+                  (typecase value
+                    ((or null (eql t) keyword string integer) t)
+                    (cons (and (null (cdr (last value)))
+                               (every (lambda (element) (portable-p element (1+ depth)))
+                                      value)))))))
+    (if (portable-p datum 0) datum (princ-to-string datum))))
+
+(defun encode-block-edit-columns (overlay &optional players journal provenance)
   "Return OVERLAY as a vocabulary table, an entity table, and edit columns,
 and PLAYERS, a players table of block identities, with its blocks written
-into the same tables.
+into the same tables; then JOURNAL's events encoded, and the actors table.
+
+JOURNAL is a list of event plists in Luvcraft's terms, as
+RESTORE-LUVCRAFT-SAVE-DESCRIPTION returns them: :SEQUENCE, :TRANSACTION,
+:ACTOR, :TICK, :TIME, :COORDINATE (X Y Z), :BEFORE, :AFTER, and :CAUSE.
+PROVENANCE, when given, is a hash table from OVERLAY's coordinates to plists
+of :ACTOR, :SEQUENCE, :TICK, and :TIME, written as a provenance column.
 
 The table is the running vocabulary, with a row appended for every unknown
 material a placeholder still stands for, so writing never loses a name."
@@ -412,8 +438,15 @@ material a placeholder still stands for, so writing never loses a name."
          (count (length edits))
          (sites (make-array (* 3 count)))
          (materials (make-array count))
-         (entity-column (make-array count :initial-element nil)))
-    (labels ((name-offset (name)
+         (entity-column (make-array count :initial-element nil))
+         (provenance-column (and provenance (make-array count :initial-element nil)))
+         (actors '()))
+    (labels ((actor-index (actor)
+               (let ((actor (portable-save-datum actor)))
+                 (or (position actor actors :test #'equal)
+                     (progn (setf actors (append actors (list actor)))
+                            (1- (length actors))))))
+             (name-offset (name)
                (or (position name table :test #'eq)
                    (let ((offset (+ (length table) (length extra-names))))
                      (push name extra-names)
@@ -434,33 +467,54 @@ material a placeholder still stands for, so writing never loses a name."
             for index from 0
             do (replace sites coordinate :start1 (* 3 index))
                (setf (aref materials index) (name-offset (saved-material-name identity))
-                     (aref entity-column index) (entity-index identity)))
+                     (aref entity-column index) (entity-index identity))
+               (let ((author (and provenance (gethash coordinate provenance))))
+                 (when author
+                   (setf (aref provenance-column index)
+                         (list (actor-index (getf author :actor)) (getf author :sequence)
+                               (getf author :tick) (getf author :time))))))
       (let ((players (mapcar (lambda (record)
                                (map-player-record-blocks #'block-code record))
-                             players)))
+                             players))
+            (journal (loop for event in journal
+                           collect (flet ((value-code (value)
+                                            (if (eq value :unrecorded) value (block-code value))))
+                                     (list (getf event :sequence) (getf event :transaction)
+                                           (actor-index (getf event :actor))
+                                           (getf event :tick) (getf event :time)
+                                           (copy-list (getf event :coordinate))
+                                           (value-code (getf event :before))
+                                           (value-code (getf event :after))
+                                           (portable-save-datum (getf event :cause)))))))
         (values (coerce table 'simple-vector)
                 (reverse entities)
-                (list :sites sites :materials materials :entities entity-column)
-                players)))))
+                (append (list :sites sites :materials materials :entities entity-column)
+                        (and provenance-column (some #'identity provenance-column)
+                             (list :provenance provenance-column)))
+                players
+                journal
+                (coerce actors 'simple-vector))))))
 
 (defun make-luvcraft-format-2-save-description
     (world &key (overlay (little-world-source-edits (block-world-source world)))
-                resume inhabitants (watermark 0) journal players)
+                resume inhabitants (watermark 0) journal provenance players)
   "Capture WORLD as a format-2 save whose authored edits are OVERLAY.
 
 RESUME, when given, is a player's resume in format 1's symbolic shape, as
 older format-2 saves kept it.  WATERMARK is the journal sequence the edit
-set is compacted at, and JOURNAL the events after it, written as given.
-PLAYERS is the players table: records whose blocks are block identities,
-written as offsets into the save's vocabulary and entity tables."
-  (multiple-value-bind (vocabulary entities columns players)
-      (encode-block-edit-columns overlay players)
+set is compacted at, and JOURNAL the events after it, event plists as
+ENCODE-BLOCK-EDIT-COLUMNS takes them; PROVENANCE says who authored OVERLAY's
+edits.  PLAYERS is the players table: records whose blocks are block
+identities, written as offsets into the save's vocabulary and entity tables."
+  (multiple-value-bind (vocabulary entities columns players journal actors)
+      (encode-block-edit-columns overlay players journal provenance)
     (append
      (list :luvcraft-world
            :format-version +luvcraft-newest-save-format-version+
            :recipe (world-recipe-description world)
            :vocabulary vocabulary
            :entities entities
+           :actors actors
            :edits (list* :watermark watermark columns)
            :journal journal
            :players players)
@@ -538,9 +592,74 @@ written as offsets into the save's vocabulary and entity tables."
                          (aref sites (+ 1 (* 3 index)))
                          (aref sites (+ 2 (* 3 index)))))))
 
+(defun decode-saved-actor (actors index)
+  (unless (and (integerp index) (< -1 index (length actors)))
+    (invalid-luvcraft-save "Actor index ~S is outside the actors table." index))
+  (aref actors index))
+
+(defun decode-edit-provenance (actors edits)
+  "Format-2 EDITS' provenance column as a hash table from coordinates to
+plists of :ACTOR, :SEQUENCE, :TICK, and :TIME; empty without one."
+  (let ((column (description-value edits :provenance "edit columns" :optional t))
+        (sites (description-value edits :sites "edit columns"))
+        (provenance (make-hash-table :test #'equal)))
+    (when column
+      (unless (and (vectorp column) (= (* 3 (length column)) (length sites)))
+        (invalid-luvcraft-save "A provenance column must match the edits: ~S." column))
+      (dotimes (index (length column))
+        (let ((entry (aref column index)))
+          (when entry
+            (unless (and (listp entry) (= 4 (length entry)) (integerp (second entry)))
+              (invalid-luvcraft-save "Malformed provenance ~S." entry))
+            (destructuring-bind (actor sequence tick time) entry
+              (setf (gethash (list (aref sites (* 3 index)) (aref sites (+ 1 (* 3 index)))
+                                   (aref sites (+ 2 (* 3 index))))
+                             provenance)
+                    (list :actor (decode-saved-actor actors actor) :sequence sequence
+                          :tick tick :time time)))))))
+    provenance))
+
+(defun decode-journal-tail (vocabulary remap restored-entities actors journal watermark)
+  "Format-2 JOURNAL as event plists with block identities, checked to follow
+WATERMARK without a gap."
+  (unless (listp journal)
+    (invalid-luvcraft-save "A journal must be a list."))
+  (loop for entry in journal
+        for expected from (1+ watermark)
+        collect (progn
+                  (unless (and (listp entry) (= 9 (length entry)))
+                    (invalid-luvcraft-save "Malformed journal event ~S." entry))
+                  (destructuring-bind (sequence transaction actor tick time coordinate
+                                       before after cause)
+                      entry
+                    (unless (eql sequence expected)
+                      (invalid-luvcraft-save "Journal event ~S should be number ~D." entry expected))
+                    (unless (and (integerp transaction) (plusp transaction)
+                                 (or (null tick) (integerp tick))
+                                 (or (null time) (integerp time))
+                                 (listp coordinate) (= 3 (length coordinate))
+                                 (every #'integerp coordinate))
+                      (invalid-luvcraft-save "Malformed journal event ~S." entry))
+                    (flet ((value (code)
+                             (cond ((eq code :unrecorded) code)
+                                   ((consp code)
+                                    (destructuring-bind (offset entity-index) code
+                                      (decode-block-identity vocabulary remap restored-entities
+                                                             offset entity-index)))
+                                   (t (decode-block-identity vocabulary remap restored-entities
+                                                             code nil)))))
+                      (list :sequence sequence :transaction transaction
+                            :actor (decode-saved-actor actors actor) :tick tick :time time
+                            :coordinate coordinate :before (value before) :after (value after)
+                            :cause cause))))))
+
 (defun restore-format-2-world (fields)
-  "Restore a format-2 save's world: raise the recipe, then install its edits.
-Return it and the players table, with its blocks restored."
+  "Restore a format-2 save's world: raise the recipe, then install its edits
+and replay its journal tail over them, so the world stands at the journal's
+head.  Return it, the players table with its blocks restored, the journal
+tail as event plists, the edits' provenance by coordinate, and the edit set
+at the watermark, a hash table from coordinates to blocks, from which a
+journal replays the tail itself."
   (let* ((recipe (description-value fields :recipe "luvcraft save"))
          (vocabulary (description-value fields :vocabulary "luvcraft save"))
          (remap (resolve-material-vocabulary vocabulary))
@@ -565,10 +684,28 @@ Return it and the players table, with its blocks restored."
                                        (little-world-source-edits little))
             (unless (zerop (length (description-value edits :materials "edit columns")))
               (invalid-luvcraft-save "~S keeps no authored edits." little)))
-        (values world
-                (decode-player-records vocabulary remap entities
-                                       (description-value fields :players "luvcraft save"
-                                                          :optional t :default nil)))))))
+        (let ((actors (description-value fields :actors "luvcraft save"
+                                          :optional t :default #())))
+          (unless (vectorp actors)
+            (invalid-luvcraft-save "An actors table must be a vector, not ~S." actors))
+          (let ((tail (decode-journal-tail vocabulary remap entities actors
+                                           (description-value fields :journal "luvcraft save")
+                                           (description-value edits :watermark "edit columns")))
+                (compacted (make-hash-table :test #'equal)))
+            (when (typep little 'little-world-source)
+              (let ((overlay (little-world-source-edits little)))
+                (maphash (lambda (coordinate block) (setf (gethash coordinate compacted) block))
+                         (block-edit-overlay-entries overlay))
+                (dolist (event tail)
+                  (apply #'record-block-edit overlay (getf event :after)
+                         (getf event :coordinate)))))
+            (values world
+                    (decode-player-records vocabulary remap entities
+                                           (description-value fields :players "luvcraft save"
+                                                              :optional t :default nil))
+                    tail
+                    (decode-edit-provenance actors edits)
+                    compacted)))))))
 
 ;;; Inhabitants are individuals living in the world that the core does not
 ;;; know: gnomes and cats belong to the agent system.  Each system registers
@@ -639,8 +776,10 @@ DESCRIPTION."
 (defun restore-luvcraft-save-description (description)
   "Return the world, resume description, and inhabitant descriptions
 represented by DESCRIPTION, and a plist of its journal :WATERMARK, its
-:JOURNAL tail, and its :PLAYERS table (empty before format 2), whose
-records hold block identities.  The resume is format 1's, or an older
+:JOURNAL tail as event plists (see ENCODE-BLOCK-EDIT-COLUMNS), the :EDITS
+at the watermark and their :PROVENANCE, both by coordinate, and its
+:PLAYERS table (empty before format 2), whose records and events hold
+block identities.  The world itself stands at the journal's head.  The resume is format 1's, or an older
 format 2's; newer saves keep their players in the table.
 
 Every format up to +LUVCRAFT-NEWEST-SAVE-FORMAT-VERSION+ is read; format 1
@@ -670,15 +809,14 @@ migrates forward through the same name resolution format 2 uses."
         (2
          (let ((watermark (description-value
                            (description-value fields :edits "luvcraft save")
-                           :watermark "edit columns"))
-               (journal (description-value fields :journal "luvcraft save")))
-           (unless (listp journal)
-             (invalid-luvcraft-save "A journal must be a list."))
-           (multiple-value-bind (world players) (restore-format-2-world fields)
+                           :watermark "edit columns")))
+           (multiple-value-bind (world players journal provenance compacted)
+               (restore-format-2-world fields)
              (values world
                      resume-description
                      inhabitants
-                     (list :watermark watermark :journal journal :players players)))))
+                     (list :watermark watermark :journal journal :players players
+                           :provenance provenance :edits compacted)))))
         (t
          (invalid-luvcraft-save
           "Format version ~S is unsupported; this image reads 1 through ~D."
