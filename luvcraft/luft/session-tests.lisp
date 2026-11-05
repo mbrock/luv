@@ -45,14 +45,26 @@ with collision for COLLISION-KEYS."
 
 (defun pump (sessions &key (until (constantly nil)) (seconds 5) (step 1/60) advance)
   "Advance SESSIONS until UNTIL is true, at most SECONDS of wall time.
-ADVANCE also steps each session's world's simulation by STEP."
-  (let ((deadline (+ (get-internal-real-time) (* seconds internal-time-units-per-second))))
+ADVANCE also steps each session's world's simulation, by the wall time each
+round took, as a frame does, and none of it discarded: remote tracks play back on the wall clock, so a
+simulation stepped by a fixed STEP would run ahead of or behind its sender's
+clock.  Without ADVANCE each round is STEP."
+  (let ((deadline (+ (get-internal-real-time) (* seconds internal-time-units-per-second)))
+        (then (get-internal-real-time)))
     (loop
-      (dolist (session sessions)
-        (when advance
-          (terrain:advance-world-simulation
-           (host:world-simulation (host:session-world session)) step))
-        (host:advance-world-session session step))
+      (let* ((now (get-internal-real-time))
+             (step (if advance (/ (- now then) internal-time-units-per-second) step)))
+        (setf then now)
+        (dolist (session sessions)
+          (when advance
+            ;; In pieces under the simulation's catch-up limit, so a slow
+            ;; round under load is run rather than discarded.
+            (loop with simulation = (host:world-simulation (host:session-world session))
+                  for left = step then (- left piece)
+                  for piece = (min left 1/40)
+                  while (plusp left)
+                  do (terrain:advance-world-simulation simulation piece)))
+          (host:advance-world-session session step)))
       (when (funcall until) (return t))
       (when (> (get-internal-real-time) deadline) (return nil))
       (sleep 0.005))))
@@ -305,10 +317,16 @@ Until the host has its requests, both stand at the same old head."
           ;; Stamped with Bea's simulation tick, at 120 a second.
           (true (<= (* 120 (host:pose-snapshot-sent newest)) (host:world-tick guest-world)))
           (true (integerp (round (* 120 (host:pose-snapshot-sent newest)))))
-          ;; Drawn a little behind where she walks, never ahead of her.
+          ;; Drawn a little behind where she walks, never ahead of her: by
+          ;; the track's delay and the newest pose's age, at her speed.  Both
+          ;; grow under load, when rounds and arrivals are uneven.
           (true shown)
-          (true (< (- (v:vec3-x body) 3) (aref (host:pose-snapshot-position shown) 0)
-                   (+ (v:vec3-x body) 0.5))))
+          (let* ((age (- (/ (host:world-tick guest-world) 120d0) (host:pose-snapshot-sent newest)))
+                 (speed (v:vec3-x (terrain:body-velocity
+                                   (terrain:character-body (host:player-character bea)))))
+                 (behind (* speed (+ (host:track-delay track) age))))
+            (true (< (- (v:vec3-x body) behind 0.5) (aref (host:pose-snapshot-position shown) 0)
+                     (+ (v:vec3-x body) 0.5)))))
         (host:close-world-session guest)))))
 
 (define-test a-remote-track-plays-a-little-behind-and-leaps-teleports

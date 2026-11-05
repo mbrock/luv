@@ -654,6 +654,13 @@ strangers switched off, all seven of its checks fail.
 Two images on one Mac showed each other's bodies holding planks, walking,
 and named near and at about 25 cells.
 
+The session tests' =pump= now steps each simulation by the wall time each
+round took, as a frame does, since remote tracks play back on the wall
+clock. A fixed 1/60 s ran the sender 1.2 to 3 times faster than wall time,
+or slower under load, and =poses-travel-stamped-with-the-simulation-tick=
+drew Bea 3.16 cells behind. Its bound is now her speed times the track's
+delay and the newest pose's age, not a fixed 3 cells.
+
 /Open./ A rider's pose will carry its turtle (2B); =remote-body-walking-p=
 and the avatar's position are where the body sits instead of walking. Both
 players wear the same avatar. The arm hangs at the side rather than
