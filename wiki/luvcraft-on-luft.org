@@ -1832,3 +1832,32 @@ The live fountain rate was set to zero; a cheaper droplet representation
 remains a follow-up. These source changes compile in the live renderer and
 pass strict Parinfer checks; residual temporal shimmer still needs judging
 at interactive resolution.
+
+* NEXT Assemble a source chunk without a cell hash table
+:PROPERTIES:
+:ID: I5NL8X
+:END:
+
+A fresh alpine world used to wait about 28 s for its first terrain. Seed 7
+needs 144 chunks before the first cohort publishes, and the single
+producer generated them one at a time. Luvcraft's generator now uses typed
+noise and reads each column once (#QTXNY0 is unchanged). It writes dense
+indices directly and raises the sixteen Luvcraft chunks under one Luft
+chunk on every core but one. One Luft chunk of seed 121 went from 250 ms
+to 7 ms on one thread and 3.5 ms on nine, on the 10-core M2 Pro.
+
+Without a window, the preroll's own streaming loop (same scene, worker and
+retargeting) measured seed 7 from spawn to the first cohort's meshes ready
+to publish. Before the change this took 27.6 to 38.9 s, with every chunk
+resident at 26.4 to 27.6 s. After it, the chunks were resident at 2.9 s
+and the meshes ready at 4.5 s.
+
+Most of those 2.9 s are now Luft's own work: about 20 ms per chunk in
+=terrain::materialize-world-source-chunk=, all on the one producer. Placing
+about 55,000 cells into an =eql= hash table of sites takes much of it.
+Packing the fibers from that table and finding the sky interfaces take the
+rest. Generation itself is 3.5 ms of it. A dense per-chunk material array
+would remove the hashing without changing what the chunk holds. Running
+several source loads at once would also help, but it changes the
+production system's concurrency. It waits until the multiplayer streaming
+rework has settled.
