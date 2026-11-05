@@ -65,6 +65,13 @@ jobs:
           args=()
           if [ "$MACOS_NOTARIZE" = true ]; then args+=(--require-notarized); fi
           python3 scripts/test-macos-release.py build/macos-release/luvcraft-macos-arm64.zip build/macos-smoke --cli-only "${args[@]}"
+      - name: Retain moved-app smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-smoke-logs
+          path: build/macos-smoke
+          if-no-files-found: ignore
       - name: Generate signed Sparkle feed
         if: env.MACOS_NOTARIZE == 'true'
         env:
