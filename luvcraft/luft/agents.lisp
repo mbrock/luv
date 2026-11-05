@@ -32,6 +32,9 @@
                :documentation "The provider turn whose words SAID holds.")
    (attending :initform nil :accessor inhabitant-attending
               :documentation "The id of the player the companion attends to: the one who spoke to it last.")
+   (owner :initarg :owner :initform nil :accessor inhabitant-owner
+          :documentation "The id of the player who summoned it, whose stock it builds
+from; NIL for the world's owner (company.lisp).")
    ;; A guest's copy of its host's companion (companion-session.lisp).
    (track :initform nil :accessor inhabitant-track
           :documentation "The host's poses of this companion's body; NIL where it lives.")
@@ -71,7 +74,7 @@
   (luft:make-site (terrain:world-source-domain (world-source world))
                   x y z luft:+cell-extent+ 1))
 
-(defun make-inhabitant (world kind position &key (id (fresh-companion-id kind))
+(defun make-inhabitant (world kind position &key (id (fresh-companion-id kind)) owner
                                                  description conversation asked said (yaw 0.0))
   (let* ((height (luvcraft.agent::companion-body-height kind))
          (character (terrain:make-walking-character
@@ -82,7 +85,7 @@
          (simulation (terrain:make-world-simulation (world-scene world))))
     (terrain:add-simulation-character simulation character)
     (make-instance 'inhabitant :id id :kind kind :character character :simulation simulation
-                               :description description
+                               :description description :owner owner
                               :conversation conversation :asked asked :said said
                               ;; Saved dialogue is history, not a newly completed turn.
                               :notified said)))
@@ -102,6 +105,7 @@
                      ;; A companion saved before ids gets one, kept from then on.
                      :id (or (getf (rest description) :id)
                              (fresh-companion-id (first description)))
+                     :owner (getf (rest description) :owner)
                      :description description
                      :yaw (getf (rest description) :facing-yaw 0.0)
                      :conversation (getf (rest description) :conversation)
@@ -116,6 +120,7 @@
          (provider (inhabitant-provider inhabitant)))
     (list (inhabitant-kind inhabitant)
           :id (inhabitant-id inhabitant)
+          :owner (inhabitant-owner inhabitant)
           :cell (game:site-luvcraft-cell
                  (world-source world)
                  (agent-cell world (floor (vec3:vec3-x p))
@@ -153,10 +158,12 @@ when it has fallen out of the world: one broken companion never stops a save."
   "Every inhabitant of WORLD as its save describes them, including ones this game cannot host."
   (agent-inhabitant-descriptions world (animal-inhabitant-descriptions world)))
 
-(defun summon-world-inhabitant (world position &optional (kind :gnome))
-  "Summon a companion onto clear, resident ground near POSITION."
-  (when (typep (world-session world) 'guest-session)
-    (error "In a shared world, the host summons companions; talk to theirs."))
+(defun summon-world-inhabitant (world position &optional (kind :gnome) owner)
+  "Summon a companion onto clear, resident ground near POSITION, to build
+from the stock of the player OWNER, an id, or of WORLD's owner.  A guest's
+world asks its host and returns NIL (company.lisp)."
+  (when (replica-world-p world)
+    (return-from summon-world-inhabitant (ask-host-to-summon world position kind)))
   (initialize-world-agents world)
   (let ((scene (world-scene world)))
     (loop for (dx dy) in '((3 0) (0 3) (-3 0) (0 -3) (4 2) (-4 2))
@@ -174,18 +181,20 @@ when it has fallen out of the world: one broken companion never stops a save."
                          (notany (lambda (other)
                                    (< (companion-distance (inhabitant-position other) point) 1.0))
                                  (world-agents world)))
-                (let ((agent (make-inhabitant world kind point)))
+                (let ((agent (make-inhabitant world kind point :owner owner)))
                   (push agent (world-agents world))
                   (return-from summon-world-inhabitant agent)))))
     (error "No clear resident ground nearby; wait for terrain or move into the open.")))
 
 (defun summon-inhabitant (viewer &optional (kind :gnome))
-  "Summon a companion near VIEWER's player, and address it."
-  (setf (viewer-conversation-agent viewer)
-        (summon-world-inhabitant
-         (viewer-world viewer)
-         (terrain:body-position (terrain:character-body (render:viewer-player viewer)))
-         kind)))
+  "Summon a companion near VIEWER's player, and address it.  A guest's
+companion arrives from its host and is addressed then: NIL meanwhile."
+  (let ((companion (summon-world-inhabitant
+                    (viewer-world viewer)
+                    (terrain:body-position (terrain:character-body (render:viewer-player viewer)))
+                    kind (world-local-player-id (viewer-world viewer)))))
+    (when companion
+      (setf (viewer-conversation-agent viewer) companion))))
 
 (defparameter *inhabitant-tools*
   '(com-look-around com-cell-at com-walk-to com-place-cell com-fetch-block com-propose-cell))

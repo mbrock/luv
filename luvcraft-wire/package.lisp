@@ -59,7 +59,7 @@ exactly what an encoder would have written.")
    #:companion-record-id #:companion-record-kind #:companion-record-presence
    #:companion-record-asked #:companion-record-said #:companion-record-said-serial
    #:companion-record-attending #:companion-record-activity #:companion-record-tool
-   #:companion-record-destination #:companion-record-pose
+   #:companion-record-destination #:companion-record-pose #:companion-record-owner
    #:chunk-hash #:make-chunk-hash #:chunk-hash-p #:chunk-hash-chunk
    #:chunk-hash-digest
    ;; messages
@@ -98,6 +98,8 @@ exactly what an encoder would have written.")
    #:companion-tell-message-companion #:companion-tell-message-text
    #:companion-pose-message #:make-companion-pose-message #:companion-pose-message-p
    #:companion-pose-message-companion #:companion-pose-message-pose
+   #:summon-message #:make-summon-message #:summon-message-p
+   #:summon-message-kind #:summon-message-position
    #:sky-request-message #:make-sky-request-message #:sky-request-message-p
    #:sky-request-message-setting #:sky-request-message-value
    #:ride-message #:make-ride-message #:ride-message-p

@@ -160,7 +160,8 @@ from the head when it opened, or NIL for the watermark."))
   ;; meshing, is the scene edit.
   ;; Particles follow from the journal's confirmed events, whoever made them.
   (multiple-value-bind (edit status)
-      (player-edit-world-cell (viewer-world viewer) (viewer-local-player viewer) cell placement
+      (player-edit-world-cell (viewer-world viewer)
+                              (or *world-edit-player* (viewer-local-player viewer)) cell placement
                        :scene-edit (lambda (block) (call-next-method viewer cell block)))
     (setf (render:viewer-last-edit-status viewer) status)
     (values edit status)))

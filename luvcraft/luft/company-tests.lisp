@@ -114,3 +114,47 @@
                 ;; ... and they come to rest together.
                 (true (< (distance (car (last track)) (turtle-at turtle)) 0.1)))))
           (host:close-world-session guest))))))
+
+(define-test a-guest-summons-a-companion-that-builds-from-her-stock
+  (let ((host::*inhabitant-provider-factory* (scripted-companion-factory (list nil))))
+    (with-host (world session network)
+      (multiple-value-bind (guest-world bea guest) (join-resident session network "bea" "Bea")
+        (let* ((ada (host:find-world-player world "ada"))
+               (film (luvcraft::ensure-film "summoned-companion"))
+               (count (lambda (player)
+                        (luvcraft:block-inventory-entry-quantity
+                         (luvcraft:block-inventory-entry-for (luvcraft:player-inventory player) film))))
+               (gnome nil) (mirror nil))
+          (luvcraft:add-block-to-inventory (luvcraft:player-inventory ada) film 2)
+          (luvcraft:add-block-to-inventory (luvcraft:player-inventory bea) film 2)
+          ;; Bea's G asks the host, which summons it for her.
+          (is eq nil (host::summon-world-inhabitant
+                      guest-world (v:make-vec3 1038.5 1040.5 (float (ground world 1038 1040)))))
+          (true (pump-companions
+                 (list session guest)
+                 :until (lambda ()
+                          (setf gnome (first (host::host-companions session))
+                                mirror (and gnome (host::find-world-inhabitant
+                                                   guest-world (host::inhabitant-id gnome))))
+                          (and mirror (host::inhabitant-owner mirror)))))
+          (is equal "bea" (host::inhabitant-owner gnome))
+          (is equal "bea" (host::inhabitant-owner mirror))
+          (is eq nil (host::inhabitant-mirror-p gnome))
+          ;; Her stock reaches the host; then the companion places a film of hers.
+          (true (pump (list session guest)
+                      :until (lambda () (eql 2 (funcall count (host:find-world-player world "bea"))))))
+          (let* ((p (host::inhabitant-position gnome))
+                 (x (1+ (floor (v:vec3-x p)))) (y (floor (v:vec3-y p)))
+                 (cell (cell world x y (ground world x y))))
+            (is eq :edited (nth-value 1 (host::edit-agent-cell world gnome cell
+                                                               (game:block-placement film))))
+            (true (pump-companions (list session guest)
+                                   :until (lambda () (eql 1 (funcall count bea)))))
+            (is equal (list :inhabitant (host::inhabitant-id gnome)) (last-actor guest-world))
+            ;; The host's own stock is untouched; Bea's is spent, on both sides.
+            (is = 2 (funcall count ada))
+            (is = 1 (funcall count bea))
+            (true (pump (list session guest)
+                        :until (lambda () (eql 1 (funcall count (host:find-world-player world "bea")))))))
+          (host:close-world-session guest)))
+      (host:shutdown-luvcraft-world world))))

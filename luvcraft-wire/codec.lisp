@@ -402,7 +402,8 @@ HELD is the exact block in hand.  An empty INVENTORY is a new player."
   "A companion as every peer sees it (#EA88ON): its stable ID, what it was
 last asked and said (SAID-SERIAL counts its lines, so a repeated line is
 still news), the player it attends to, what it is doing, the foot cell it
-walks to, and its body."
+walks to, its body, and the id of the player whose stock it builds from,
+empty for the host's."
   (id :string "")
   (kind :keyword :gnome)
   (presence (:enum :present :left) :present)
@@ -413,7 +414,8 @@ walks to, and its body."
   (activity (:enum :idle :opening :thinking :working) :idle)
   (tool :string "")
   (destination (:optional :site) nil)
-  (pose :pose (make-pose)))
+  (pose :pose (make-pose))
+  (owner :string ""))
 
 (define-wire-record chunk-hash ()
   (chunk :chunk (make-site 0 0 0))
@@ -548,6 +550,12 @@ hour (0 to 24), the real minutes in a day, whether the clock is paused, or
 the sun's orbit tilt."
   (setting (:enum :hour :minutes-per-day :paused :tilt) :hour)
   (value :value nil))
+
+(define-message summon-message 23 :reliable
+  "A guest asking its host to summon a companion of KIND near POSITION, to
+build from the guest's own stock."
+  (kind (:enum :gnome :cat :fantus) :gnome)
+  (position :position (vector 0d0 0d0 0d0)))
 
 (define-message pose-message 32 :unreliable
   (player :string "")

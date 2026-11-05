@@ -752,3 +752,15 @@ about 0.1 s before its mind takes over.  =a-turtle-is-handed-back-without-a-step
 rides for a second and gets off: with the old hand-back the guest's
 turtle steps 0.088 cells back in one frame; with the old set-down the
 host's moves twice a frame's ride.
+
+A guest summons its own companion: its G sends a =summon-message= (type
+23) with where it stands, and the host summons the companion there, its
+=inhabitant-owner= the guest, and shares it as any other; its record now
+carries that owner, and a save keeps it.  The guest's view addresses the
+companion when it arrives.  The companion builds through the host's
+sequencer as before, but spends its owner's stock: the host keeps a copy
+of each guest's inventory from the records it sends, and a guest accounts
+a confirmed event of a companion it owns as it accounts its own.
+=a-guest-summons-a-companion-that-builds-from-her-stock= has Bea's gnome
+place one of her two films: hers drop to one on both sides, Ada's stay at
+two.  With the host's stock spent instead, it fails.

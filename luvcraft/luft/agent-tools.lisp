@@ -45,15 +45,16 @@
   "Edit CELL as INHABITANT, from its owner's stock: through WORLD's open view, else directly.
 The journal names INHABITANT's stable id as the actor, so its edits undo on
 their own, and keep their author across saves."
-  (let ((*world-edit-actor* (inhabitant-actor inhabitant)))
+  (let ((*world-edit-actor* (inhabitant-actor inhabitant))
+        (*world-edit-player* (companion-owner world inhabitant)))
     (if (world-editor world)
         (funcall (world-editor world) cell placement)
-        (player-edit-world-cell world (world-owner world) cell placement))))
+        (player-edit-world-cell world *world-edit-player* cell placement))))
 
 (defun edit-agent-cell (world inhabitant cell placement)
   (validate-agent-reach world inhabitant cell)
   ;; Do not let the player's per-instance held block leak into a tool edit.
-  (let* ((player (world-owner world))
+  (let* ((player (companion-owner world inhabitant))
          (held (player-held-block player)))
     (unwind-protect
          (progn
@@ -69,8 +70,8 @@ their own, and keep their author across saves."
   "Report your feet, player, inventory, walking status and nearby standing surfaces. Z is up."
   (multiple-value-bind (world inhabitant) (companion-command-context)
     (let* ((p (inhabitant-position inhabitant))
-           (owner (world-owner world))
-           ;; The player is whoever spoke last; the stock is the owner's.
+           (owner (companion-owner world inhabitant))
+           ;; The player is whoever spoke last; the stock is its summoner's.
            (player (or (companion-attention-position world inhabitant)
                        (terrain:body-position (terrain:character-body (player-character owner))))))
       (format nil "~(~A~) feet (~,2F ~,2F ~,2F); player (~,2F ~,2F ~,2F). Z up.~%~
@@ -233,7 +234,10 @@ their own, and keep their author across saves."
                                          :name "Summon Companion" :keystroke (:g)) ()
   (let* ((viewer (render:viewer-command-viewer))
          (companion (summon-inhabitant viewer)))
-    (show-companion-message viewer companion)))
+    (if companion
+        (show-companion-message viewer companion)
+        (luv.workbench:show-workbench-message (luv.workbench:application-workbench viewer)
+                                             "Asking the host for a companion…"))))
 
 (clim:define-command (com-summon-cat :command-table luvcraft-world :name "Summon Cat") ()
   (summon-inhabitant (render:viewer-command-viewer) :cat))

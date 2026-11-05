@@ -143,3 +143,74 @@ asked for and the host has not yet granted, and forget the rest."
       (if (valid-sky-setting-p setting value)
           (set-world-sky (session-world session) setting value)
           (session-log session "Refused ~A's sky request ~S ~S." (player-id player) setting value)))))
+
+;;; Companions of one's own.  A guest's G asks its host with a
+;;; SUMMON-MESSAGE; the host summons the companion near where the guest
+;;; asked, its owner the guest, and shares it as any companion.  The
+;;; companion builds through the host's sequencer as ever, but spends its
+;;; owner's stock: on the host, the guest's inventory as its latest record
+;;; says, and on the guest, which owns that stock, once the host confirms
+;;; the companion's edit, as it accounts its own.
+
+(defun companion-owner (world inhabitant)
+  "The player whose stock INHABITANT builds from: its summoner, while here,
+else WORLD's owner."
+  (or (and (inhabitant-owner inhabitant)
+           (find-world-player world (inhabitant-owner inhabitant)))
+      (world-owner world)))
+
+(defun own-actor-p (session actor)
+  "Whether journal ACTOR spends SESSION's local player's stock: the player
+itself, or a companion it summoned."
+  (let ((me (player-id (session-local-player session))))
+    (or (equal actor me)
+        (and (consp actor) (eq (first actor) :inhabitant)
+             (let ((companion (find-world-inhabitant (session-world session) (second actor))))
+               (and companion (equal me (inhabitant-owner companion))))))))
+
+(defun ask-host-to-summon (world position kind)
+  "Ask WORLD's host to summon a companion of KIND near Luft POSITION for its
+local player."
+  (let ((session (world-session world)))
+    (unless (eq (session-state session) :open)
+      (error "The host is not connected; no companion can come."))
+    (session-broadcast session (wire:make-summon-message
+                                :kind kind
+                                :position (vector (coerce (vec3:vec3-x position) 'double-float)
+                                                  (coerce (vec3:vec3-y position) 'double-float)
+                                                  (coerce (vec3:vec3-z position) 'double-float))))
+    nil))
+
+(defmethod handle-session-message ((session host-session) peer (message wire:summon-message))
+  (let ((player (guest-peer-player session peer)))
+    (when player
+      (handler-case
+          (let* ((p (wire:summon-message-position message))
+                 (companion (summon-world-inhabitant
+                             (session-world session)
+                             (vec3:make-vec3 (coerce (aref p 0) 'single-float)
+                                             (coerce (aref p 1) 'single-float)
+                                             (coerce (aref p 2) 'single-float))
+                             (wire:summon-message-kind message) (player-id player))))
+            (session-log session "~A summoned ~A." (player-name player) (inhabitant-id companion)))
+        (error (condition)
+          (net:send-message (session-endpoint session)
+                            (wire:make-chat-message :speaker "host" :text (princ-to-string condition))
+                            peer))))))
+
+(defun address-summoned-companion (session inhabitant)
+  "A guest's view addresses a companion that its own player just summoned."
+  (let ((viewer (session-viewer session)))
+    (when (and viewer (equal (inhabitant-owner inhabitant)
+                             (player-id (session-local-player session))))
+      (setf (viewer-conversation-agent viewer) inhabitant)))
+  inhabitant)
+
+(defmethod handle-session-message :after ((session host-session) peer
+                                          (message wire:player-update-message))
+  ;; The host's copy of a guest's stock is what the guest last said it is,
+  ;; so its companions spend what the guest has.
+  (let ((player (guest-peer-player session peer)))
+    (when (and player (player-saved-record player))
+      (setf (luvcraft:block-inventory-entries (luvcraft:player-inventory player))
+            (luvcraft:block-inventory-entries (restore-inventory (player-saved-record player)))))))

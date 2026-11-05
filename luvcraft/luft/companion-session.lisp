@@ -42,7 +42,7 @@
        :attending (or (inhabitant-attending inhabitant) "")
        :activity activity :tool (or tool "")
        :destination (and destination (site-wire destination))
-       :pose pose))))
+       :pose pose :owner (or (inhabitant-owner inhabitant) "")))))
 
 (defun companion-attention-position (world inhabitant)
   "Where the player INHABITANT attends to stands in WORLD, or NIL."
@@ -167,7 +167,8 @@ changed since they were last told, and each that has gone."
   "Bring the guest's copy INHABITANT to what the host's RECORD says.  What
 it said before JOINING is history, not a fresh subtitle."
   (flet ((blank-nil (string) (if (string= string "") nil string)))
-    (setf (inhabitant-asked inhabitant) (blank-nil (wire:companion-record-asked record))
+    (setf (inhabitant-owner inhabitant) (blank-nil (wire:companion-record-owner record))
+          (inhabitant-asked inhabitant) (blank-nil (wire:companion-record-asked record))
           (inhabitant-attending inhabitant) (blank-nil (wire:companion-record-attending record))
           (inhabitant-mirrored-activity inhabitant) (wire:companion-record-activity record)
           (inhabitant-mirrored-tool inhabitant) (blank-nil (wire:companion-record-tool record))
@@ -197,8 +198,9 @@ it said before JOINING is history, not a fresh subtitle."
       (:present
        (if inhabitant
            (update-mirror-companion session inhabitant record)
-           (update-mirror-companion session (mirror-companion session record) record
-                                    :joining t)))
+           (address-summoned-companion
+            session (update-mirror-companion session (mirror-companion session record) record
+                                             :joining t))))
       (:left
        (when inhabitant (forget-mirror-companion session inhabitant))))))
 

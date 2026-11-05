@@ -783,7 +783,7 @@ set installed at its watermark, and the remap of the host's vocabulary."
   (let* ((player (session-local-player session))
          (inventory (luvcraft:player-inventory player)))
     (dolist (event events)
-      (when (equal (terrain:world-event-actor event) (player-id player))
+      (when (own-actor-p session (terrain:world-event-actor event))
         (let ((before (values (journal-value-block (terrain:world-event-before event))))
               (after (values (journal-value-block (terrain:world-event-after event)))))
           (when (and after (luvcraft:block-kind-carried-p after))

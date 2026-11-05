@@ -384,6 +384,10 @@ as by STEER-LUVCRAFT-PLAYER with a tape's or a bot's next frame."
   "The journal actor of the edit in progress when it is not the editing
 player's own, such as a companion building for its player.")
 
+(defvar *world-edit-player* nil
+  "The player whose stock the edit in progress spends when it is not the
+view's own, such as a guest's companion building on the host.")
+
 (defun world-edit-actor (player)
   "The principal whose journal event an edit by or for PLAYER is."
   (or *world-edit-actor* (player-id player)))

@@ -33,7 +33,7 @@
                          :said "Gärna — ett steg i taget." :said-serial 3
                          :attending "c2f0-player-ida" :activity :working
                          :tool "Walk To" :destination (make-site 1030 1031 12)
-                         :pose (sample-pose)))
+                         :pose (sample-pose) :owner "c2f0-player-ida"))
 
 (defun sample-messages ()
   "One rich message of every type, with distinct values in every field."
@@ -98,6 +98,7 @@
        (in-world (make-ride-message :rider "c2f0-player-ida" :entity 5 :action :refused))
        (in-world (make-throw-message :kind :beach-ball :position #(1030.5d0 1040.25d0 21.75d0)
                                      :velocity #(-3.5d0 8d0 2.25d0)))
+       (in-world (make-summon-message :kind :cat :position #(1030.5d0 1040.25d0 21d0)))
        (in-world (make-sky-request-message :setting :minutes-per-day :value 7.5d0))
        (in-world (make-pose-message :player "c2f0-player-ida" :pose (sample-pose)))
        (in-world (make-entity-snapshot-message :snapshot (sample-entities)))
