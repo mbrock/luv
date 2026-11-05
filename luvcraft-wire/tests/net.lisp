@@ -139,11 +139,14 @@ arrive by CHANNEL."
                 (nth-value 1 (sb-bsd-sockets:socket-name socket)))
       (sb-bsd-sockets:socket-close socket))))
 
-(defun broadcast-deliverable-p ()
-  "Whether a datagram broadcast to 255.255.255.255 comes back to this machine.
+(defun broadcast-undeliverable ()
+  "NIL when a datagram broadcast to 255.255.255.255 comes back to this
+machine, else why not.
 
 A host firewall may drop inbound broadcasts to ports it has not opened --
-NixOS's default one does -- and then no beacon can be heard here at all."
+NixOS's default one does -- and then no beacon can be heard here at all.
+macOS may refuse the send itself with EHOSTUNREACH, for instance where the
+process may not use the local network."
   (let ((listener (make-instance 'sb-bsd-sockets:inet-socket
                                  :type :datagram :protocol :udp))
         (sender (make-instance 'sb-bsd-sockets:inet-socket
@@ -155,25 +158,32 @@ NixOS's default one does -- and then no beacon can be heard here at all."
            (sb-bsd-sockets:socket-bind listener #(0 0 0 0) 0)
            (setf (sb-bsd-sockets:non-blocking-mode listener) t
                  (sb-bsd-sockets:sockopt-broadcast sender) t)
-           (sb-bsd-sockets:socket-send
-            sender probe (length probe)
-            :address (list #(255 255 255 255)
-                           (nth-value 1 (sb-bsd-sockets:socket-name listener))))
-           (wait-until (lambda ()
-                         (let ((length (nth-value 1 (sb-bsd-sockets:socket-receive
-                                                     listener buffer nil))))
-                           (and length (= length (length probe)))))
-                       :timeout 1))
+           (handler-case
+               (progn
+                 (sb-bsd-sockets:socket-send
+                  sender probe (length probe)
+                  :address (list #(255 255 255 255)
+                                 (nth-value 1 (sb-bsd-sockets:socket-name listener))))
+                 (unless (wait-until
+                          (lambda ()
+                            (let ((length (nth-value 1 (sb-bsd-sockets:socket-receive
+                                                        listener buffer nil))))
+                              (and length (= length (length probe)))))
+                          :timeout 1)
+                   "this machine drops its own UDP broadcasts, probably in a host firewall; open the announce port to discover hosts here"))
+             (sb-bsd-sockets:socket-error (condition)
+               (format nil "this machine refuses to send a UDP broadcast: ~A" condition))))
       (sb-bsd-sockets:socket-close listener)
       (sb-bsd-sockets:socket-close sender))))
 
 (define-test socket-endpoints-find-each-other-by-broadcast-and-by-name
-  (if (broadcast-deliverable-p)
-      (find-endpoints-by-broadcast-and-by-name)
-      (let ((reason "this machine drops its own UDP broadcasts, probably in a host firewall; open the announce port to discover hosts here"))
-        (format t "~&Skipping LAN discovery: ~A.~%" reason)
-        (parachute:skip reason
-          (true (find-endpoints-by-broadcast-and-by-name))))))
+  (let ((reason (broadcast-undeliverable)))
+    (if (null reason)
+        (find-endpoints-by-broadcast-and-by-name)
+        (progn
+          (format t "~&Skipping LAN discovery: ~A.~%" reason)
+          (parachute:skip reason
+            (true (find-endpoints-by-broadcast-and-by-name)))))))
 
 (defun find-endpoints-by-broadcast-and-by-name ()
   (let* ((announce-port (free-udp-port))
