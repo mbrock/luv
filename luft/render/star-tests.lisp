@@ -1013,7 +1013,7 @@
     (let* ((live (make-test-walking-body 10.5 10.5 1.0))
            (viewer (make-instance 'render:game-host :source (ground) :player live))
            (camera (render:viewer-camera viewer))
-           (tape (make-array 0 :adjustable t :fill-pointer t)))
+           (tape (terrain:make-input-tape)))
       (setf (render:viewer-input-tape viewer) tape
             (render:camera-yaw camera) 0.3)
       (loop for frame below 150
@@ -1026,17 +1026,23 @@
                   (setf (render:camera-yaw camera) 1.2))
                  (120 (render::set-viewer-control viewer :forward nil)))
                (render::advance-viewer-world viewer time))
-      (true (= (length tape) (terrain:simulation-tick (render:viewer-simulation viewer))))
-      (true (= 1 (count-if #'terrain:input-frame-jump-p tape)) "a press is one edge")
+      (true (= (terrain:input-tape-length tape)
+               (terrain:simulation-tick (render:viewer-simulation viewer))))
+      (true (= 1 (count-if #'terrain:input-frame-jump-p (terrain::input-tape-frames tape)))
+            "a press is one edge")
+      ;; The tape it saves is the tape it replays.
+      (uiop:with-temporary-file (:pathname pathname :type "tape")
+        (setf tape (terrain:read-input-tape (terrain:write-input-tape tape pathname))))
       (let* ((body (render:character-body live))
              (replayed (make-test-walking-body 10.5 10.5 1.0))
              (simulation (render:make-world-simulation (ground))))
         (true (> (vec3-x (render:body-position body)) 13.0) "the live player walked")
         (render:add-simulation-character simulation replayed)
-        (dotimes (i (length tape))
+        (dotimes (i (terrain:input-tape-length tape))
           (terrain:advance-world-simulation
            simulation 1/120 :before-tick (lambda (tick)
-                                           (terrain:apply-input-frame replayed (aref tape tick)))))
+                                           (terrain:apply-input-frame
+                                            replayed (terrain:input-tape-frame tape tick)))))
         (true (equalp (render:body-position body)
                       (render:body-position (render:character-body replayed))))
         (true (equalp (render:body-velocity body)

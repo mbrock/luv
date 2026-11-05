@@ -804,7 +804,7 @@ before the operation boundary, or it would encode through resources which the
    (pending-jump-p :initform nil :accessor viewer-pending-jump-p)
    (pending-flight-p :initform nil :accessor viewer-pending-flight-p)
    (input-tape :initform nil :accessor viewer-input-tape
-               :documentation "NIL, or an adjustable vector receiving every input frame the player gets.")
+               :documentation "NIL, or an INPUT-TAPE recording every input frame the player gets.")
    (pointer-captured-p :initform nil :accessor viewer-pointer-captured-p)
    (pointer-x :initform nil :accessor viewer-pointer-x)
    (pointer-y :initform nil :accessor viewer-pointer-y)
@@ -1017,7 +1017,7 @@ look to the camera's, which the view turns directly."
   (when (viewer-player viewer)
     (let ((frame (take-viewer-input-frame viewer)))
       (when (viewer-input-tape viewer)
-        (vector-push-extend frame (viewer-input-tape viewer)))
+        (record-input-frame (viewer-input-tape viewer) frame))
       (apply-viewer-input-frame viewer frame))))
 
 (defun advance-viewer-world (viewer timestamp)

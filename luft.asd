@@ -165,7 +165,9 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luft/terrain")
-  :components ((:file "luft/terrain/simulation")))
+  :serial t
+  :components ((:file "luft/terrain/simulation")
+               (:file "luft/terrain/input-tape")))
 
 (defsystem "luft/wizard"
   :description "The isometric wizard: a small game on the Luft engine alone."

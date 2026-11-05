@@ -131,6 +131,17 @@ this package draws; the renderer and the ateliers use it.")
            #:input-frame-flight-p
            #:input-frame-vertical
            #:apply-input-frame
+           #:input-tape
+           #:make-input-tape
+           #:input-tape-length
+           #:input-tape-frame
+           #:input-tape-actions
+           #:input-tape-actions-at
+           #:record-input-frame
+           #:record-input-action
+           #:write-input-tape
+           #:read-input-tape
+           #:invalid-input-tape
            #:character-gait
            #:character-ground-acceleration
            #:character-heading-x
