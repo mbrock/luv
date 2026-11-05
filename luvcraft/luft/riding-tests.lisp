@@ -229,10 +229,14 @@
             (render:camera-pose-position new))
         (is = (luvcraft::camera-pose-field-of-view old) (render:camera-pose-field-of-view new)))
       (ride-key viewer :w)
-      (let ((start (luvcraft::critter-x turtle)))
+      (let ((start (luvcraft::critter-x turtle))
+            (tick (luft.terrain:simulation-tick (render:viewer-simulation viewer))))
         (dotimes (frame 600)
           (render::advance-viewer-world viewer (/ frame 60d0)))
         (true (> (luvcraft::critter-x turtle) (+ start 5)))
+        ;; The clock runs on under a rider, 2 ticks a 60 Hz frame after the
+        ;; first: a remote rider's poses are stamped with it (#3JTHM3).
+        (is = (+ tick 1198) (luft.terrain:simulation-tick (render:viewer-simulation viewer)))
         (true (< (luvcraft::critter-y turtle) 6))
         ;; At the lip of a stair the turtle can still be falling. Release
         ;; forward and allow the original gravity to settle it on that tread.

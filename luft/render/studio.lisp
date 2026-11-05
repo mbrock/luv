@@ -1038,7 +1038,8 @@ input frame per tick."
            (reset-simulation-interpolation simulation))
           ((viewer-focus-carries-player-p (viewer-modal-focus viewer))
            ;; What carries the player moves once a frame, by this frame's input.
-           (reset-simulation-interpolation simulation)
+           ;; The clock runs on: a rider's poses are stamped with it.
+           (pass-simulation-time simulation dt)
            (steer-viewer-player viewer))
           (t
            (advance-world-simulation

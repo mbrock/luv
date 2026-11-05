@@ -506,6 +506,14 @@ Do not advance the simulation clock or overwrite previous-frame motion history."
   (mapc #'reset-body-interpolation (simulation-bodies simulation))
   simulation)
 
+(defun pass-simulation-time (simulation seconds)
+  "Let SECONDS pass on SIMULATION's clock without running a tick of its
+bodies, and cut render poses to their physical positions: while something
+else carries the player, what is stamped with the clock still moves on."
+  (incf (slot-value simulation 'tick) (consume-simulation-time simulation seconds))
+  (mapc #'reset-body-interpolation (simulation-bodies simulation))
+  simulation)
+
 (defun add-simulation-body (simulation body)
   (unless (member body (simulation-bodies simulation) :test #'eq)
     (reset-body-interpolation body)

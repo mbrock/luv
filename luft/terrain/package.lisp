@@ -279,6 +279,7 @@ this package draws; the renderer and the ateliers use it.")
            #:set-character-movement
            #:set-character-vertical-urge
            #:reset-simulation-interpolation
+           #:pass-simulation-time
            #:simulation-phase
            #:simulation-tick
            #:simulation-bodies
