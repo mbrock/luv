@@ -674,3 +674,43 @@ frames would, until UNTIL holds with nothing in flight."
                   (shown (host:track-shown (host:player-track (host:find-world-player world "bea")))))
               (is = (aref (host:pose-snapshot-position shown) 2) (v:vec3-y seat))))
           (host:close-world-session guest))))))
+
+(defun free-port ()
+  "A TCP port nothing listens on just now."
+  (let ((socket (make-instance 'sb-bsd-sockets:inet-socket :type :stream :protocol :tcp)))
+    (unwind-protect
+         (progn (sb-bsd-sockets:socket-bind socket #(0 0 0 0) 0)
+                (nth-value 1 (sb-bsd-sockets:socket-name socket)))
+      (sb-bsd-sockets:socket-close socket))))
+
+(define-test a-game-that-cannot-open-its-view-lets-go-of-its-session
+  ;; As on a machine with no display: the canvas fails after the host has
+  ;; opened its ports, or after a guest has joined.  Neither may stay open.
+  (sb-int:encapsulate 'host::start-luvcraft-view 'no-display
+                      (lambda (function &rest arguments)
+                        (declare (ignore function arguments))
+                        (error "SDL video initialization failed: no displays")))
+  (unwind-protect
+       (let ((port (free-port)))
+         ;; The host's port is free again for the next try.
+         (fail (host:play :host t :port port :seed 3 :pathname nil :player-id "ada" :name "Ada"))
+         (let* ((world (session-test-world))
+                (session (host:host-luvcraft-world world (host:find-world-player world "ada")
+                                                   :port port)))
+           (unwind-protect
+                (progn
+                  (true session)
+                  ;; A guest that joined and could not show the world leaves it.
+                  (let ((thread (sb-thread:make-thread
+                                 (lambda ()
+                                   (ignore-errors
+                                    (host:play :join (format nil "localhost:~D" port)
+                                               :player-id "bea" :name "Bea")))
+                                 :name "joining a world with no display")))
+                    (true (pump (list session) :seconds 15
+                                :until (lambda ()
+                                         (and (not (sb-thread:thread-alive-p thread))
+                                              (null (host:find-world-player world "bea"))))))
+                    (sb-thread:join-thread thread :default nil)))
+             (host:close-world-session session))))
+    (sb-int:unencapsulate 'host::start-luvcraft-view 'no-display)))

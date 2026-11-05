@@ -327,14 +327,16 @@ go to LUFT.RENDER:START-GAME-HOST."
                                     :scene-initargs
                                     (list :residency-radius 3
                                           :mesh-preparer render:+render-population-preparer+))
-        (declare (ignore session))
-        (start-luvcraft-view
-         world player viewer-arguments
-         :terrain-bevels-p terrain-bevels-p
-         :saved-world (list :player (coerce (wire:pose-position pose) 'list)
-                            :yaw (coerce (wire:pose-yaw pose) 'single-float)
-                            :pitch (coerce (wire:pose-pitch pose) 'single-float)
-                            :flying-p (wire:pose-flying pose))))))
+        (closing-session-unless-viewed
+         session
+         (lambda ()
+           (start-luvcraft-view
+            world player viewer-arguments
+            :terrain-bevels-p terrain-bevels-p
+            :saved-world (list :player (coerce (wire:pose-position pose) 'list)
+                               :yaw (coerce (wire:pose-yaw pose) 'single-float)
+                               :pitch (coerce (wire:pose-pitch pose) 'single-float)
+                               :flying-p (wire:pose-flying pose))))))))
   (let ((loaded-p (and pathname (null seed) (probe-file pathname))))
     (multiple-value-bind (block-world resume inhabitants journal)
         (if loaded-p
@@ -351,20 +353,30 @@ go to LUFT.RENDER:START-GAME-HOST."
                                source :residency-radius 3
                                :mesh-preparer render:+render-population-preparer+)))
                (player (make-luvcraft-player :record record :id player-id :name name)))
-          (when host
-            (host-luvcraft-world world player :port port :name name
-                                              :announce (format nil "~A's world" name)))
           (multiple-value-bind (position yaw pitch flying-p)
               (and record (game:luvcraft-resume-luft-pose source record))
-            (start-luvcraft-view
-             world player viewer-arguments
-             :terrain-bevels-p terrain-bevels-p
-             :world-pathname (and (or loaded-p pathname-p
-                                      (and pathname (null seed)))
-                                  pathname)
-             :saved-world (and position
-                               (list :player position :yaw yaw :pitch pitch
-                                     :flying-p flying-p)))))))))
+            (closing-session-unless-viewed
+             (and host (host-luvcraft-world world player :port port :name name
+                                                         :announce (format nil "~A's world" name)))
+             (lambda ()
+               (start-luvcraft-view
+                world player viewer-arguments
+                :terrain-bevels-p terrain-bevels-p
+                :world-pathname (and (or loaded-p pathname-p
+                                         (and pathname (null seed)))
+                                     pathname)
+                :saved-world (and position
+                                  (list :player position :yaw yaw :pitch pitch
+                                        :flying-p flying-p)))))))))))
+
+(defun closing-session-unless-viewed (session start-view)
+  "Call START-VIEW and return its viewer.  If it does not return, as when the
+canvas cannot open, close SESSION, so its ports and worker do not outlive
+a game that never started."
+  (let ((viewer nil))
+    (unwind-protect (setf viewer (funcall start-view))
+      (when (and session (null viewer))
+        (close-world-session session)))))
 
 (defmethod render::quiesce-viewer-services :after ((viewer luvcraft-viewer))
   ;; The view has let go of its companions' conversations (agents.lisp).  The
