@@ -699,7 +699,7 @@ shows her astride the shell with the block in hand.
 /Open./ Both players wear the same avatar. Walking, the arm hangs at the
 side rather than carrying the block forward.
 
-** TODO Make company comfortable
+** DONE Make company comfortable
 :PROPERTIES:
 :ID: 3JTHM3
 :END:
@@ -707,6 +707,20 @@ side rather than carrying the block forward.
 /Intent./ Phase 3: sessions in the lobby, nameplates and chat, a provenance
 inspector and age lens (#OVEP9A), lossless reconnection, a soak bot, and
 edit prediction for tailnet play.
+
+/Evidence./ Four parts landed on =main=: chat, carrying, shared day knobs,
+a smooth ride hand-back, and guest summoning (#LV16J7); the lobby entry,
+the Join list, and reconnection from a watermark (#FPVFZC); a journal tail
+in saves, provenance, and the age lens (#NK0OC8); and input tapes, the soak
+bot, and play between machines (#3E8LY0). Each has tests that fail without
+it. A 10-minute soak on chapel made 851 events with 944 live chunk-hash
+comparisons and none differed. Over the tailnet, a Linux host with a Mac
+guest and the reverse each joined from the lobby entry and ended with equal
+journals and byte-identical chunks, and a 10 s cut resumed 6 events behind
+with equal journals. Edit prediction was left out on purpose: on a LAN an
+edit is confirmed in about 2 ms, and a guest's edits while it reconnects
+are refused as =:disconnected= rather than queued. LAN play on Windows
+also waits; its socket transport is a stub that refuses to open.
 
 *** DONE Talk, carry, and share the day
 :PROPERTIES:
