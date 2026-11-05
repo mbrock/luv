@@ -778,3 +778,59 @@ and the held block follows the same palette.  Over a walk loop its palm
 stays 0.46 figure units before it, varying by under 0.01; empty-handed it
 swings from 0.34 behind to 0.16 ahead.  =a-walking-avatar-carries-its-block-before-it=
 fails without the overlay.
+
+*** DONE Find a game, and come back to it
+:PROPERTIES:
+:ID: FPVFZC
+:END:
+
+/Intent./ Phase 3A: a host that lists itself in the tailnet lobby, a Join
+list in the workbench's lobby pane, and a guest whose link drops coming
+back without losing or repeating an event (#2SGDU2), its place kept.
+
+/Evidence./ While it hosts, a game keeps a retained entry at
+=luv/store/luvcraft/sessions/ID=, where ID is its lobby radio's client id:
+a few =key=value= lines naming the address it reaches the lobby from, its
+port, the world's name and tag, its player count, and its host
+(=session-lobby.lisp=).  The radio publishes the values it owns on every
+connection and deletes them when it stops, so an entry lasts exactly as
+long as the hosting; and the Join list counts an entry only while its
+radio's presence is there, so a host that died without a goodbye is not
+listed.  The store is subscribed as =luv/store/#= so keys with slashes are
+heard.  The Join list is those entries merged with the LAN's beacons: a
+host heard on both is dialled on the LAN, and the viewer's own session is
+left out.  A click on a row closes the view and joins that world.
+
+A dropped link is not a goodbye (=session-reconnect.lisp=).  The host keeps
+the guest's place -- its body where it was last seen, its rides, its
+record, the terrain held around it -- for 30 seconds.  The guest keeps its
+world and dials again, each second for a minute, saying hello with the
+host's epoch (a random name each host session puts in its welcomes) and
+the last sequence its journal holds.  The host answers with a welcome at
+that very watermark, no edit set, and the events after it.  A restarted
+host has another epoch and says so; a resume point the journal has
+compacted past is refused the same way.  Either way the guest is told to
+join again.
+
+=a-guest-whose-link-drops-mid-catch-up-resumes-where-it-was= cuts the link
+after the first of three stones reached the guest, with its own film
+placed but unconfirmed: on reconnecting, the journals agree event for event,
+the film is spent once, and the host's player is the same one.  Without the
+change the guest stays disconnected and the host forgets it.
+=the-host-keeps-a-lost-guests-place-for-a-while= and
+=a-restarted-host-does-not-resume-a-guest= cover the grace period and the
+epoch, and =a-hosts-lobby-entry-lists-it-to-join= the entry and the merge.
+
+Live on temple, a host published its entry with its tailnet address,
+100.85.9.92, and a second image's Join list showed it, merged with its
+beacon, beside another thread's LAN host.  Joining from the list worked,
+as did a link cut while the host built: the guest resumed one event behind,
+with both journals at 1 and every chunk hash equal.  Stopping the host
+cleared its entry.
+
+/Open./ A guest on another network dials the address the host reaches the
+lobby from; whether that is reachable across the tailnet has not been
+tried.  The live join called =lobby-join= with the row's entry, which the
+pane's pointer handler calls; no real mouse click was tried.  Reconnection
+was checked by closing the host's side of the link, not by pulling a
+cable.
