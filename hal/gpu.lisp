@@ -669,6 +669,9 @@ factories for requesting GPU-DEVICE instances."))
    (motion-usage
     :initarg :motion-usage
     :reader gpu-temporal-scaler-motion-usage)
+   (reactive-usage
+    :initarg :reactive-usage :initform nil
+    :reader gpu-temporal-scaler-reactive-usage)
    (output-usage
     :initarg :output-usage
     :reader gpu-temporal-scaler-output-usage))
@@ -1079,7 +1082,10 @@ itself is discarded after resolve.  Depth resolves select sample zero."
   (color-format :rgba16-float)
   (depth-format :depth32-float)
   (motion-format :rg16-float)
-  (output-format :rgba16-float))
+  (output-format :rgba16-float)
+  ;; NIL, or the format of a per-pixel mask telling the scaler how far to
+  ;; favour the current frame over its history.
+  (reactive-format nil))
 
 (defstruct (shader-module-descriptor (:include gpu-descriptor))
   code
@@ -1180,7 +1186,8 @@ itself is discarded after resolve.  Depth resolves select sample zero."
   motion
   output
   jitter
-  reset-p)
+  reset-p
+  reactive)
 
 (defstruct (gpu-signal-temporal-scaler-command
              (:include gpu-render-pass-command))
@@ -1276,16 +1283,18 @@ to realize the usage.  Application code does not dispatch on the backend.
            :texture texture :usage usage)))
 
 (defun encode-temporal-scale
-    (encoder scaler color depth motion output jitter reset-p)
+    (encoder scaler color depth motion output jitter reset-p &key reactive)
   "Encode one temporal reconstruction from COLOR, DEPTH, and MOTION.
 
 JITTER is the current sample offset in input-pixel units.  Motion values are
 current-to-previous displacements in normalized input-texture coordinates;
-the scaler's input extent binds their conversion to pixels once per frame."
+the scaler's input extent binds their conversion to pixels once per frame.
+REACTIVE is the mask a scaler made with a reactive format requires: zero
+keeps the scaler's own history policy, one ignores history at that pixel."
   (encode encoder
           (make-gpu-temporal-scale-command
            :scaler scaler :color color :depth depth :motion motion
-           :output output :jitter jitter :reset-p reset-p)))
+           :output output :jitter jitter :reset-p reset-p :reactive reactive)))
 
 (defun signal-temporal-scaler-inputs (pass scaler)
   "Publish PASS's attachment writes to SCALER's private synchronization."

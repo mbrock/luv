@@ -110,7 +110,9 @@
    (motion-format :initarg :motion-format
                   :reader metal-temporal-scaler-motion-format)
    (output-format :initarg :output-format
-                  :reader metal-temporal-scaler-output-format))
+                  :reader metal-temporal-scaler-output-format)
+   (reactive-format :initarg :reactive-format :initform nil
+                    :reader metal-temporal-scaler-reactive-format))
   (:documentation
    "A Metal4FX temporal scaler, its fence, and neutral exposure texture."))
 
@@ -1113,6 +1115,7 @@ construct its temporal surface cohort.  #NL5J0J"
          (depth-format (temporal-scaler-descriptor-depth-format descriptor))
          (motion-format (temporal-scaler-descriptor-motion-format descriptor))
          (output-format (temporal-scaler-descriptor-output-format descriptor))
+         (reactive-format (temporal-scaler-descriptor-reactive-format descriptor))
          native fence exposure scaler (completed-p nil))
     (unless (and (= 1 (third input-size)) (= 1 (third output-size)))
       (reject-metal-gpu-request descriptor :invalid-temporal-scaler-extent))
@@ -1128,15 +1131,18 @@ construct its temporal surface cohort.  #NL5J0J"
               (metal-resource-pixel-format motion-format descriptor)
               (metal-resource-pixel-format output-format descriptor)
               (first input-size) (second input-size)
-              (first output-size) (second output-size)))
+              (first output-size) (second output-size)
+              (and reactive-format
+                   (metal-resource-pixel-format reactive-format descriptor))))
            (unless (and native fence)
              (error 'metal-gpu-error :operation :create-temporal-scaler
                     :reason :unsupported-or-creation-failed
                     :details descriptor))
            (multiple-value-bind
                  (native-color-usage native-depth-usage native-motion-usage
-                  native-output-usage)
-               (luv.metal:metal-temporal-scaler-texture-usages native)
+                  native-output-usage native-reactive-usage)
+               (luv.metal:metal-temporal-scaler-texture-usages
+                native (and reactive-format t))
              (let ((color-usage
                      (portable-metal-texture-usage
                       native-color-usage descriptor :color))
@@ -1148,7 +1154,11 @@ construct its temporal surface cohort.  #NL5J0J"
                       native-motion-usage descriptor :motion))
                    (output-usage
                      (portable-metal-texture-usage
-                      native-output-usage descriptor :output)))
+                      native-output-usage descriptor :output))
+                   (reactive-usage
+                     (and native-reactive-usage
+                          (portable-metal-texture-usage
+                           native-reactive-usage descriptor :reactive))))
                (setf exposure
                      (create
                       device
@@ -1170,8 +1180,10 @@ construct its temporal surface cohort.  #NL5J0J"
                       :input-size input-size :output-size output-size
                       :color-format color-format :depth-format depth-format
                       :motion-format motion-format :output-format output-format
+                      :reactive-format reactive-format
                       :color-usage color-usage :depth-usage depth-usage
-                      :motion-usage motion-usage :output-usage output-usage)
+                      :motion-usage motion-usage :output-usage output-usage
+                      :reactive-usage reactive-usage)
                      completed-p t
                      native nil fence nil exposure nil)
                (log-event :metal "complete Metal4FX temporal scaler")
@@ -2381,7 +2393,9 @@ compiler boundary of #58IDSR."
          (motion (gpu-temporal-scale-command-motion command))
          (output (gpu-temporal-scale-command-output command))
          (jitter (gpu-temporal-scale-command-jitter command))
-         (reset-p (gpu-temporal-scale-command-reset-p command)))
+         (reset-p (gpu-temporal-scale-command-reset-p command))
+         (reactive (gpu-temporal-scale-command-reactive command))
+         (reactive-format (metal-temporal-scaler-reactive-format scaler)))
     (ensure-metal-temporal-scaler-device scaler device :temporal-scale)
     (unless (and
              (every (lambda (texture)
@@ -2412,11 +2426,21 @@ compiler boundary of #58IDSR."
                       (gpu-texture-usage motion))
              (subsetp (gpu-temporal-scaler-output-usage scaler)
                       (gpu-texture-usage output))
+             ;; A reactive scaler reads its mask every frame; another has none.
+             (if reactive-format
+                 (and (typep reactive 'metal-gpu-texture)
+                      (eq (metal-texture-device reactive) device)
+                      (equal (gpu-texture-size reactive)
+                             (gpu-temporal-scaler-input-size scaler))
+                      (eq (gpu-texture-format reactive) reactive-format)
+                      (subsetp (gpu-temporal-scaler-reactive-usage scaler)
+                               (gpu-texture-usage reactive)))
+                 (null reactive))
              (typep jitter 'sequence) (= 2 (length jitter))
              (every #'realp jitter)
              (member reset-p '(nil t)))
       (reject-metal-gpu-request command :invalid-temporal-scale-frame))
-    (dolist (texture (list color depth motion output))
+    (dolist (texture (remove nil (list color depth motion output reactive)))
       (ensure-live-metal-object texture :temporal-scale)
       (retain-metal-resource encoder texture))
     (let ((exposure (metal-temporal-scaler-exposure-texture scaler)))
@@ -2428,7 +2452,8 @@ compiler boundary of #58IDSR."
        (metal-native-object output)
        (first (gpu-temporal-scaler-input-size scaler))
        (second (gpu-temporal-scaler-input-size scaler))
-       (elt jitter 0) (elt jitter 1) reset-p)
+       (elt jitter 0) (elt jitter 1) reset-p
+       (and reactive (metal-native-object reactive)))
       (luv.metal:encode-metal-temporal-scaler
        (metal-native-object scaler)
        (metal-encoder-command-buffer encoder))

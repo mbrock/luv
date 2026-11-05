@@ -398,6 +398,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:gpu-temporal-scaler-color-usage
            #:gpu-temporal-scaler-depth-usage
            #:gpu-temporal-scaler-motion-usage
+           #:gpu-temporal-scaler-reactive-usage
            #:gpu-temporal-scaler-output-usage
            #:gpu-encoder
            #:gpu-render-pass-encoder

@@ -531,6 +531,21 @@ description on native rejection."
     ("setOutputHeight:" :void)
   (height :uint64))
 
+(objc:define-objective-c-message %set-temporal-reactive-mask-enabled
+    ("setReactiveMaskTextureEnabled:" :void)
+  (enabled :uint8))
+
+(objc:define-objective-c-message %set-temporal-reactive-mask-format
+    ("setReactiveMaskTextureFormat:" :void)
+  (format :uint64))
+
+(objc:define-objective-c-message %temporal-reactive-texture-usage
+    ("reactiveTextureUsage" :uint64))
+
+(objc:define-objective-c-message %set-temporal-reactive-mask-texture
+    ("setReactiveMaskTexture:" :void)
+  (texture :object))
+
 (objc:define-objective-c-message %set-temporal-auto-exposure-enabled
     ("setAutoExposureEnabled:" :void)
   (enabled :uint8))
@@ -636,8 +651,10 @@ description on native rejection."
 
 (defun new-metal-4-temporal-scaler
     (device compiler color-format depth-format motion-format output-format
-     input-width input-height output-width output-height)
-  "Create an owned Metal4FX temporal scaler and its owned synchronization fence."
+     input-width input-height output-width output-height
+     &optional reactive-format)
+  "Create an owned Metal4FX temporal scaler and its owned synchronization fence.
+A REACTIVE-FORMAT pixel format enables the per-pixel reactive mask."
   (objc:with-autorelease-pool ()
     (let ((class (objc:find-objective-c-class
                   "MTLFXTemporalScalerDescriptor")))
@@ -652,6 +669,9 @@ description on native rejection."
           (%set-temporal-input-height descriptor input-height)
           (%set-temporal-output-width descriptor output-width)
           (%set-temporal-output-height descriptor output-height)
+          (when reactive-format
+            (%set-temporal-reactive-mask-enabled descriptor 1)
+            (%set-temporal-reactive-mask-format descriptor reactive-format))
           (%set-temporal-auto-exposure-enabled descriptor 0)
           (%set-temporal-synchronous-initialization descriptor 1)
           (let ((scaler (%new-temporal-scaler-with-compiler
@@ -666,17 +686,22 @@ description on native rejection."
                       (objc:release-objective-c-object scaler)
                       (values nil nil)))))))))))
 
-(defun metal-temporal-scaler-texture-usages (scaler)
-  "Return SCALER's required color, depth, motion, and output usage masks."
+(defun metal-temporal-scaler-texture-usages (scaler &optional reactive-p)
+  "Return SCALER's required color, depth, motion, and output usage masks, and
+its reactive mask's when REACTIVE-P."
   (values (%temporal-color-texture-usage scaler)
           (%temporal-depth-texture-usage scaler)
           (%temporal-motion-texture-usage scaler)
-          (%temporal-output-texture-usage scaler)))
+          (%temporal-output-texture-usage scaler)
+          ;; The selector its macOS 27 replacement renames; both are present.
+          (and reactive-p (%temporal-reactive-texture-usage scaler))))
 
 (defun configure-metal-temporal-scaler
     (scaler color depth motion exposure output width height jitter-x jitter-y
-     reset-p)
+     reset-p &optional reactive)
   "Bind one native frame to SCALER before encoding it."
+  (when reactive
+    (%set-temporal-reactive-mask-texture scaler reactive))
   (%set-temporal-color-texture scaler color)
   (%set-temporal-depth-texture scaler depth)
   (%set-temporal-motion-texture scaler motion)
@@ -702,6 +727,7 @@ description on native rejection."
   (%set-temporal-motion-texture scaler nil)
   (%set-temporal-exposure-texture scaler nil)
   (%set-temporal-output-texture scaler nil)
+  (%set-temporal-reactive-mask-texture scaler nil)
   (%set-temporal-fence scaler nil)
   scaler)
 
