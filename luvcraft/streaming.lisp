@@ -167,12 +167,28 @@ the session's outstanding-work and cancellation bookkeeping."))
                     'little-world-source
                     :seed (little-world-load-request-seed request)
                     :relief (little-world-load-request-relief request)))
+           (width (little-world-load-request-width request))
+           (depth (little-world-load-request-depth request))
            (world (make-block-world
-                   :chunk-width (little-world-load-request-width request)
+                   :chunk-width width
                    :chunk-height (little-world-load-request-height request)
-                   :chunk-depth (little-world-load-request-depth request)
-                   :source source)))
-      (materialize-block-world-chunk source world chunk-x chunk-y chunk-z)
+                   :chunk-depth depth
+                   :source source))
+           (vocabulary (block-world-vocabulary world)))
+      (unless (zerop chunk-y)
+        (error "The little world currently materializes only chunk layer zero."))
+      ;; The terrain arrives as one dense column; only the sparse landmarks
+      ;; and edits below are written cell by cell.
+      (install-world-chunk-storage
+       world chunk-x chunk-y chunk-z
+       (make-block-content-column
+        (make-chunk-domain (block-world-space world)
+                           (make-chunk-coordinate chunk-x chunk-y chunk-z))
+        :vocabulary vocabulary
+        :indices (little-world-chunk-indices
+                  source vocabulary width
+                  (little-world-load-request-height request) depth
+                  (* chunk-x width) (* chunk-z depth))))
       (dolist (landmark (little-world-load-request-landmarks request))
         (destructuring-bind (block x y z) landmark
           (setf (world-block-at world x y z) block)))

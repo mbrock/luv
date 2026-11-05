@@ -549,8 +549,9 @@ up, so cliffs and peaks are not capped with dirt."
          *stone-block*)
         (t *dirt-block*)))
 
-(defun materialize-little-world-chunk (source world chunk-x chunk-z)
-  "Materialize one deterministic terrain chunk at vertical layer zero.
+(defun little-world-chunk-indices
+    (source vocabulary width height depth origin-x origin-z)
+  "The dense VOCABULARY offsets of the generated chunk at ORIGIN-X, ORIGIN-Z.
 
 Every column is filled from the ground up, then, in the alpine relief,
 carved from the bottom up: a carved cell over solid stone may grow a
@@ -559,88 +560,122 @@ crystal from that ceiling, so cave systems glow from within.
 
 Each column's surface is read once, with a one-column border for the
 slopes, and each cave field once per column (#QTXNY0): the readings are
-the ones LITTLE-WORLD-SURFACE-HEIGHT and LITTLE-WORLD-CAVE-P give."
+the ones LITTLE-WORLD-SURFACE-HEIGHT and LITTLE-WORLD-CAVE-P give.  The
+offsets are written straight into the array, X fastest, then Y, then Z, so
+a chunk is raised without a resident chunk noticing every cell."
+  (declare (type fixnum width height depth origin-x origin-z))
+  (let* ((indices (make-array (* width height depth)
+                              :element-type '(unsigned-byte 16)
+                              :initial-element 0))
+         (caves-p (eq (little-world-source-relief source) :alpine))
+         (seed (little-world-seed-bits source))
+         (surfaces (make-array (list (+ depth 2) (+ width 2))
+                               :element-type 'fixnum))
+         (fields (loop repeat 4
+                       collect (make-array (1+ height)
+                                           :element-type 'double-float)))
+         (tunnel (coerce *cave-tunnel-period* 'double-float))
+         (tunnel-vertical
+           (coerce *cave-tunnel-vertical-period* 'double-float))
+         (cavern (coerce *cave-cavern-period* 'double-float))
+         (crystal-chance *cave-crystal-chance*)
+         (cached-block nil)
+         (cached-index 0))
+    (declare (type fixnum crystal-chance cached-index))
+    (flet ((index (block)
+             ;; Columns are long runs of one block, so one entry suffices.
+             (unless (eq block cached-block)
+               (setf cached-block block
+                     cached-index (if block
+                                      (block-vocabulary-offset vocabulary block)
+                                      0)))
+             cached-index))
+      (let ((stone (index *stone-block*))
+            (crystal (index *crystal-block*)))
+        (declare (type fixnum stone crystal))
+        (dotimes (row (+ depth 2))
+          (dotimes (column (+ width 2))
+            (setf (aref surfaces row column)
+                  (little-world-surface-height
+                   source (+ origin-x column -1) (+ origin-z row -1) height))))
+        (destructuring-bind (a b cavern-field detail) fields
+          (declare (type (simple-array double-float (*))
+                         a b cavern-field detail))
+          (dotimes (local-z depth)
+            (dotimes (local-x width)
+              (let* ((x (+ origin-x local-x))
+                     (z (+ origin-z local-z))
+                     (surface (aref surfaces (1+ local-z) (1+ local-x)))
+                     (slope (max (abs (- surface (aref surfaces (1+ local-z) local-x)))
+                                 (abs (- surface (aref surfaces (1+ local-z) (+ local-x 2))))
+                                 (abs (- surface (aref surfaces local-z (1+ local-x))))
+                                 (abs (- surface (aref surfaces (+ local-z 2) (1+ local-x))))))
+                     (surface-material
+                       (little-world-surface-material
+                        source x z surface height slope)))
+                (declare (type fixnum x z surface))
+                (flet ((offset (y)
+                         (declare (type fixnum y))
+                         (the fixnum (+ local-x (* width (+ y (* height local-z)))))))
+                  (declare (inline offset))
+                  (dotimes (y (1+ surface))
+                    (setf (aref indices (offset y))
+                          (index (little-world-column-material
+                                  source y surface surface-material))))
+                  (when caves-p
+                    (fill-little-world-volume-column
+                     a seed x z surface tunnel tunnel-vertical 40)
+                    (fill-little-world-volume-column
+                     b seed x z surface tunnel tunnel-vertical 41)
+                    (fill-little-world-volume-column
+                     cavern-field seed x z surface cavern cavern 44)
+                    (fill-little-world-volume-column
+                     detail seed x z surface 12.0d0 12.0d0 45)
+                    (let ((wander (%little-world-value-noise seed x z 40.0d0 43))
+                          (below-carved-p nil))
+                      (loop for y of-type fixnum from 2 to surface
+                            for carved-p = (little-world-cave-reading-p
+                                            y surface (aref a y) (aref b y) wander
+                                            (aref cavern-field y) (aref detail y))
+                            for crystal-p = (zerop
+                                             (mod (%little-world-hash-3d
+                                                   seed x y z 46)
+                                                  crystal-chance))
+                            do (cond (carved-p
+                                      (setf (aref indices (offset y)) 0)
+                                      (when (and crystal-p (not below-carved-p)
+                                                 (= (aref indices (offset (1- y)))
+                                                    stone))
+                                        (setf (aref indices (offset (1- y)))
+                                              crystal)))
+                                     ((and crystal-p below-carved-p
+                                           (< y surface))
+                                      (setf (aref indices (offset y)) crystal)))
+                               (setf below-carved-p carved-p)))))))))))
+    indices))
+
+(defun materialize-little-world-chunk (source world chunk-x chunk-z)
+  "Materialize one deterministic terrain chunk at vertical layer zero.
+
+The chunk's cells are those of LITTLE-WORLD-CHUNK-INDICES; each one the
+chunk does not already hold is written through it, so its hooks see the
+change."
   (check-type source little-world-source)
   (with-world-change-transaction (world)
     (let* ((chunk (ensure-world-chunk world chunk-x 0 chunk-z))
            (shape (voxel-space-chunk-shape (block-world-space world)))
            (width (chunk-shape-width shape))
-           (height (chunk-shape-height shape))
            (depth (chunk-shape-depth shape))
-           (origin (chunk-domain-origin (block-chunk-domain chunk)))
-           (origin-x (world-coordinate-x origin))
-           (origin-z (world-coordinate-z origin))
-           (caves-p (eq (little-world-source-relief source) :alpine))
-           (seed (little-world-seed-bits source))
-           (surfaces (make-array (list (+ depth 2) (+ width 2))))
-           (fields (loop repeat 4
-                         collect (make-array (1+ height)
-                                             :element-type 'double-float)))
-           (tunnel (coerce *cave-tunnel-period* 'double-float))
-           (tunnel-vertical
-             (coerce *cave-tunnel-vertical-period* 'double-float))
-           (cavern (coerce *cave-cavern-period* 'double-float)))
-      (dotimes (row (+ depth 2))
-        (dotimes (column (+ width 2))
-          (setf (aref surfaces row column)
-                (little-world-surface-height
-                 source (+ origin-x column -1) (+ origin-z row -1) height))))
-      (destructuring-bind (a b cavern-field detail) fields
-        (declare (type (simple-array double-float (*)) a b cavern-field detail))
-        (dotimes (local-z depth)
-          (dotimes (local-x width)
-            (let* ((x (+ origin-x local-x))
-                   (z (+ origin-z local-z))
-                   (surface (aref surfaces (1+ local-z) (1+ local-x)))
-                   (slope (max (abs (- surface (aref surfaces (1+ local-z) local-x)))
-                               (abs (- surface (aref surfaces (1+ local-z) (+ local-x 2))))
-                               (abs (- surface (aref surfaces local-z (1+ local-x))))
-                               (abs (- surface (aref surfaces (+ local-z 2) (1+ local-x))))))
-                   (surface-material
-                     (little-world-surface-material
-                      source x z surface height slope)))
-              (flet ((offset (y)
-                       (+ local-x (* width (+ y (* height local-z))))))
-                (dotimes (y (1+ surface))
-                  (setf (chunk-block-at-offset chunk (offset y))
-                        (little-world-column-material
-                         source y surface surface-material)))
-                (when caves-p
-                  (fill-little-world-volume-column
-                   a seed x z surface tunnel tunnel-vertical 40)
-                  (fill-little-world-volume-column
-                   b seed x z surface tunnel tunnel-vertical 41)
-                  (fill-little-world-volume-column
-                   cavern-field seed x z surface cavern cavern 44)
-                  (fill-little-world-volume-column
-                   detail seed x z surface 12.0d0 12.0d0 45)
-                  (let ((wander (%little-world-value-noise seed x z 40.0d0 43))
-                        (below-carved-p nil))
-                    (loop for y from 2 to surface
-                          for carved-p = (little-world-cave-reading-p
-                                          y surface (aref a y) (aref b y) wander
-                                          (aref cavern-field y) (aref detail y))
-                          for crystal-p = (zerop
-                                           (mod (%little-world-hash-3d
-                                                 seed x y z 46)
-                                                *cave-crystal-chance*))
-                          do (cond (carved-p
-                                    (setf (chunk-block-at-offset
-                                           chunk (offset y))
-                                          nil)
-                                    (when (and crystal-p (not below-carved-p)
-                                               (eq (chunk-block-at-offset
-                                                    chunk (offset (1- y)))
-                                                   *stone-block*))
-                                      (setf (chunk-block-at-offset
-                                             chunk (offset (1- y)))
-                                            *crystal-block*)))
-                                   ((and crystal-p below-carved-p
-                                         (< y surface))
-                                    (setf (chunk-block-at-offset
-                                           chunk (offset y))
-                                          *crystal-block*)))
-                             (setf below-carved-p carved-p)))))))))
+           (content (block-chunk-content chunk))
+           (vocabulary (block-content-column-vocabulary content))
+           (indices (little-world-chunk-indices
+                     source vocabulary width (chunk-shape-height shape) depth
+                     (* chunk-x width) (* chunk-z depth)))
+           (palette (block-vocabulary-members vocabulary)))
+      (dotimes (offset (length indices))
+        (let ((block (aref palette (aref indices offset))))
+          (unless (eq block (block-content-at-offset content offset))
+            (setf (chunk-block-at-offset chunk offset) block))))
       chunk)))
 
 (defmethod materialize-block-world-chunk

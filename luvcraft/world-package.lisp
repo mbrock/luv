@@ -35,6 +35,7 @@
            #:block-content-column-indices
            #:block-content-column-palette
            #:block-content-column-vocabulary
+           #:make-block-content-column
            #:block-vocabulary
            #:block-vocabulary-cardinality
            #:block-vocabulary-member

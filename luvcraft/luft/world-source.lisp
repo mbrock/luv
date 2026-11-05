@@ -154,19 +154,22 @@ WORLD is only read, for its chunk shape, so threads may share it."
                  (base-x (+ offset (* chunk-x +luvcraft-chunk-size+)))
                  (base-y (+ offset (* chunk-z +luvcraft-chunk-size+))))
             ;; Read the dense storage directly; X varies fastest, then Y.
-            (luvcraft.world:with-block-content-storage (domain palette indices)
+            (luvcraft.world:with-block-content-storage (domain members indices)
                 (aref contents (+ (* i span) j))
               (declare (ignore domain))
-              (dotimes (lx +luvcraft-chunk-size+)
-                (dotimes (lz +luvcraft-chunk-size+)
-                  (dotimes (y height)
-                    (let ((block (aref palette
-                                       (aref indices
-                                             (+ lx (* +luvcraft-chunk-size+
-                                                      (+ y (* height lz))))))))
-                      (when block
-                        (funcall place (+ base-x lx) (+ base-y lz) y
-                                 (placement block)))))))))))))
+              (let ((palette (coerce members 'simple-vector)))
+                (declare (type (simple-array (unsigned-byte 16) (*)) indices)
+                         (type fixnum height base-x base-y))
+                (dotimes (lx +luvcraft-chunk-size+)
+                  (dotimes (lz +luvcraft-chunk-size+)
+                    (dotimes (y height)
+                      (let ((block (svref palette
+                                          (aref indices
+                                                (+ lx (* +luvcraft-chunk-size+
+                                                         (+ y (* height lz))))))))
+                        (when block
+                          (funcall place (+ base-x lx) (+ base-y lz) y
+                                   (placement block))))))))))))))
   (values))
 
 (defun luvcraft-column-top (source x z)
