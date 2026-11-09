@@ -210,6 +210,9 @@ pushed by the server thread.")
    (software-cursor-p :initarg :software-cursor-p :initform nil
                       :reader luvland-software-cursor-p)
    (cursor-texture :initform nil :accessor luvland-cursor-texture)
+   (terminals :initform '() :accessor luvland-terminals
+              :documentation "The terminals Luvland runs and draws itself, oldest first.")
+   (terminal-renderer :initform nil :accessor luvland-terminal-renderer)
    (frame-times :initform '() :accessor luvland-frame-times
                 :documentation "Recent frames, newest first, as plists of milliseconds.")))
 
@@ -325,8 +328,9 @@ submitted so far, which is all work that could still read what THUNK frees."
 (defun sync-windows (luvland)
   "Add windows for newly mapped toplevels, drop vanished ones, and upload
 fresh snapshots.  Runs on the canvas thread."
-  (let* ((toplevels (remove-if-not #'wl:toplevel-mapped-p
-                                   (reverse (wl:server-toplevels (luvland-server luvland)))))
+  (let* ((toplevels (append (remove-if-not #'wl:toplevel-mapped-p
+                                           (reverse (wl:server-toplevels (luvland-server luvland))))
+                            (live-terminals luvland)))
          (kept (remove-if-not (lambda (window)
                                 (member (window-toplevel window) toplevels))
                               (luvland-windows luvland))))
@@ -350,8 +354,10 @@ fresh snapshots.  Runs on the canvas thread."
       (setf (luvland-focus luvland) (and kept (window-toplevel (first kept))))
       (focus-keyboard-later luvland (luvland-focus luvland)))
     (dolist (window kept)
-      (or (take-dmabuf-frame luvland window)
-          (upload-snapshot luvland window)))
+      (if (terminal-p (window-toplevel window))
+          (sync-terminal-window luvland window)
+          (or (take-dmabuf-frame luvland window)
+              (upload-snapshot luvland window))))
     (layout-strip luvland)))
 
 (defun show (window texture view width height)
@@ -475,10 +481,10 @@ or NIL when it cannot import dmabufs at all."
                                :server (luvland-server luvland) :wait nil))))
       t)))
 
-(defparameter *terminal* '("foot" "--override=pad=18x14 center")
-  "The terminal Luvland opens as a client, as a program and its arguments.
-Windows meet the compositor's frame edge to edge, so foot pads its own grid
-in its own background colour rather than setting text against the border.")
+(defparameter *terminal* :built-in
+  "The terminal Luvland opens: :BUILT-IN for its own (terminal.lisp), or a
+program and its arguments to run as a client, such as
+'(\"foot\" \"--override=pad=18x14 center\").")
 
 (defparameter *window-margin* 28
   "Pixels between the focused window's border and the edge of the view.")
@@ -599,7 +605,8 @@ return to showing the focused window one to one."
         (server (luvland-server luvland)))
     (unless (equal size (wl:server-initial-toplevel-size server))
       (setf (wl:server-initial-toplevel-size server) size))
-    (dolist (window (luvland-windows luvland))
+    ;; A terminal takes the fitted size itself, in SYNC-TERMINAL-WINDOW.
+    (dolist (window (remove-if #'terminal-p (luvland-windows luvland) :key #'window-toplevel))
       (let* ((toplevel (window-toplevel window))
              (states (append (when (eq toplevel (luvland-focus luvland)) '(:activated))
                              '(:tiled-left :tiled-right :tiled-top :tiled-bottom)))
@@ -675,6 +682,7 @@ contents into the swapchain image STATE belongs to."
 (defun encode-windows (luvland encoder target extent time)
   "Draw every window into TARGET, a texture of EXTENT (width height), as
 the world will be at TIME."
+  (encode-terminals luvland encoder)
   ;; Imported dmabufs belong to their clients' queues until acquired, and an
   ;; acquire cannot happen inside the pass.
   (let ((acquired '()))
@@ -881,12 +889,19 @@ would ask for a layout transition inside the render pass."
 
 ;;; Input.
 
+(defun toplevel-surface (toplevel)
+  "TOPLEVEL's Wayland surface, or NIL for none or a terminal Luvland draws."
+  (and toplevel (not (terminal-p toplevel)) (wl:toplevel-surface toplevel)))
+
 (defun focus-keyboard-later (luvland toplevel)
-  (let ((surface (and toplevel (wl:toplevel-surface toplevel))))
+  (let ((surface (toplevel-surface toplevel)))
     (wl:call-in-server (lambda () (wl:focus-keyboard surface))
                        :server (luvland-server luvland) :wait nil)))
 
 (defun focus-window (luvland toplevel)
+  (when (terminal-p toplevel)
+    ;; Keys a client saw pressed would stay pressed while the terminal reads.
+    (release-forwarded-input luvland))
   (setf (luvland-focus luvland) toplevel
         (luvland-history luvland)
         (cons toplevel (remove toplevel (luvland-history luvland))))
@@ -910,16 +925,20 @@ would ask for a layout transition inside the render pass."
       ((handle-command-key luvland event)
        ;; Its release belongs to Luvland too.
        (pushnew key-name (luvland-suppressed-keys luvland)))
+      ((terminal-p (luvland-focus luvland))     ; repeats included
+       (send-terminal-key (luvland-focus luvland) event))
       ((luv:canvas-key-event-repeat-p event))   ; clients repeat keys themselves
       (t (forward-key luvland key-name t)))))
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas (event luv:canvas-key-release-event))
   (declare (ignore canvas))
   (let ((key-name (luv:canvas-key-event-key-name event)))
-    (if (member key-name (luvland-suppressed-keys luvland))
-        (setf (luvland-suppressed-keys luvland)
-              (remove key-name (luvland-suppressed-keys luvland)))
-        (forward-key luvland key-name nil))))
+    (cond ((member key-name (luvland-suppressed-keys luvland))
+           (setf (luvland-suppressed-keys luvland)
+                 (remove key-name (luvland-suppressed-keys luvland))))
+          ((terminal-p (luvland-focus luvland))
+           (send-terminal-key (luvland-focus luvland) event))
+          (t (forward-key luvland key-name nil)))))
 
 (defun send-to-server (luvland function)
   (wl:call-in-server function :server (luvland-server luvland) :wait nil))
@@ -976,7 +995,7 @@ where the camera ray through it meets the window's plane."
         (list (luv:canvas-pointer-event-x event) (luv:canvas-pointer-event-y event)))
   (multiple-value-bind (window x y)
       (pick luvland (luv:canvas-pointer-event-x event) (luv:canvas-pointer-event-y event))
-    (let ((surface (and window (wl:toplevel-surface (window-toplevel window)))))
+    (let ((surface (and window (toplevel-surface (window-toplevel window)))))
       (wl:call-in-server (lambda ()
                            (if (eq surface (wl:pointer-focus (wl::seat)))
                                (when surface (wl:send-pointer-motion x y))
@@ -1124,7 +1143,7 @@ otherwise sixty frames a second."
                            (software-cursor-p (default-software-cursor-p))
                            (init-file-p t))
   "Open Luvland: a canvas, a Wayland server on its own socket, the McCLIM
-workbench, the init file, and SPAWN, a program run as the first client."
+workbench, the init file, and SPAWN, the first terminal, as *TERMINAL* names one."
   (when *luvland*
     (error "Luvland is already running: ~A" *luvland*))
   (let ((server nil)
@@ -1177,7 +1196,7 @@ workbench, the init file, and SPAWN, a program run as the first client."
                                              (declare (ignore timestamp))
                                              (load-init-file luvland))))
         (when spawn
-          (apply #'spawn-client luvland spawn))
+          (open-terminal luvland spawn))
         luvland))))
 
 (defun %stop-luvland (luvland)
@@ -1198,6 +1217,8 @@ detach the shell, then the application's resources, canvas, and device."
     (dolist (process (luvland-processes luvland))
       (when (sb-ext:process-alive-p process)
         (sb-ext:process-kill process 15)))
+    (dolist (terminal (luvland-terminals luvland))
+      (close-terminal luvland terminal))
     (wl:stop-server (luvland-server luvland))
     (when (member (luv:canvas-state canvas) '(:opening :open))
       (luv:close-canvas canvas))

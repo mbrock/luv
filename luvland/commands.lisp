@@ -317,6 +317,10 @@ key, and NIL when it belongs to the focused client."
 
 (defun send-prefix-key (luvland)
   "Send the prefix key itself to the focused client, as ratpoison's C-t t."
+  (when (terminal-p (luvland-focus luvland))
+    (return-from send-prefix-key
+      (send-terminal-prefix-key (luvland-focus luvland)
+                                (luvland-prefix-key-name luvland) *prefix-key*)))
   (let ((code (key-evdev-code (luvland-prefix-key-name luvland)))
         (control-p (member :control (rest *prefix-key*)))
         (meta-p (member :meta (rest *prefix-key*))))
@@ -425,19 +429,21 @@ key, and NIL when it belongs to the focused client."
   (spawn-client luvland "/bin/sh" "-c" (format nil "exec ~A" line)))
 
 (define-luvland-command terminal ()
-  (apply #'spawn-client luvland *terminal*))
+  (open-terminal luvland))
 
 (define-luvland-command delete ()
   (let ((toplevel (luvland-focus luvland)))
-    (when toplevel
-      (wl:call-in-server (lambda () (wl:close-toplevel toplevel))
-                         :server (luvland-server luvland) :wait nil))))
+    (cond ((terminal-p toplevel) (close-terminal luvland toplevel))
+          (toplevel
+           (wl:call-in-server (lambda () (wl:close-toplevel toplevel))
+                              :server (luvland-server luvland) :wait nil)))))
 
 (define-luvland-command kill ()
   (let ((toplevel (luvland-focus luvland)))
-    (when toplevel
-      (wl:call-in-server (lambda () (wl:destroy-client (wl:resource-client toplevel)))
-                         :server (luvland-server luvland) :wait nil))))
+    (cond ((terminal-p toplevel) (close-terminal luvland toplevel))
+          (toplevel
+           (wl:call-in-server (lambda () (wl:destroy-client (wl:resource-client toplevel)))
+                              :server (luvland-server luvland) :wait nil)))))
 
 (define-luvland-command overview ()
   (toggle-overview luvland))
