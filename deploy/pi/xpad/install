@@ -1,0 +1,22 @@
+#!/bin/sh
+# Build xpad with xpad-reinit-on-announce.patch as the DKMS package
+# xpad-luv, then load it in place of the kernel's own.  Run as root on a
+# Raspberry Pi OS kernel; needs dkms and the matching linux-headers.
+# DKMS rebuilds the module for each new kernel from the same source.
+set -eu
+here=$(cd "$(dirname "$0")" && pwd)
+series=$(uname -r | sed 's/^\([0-9]*\.[0-9]*\).*/\1/')
+source=/usr/src/xpad-luv-1.0
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+curl -fsSL -o "$work/xpad.c" \
+  "https://raw.githubusercontent.com/raspberrypi/linux/rpi-$series.y/drivers/input/joystick/xpad.c"
+patch --quiet "$work/xpad.c" "$here/xpad-reinit-on-announce.patch"
+dkms remove xpad-luv/1.0 --all 2>/dev/null || true
+rm -rf "$source"
+install -d "$source"
+install -m644 "$work/xpad.c" "$here/Makefile" "$here/dkms.conf" "$source/"
+dkms install xpad-luv/1.0
+modprobe -r xpad
+modprobe xpad
+echo "xpad now loads from $(modinfo -n xpad)"

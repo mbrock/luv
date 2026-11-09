@@ -430,10 +430,35 @@ closes.
 
 The session is a systemd unit on tty1 that takes only Luvland's own
 variables from the Nix shell, so the shells and browsers it starts see the
-machine's ordinary environment.
+machine's ordinary environment.  Its files, and the pad's (#271LDE), are in
+=deploy/pi/= with a README that installs them.
 
 Everything the bar offers a click is in that menu too (#Z1MIPN): sound,
 each tray item, and the entries of its menu.
+
+* DONE The pad stays started
+:PROPERTIES:
+:ID: 271LDE
+:END:
+
+A wired Xbox Series pad sends nothing, its logo blinking, until the host
+sends it the start sequence of Microsoft's Gaming Input Protocol.  xpad
+sends it on binding and on the first open of the pad's input device.  A pad
+that powers off and on while plugged in announces itself again, about twice
+a second, and waits for the sequence anew; stock xpad answers announces
+only for a few wireless dongles, and Luvland never closes the device, so
+the pad blinked until xpad was rebound.  A usbmon capture on the sofa Pi
+(#JJJAO9) showed exactly that: announces and nothing else.
+
+The fix is in the driver: a patched xpad, built by DKMS, sends the sequence
+again on every announce, as SDL's and xone's drivers for the protocol do.
+On a replug it was seen answering the pad's announce with a second power-on,
+input following within 10 ms.  A root watchdog on usbmon is the safety net:
+it rebinds xpad to a pad that has only announced for 3 s, and binds it to
+any pad left without a driver -- as SDL's HIDAPI over libusb can leave one,
+which is why Luvland's SDL reads pads through evdev only.  Vicki Pfau's
+=xbox_gip= driver, a proper implementation of the protocol, would replace
+both, but was not merged when this was written.
 
 * DONE Luvland's bar says what the machine is doing
 :PROPERTIES:

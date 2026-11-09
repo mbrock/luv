@@ -1,0 +1,145 @@
+#!/usr/bin/python3 -I
+"""Keep wired Xbox One/Series pads working on plank.
+
+An Xbox pad on USB stays dead, its logo blinking, until the host sends it
+the GIP start sequence.  The kernel's xpad driver sends it when it binds
+and when the pad's input device is first opened.  A pad that turns off and
+back on while plugged in (holding the Xbox button, or the pad timing out)
+announces itself again, a GIP 0x02 packet about twice a second, and xpad
+ignores that while Luvland keeps the device open.  Something else may also
+take the pad from xpad, such as SDL's HIDAPI over libusb.
+
+plank's xpad is patched to answer announces itself (DKMS package
+xpad-luv, deploy/pi/xpad in luv).  This is the safety net, as root:
+rebind xpad to a pad that has only announced for 3 s, which sends the
+start sequence even with the stock driver; and every few seconds bind
+xpad to any Xbox pad interface that has no driver.
+Installed as /usr/local/libexec/xpad-watchdog, run by xpad-watchdog.service.
+"""
+import os
+import subprocess
+import sys
+import threading
+import time
+
+USB = '/sys/bus/usb/devices'
+XPAD = '/sys/bus/usb/drivers/xpad'
+USBMON = '/sys/kernel/debug/usb/usbmon/0u'
+lock = threading.Lock()
+last_action = {}      # interface name -> monotonic time of our last bind
+
+
+def log(message):
+    print(message, flush=True)
+
+
+def read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def gip_interfaces():
+    """Data interfaces of Xbox One/Series pads: class ff, subclass 47,
+    protocol d0, interface 0, as xpad matches them."""
+    for name in sorted(os.listdir(USB)):
+        if name.endswith(':1.0') and \
+           read(f'{USB}/{name}/bInterfaceClass') == 'ff' and \
+           read(f'{USB}/{name}/bInterfaceSubClass') == '47' and \
+           read(f'{USB}/{name}/bInterfaceProtocol') == 'd0':
+            yield name
+
+
+def driver(interface):
+    link = f'{USB}/{interface}/driver'
+    return os.path.basename(os.readlink(link)) if os.path.islink(link) else None
+
+
+def write(path, value):
+    try:
+        with open(path, 'w') as f:
+            f.write(value)
+        return True
+    except OSError as error:
+        log(f'{path} <- {value}: {error}')
+        return False
+
+
+def restart(interface, reason):
+    """Bind xpad to INTERFACE afresh, at most once every 5 s."""
+    with lock:
+        now = time.monotonic()
+        if now - last_action.get(interface, -1e9) < 5:
+            return
+        last_action[interface] = now
+        current = driver(interface)
+        log(f'{interface}: {reason}; driver {current or "none"}, rebinding xpad')
+        if current:
+            write(f'{USB}/{interface}/driver/unbind', interface)
+        write(f'{XPAD}/bind', interface)
+
+
+def interface_for(bus, address):
+    for interface in gip_interfaces():
+        device = interface.split(':')[0]
+        if read(f'{USB}/{device}/busnum') == str(bus) and \
+           read(f'{USB}/{device}/devnum') == str(address):
+            return interface
+    return None
+
+
+def watch_announces():
+    """Restart a pad that has done nothing but announce for 3 s.
+
+    A pad waiting for its start sequence repeats the announce every half
+    second.  The patched xpad (deploy/pi/xpad in luv) answers the first
+    one, after which the pad sends input and a heartbeat every second; so
+    this acts only when that answer did not take, or xpad is the stock one.
+    """
+    waiting_since = {}
+    with open(USBMON) as usbmon:
+        for line in usbmon:
+            fields = line.split()
+            # tag time C Ii:BUS:ADDR:EP status length = data...
+            if len(fields) < 8 or fields[2] != 'C' or not fields[3].startswith('Ii:') \
+               or '=' not in fields:
+                continue
+            data = fields[fields.index('=') + 1:]
+            if not data:
+                continue
+            _, bus, address, _ = fields[3].split(':')
+            key = (int(bus), int(address))
+            if not data[0].startswith('0220'):
+                waiting_since.pop(key, None)
+                continue
+            now = time.monotonic()
+            since = waiting_since.setdefault(key, now)
+            if now - since >= 3:
+                interface = interface_for(*key)
+                if interface:
+                    restart(interface, 'pad announced for 3 s without starting')
+                waiting_since.pop(key, None)
+
+
+def watch_drivers():
+    while True:
+        for interface in gip_interfaces():
+            if driver(interface) is None:
+                restart(interface, 'no driver')
+        time.sleep(3)
+
+
+def main():
+    subprocess.run(['modprobe', 'usbmon'], check=False)
+    if not os.path.exists(USBMON):
+        subprocess.run(['mount', '-t', 'debugfs', 'none', '/sys/kernel/debug'], check=False)
+    log('watching Xbox pads: ' + (', '.join(gip_interfaces()) or 'none connected'))
+    threading.Thread(target=watch_drivers, daemon=True).start()
+    watch_announces()
+    sys.exit('usbmon closed')
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep wired Xbox pads started (rebind xpad when a pad re-announces)
+Documentation=https://github.com/mbrock/luv/blob/main/deploy/pi/README.md
+
+[Service]
+ExecStart=/usr/local/libexec/xpad-watchdog
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

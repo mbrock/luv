@@ -1,0 +1,22 @@
+#!/bin/sh
+# plank's graphical session: Luvland on the console, nothing else.
+# Started by /etc/systemd/system/luvland.service on tty1.
+#
+# Luvland takes only what it needs from the checkout's Nix environment, so
+# the shells and programs it starts see plank's own PATH and SHELL.
+export SDL_VIDEODRIVER=kmsdrm
+# Pads through the kernel (xpad/evdev) only, never raw USB from SDL.
+export SDL_JOYSTICK_HIDAPI=0 SDL_HIDAPI_LIBUSB=0
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export PATH="$HOME/.local/bin:$HOME/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH"
+state="$HOME/.local/state/luvland"
+mkdir -p "$state"
+cd "$HOME/src/luv" || exit 1
+./env sh -c '
+  for name in $(env | sed -n "s/^\(LUV_[A-Z_]*\|LD_LIBRARY_PATH\|VK_DRIVER_FILES\|VK_LAYER_PATH\|ASDF_OUTPUT_TRANSLATIONS\|CL_SOURCE_REGISTRY\|SWASH_RUNTIME_DIR\)=.*/\1/p"); do
+    printf "export %s=%s\n" "$name" "$(printenv "$name" | sed "s/'"'"'/'"'"'\\\\'"'"''"'"'/g; s/^/'"'"'/; s/\$/'"'"'/")"
+  done' > "$state/env" 2>/dev/null || exit 1
+. "$state/env"
+# The Pi 5's V3D, from the same Nix Mesa the dev shell's loader would find.
+export VK_DRIVER_FILES="${LUV_MESA_LIBRARY_PATH%/lib}/share/vulkan/icd.d/broadcom_icd.aarch64.json"
+exec build/luvland --fullscreen --no-terminal
