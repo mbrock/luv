@@ -1772,10 +1772,16 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
                           (sdl3:get-error)))
                  (setf sdl-initialized-p t)
                  ;; Connected pads arrive as added events on the first poll.
-                 (when (and (sdl-canvas-gamepads-p canvas)
-                            (not (with-runtime-signal-handlers-preserved
-                                   (sdl3:init-sub-system :gamepad))))
-                   (warn "SDL gamepad initialization failed: ~A" (sdl3:get-error)))
+                 ;; Read them through the kernel's evdev devices only: SDL's
+                 ;; HIDAPI drivers would talk to an Xbox pad over raw USB
+                 ;; beside the kernel's xpad, which games read too, and two
+                 ;; drivers would both send the pad its start-up packets.
+                 (when (sdl-canvas-gamepads-p canvas)
+                   (sdl3:set-hint "SDL_JOYSTICK_HIDAPI" "0")
+                   (sdl3:set-hint "SDL_HIDAPI_LIBUSB" "0")
+                   (unless (with-runtime-signal-handlers-preserved
+                             (sdl3:init-sub-system :gamepad))
+                     (warn "SDL gamepad initialization failed: ~A" (sdl3:get-error))))
                  (let ((wake-event-type (sdl3:register-events 1)))
                    (when (zerop wake-event-type)
                      (error "SDL user event registration failed: ~A"
