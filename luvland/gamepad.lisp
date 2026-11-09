@@ -65,6 +65,8 @@ contains NAME, or else runs COMMAND-LINE through the shell as a client."
                          (lambda () (focus-window luvland toplevel)))))
    (list (cons "overview" (lambda () (toggle-overview luvland)))
          (cons "terminal" (lambda () (run-command-line luvland "terminal"))))
+   ;; Whatever the bar offers a click, the pad reaches here.
+   (bar-menu-entries luvland)
    (when (luvland-focus luvland)
      (list (cons "close window" (lambda () (run-command-line luvland "delete")))))))
 
@@ -121,11 +123,15 @@ contains NAME, or else runs COMMAND-LINE through the shell as a client."
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas
                                     (event luv:canvas-gamepad-added-event))
   (declare (ignore canvas))
+  (push (cons (luv:canvas-gamepad-event-gamepad event) (luv:canvas-gamepad-event-name event))
+        (luvland-gamepads luvland))
   (message luvland "~A connected: the ~:[Guide button~;A button~] opens the play menu."
            (or (luv:canvas-gamepad-event-name event) "A gamepad")
            (null (luvland-focus luvland))))
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas
                                     (event luv:canvas-gamepad-removed-event))
-  (declare (ignore canvas event))
+  (declare (ignore canvas))
+  (setf (luvland-gamepads luvland)
+        (remove (luv:canvas-gamepad-event-gamepad event) (luvland-gamepads luvland) :key #'car))
   (message luvland "Gamepad disconnected."))
