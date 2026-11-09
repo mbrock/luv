@@ -388,7 +388,7 @@ Not yet: scrollback, mouse reporting, selection and paste, OSC titles, and
 anything beyond a cell's base code point.  Setting =*terminal*= to a program
 and its arguments runs that as the terminal client again.
 
-* NEXT Run Luvland on a console
+* DONE Run Luvland on a console
 :PROPERTIES:
 :ID: RRONLT
 :END:
@@ -404,7 +404,30 @@ a console Luvland runs as =build/luvland= from the VT's own login, and
 =./sly --luvland= reaches it through the Slynk endpoint it publishes, as
 =./sly --luvcraft= does for the standalone game.
 
-Untried: the run itself, which needs a free VT rather than a session inside
-niri, and whether SDL's own VT switching on Ctrl+Alt+Fn gives up the display
-cleanly.  Then luvcraft hosts a surface on a terminal wall (#QYFVAF), and a
-Chromium-based client, the other proof #MG1LRT named, is still to be tried.
+The first run was on a Raspberry Pi 5, which now boots into Luvland on
+tty1 and nothing else (#JJJAO9).  Two things only a console exposed: the
+Pi's V3DV has no =shaderInt64=, so luv now enables it only where the device
+offers it; and the standalone image asked ASDF where its sources were, which
+reloaded =luv.asd= and CFFI beneath live frames until the build marked every
+system in the image immutable.  Chromium joined as an ordinary Wayland
+client.  Still untried: SDL's own VT switching on Ctrl+Alt+Fn, and
+luvcraft hosting a surface on a terminal wall (#QYFVAF).
+
+* A Raspberry Pi played from the sofa
+:PROPERTIES:
+:ID: JJJAO9
+:END:
+
+With no keyboard or mouse in reach, the gamepad is the whole interface.
+Games read the pad themselves, so Luvland takes only Guide, which opens a
+play menu: the workbench prompt, its candidates the
+games named by =define-game= in the init file, the open windows, and a few
+window commands.  While the shell has the input the pad plays keys -- the
+D-pad is the arrows, A is Return, B is Escape -- and the shoulders, Y, and
+X move between windows, pull back to the overview, and close one.  Clients
+lose the keyboard meanwhile, so an SDL game ignores the pad until the menu
+closes.
+
+The session is a systemd unit on tty1 that takes only Luvland's own
+variables from the Nix shell, so the shells and browsers it starts see the
+machine's ordinary environment.
