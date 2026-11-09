@@ -213,6 +213,10 @@
            #:status-bar-field-label
            #:status-bar-field-value
            #:status-bar-presentation #:status-bar-overlay-height
+           #:status-bar-height-for
+           #:sample-status-bar
+           #:paint-status-bar
+           #:prompt-top
            #:status-bar-channels-for
            #:status-bar-channel-label
            #:status-bar-channel-value

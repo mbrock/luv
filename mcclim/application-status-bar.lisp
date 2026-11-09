@@ -33,10 +33,15 @@
   (declare (ignore owner))
   :strip)
 
+(defgeneric status-bar-height-for (owner)
+  (:documentation "The logical height of OWNER's status line.")
+  (:method ((owner t))
+    (if (eq :chip (status-bar-presentation owner)) 64 +status-bar-height+)))
+
 (defun status-bar-overlay-height (bar)
-  (if (and (typep bar 'status-bar)
-           (eq :chip (status-bar-presentation (status-bar-owner bar))))
-      64 +status-bar-height+))
+  (if (typep bar 'status-bar)
+      (status-bar-height-for (status-bar-owner bar))
+      +status-bar-height+))
 
 (defgeneric status-bar-channels-for (owner)
   (:documentation
@@ -191,6 +196,13 @@ They must inspect already-owned state and must not perform I/O or wait."))
                    :max-height +status-bar-height+)))
   (:layouts (default bar)))
 
+(defmethod prompt-top ((bar status-bar))
+  ;; A taller strip pushes the prompt down with it; the default strip and
+  ;; the corner chips keep their old place.
+  (if (eq :strip (status-bar-presentation (status-bar-owner bar)))
+      (max +prompt-top+ (+ (status-bar-overlay-height bar) 16))
+      +prompt-top+))
+
 (defmethod status-bar-channel-label
     ((channel (eql :application)) owner)
   (declare (ignore channel owner))
@@ -266,6 +278,16 @@ They must inspect already-owned state and must not perform I/O or wait."))
             (*print-pretty* nil))
         (princ-to-string value))))))
 
+(defgeneric sample-status-bar (owner bar)
+  (:documentation
+   "Return OWNER's immutable status sample for BAR, which the bar compares
+with EQUALP to decide whether to repaint.  The default samples the channels
+into bounded STATUS-BAR-FIELDs; an owner that paints its own line with
+PAINT-STATUS-BAR may sample anything else that EQUALP compares.  Runs on the
+throttled frame-boundary sample, never during paint, and must not wait.")
+  (:method ((owner t) bar)
+    (sample-status-bar-fields bar)))
+
 (defun sample-status-bar-fields (bar)
   "Copy one bounded immutable semantic field list from BAR's owner."
   (let ((owner (status-bar-owner bar)))
@@ -330,46 +352,56 @@ semantic repaint."
             do (write-string +status-bar-field-separator+ stream)
           do (write-string text stream))))
 
+(defgeneric paint-status-bar (owner bar pane medium)
+  (:documentation
+   "Draw OWNER's status line from BAR's retained sample on PANE's MEDIUM,
+STATUS-BAR-LOGICAL-WIDTH wide and STATUS-BAR-OVERLAY-HEIGHT tall.  Only
+direct analytic primitives and text: the shell's stream admits no raster
+images or decomposed fallbacks."))
+
 (defmethod handle-repaint ((pane status-bar-pane) region)
   (declare (ignore region))
-  (let* ((bar (pane-frame pane))
-         (width (status-bar-logical-width bar))
-         (chip-p (eq :chip (status-bar-presentation (status-bar-owner bar)))))
+  (let ((bar (pane-frame pane)))
     (with-sheet-medium (medium pane)
-      (if chip-p
-          (let* ((fields (status-bar-visible-fields bar))
-                 (clock (find :daytime fields :key #'status-bar-field-channel))
-                 (fps (find :fps fields :key #'status-bar-field-channel)))
-            ;; CLIM's supported :FIX family resolves through the GPU font
-            ;; mapping. Both corners share its size, baseline and inset.
-            (loop for field in (list fps clock)
-                  for x in (list 20 (- width 20))
-                  for align-x in '(:left :right)
-                  when field
-                    do (let ((text (if (eq field fps)
-                                       (format nil "~A fps" (status-bar-field-value field))
-                                       (status-bar-field-value field))))
-                         (draw-text* medium text (1+ x) 35
-                                     :align-x align-x :align-y :baseline
-                                     :text-family :fix :text-face :roman
-                                     :text-size +status-bar-text-size+
-                                     :ink (status-bar-alpha-ink 0 0 0 0.45))
-                         (draw-text* medium text x 34
-                                     :align-x align-x :align-y :baseline
-                                     :text-family :fix :text-face :roman
-                                     :text-size +status-bar-text-size+
-                                     :ink (status-bar-alpha-ink 1 1 1 0.92)))))
-          (progn
-            (draw-analytic-rounded-rectangle*
-             medium 0 0 width +status-bar-height+
-             :radius 0 :ink (ui-ink :surface))
-            (draw-analytic-rounded-rectangle*
-             medium 0 (- +status-bar-height+ 1) width +status-bar-height+
-             :radius 0 :ink (ui-ink :border))
-            (draw-text* pane (status-bar-display-string bar medium)
-                        +status-bar-horizontal-pad+ (/ +status-bar-height+ 2)
-                        :align-y :center :text-size +status-bar-text-size+
-                        :ink (ui-ink :muted)))))))
+      (paint-status-bar (status-bar-owner bar) bar pane medium))))
+
+(defmethod paint-status-bar (owner bar pane medium)
+  (let ((width (status-bar-logical-width bar))
+        (chip-p (eq :chip (status-bar-presentation owner))))
+    (if chip-p
+        (let* ((fields (status-bar-visible-fields bar))
+               (clock (find :daytime fields :key #'status-bar-field-channel))
+               (fps (find :fps fields :key #'status-bar-field-channel)))
+          ;; CLIM's supported :FIX family resolves through the GPU font
+          ;; mapping. Both corners share its size, baseline and inset.
+          (loop for field in (list fps clock)
+                for x in (list 20 (- width 20))
+                for align-x in '(:left :right)
+                when field
+                  do (let ((text (if (eq field fps)
+                                     (format nil "~A fps" (status-bar-field-value field))
+                                     (status-bar-field-value field))))
+                       (draw-text* medium text (1+ x) 35
+                                   :align-x align-x :align-y :baseline
+                                   :text-family :fix :text-face :roman
+                                   :text-size +status-bar-text-size+
+                                   :ink (status-bar-alpha-ink 0 0 0 0.45))
+                       (draw-text* medium text x 34
+                                   :align-x align-x :align-y :baseline
+                                   :text-family :fix :text-face :roman
+                                   :text-size +status-bar-text-size+
+                                   :ink (status-bar-alpha-ink 1 1 1 0.92)))))
+        (progn
+          (draw-analytic-rounded-rectangle*
+           medium 0 0 width +status-bar-height+
+           :radius 0 :ink (ui-ink :surface))
+          (draw-analytic-rounded-rectangle*
+           medium 0 (- +status-bar-height+ 1) width +status-bar-height+
+           :radius 0 :ink (ui-ink :border))
+          (draw-text* pane (status-bar-display-string bar medium)
+                      +status-bar-horizontal-pad+ (/ +status-bar-height+ 2)
+                      :align-y :center :text-size +status-bar-text-size+
+                      :ink (ui-ink :muted))))))
 
 (define-condition status-bar-requires-direct-gpu (error)
   ((object :initarg :object :reader status-bar-non-gpu-object))
@@ -478,7 +510,7 @@ semantic repaint."
                  elapsed-ticks)))
       (setf (status-bar-frames-since-sample bar) 0
             (status-bar-last-sample-ticks bar) now)
-      (let ((fields (sample-status-bar-fields bar)))
+      (let ((fields (sample-status-bar (status-bar-owner bar) bar)))
         (unless (equalp fields (status-bar-visible-fields bar))
           (setf (status-bar-visible-fields bar) fields
                 (status-bar-dirty-p bar) t)
