@@ -276,6 +276,19 @@
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luv.ghostty.tests)))
 
+(defsystem "luv/dbus"
+  :description "A D-Bus client written in Lisp over a Unix socket."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("sb-bsd-sockets" "sb-posix" "uiop")
+  :serial t
+  :components
+  ((:module "dbus"
+    :serial t
+    :components ((:file "package")
+                 (:file "wire")
+                 (:file "bus")))))
+
 (defsystem "luv/wayland"
   :description "A Wayland server over libwayland-server, implemented in Lisp."
   :version "0.0.1"
@@ -291,12 +304,14 @@
                  (:static-file "protocols/viewporter.xml")
                  (:static-file "protocols/presentation-time.xml")
                  (:static-file "protocols/linux-dmabuf-v1.xml")
+                 (:static-file "protocols/wlr-layer-shell-unstable-v1.xml")
                  (:file "package")
                  (:file "ffi")
                  (:file "protocol")
                  (:file "server")
                  (:file "core")
                  (:file "xdg-shell")
+                 (:file "layer-shell")
                  (:file "seat")
                  (:file "dmabuf"))))
   :in-order-to ((test-op (test-op "luv/wayland/test"))))

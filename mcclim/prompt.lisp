@@ -17,6 +17,12 @@
 (defconstant +prompt-top+ 44
   "Where the prompt panel sits below the status line.")
 
+(defgeneric prompt-top (frame)
+  (:documentation "Where FRAME's prompt and messages sit, below its status line.")
+  (:method ((frame t))
+    (declare (ignore frame))
+    +prompt-top+))
+
 (defconstant +message-margin+ 14)
 (defconstant +message-line-height+ 22)
 (defconstant +message-min-width+ 200)
@@ -65,7 +71,7 @@
   "The prompt's LEFT, TOP, WIDTH, and HEIGHT in a WIDTH by HEIGHT shell."
   (declare (ignore height))
   (let ((pane-width (min +prompt-width+ (max 1 (- width 32)))))
-    (values (max 0 (floor (- width pane-width) 2)) +prompt-top+
+    (values (max 0 (floor (- width pane-width) 2)) (prompt-top frame)
             pane-width (prompt-height frame))))
 
 (defun update-prompt-candidates (frame)
@@ -266,7 +272,7 @@ first candidate chosen, for a menu that is answered without typing."
   "Top right, below the status line, as StumpWM's message window."
   (declare (ignore height))
   (let ((pane-width (min (message-width frame) (max 1 (- width 32)))))
-    (values (max 0 (- width pane-width 16)) +prompt-top+
+    (values (max 0 (- width pane-width 16)) (prompt-top frame)
             pane-width (message-height frame))))
 
 (defun set-message (frame pane lines &key error-p (seconds 5))

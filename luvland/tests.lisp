@@ -197,3 +197,236 @@
                (apply #'press (control :d #\d))
                (true (wait-until (lambda () (null (luvland::live-terminals luvland))))))
           (luvland::close-terminal luvland terminal)))))
+
+;;; The bar's sources, against real D-Bus daemons Luvland does not own: a
+;;; private bus, a StatusNotifierItem as nm-applet would publish one, and a
+;;; NetworkManager with one Wi-Fi connection.
+
+(defun call-with-private-bus (function)
+  "Call FUNCTION with the address of a fresh dbus-daemon, which is also the
+session bus meanwhile."
+  (if (null (program-on-path "dbus-daemon"))
+      (skip "dbus-daemon is not on PATH" (true nil))
+      (let* ((process (sb-ext:run-program "dbus-daemon" '("--session" "--nofork" "--print-address=1")
+                                          :search t :wait nil :output :stream :error nil))
+             (address (string-trim '(#\Space #\Newline)
+                                   (read-line (sb-ext:process-output process))))
+             (previous (uiop:getenv "DBUS_SESSION_BUS_ADDRESS")))
+        (sb-posix:setenv "DBUS_SESSION_BUS_ADDRESS" address 1)
+        (unwind-protect (funcall function address)
+          (if previous
+              (sb-posix:setenv "DBUS_SESSION_BUS_ADDRESS" previous 1)
+              (sb-posix:unsetenv "DBUS_SESSION_BUS_ADDRESS"))
+          (sb-ext:process-kill process 15)))))
+
+(defun variant-plist (&rest pairs)
+  "PAIRS, name signature value ..., as an a{sv} dictionary."
+  (loop for (name signature value) on pairs by #'cdddr
+        collect (cons name (luv.dbus:make-variant signature value))))
+
+(defun menu-node (id properties &rest children)
+  (list id properties
+        (mapcar (lambda (child) (luv.dbus:make-variant "(ia{sv}av)" child)) children)))
+
+(defun solid-pixmap (size argb)
+  (let ((octets (make-array (* 4 size size) :element-type '(unsigned-byte 8))))
+    (dotimes (i (* size size))
+      (dotimes (byte 4)
+        (setf (aref octets (+ (* 4 i) byte)) (ldb (byte 8 (* 8 (- 3 byte))) argb))))
+    (list size size octets)))
+
+(defclass fake-tray-item ()
+  ((bus :initarg :bus :reader fake-bus)
+   (path :initarg :path :initform "/StatusNotifierItem" :reader fake-path)
+   (title :initarg :title :accessor fake-title)
+   (pixmaps :initarg :pixmaps :initform '() :reader fake-pixmaps)
+   (calls :initform '() :accessor fake-calls)))
+
+(defun fake-menu-layout ()
+  (menu-node 0 '()
+             (menu-node 1 (variant-plist "label" "s" "_Enable Wi-Fi"
+                                         "toggle-type" "s" "checkmark"
+                                         "toggle-state" "i" 1))
+             (menu-node 2 (variant-plist "type" "s" "separator"))
+             (menu-node 3 (variant-plist "label" "s" "Hidden" "visible" "b" nil))
+             (menu-node 5 (variant-plist "label" "s" "Disabled" "enabled" "b" nil))
+             (menu-node 6 (variant-plist "label" "s" "VPN" "children-display" "s" "submenu")
+                        (menu-node 7 (variant-plist "label" "s" "Connect __home")))))
+
+(defun serve-fake-tray-item (fake)
+  "Answer as an item at FAKE's path: properties, Activate, and a dbusmenu."
+  (luv.dbus:add-handler
+   (fake-bus fake)
+   (lambda (bus message)
+     (when (eq (luv.dbus:message-type message) :method-call)
+       (let ((member (luv.dbus:message-member message))
+             (path (luv.dbus:message-path message)))
+         (cond
+           ((and (string= path (fake-path fake)) (string= member "GetAll"))
+            (luv.dbus:reply bus message :signature "a{sv}"
+                                        :arguments (list (variant-plist
+                                                          "Id" "s" "nm-applet"
+                                                          "Title" "s" (fake-title fake)
+                                                          "Status" "s" "Active"
+                                                          "IconName" "s" "nm-signal-75"
+                                                          "IconPixmap" "a(iiay)" (fake-pixmaps fake)
+                                                          "ItemIsMenu" "b" nil
+                                                          "Menu" "o" "/MenuBar")))
+            t)
+           ((string= member "Activate")
+            (push (list :activate) (fake-calls fake))
+            (luv.dbus:reply bus message)
+            t)
+           ((and (string= path "/MenuBar") (string= member "AboutToShow"))
+            (luv.dbus:reply bus message :signature "b" :arguments '(nil))
+            t)
+           ((and (string= path "/MenuBar") (string= member "GetLayout"))
+            (luv.dbus:reply bus message :signature "u(ia{sv}av)"
+                                        :arguments (list 1 (fake-menu-layout)))
+            t)
+           ((and (string= path "/MenuBar") (string= member "Event"))
+            (push (list :event (first (luv.dbus:message-body message))
+                        (second (luv.dbus:message-body message)))
+                  (fake-calls fake))
+            (luv.dbus:reply bus message)
+            t)))))))
+
+(defun open-fake-tray-item (&key (name "org.example.FakeApplet") (title "Network")
+                                 (pixmaps (list (solid-pixmap 16 #xff00ff00)
+                                                (solid-pixmap 48 #xc0336699)
+                                                (solid-pixmap 64 #xff000000)))
+                                 path)
+  "Publish a fake item and register it as nm-applet would, by NAME, or as
+libappindicator would, by PATH alone."
+  (let* ((bus (luv.dbus:open-bus :session))
+         (fake (make-instance 'fake-tray-item :bus bus :title title :pixmaps pixmaps
+                                              :path (or path "/StatusNotifierItem"))))
+    (serve-fake-tray-item fake)
+    (unless path (luv.dbus:request-name bus name))
+    (luv.dbus:call bus "org.kde.StatusNotifierWatcher" "/StatusNotifierWatcher"
+                   "org.kde.StatusNotifierWatcher" "RegisterStatusNotifierItem"
+                   :signature "s" :arguments (list (or path name)))
+    fake))
+
+(define-test the-tray-watches-items-their-menus-and-their-exits
+  (call-with-private-bus
+   (lambda (address)
+     (declare (ignore address))
+     (let ((tray (luvland::start-tray)))
+       (unwind-protect
+            (let ((fake (open-fake-tray-item)))
+              (true (luvland::tray-watcher-p tray))
+              (true (wait-until (lambda () (luvland::tray-items tray))))
+              (let ((item (first (luvland::tray-items tray))))
+                (is string= "Network" (luvland::tray-item-name item))
+                (is string= "org.example.FakeApplet/StatusNotifierItem"
+                    (luvland::tray-item-key item))
+                ;; The smallest pixmap at least 48 wide, not the first or largest.
+                (is = 48 (first (luvland::tray-item-pixmap item)))
+                ;; Separators, hidden, and disabled entries are not offered;
+                ;; submenus flatten, mnemonics go, and toggles show their state.
+                (is equal '(("● Enable Wi-Fi" . 1) ("VPN › Connect _home" . 7))
+                    (luvland::tray-item-menu item))
+                (luvland::click-tray-menu-entry tray item 7)
+                (luvland::activate-tray-item tray item)
+                (true (wait-until (lambda () (and (find :activate (fake-calls fake) :key #'first)
+                                                  (find :event (fake-calls fake) :key #'first)))))
+                (is equal '(:event 7 "clicked") (find :event (fake-calls fake) :key #'first)))
+              ;; A changed title is read again when the item says so.
+              (setf (fake-title fake) "Wi-Fi: plank-net")
+              (luv.dbus:emit-signal (fake-bus fake) "/StatusNotifierItem"
+                                    "org.kde.StatusNotifierItem" "NewTitle")
+              (true (wait-until (lambda () (equal "Wi-Fi: plank-net"
+                                                  (luvland::tray-item-name
+                                                   (first (luvland::tray-items tray)))))))
+              ;; libappindicator registers an object path its connection serves.
+              (let ((path-fake (open-fake-tray-item :path "/org/ayatana/NotificationItem/x"
+                                                    :title "Indicator" :pixmaps '())))
+                (true (wait-until (lambda () (= 2 (length (luvland::tray-items tray))))))
+                (let ((item (second (luvland::tray-items tray))))
+                  (is string= (luv.dbus:bus-unique-name (fake-bus path-fake))
+                      (luvland::tray-item-service item))
+                  (false (luvland::tray-item-pixmap item)))
+                ;; An item leaves with its connection.
+                (luv.dbus:close-bus (fake-bus path-fake))
+                (true (wait-until (lambda () (= 1 (length (luvland::tray-items tray)))))))
+              (luv.dbus:close-bus (fake-bus fake))
+              (true (wait-until (lambda () (null (luvland::tray-items tray))))))
+         (luvland::stop-tray tray))))))
+
+(defun serve-fake-network-manager (bus primary)
+  "Serve NetworkManager's properties on BUS, its primary connection the
+CAR of PRIMARY, a Wi-Fi connection or \"/\" for none."
+  (let ((properties
+          `(("/org/freedesktop/NetworkManager/ActiveConnection/1"
+             ("Type" . ,(luv.dbus:make-variant "s" "802-11-wireless"))
+             ("Id" . ,(luv.dbus:make-variant "s" "plank-net"))
+             ("Devices" . ,(luv.dbus:make-variant "ao" '("/org/freedesktop/NetworkManager/Devices/3"))))
+            ("/org/freedesktop/NetworkManager/Devices/3"
+             ("ActiveAccessPoint" . ,(luv.dbus:make-variant "o" "/org/freedesktop/NetworkManager/AccessPoint/9")))
+            ("/org/freedesktop/NetworkManager/AccessPoint/9"
+             ("Strength" . ,(luv.dbus:make-variant "y" 68))))))
+    (luv.dbus:request-name bus "org.freedesktop.NetworkManager")
+    (luv.dbus:add-handler
+     bus (lambda (bus message)
+           (when (equal (luv.dbus:message-member message) "Get")
+             (let* ((path (luv.dbus:message-path message))
+                    (name (second (luv.dbus:message-body message)))
+                    (value (if (and (string= path "/org/freedesktop/NetworkManager")
+                                    (string= name "PrimaryConnection"))
+                               (luv.dbus:make-variant "o" (car primary))
+                               (cdr (assoc name (cdr (assoc path properties :test #'string=))
+                                           :test #'string=)))))
+               (if value
+                   (luv.dbus:reply bus message :signature "v" :arguments (list value))
+                   (luv.dbus:reply-error bus message "org.freedesktop.DBus.Error.UnknownProperty"))
+               t))))))
+
+(define-test the-network-indicator-reads-networkmanager
+  (call-with-private-bus
+   (lambda (address)
+     (let ((manager (luv.dbus:open-bus address))
+           (reader (luv.dbus:open-bus address))
+           (primary (list "/org/freedesktop/NetworkManager/ActiveConnection/1")))
+       (unwind-protect
+            (progn
+              ;; Without NetworkManager there is nothing to say.
+              (false (luvland::sample-network reader))
+              (serve-fake-network-manager manager primary)
+              (is equal '(:kind :wifi :name "plank-net" :strength 68)
+                  (luvland::sample-network reader))
+              (setf (car primary) "/")
+              (is equal '(:kind :offline) (luvland::sample-network reader)))
+         (luv.dbus:close-bus manager)
+         (luv.dbus:close-bus reader))))))
+
+(define-test indicators-read-wpctl-and-sysfs
+  (is equal '(:level 45 :muted-p nil) (luvland::parse-wpctl-volume "Volume: 0.45"))
+  (is equal '(:level 30 :muted-p t) (luvland::parse-wpctl-volume "Volume: 0.30 [MUTED]"))
+  (is equal '(:level 120 :muted-p nil) (luvland::parse-wpctl-volume "Volume: 1.20"))
+  (false (luvland::parse-wpctl-volume "Could not connect to PipeWire"))
+  (let ((root (uiop:ensure-directory-pathname
+               (format nil "/tmp/luvland-power-~D/" (random 1000000)))))
+    (flet ((supply (name &rest files)
+             (loop for (file contents) on files by #'cddr
+                   do (let ((path (merge-pathnames file (merge-pathnames (format nil "~A/" name) root))))
+                        (ensure-directories-exist path)
+                        (with-open-file (stream path :direction :output :if-exists :supersede)
+                          (write-line contents stream))))))
+      (unwind-protect
+           (progn
+             (supply "AC" "type" "Mains" "online" "1")
+             (supply "BAT0" "type" "Battery" "capacity" "76" "status" "Charging")
+             (supply "ps-controller-battery-aa" "type" "Battery" "capacity" "40"
+                     "status" "Discharging" "scope" "Device")
+             (let* ((luvland::*power-supply-directory* root)
+                    (batteries (sort (luvland::sample-batteries) #'string<
+                                     :key (lambda (battery) (getf battery :name)))))
+               (is = 2 (length batteries))
+               (is equal '("BAT0" 76 t nil)
+                   (let ((battery (first batteries)))
+                     (list (getf battery :name) (getf battery :level)
+                           (and (getf battery :charging-p) t) (getf battery :device-p))))
+               (true (getf (second batteries) :device-p))
+               (false (getf (second batteries) :charging-p))))
+        (uiop:delete-directory-tree root :validate t)))))

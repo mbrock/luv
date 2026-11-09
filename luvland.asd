@@ -4,15 +4,19 @@
   :description "A Wayland atelier whose only world is windows."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luv" "luv/wayland" "luv/workbench" "luv/terminal/canvas")
+  :depends-on ("luv" "luv/wayland" "luv/dbus" "luv/workbench" "luv/terminal/canvas")
   :serial t
   :components ((:module "luvland"
                 :serial t
                 :components ((:file "package")
                              (:file "keys")
                              (:file "luvland")
+                             (:file "layers")
                              (:file "terminal")
                              (:file "commands")
+                             (:file "indicators")
+                             (:file "tray")
+                             (:file "bar")
                              (:file "gamepad"))))
   :in-order-to ((test-op (test-op "luvland/test"))))
 

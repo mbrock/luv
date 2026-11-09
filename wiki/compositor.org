@@ -431,3 +431,90 @@ closes.
 The session is a systemd unit on tty1 that takes only Luvland's own
 variables from the Nix shell, so the shells and browsers it starts see the
 machine's ordinary environment.
+
+Everything the bar offers a click is in that menu too (#Z1MIPN): sound,
+each tray item, and the entries of its menu.
+
+* DONE Luvland's bar says what the machine is doing
+:PROPERTIES:
+:ID: Z1MIPN
+:END:
+
+Seen from the sofa (#JJJAO9), the shared workbench status line was a row of
+telemetry -- pid, fps, heap, lobby, worktree -- in small grey type, with
+nothing about the machine itself.  Luvland now draws its own bar in the
+same pane, 44 logical pixels tall with 22-point type: on the left a chip
+per window, the focused one filled, then the focused window's title; on
+the right tray icons (#N68SK6), the gamepads and a gamepad's battery,
+sound, the network, the machine's battery, and the date and clock.  An
+indicator the machine lacks leaves no gap; with no windows the left says
+how to open the play menu.
+
+[[file:images/luvland-bar.png]]
+
+The shared line became three generic functions --
+=status-bar-height-for=, =sample-status-bar=, =paint-status-bar= -- whose
+defaults are the old line, so the games' bars are unchanged and the
+prompt sits below whichever bar is taller.  Luvland's sample is an
+immutable plist the bar compares as before, so it repaints only when what
+it shows changes.  The machine's state comes from a sampler thread every
+two seconds: NetworkManager's primary connection over the system bus,
+falling back to =/proc/net/wireless=; the default sink through =wpctl=;
+batteries in =/sys/class/power_supply=, where a pad's has scope Device.
+Icons are roundrects and circles, the primitives the shell draws exactly.
+
+Painting lays the bar out as regions that the pointer and the play menu
+both read.  A click on a chip focuses that window; on sound, mutes, a
+right click louder; on the gamepad, opens the play menu; on a tray icon,
+activates it or opens its menu at the prompt.
+
+* DONE Tray icons are D-Bus, so Luvland is the watcher
+:PROPERTIES:
+:ID: N68SK6
+:END:
+
+Tray icons are not a Wayland protocol.  nm-applet, blueman, and the rest
+publish an =org.kde.StatusNotifierItem= on the session bus and register it
+with whoever owns =org.kde.StatusNotifierWatcher=; waybar is such a
+watcher's host.  Luvland takes the watcher name itself, so items register
+straight into its bar; if another program already watches, it registers
+as one more host.  On a console with no session bus it starts a
+=dbus-daemon= and gives its clients the address.
+
+D-Bus is spoken by =luv/dbus=, a client written in Lisp over a Unix
+socket: the wire format, EXTERNAL authentication, calls whose replies wake
+their callers, and a dispatch thread for incoming calls and signals that
+may itself call synchronously.  An item's pixmap is uploaded once,
+premultiplied, and drawn by Luvland over the slot the bar left for it,
+since the shell's stream admits no raster images; an item without one is
+its initial on a tile.  Its =com.canonical.dbusmenu= menu is read ahead
+and flattened -- separators, hidden, and disabled entries dropped,
+submenus prefixed -- so neither a click nor the pad waits on it.  The
+tests run a private bus, register items both ways nm-applet and
+libappindicator do, and watch them go when their connections close.
+
+Not yet: themed icons by =IconName= alone, which need an icon theme
+lookup; tooltips; and real nm-applet or blueman on plank.
+
+* DONE Bars, launchers, and wallpapers from other programs
+:PROPERTIES:
+:ID: 93ILCF
+:END:
+
+=luv.wayland= serves =zwlr_layer_shell_v1=, so waybar, fuzzel, swaybg, and
+mako can run in Luvland.  A layer surface asks for a place on the screen
+rather than in the world: anchored edges, a size, margins, a layer, and
+perhaps an exclusive zone.  The server keeps that state and proposes
+sizes within the area below Luvland's bar; Luvland draws background and
+bottom layers beneath the windows, top and overlay above them, and its
+own bar above all, flat and one to one.  An exclusive zone shrinks and
+recentres the windows, as the bar does.  A layer that takes the keyboard
+exclusively has it while it shows, and one that takes it on demand when
+clicked.
+
+[[file:images/luvland-layer-shell.png]]
+
+Here a throwaway client over libwayland-client shows a wallpaper on the
+background layer and a translucent panel anchored to the bottom with a
+64-pixel zone; the window gave up 80 pixels to it.  Not yet: layer
+popups, and the protocol's =output= choice, since Luvland has one output.
