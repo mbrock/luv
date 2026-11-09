@@ -98,6 +98,15 @@
                        :character character :unshifted-character unshifted
                        :repeat-p nil))
 
+(define-test app-ids-name-windows-unless-made-up
+  (is string= "Nautilus" (luvland::app-id-name "org.gnome.Nautilus"))
+  (is string= "foot" (luvland::app-id-name "foot"))
+  ;; Chromium's ids for web apps: the dotted host is not a reverse-DNS name.
+  (false (luvland::app-id-name "chrome-127.0.0.1__-Default"))
+  (false (luvland::app-id-name "chrome-fmgjjmmmlfnkbppncabfkddbjimcfncm-Default"))
+  (false (luvland::app-id-name ""))
+  (false (luvland::app-id-name nil)))
+
 (define-test kbd-reads-and-prints-stumpwm-key-names
   (dolist (name '("C-t" "M-Left" "C-M-RET" "SPC" "!" "K" "C-g" "F5" "s-x"))
     (is string= name (luvland::print-key (luvland:kbd name)))))

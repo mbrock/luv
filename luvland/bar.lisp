@@ -28,14 +28,25 @@
 ;;; The sample: an immutable plist the shared bar compares with EQUALP, so
 ;;; the pane repaints only when something it shows has changed.
 
+(defun app-id-name (app-id)
+  "The name APP-ID gives its window, or NIL when it names none.
+org.gnome.Nautilus is Nautilus and foot is foot, but Chromium makes up an id
+for each web app, such as chrome-127.0.0.1__-Default, that names nothing a
+person would recognise; its window's title does."
+  (flet ((word-p (part)
+           (and (plusp (length part))
+                (alpha-char-p (char part 0))
+                (every (lambda (char) (or (alphanumericp char) (find char "-_"))) part))))
+    (let ((parts (uiop:split-string (or app-id "") :separator ".")))
+      (when (and (every #'word-p parts)
+                 (not (uiop:string-prefix-p "chrome-" app-id))
+                 (not (uiop:string-prefix-p "crx_" app-id)))
+        (car (last parts))))))
+
 (defun window-chip-name (window)
   (let* ((toplevel (window-toplevel window))
          (name (cond ((terminal-p toplevel) "terminal")
-                     ((plusp (length (wl:toplevel-app-id toplevel)))
-                      (let* ((id (wl:toplevel-app-id toplevel))
-                             (dot (position #\. id :from-end t)))
-                        ;; org.gnome.Nautilus is Nautilus.
-                        (if dot (subseq id (1+ dot)) id)))
+                     ((app-id-name (wl:toplevel-app-id toplevel)))
                      (t (window-title window)))))
     (if (> (length name) *bar-chip-name-length*)
         (concatenate 'string (subseq name 0 (1- *bar-chip-name-length*)) "…")
