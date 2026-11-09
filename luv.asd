@@ -276,6 +276,19 @@
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luv.ghostty.tests)))
 
+(defsystem "luv/dbus"
+  :description "A D-Bus client written in Lisp over a Unix socket."
+  :version "0.0.1"
+  :author "Mikael Brockman"
+  :depends-on ("sb-bsd-sockets" "sb-posix" "uiop")
+  :serial t
+  :components
+  ((:module "dbus"
+    :serial t
+    :components ((:file "package")
+                 (:file "wire")
+                 (:file "bus")))))
+
 (defsystem "luv/wayland"
   :description "A Wayland server over libwayland-server, implemented in Lisp."
   :version "0.0.1"
