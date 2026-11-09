@@ -108,6 +108,33 @@
                        (* model-view-projection
                           (shader:vec4 (/ x width) (/ y height) 0.0 1.0)))))
 
+(define-window-shader frame-vertex-specification :vertex
+    ((vertex-index :uint :built-in :vertex-index))
+    ()
+    ((clip-position :vec4 :built-in :position)
+     (window-pixel :vec2 :location 0))
+  ;; Only the ring a frame shows: a ten-vertex strip between the extended
+  ;; edge and the window inset by its corner radius, around corners 0 to 3
+  ;; and back to 0.  The window covers the rest, and shading the whole
+  ;; window twice cost a Raspberry Pi 5 a sixth of a game's frame rate.
+  (let* ((two (shader:uint 2.0))
+         (corner (mod (/ vertex-index two) (shader:uint 4.0)))
+         (u (shader:float (mod (/ (+ corner (shader:uint 1.0)) two) two)))
+         (v (shader:float (/ corner two)))
+         (outer (- 1.0 (shader:float (mod vertex-index two))))
+         (width (shader:swizzle shape :x))
+         (height (shader:swizzle shape :y))
+         (radius (shader:swizzle shape :z))
+         (extend (shader:swizzle shape :w))
+         (x (+ (* outer (- (* u (+ width (* 2.0 extend))) extend))
+               (* (- 1.0 outer) (+ radius (* u (- width (* 2.0 radius)))))))
+         (y (+ (* outer (- (* v (+ height (* 2.0 extend))) extend))
+               (* (- 1.0 outer) (+ radius (* v (- height (* 2.0 radius))))))))
+    (shader:set-output window-pixel (shader:vec2 x y))
+    (shader:set-output clip-position
+                       (* model-view-projection
+                          (shader:vec4 (/ x width) (/ y height) 0.0 1.0)))))
+
 (shader:define-shader-function rounded-box-distance (point half-size radius)
   "Signed distance from POINT to a box of HALF-SIZE about the origin whose
 corners are rounded by RADIUS."
@@ -307,10 +334,11 @@ submitted so far, which is all work that could still read what THUNK frees."
                                                :code specification))))
                (push module modules)
                module)))
-      (let ((vertex (module "Luvland window vertex" (window-vertex-specification)))
+      (let ((window-vertex (module "Luvland window vertex" (window-vertex-specification)))
+            (frame-vertex (module "Luvland frame vertex" (frame-vertex-specification)))
             (window (module "Luvland window fragment" (window-fragment-specification)))
             (frame (module "Luvland frame fragment" (frame-fragment-specification))))
-        (flet ((pipeline (label fragment)
+        (flet ((pipeline (label vertex fragment)
                  (luv:create device (luv:make-render-pipeline-descriptor
                                      :label label
                                      :layout layout
@@ -324,8 +352,9 @@ submitted so far, which is all work that could still read what THUNK frees."
                 (luvland-sampler luvland)
                 (luv:create device (luv:make-sampler-descriptor
                                     :label "Luvland window sampler"))
-                (luvland-pipeline luvland) (pipeline "Luvland windows" window)
-                (luvland-frame-pipeline luvland) (pipeline "Luvland frames" frame)))))))
+                (luvland-pipeline luvland) (pipeline "Luvland windows" window-vertex window)
+                (luvland-frame-pipeline luvland)
+                (pipeline "Luvland frames" frame-vertex frame)))))))
 
 ;;; Windows follow the server's toplevels.
 
@@ -770,7 +799,7 @@ the world will be at TIME."
     (luv:set-pipeline pass (luvland-frame-pipeline luvland))
     (dolist (window windows)
       (luv:set-bind-group pass 0 (getf (gethash window state) :frame-group))
-      (luv:draw pass 4))
+      (luv:draw pass 10))
     (luv:set-pipeline pass (luvland-pipeline luvland))
     (dolist (window windows)
       (luv:set-bind-group pass 0 (getf (gethash window state) :window-group))
@@ -852,7 +881,7 @@ would ask for a layout transition inside the render pass."
           (luv:write-buffer (getf entry :frame-buffer) data)
           (luv:set-pipeline pass (luvland-frame-pipeline luvland))
           (luv:set-bind-group pass 0 (getf entry :frame-group))
-          (luv:draw pass 4))))))
+          (luv:draw pass 10))))))
 
 (defun milliseconds-since (start)
   (/ (- (get-internal-real-time) start)
@@ -867,25 +896,35 @@ would ask for a layout transition inside the render pass."
   (let ((start (get-internal-real-time))
         (synced nil)
         (encoded nil))
-    (sync-windows luvland)
-    (reconfigure-windows luvland)
-    ;; A buffer replaced just now was last sampled by the previous frame,
-    ;; which has usually finished: give it back before drawing, not a frame
-    ;; later, or a client with three swapchain images starves.
-    (bury-the-dead luvland)
-    (aim-camera luvland)
-    ;; The shell samples and prepares outside the pass it is drawn in.
-    (let ((workbench (luvland-workbench luvland)))
-      (when workbench (luv.workbench:refresh-workbench workbench)))
-    (setf synced (milliseconds-since start))
     (luv:call-with-canvas-frame
      (luvland-context luvland)
      (lambda (surface-texture encoder presentation-time)
+       ;; Take the clients' newest buffers only now, once the swapchain has
+       ;; an image: waiting for one takes most of a frame, and a buffer
+       ;; committed meanwhile would otherwise wait a whole frame more.
+       (let ((begun (get-internal-real-time)))
+         (sync-windows luvland)
+         (reconfigure-windows luvland)
+         ;; A buffer replaced just now was last sampled by the previous
+         ;; frame, which has usually finished: give it back before drawing,
+         ;; not a frame later, or a client with three swapchain images
+         ;; starves.
+         (bury-the-dead luvland)
+         (aim-camera luvland)
+         ;; The shell samples and prepares outside the pass it is drawn in.
+         (let ((workbench (luvland-workbench luvland)))
+           (when workbench (luv.workbench:refresh-workbench workbench)))
+         (setf synced (milliseconds-since begun)))
        ;; Animate to when this frame will be seen, not when it is drawn.
        (let ((begun (get-internal-real-time)))
          (encode-windows luvland encoder surface-texture (canvas-extent luvland)
                          (or presentation-time (now luvland)))
          (setf encoded (milliseconds-since begun)))))
+    ;; No image this time, as while the console is switched away: keep
+    ;; following the clients all the same.
+    (unless synced
+      (sync-windows luvland)
+      (reconfigure-windows luvland))
     (record-frame-time luvland :sync synced :encode encoded
                                :total (milliseconds-since start)))
   (incf (luvland-frame-number luvland))
