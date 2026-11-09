@@ -360,6 +360,34 @@ fed by key events whose continuation runs after it closes; it never waits.
 Whenever the shell takes the keyboard, Luvland releases every key and button
 its clients saw pressed, since the shell swallows their releases.
 
+* DONE Luvland draws its own terminal
+:PROPERTIES:
+:ID: E0U5JD
+:END:
+
+=C-t c= no longer starts foot.  It opens a terminal Luvland runs itself: a
+shell under a PTY driving a Ghostty screen, the same terminal the walls
+carry (#NMAD2U), drawn by Luvland into its window's texture.  The terminal
+stands where a client's toplevel would, so focus, window numbers, the
+overview, =k=, and the status line treat it as one more window.  Its keys
+are canvas events that passed the prefix keymaps, encoded by Ghostty in the
+shell's current modes, and =C-t t= sends =C-t= itself.  It takes the fitted
+window size, resizing its grid and PTY with it, and closes when its shell
+exits.  Programs the shell starts are clients of Luvland's display.
+
+[[file:images/luvland-terminal.png]]
+
+The drawing is the walls' recipe in window pixels: Ghostty's styled
+snapshot read cell by cell, runs of explicit backgrounds as flat panels,
+and each character as Slug glyphs of Monaspace Neon from one atlas seeded
+with printable ASCII, drawn with the workbench's screen-space solid and Slug
+shaders into a texture the window pipeline shows as it shows a client's.  A
+screen is redrawn only after output.
+
+Not yet: scrollback, mouse reporting, selection and paste, OSC titles, and
+anything beyond a cell's base code point.  Setting =*terminal*= to a program
+and its arguments runs that as the terminal client again.
+
 * NEXT Run Luvland on a console
 :PROPERTIES:
 :ID: RRONLT

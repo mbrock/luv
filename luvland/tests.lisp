@@ -152,3 +152,48 @@
     (is string= "No command \"frobnicate\"." (luvland::run-command-line luvland "frobnicate"))
     (true (search "is not a integer"
                   (luvland::run-command-line luvland "select seven")))))
+
+;;; Luvland's own terminal, without a GPU: keys reach its shell past the
+;;; prefix, and it closes with the shell.
+
+(defun terminal-text (terminal)
+  (luv.terminal:call-with-pty-device-terminal (luvland::terminal-device terminal)
+                                              #'luv.ghostty:terminal-text))
+
+(defun wait-until (predicate &key (timeout 3.0))
+  (loop repeat (round timeout 0.01)
+        thereis (funcall predicate)
+        do (sleep 0.01)))
+
+(define-test terminals-read-keys-past-the-prefix-and-close-with-their-shell
+  (if (null (ignore-errors (luv.ghostty:load-libghostty-vt)))
+      (skip "libghostty-vt is not loadable" (true nil))
+      (let* ((luvland (make-instance 'luvland::luvland))
+             (terminal (luvland::start-terminal :columns 40 :rows 4 :program '("cat"))))
+        (setf (luvland::luvland-command-frame luvland)
+              (clim:make-application-frame 'luvland::luvland-frame :luvland luvland)
+              (luvland::luvland-terminals luvland) (list terminal)
+              (luvland::luvland-focus luvland) terminal)
+        (unwind-protect
+             (flet ((press (key-name character &rest options)
+                      (luv:handle-canvas-event
+                       luvland nil (apply #'key-event 'luv:canvas-key-press-event
+                                          key-name character options)))
+                    (control (key-name character)
+                      (list key-name (code-char (- (char-code character) 96))
+                            :modifiers '(:control) :unshifted character)))
+               (press :h #\h)
+               (press :i #\i)
+               ;; C-t n is Luvland's; C-t t sends C-t itself, which the tty
+               ;; echoes as ^T.
+               (apply #'press (control :t #\t))
+               (press :n #\n)
+               (apply #'press (control :t #\t))
+               (press :t #\t)
+               (press :return nil)
+               (true (wait-until (lambda () (search "hi^T" (terminal-text terminal)))))
+               (false (search "n" (terminal-text terminal)))
+               ;; End of file ends cat, and the next sync drops its window.
+               (apply #'press (control :d #\d))
+               (true (wait-until (lambda () (null (luvland::live-terminals luvland))))))
+          (luvland::close-terminal luvland terminal)))))
