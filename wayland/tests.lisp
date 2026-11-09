@@ -144,3 +144,27 @@ private temporary one for the duration."
                  (sb-ext:process-kill process 15))
                (wl:stop-server server)
                (false (wl:server-running-p server)))))))))
+
+(define-test layer-surfaces-are-placed-by-their-anchors-and-margins
+  (flet ((place (anchor size &key (margin '(0 0 0 0)))
+           (wl::layer-geometry '(0 44 1920 1036)
+                               (wl::make-layer-state :anchor anchor :size size :margin margin)))
+         (edge (anchor zone)
+           (wl::layer-exclusive-edge (wl::make-layer-state :anchor anchor :exclusive-zone zone))))
+    ;; Bottom, left, and right with width 0: stretched between the side
+    ;; margins, standing on the bottom margin.  (Margins: top right bottom left.)
+    (is equal '(16 1016 1888 64) (place (logior 2 4 8) '(0 64) :margin '(0 16 0 16)))
+    (is equal '(10 1000 1880 64) (place (logior 2 4 8) '(0 64) :margin '(0 30 16 10)))
+    ;; Every edge with size 0 fills the area.
+    (is equal '(0 44 1920 1036) (place 15 '(0 0)))
+    ;; The top right corner, inset by its margins.
+    (is equal '(1600 52 300 200) (place (logior 1 8) '(300 200) :margin '(8 20 0 0)))
+    ;; Anchored to nothing: centred.
+    (is equal '(660 312 600 500) (place 0 '(600 500)))
+    ;; Only an edge, or an edge and both its neighbours, claims space.
+    (is eq :bottom (edge (logior 2 4 8) 64))
+    (is eq :top (edge 1 30))
+    (is eq :left (edge (logior 4 1 2) 200))
+    (false (edge (logior 1 4) 30))
+    (false (edge (logior 2 4 8) 0))
+    (false (edge (logior 2 4 8) -1))))

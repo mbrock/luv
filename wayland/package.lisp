@@ -89,6 +89,18 @@ supplies placement, picking, and focus.")
    #:configure-toplevel
    #:close-toplevel
    #:send-frame-callbacks
+   ;; Layer shell.
+   #:server-layer-surfaces
+   #:layer-surface
+   #:layer-surface-surface
+   #:layer-surface-namespace
+   #:layer-surface-layer
+   #:layer-surface-anchor
+   #:layer-surface-mapped-p
+   #:layer-surface-keyboard-interactivity
+   #:layer-surface-geometry
+   #:layer-surface-exclusive-edge
+   #:reconfigure-layer-surfaces
    ;; Input.
    #:keyboard-focus
    #:pointer-focus

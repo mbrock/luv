@@ -29,6 +29,11 @@
    (wakeup-fd :initform -1 :accessor server-wakeup-fd)
    (surfaces :initform '() :accessor server-surfaces)
    (toplevels :initform '() :accessor server-toplevels)
+   (layer-surfaces :initform '() :accessor server-layer-surfaces
+                   :documentation "zwlr_layer_surface_v1 objects, newest first.")
+   (layer-area :initform nil :accessor server-layer-area
+               :documentation "The (x y width height) the host offers layer surfaces,
+or NIL for the whole output.")
    (seat :initform nil :accessor server-seat)
    (log :initform '() :accessor server-log-entries)
    (failures :initform '() :accessor server-failures)

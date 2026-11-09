@@ -43,7 +43,8 @@
 
 (defparameter *protocol-files*
   '("wayland.xml" "xdg-shell.xml" "xdg-decoration-unstable-v1.xml"
-    "viewporter.xml" "presentation-time.xml" "linux-dmabuf-v1.xml"))
+    "viewporter.xml" "presentation-time.xml" "linux-dmabuf-v1.xml"
+    "wlr-layer-shell-unstable-v1.xml"))
 
 (defun protocol-directory ()
   (asdf:system-relative-pathname "luv/wayland" "wayland/protocols/"))
