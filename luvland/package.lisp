@@ -28,6 +28,8 @@ in LUV.WAYLAND; this package supplies placement, picking, and focus.")
            #:define-luvland-command
            #:run-command
            #:message
+           #:define-game
+           #:*games*
            #:*terminal*
            #:*window-margin*
            #:*border-width*

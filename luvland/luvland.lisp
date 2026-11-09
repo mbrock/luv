@@ -1028,10 +1028,14 @@ where the camera ray through it meets the window's plane."
 ;;; Clients.
 
 (defun client-environment (luvland)
+  "Luvland's environment for a client, minus what only Luvland should see:
+the display it runs on, which on a console means SDL's KMSDRM driver, and
+the library path of the Nix shell it was started from."
   (cons (format nil "WAYLAND_DISPLAY=~A" (wl:server-socket-name (luvland-server luvland)))
         (remove-if (lambda (entry)
                      (some (lambda (prefix) (uiop:string-prefix-p prefix entry))
-                           '("WAYLAND_DISPLAY=" "DISPLAY=" "WAYLAND_SOCKET=")))
+                           '("WAYLAND_DISPLAY=" "DISPLAY=" "WAYLAND_SOCKET="
+                             "SDL_VIDEODRIVER=" "LD_LIBRARY_PATH=")))
                    (sb-ext:posix-environ))))
 
 (defun spawn-client (luvland program &rest arguments)
@@ -1071,10 +1075,14 @@ swapchain encodes on write, so colors pass through unchanged."
   (release-forwarded-input luvland)
   (reset-key-state luvland)
   (setf (luvland-suppressed-keys luvland) nil)
+  ;; Clients lose the keyboard too, so a game ignores the gamepad that is
+  ;; driving the shell.
+  (focus-keyboard-later luvland nil)
   (list :luvland-input-suspension luvland))
 
 (defmethod luv.workbench:resume-workbench-application-input ((luvland luvland) token)
   (declare (ignore token))
+  (focus-keyboard-later luvland (luvland-focus luvland))
   nil)
 
 (defmethod mcluv:command-menu-tables-for ((luvland luvland))
@@ -1140,7 +1148,8 @@ workbench, the init file, and SPAWN, a program run as the first client."
       (setf canvas (luv:make-sdl-canvas
                     :title "Luvland" :width width :height height
                     :fullscreen-p fullscreen-p :high-pixel-density-p t
-                    :presentation-api (luv:sdl-presentation-api-for luv:*gpu-provider*)))
+                    :presentation-api (luv:sdl-presentation-api-for luv:*gpu-provider*)
+                    :gamepads-p t))
       (luv:open-canvas canvas)
       (setf device (luv:request-gpu-device luv:*gpu-provider*
                                            (luv:make-device-descriptor :label "Luvland")))

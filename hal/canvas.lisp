@@ -405,6 +405,31 @@ says the user asked for, not what the hardware reported."))
 (defclass canvas-key-press-event (canvas-key-event) ())
 (defclass canvas-key-release-event (canvas-key-event) ())
 
+(defclass canvas-gamepad-event (canvas-event)
+  ((gamepad
+    :initarg :gamepad
+    :reader canvas-gamepad-event-gamepad
+    :documentation "Which pad: an id that lasts while it stays connected."))
+  (:documentation
+   "Gamepad input, which belongs to no window: only canvases that ask for
+gamepads receive it."))
+
+(defclass canvas-gamepad-added-event (canvas-gamepad-event)
+  ((name :initarg :name :initform nil :reader canvas-gamepad-event-name)))
+(defclass canvas-gamepad-removed-event (canvas-gamepad-event) ())
+
+(defclass canvas-gamepad-button-event (canvas-gamepad-event)
+  ((button
+    :initarg :button
+    :reader canvas-gamepad-event-button
+    :documentation
+    "The button by its place on a standard pad, as SDL names it: :SOUTH (A
+on an Xbox pad), :EAST, :WEST, :NORTH, :BACK, :GUIDE, :START, :LEFT-SHOULDER,
+:RIGHT-SHOULDER, :LEFT-STICK, :RIGHT-STICK, and :DPAD-UP and its siblings.")))
+
+(defclass canvas-gamepad-button-press-event (canvas-gamepad-button-event) ())
+(defclass canvas-gamepad-button-release-event (canvas-gamepad-button-event) ())
+
 (defclass canvas-window-event (canvas-event) ())
 (defclass canvas-window-size-event (canvas-window-event)
   ((width :initarg :width :reader canvas-window-event-width)

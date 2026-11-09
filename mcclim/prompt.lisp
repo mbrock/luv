@@ -77,15 +77,19 @@
           (prompt-selected frame) nil
           (prompt-dirty-p frame) t)))
 
-(defun open-prompt (frame &key (label "") (initial "") completer continuation)
+(defun open-prompt (frame &key (label "") (initial "") completer continuation
+                               select-first-p)
   "Begin reading a line into FRAME's prompt.  CONTINUATION is called with the
-submitted text after the prompt has closed."
+submitted text after the prompt has closed.  SELECT-FIRST-P starts with the
+first candidate chosen, for a menu that is answered without typing."
   (setf (prompt-label frame) label
         (prompt-text frame) initial
         (prompt-completer frame) completer
         (prompt-continuation frame) continuation
         (prompt-history-position frame) nil)
   (update-prompt-candidates frame)
+  (when (and select-first-p (prompt-candidates frame))
+    (setf (prompt-selected frame) 0))
   frame)
 
 (defun set-prompt-text (frame text)

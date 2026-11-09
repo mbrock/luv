@@ -362,6 +362,12 @@ on is still playing the game, so they contribute nothing rather than fail."
   nil)
 
 (defmethod luv:handle-canvas-event
+    ((mirror luv-mirror) canvas (event luv:canvas-gamepad-event))
+  ;; McCLIM has no gamepads; the application beneath reads them.
+  (declare (ignore mirror canvas event))
+  nil)
+
+(defmethod luv:handle-canvas-event
     ((mirror luv-mirror) canvas
      (event luv:canvas-window-close-request-event))
   (declare (ignore canvas))

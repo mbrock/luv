@@ -545,8 +545,8 @@ other drivers and processes.")
   (min-image-transfer-granularity (:struct extent-3d)))
 
 ;; VkPhysicalDeviceFeatures is an untagged, fixed-layout Vulkan 1.0 struct.
-;; Keep the complete treaty here even though luv currently requires only
-;; SHADER-INT64: passing a shortened struct as P-ENABLED-FEATURES would let the
+;; Keep the complete treaty here even though luv enables only a few of its
+;; features: passing a shortened struct as P-ENABLED-FEATURES would let the
 ;; driver read beyond our allocation.
 (defvkstruct physical-device-features ()
   (robust-buffer-access :uint32)

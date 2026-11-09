@@ -643,6 +643,15 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:canvas-key-event-repeat-p
            #:canvas-key-press-event
            #:canvas-key-release-event
+           #:canvas-gamepad-event
+           #:canvas-gamepad-event-gamepad
+           #:canvas-gamepad-added-event
+           #:canvas-gamepad-event-name
+           #:canvas-gamepad-removed-event
+           #:canvas-gamepad-button-event
+           #:canvas-gamepad-event-button
+           #:canvas-gamepad-button-press-event
+           #:canvas-gamepad-button-release-event
            #:canvas-window-event
            #:canvas-window-size-event
            #:canvas-window-event-width

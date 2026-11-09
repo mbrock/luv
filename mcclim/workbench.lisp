@@ -547,15 +547,18 @@ wide: its margin, or clear above APPLICATION's bottom band where they meet."
   (mcluv:prepare-prompt (workbench-frame workbench))
   workbench)
 
-(defun open-workbench-prompt (workbench &key (label "") (initial "") completer function)
+(defun open-workbench-prompt (workbench &key (label "") (initial "") completer function
+                                             select-first-p)
   "Read a line with LABEL, starting from INITIAL, offering what COMPLETER
 returns for the text so far, and call FUNCTION with the submitted line once
-the prompt has closed.  Escape or C-g closes it without calling FUNCTION."
+the prompt has closed.  Escape or C-g closes it without calling FUNCTION.
+SELECT-FIRST-P starts with the first candidate chosen."
   (call-with-workbench-frame-mutation
    workbench
    (lambda ()
      (%open-workbench-prompt workbench :label label :initial initial
-                                       :completer completer :continuation function))))
+                                       :completer completer :continuation function
+                                       :select-first-p select-first-p))))
 
 (defun %close-workbench-prompt (workbench)
   (when (eq :prompt (workbench-active-tool workbench))

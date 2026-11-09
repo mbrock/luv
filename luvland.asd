@@ -11,7 +11,8 @@
                 :components ((:file "package")
                              (:file "keys")
                              (:file "luvland")
-                             (:file "commands"))))
+                             (:file "commands")
+                             (:file "gamepad"))))
   :in-order-to ((test-op (test-op "luvland/test"))))
 
 (defsystem "luvland/program"

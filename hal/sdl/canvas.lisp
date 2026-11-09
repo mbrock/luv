@@ -48,6 +48,16 @@
     :reader sdl-canvas-presentation-api
     :documentation
     "The native graphics machinery SDL must select when realizing the window.")
+   (gamepads-p
+    :initarg :gamepads-p
+    :initform nil
+    :reader sdl-canvas-gamepads-p
+    :documentation
+    "Whether this canvas opens gamepads and receives their events.")
+   (gamepads
+    :initform '()
+    :accessor sdl-canvas-gamepads
+    :documentation "Open SDL gamepads, as (instance-id . handle).")
    ;; The loop publishes where it is and when it got there.  Everything the
    ;; watchdog knows, and everything ./sly status reports about a window that
    ;; has stopped answering, is read out of these three slots.
@@ -484,17 +494,20 @@ arbitrary window dimensions commonly fail in SDL_Vulkan_CreateSurface."
                           (high-pixel-density-p nil)
                           (clock (make-demand-clock))
                           (time (make-lazy-clock))
-                          (presentation-api :vulkan))
+                          (presentation-api :vulkan)
+                          (gamepads-p nil))
   "Construct an unrealized SDL canvas.
 
 WIDTH or HEIGHT may be NIL, which asks the display for a size when the window
-is finally created."
+is finally created.  GAMEPADS-P opens every gamepad and sends their events to
+the canvas's handler."
   (make-instance 'sdl-canvas :title title :width width :height height
                               :x x :y y :visible-p visible-p
                               :clock clock :time time
                               :fullscreen-p fullscreen-p
                               :high-pixel-density-p high-pixel-density-p
-                              :presentation-api presentation-api))
+                              :presentation-api presentation-api
+                              :gamepads-p gamepads-p))
 
 (defmethod canvas-size ((canvas sdl-canvas))
   (if (eq :open (canvas-state canvas))
@@ -1241,6 +1254,36 @@ key, so the swap has to track the key itself.")
                           (cffi:foreign-slot-value
                            event type 'sdl3::%repeat))))))))
 
+(defun dispatch-sdl-gamepad-device (canvas event added-p)
+  (let* ((id (sdl3:%which event))
+         (open (assoc id (sdl-canvas-gamepads canvas))))
+    (if added-p
+        (unless open
+          (let ((handle (sdl3:open-gamepad id)))
+            (unless (cffi:null-pointer-p handle)
+              (push (cons id handle) (sdl-canvas-gamepads canvas))
+              (dispatch-canvas-event
+               canvas (make-instance 'canvas-gamepad-added-event
+                                     :timestamp (sdl3:%timestamp event)
+                                     :gamepad id
+                                     :name (sdl3:get-gamepad-name handle))))))
+        (when open
+          (sdl3:close-gamepad (cdr open))
+          (setf (sdl-canvas-gamepads canvas) (remove open (sdl-canvas-gamepads canvas)))
+          (dispatch-canvas-event
+           canvas (make-instance 'canvas-gamepad-removed-event
+                                 :timestamp (sdl3:%timestamp event)
+                                 :gamepad id))))))
+
+(defun dispatch-sdl-gamepad-button (canvas event class)
+  (let ((button (cffi:foreign-enum-keyword 'sdl3::gamepad-button (sdl3:%button event)
+                                           :errorp nil)))
+    (when button
+      (dispatch-canvas-event
+       canvas (make-instance class :timestamp (sdl3:%timestamp event)
+                                   :gamepad (sdl3:%which event)
+                                   :button button)))))
+
 (defun dispatch-sdl-window-event (canvas event class)
   (when (sdl-canvas-window-event-p canvas event)
     (dispatch-canvas-event
@@ -1400,7 +1443,27 @@ that context.  Every other handler retains the ordinary native close policy."
         (cffi:foreign-enum-value 'sdl3::event-type :mouse-wheel))
      (dispatch-sdl-pointer-wheel
       canvas
-      (cffi:mem-ref event '(:struct sdl3:mouse-wheel-event))))))
+      (cffi:mem-ref event '(:struct sdl3:mouse-wheel-event))))
+    ((not (sdl-canvas-gamepads-p canvas)) nil)
+    ((member event-type
+             (list (cffi:foreign-enum-value 'sdl3::event-type :gamepad-added)
+                   (cffi:foreign-enum-value 'sdl3::event-type :gamepad-removed)))
+     (dispatch-sdl-gamepad-device
+      canvas
+      (cffi:mem-ref event '(:struct sdl3:gamepad-device-event))
+      (= event-type (cffi:foreign-enum-value 'sdl3::event-type :gamepad-added))))
+    ((= event-type
+        (cffi:foreign-enum-value 'sdl3::event-type :gamepad-button-down))
+     (dispatch-sdl-gamepad-button
+      canvas
+      (cffi:mem-ref event '(:struct sdl3:gamepad-button-event))
+      'canvas-gamepad-button-press-event))
+    ((= event-type
+        (cffi:foreign-enum-value 'sdl3::event-type :gamepad-button-up))
+     (dispatch-sdl-gamepad-button
+      canvas
+      (cffi:mem-ref event '(:struct sdl3:gamepad-button-event))
+      'canvas-gamepad-button-release-event))))
 
 (defun poll-sdl-canvas-event (canvas)
   (cffi:with-foreign-object (event '(:union sdl3:event))
@@ -1708,6 +1771,11 @@ servicing its window~@[; ending this image in ~,1F s unless it recovers~]"
                    (error "SDL video initialization failed: ~A"
                           (sdl3:get-error)))
                  (setf sdl-initialized-p t)
+                 ;; Connected pads arrive as added events on the first poll.
+                 (when (and (sdl-canvas-gamepads-p canvas)
+                            (not (with-runtime-signal-handlers-preserved
+                                   (sdl3:init-sub-system :gamepad))))
+                   (warn "SDL gamepad initialization failed: ~A" (sdl3:get-error)))
                  (let ((wake-event-type (sdl3:register-events 1)))
                    (when (zerop wake-event-type)
                      (error "SDL user event registration failed: ~A"

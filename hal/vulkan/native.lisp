@@ -472,8 +472,6 @@ advertised is never placed in the query chain and is returned as NIL."
 (defun create-device
     (physical-device family-index &key enabled-extension-names
                                        additional-family-indices)
-  (unless (physical-device-shader-int64-p physical-device)
-    (error "The Vulkan physical device lacks luv's required shaderInt64 feature."))
   (let ((present-timing-p
           (member +present-timing-extension-name+
                   enabled-extension-names :test #'string=))
@@ -503,19 +501,20 @@ advertised is never placed in the query chain and is returned as NIL."
                         'device-queue-create-info
                         :flags 0 :queue-family-index family :queue-count 1
                         :p-queue-priorities queue-priority))
-              (with-vk (features physical-device-features :shader-int64 1)
+              (with-vk (features physical-device-features)
                 ;; Fragment PrimitiveId declares SPIR-V Geometry, requiring
                 ;; geometryShader even without a geometry pipeline stage.
                 ;; Keep it optional: other shaders still work on devices
                 ;; without it, but PrimitiveId modules remain unsupported.
+                ;; shaderInt64 likewise: the Raspberry Pi 5's V3DV lacks it,
+                ;; and only modules computing in 64-bit integers need it.
                 (with-vk (supported physical-device-features)
                   (vk:get-physical-device-features physical-device supported)
-                  (setf (cffi:foreign-slot-value
-                         features '(:struct physical-device-features)
-                         'geometry-shader)
-                        (cffi:foreign-slot-value
-                         supported '(:struct physical-device-features)
-                         'geometry-shader)))
+                  (dolist (feature '(geometry-shader shader-int64))
+                    (setf (cffi:foreign-slot-value
+                           features '(:struct physical-device-features) feature)
+                          (cffi:foreign-slot-value
+                           supported '(:struct physical-device-features) feature))))
                 (with-vk (timeline-features
                           physical-device-timeline-semaphore-features
                           :timeline-semaphore 1)

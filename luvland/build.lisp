@@ -26,6 +26,13 @@
 (uiop:register-image-dump-hook
  (lambda () (luv-build:finish :done)))
 
+;;; The running compositor asks ASDF where its own sources are, for fonts and
+;;; the status line.  Unless every system it was built from is immutable,
+;;; that lookup reloads luv.asd and its DEFSYSTEM-DEPENDS-ON chain, recompiling
+;;; and redefining CFFI underneath live frames.
+(uiop:register-image-dump-hook
+ (lambda () (map nil #'asdf:register-immutable-system (asdf:already-loaded-systems))))
+
 (handler-case (progn
                 (asdf:make :luvland/program)
                 ;; A current PROGRAM-OP returns instead of dumping an image,
