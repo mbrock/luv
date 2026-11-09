@@ -744,17 +744,19 @@ of some object fulfilling the DESCRIPTOR."))
 or NIL when it cannot say.")
   (:method ((device gpu-device)) nil))
 
-(defgeneric dmabuf-modifiers (device format)
-  (:documentation "The DRM format modifiers with which DEVICE can import and
-sample a dmabuf as a texture of FORMAT; NIL when it cannot import at all.")
-  (:method ((device gpu-device) format)
-    (declare (ignore format))
+(defgeneric dmabuf-modifiers (device format &key usage)
+  (:documentation "The DRM format modifiers with which DEVICE can import a
+dmabuf as a texture of FORMAT for USAGE: :TEXTURE-BINDING (the default) to
+sample it, or :COPY-SRC to copy from it.  NIL when it cannot import at all.")
+  (:method ((device gpu-device) format &key usage)
+    (declare (ignore format usage))
     nil))
 
 (defgeneric import-dmabuf-texture (device descriptor &key modifier planes)
-  (:documentation "A sampled texture over the dmabuf PLANES, a list of
+  (:documentation "A texture over the dmabuf PLANES, a list of
 (fd offset stride) of one buffer, laid out by MODIFIER.  DESCRIPTOR gives its
-size and format.  The caller keeps its fds.  The texture's memory belongs to
+size and format, and its usage: sampled, or :COPY-SRC alone for a layout
+DMABUF-MODIFIERS offers only for copying.  The caller keeps its fds.  The texture's memory belongs to
 another queue between uses: an encoder must ACQUIRE-EXTERNAL-TEXTURE it before
 any pass samples it, and gives it back when finished."))
 

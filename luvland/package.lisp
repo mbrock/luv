@@ -32,6 +32,7 @@ in LUV.WAYLAND; this package supplies placement, picking, and focus.")
            #:*games*
            #:*terminal*
            #:*window-margin*
+           #:*client-scale*
            #:*border-width*
            #:*corner-radius*
            #:*shadow-blur*

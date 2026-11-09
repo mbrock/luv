@@ -25,6 +25,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:+dmabuf-import-extension-names+
            #:+queue-family-foreign+
            #:+format-feature-sampled-image+
+           #:+format-feature-transfer-src+
            #:physical-device-drm-render-node
            #:physical-device-drm-format-modifiers
            #:physical-device-dmabuf-importable-p

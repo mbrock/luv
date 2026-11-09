@@ -4149,16 +4149,24 @@ can make a successful native call repeat."
 (defmethod dmabuf-render-node ((device vulkan-gpu-device))
   (lvk:physical-device-drm-render-node (vulkan-device-physical-device device)))
 
-(defmethod dmabuf-modifiers ((device vulkan-gpu-device) format)
+(defun vulkan-dmabuf-usage (usage)
+  "The Vulkan image usage and format feature an import for USAGE needs."
+  (ecase usage
+    (:texture-binding (values '(:sampled) lvk:+format-feature-sampled-image+))
+    (:copy-src (values '(:transfer-src) lvk:+format-feature-transfer-src+))))
+
+(defmethod dmabuf-modifiers ((device vulkan-gpu-device) format
+                             &key (usage :texture-binding))
   (when (vulkan-device-dmabuf-p device)
     (let ((physical-device (vulkan-device-physical-device device))
           (vk-format (vulkan-gpu-format format format)))
-      (loop for (modifier nil features)
-              in (lvk:physical-device-drm-format-modifiers physical-device vk-format)
-            when (and (logtest lvk:+format-feature-sampled-image+ features)
-                      (lvk:physical-device-dmabuf-importable-p
-                       physical-device vk-format modifier '(:sampled)))
-              collect modifier))))
+      (multiple-value-bind (vk-usage feature) (vulkan-dmabuf-usage usage)
+        (loop for (modifier nil features)
+                in (lvk:physical-device-drm-format-modifiers physical-device vk-format)
+              when (and (logtest feature features)
+                        (lvk:physical-device-dmabuf-importable-p
+                         physical-device vk-format modifier vk-usage))
+                collect modifier)))))
 
 (defmethod import-dmabuf-texture
     ((device vulkan-gpu-device) (descriptor texture-descriptor) &key modifier planes)
@@ -4168,12 +4176,15 @@ can make a successful native call repeat."
       (reject-gpu-request descriptor :unsupported-dmabuf-import device))
     (let* ((descriptor (canonical-texture-descriptor descriptor))
            (size (texture-descriptor-size descriptor))
-           (vk-format (vulkan-texture-format descriptor)))
+           (vk-format (vulkan-texture-format descriptor))
+           (usage (if (member :copy-src (texture-descriptor-usage descriptor))
+                      :copy-src
+                      :texture-binding)))
       (multiple-value-bind (image memory)
           (lvk:import-dmabuf-image
            (vulkan-handle device) (vulkan-device-physical-device device)
            :format vk-format :width (first size) :height (second size)
-           :modifier modifier :planes planes :usage '(:sampled)
+           :modifier modifier :planes planes :usage (vulkan-dmabuf-usage usage)
            :memory-type-filter
            (lambda (bits)
              (loop for index below 32
@@ -4181,7 +4192,7 @@ can make a successful native call repeat."
         (make-instance 'vulkan-gpu-texture
                        :label (gpu-descriptor-label descriptor)
                        :size size
-                       :usage '(:texture-binding)
+                       :usage (list usage)
                        :dimensions :2d
                        :format (texture-descriptor-format descriptor)
                        :sample-count 1
@@ -4216,10 +4227,17 @@ can make a successful native call repeat."
     (ensure-no-active-vulkan-pass encoder :acquire-external-texture)
     (unless (vulkan-texture-foreign-p texture)
       (reject-gpu-request texture :not-external texture))
-    (ensure-vulkan-texture-for-command encoder texture encoder :texture-binding)
-    (unless (member texture (vulkan-command-encoder-acquired-foreign-textures encoder))
-      (record-foreign-transfer encoder texture :shader-read-only-optimal t)
-      (push texture (vulkan-command-encoder-acquired-foreign-textures encoder))))
+    ;; An import made only to be copied from cannot be sampled, so it waits
+    ;; in the layout its copy reads.
+    (let ((usage (first (gpu-texture-usage texture))))
+      (ensure-vulkan-texture-for-command encoder texture encoder usage)
+      (unless (member texture (vulkan-command-encoder-acquired-foreign-textures encoder))
+        (record-foreign-transfer encoder texture
+                                 (ecase usage
+                                   (:texture-binding :shader-read-only-optimal)
+                                   (:copy-src :transfer-src-optimal))
+                                 t)
+        (push texture (vulkan-command-encoder-acquired-foreign-textures encoder)))))
   texture)
 
 (defun release-vulkan-foreign-textures (encoder)

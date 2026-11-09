@@ -231,6 +231,10 @@ pushed by the server thread.")
   (shm-view nil)
   ;; The dmabuf frame being shown, claimed from the server.
   (held-frame nil)
+  ;; Its import when the GPU can only copy from its layout, and whether
+  ;; TEXTURE holds that copy yet.
+  (copy-source nil)
+  (copied-p nil)
   (snapshot-serial -1)
   ;; The window's number, the lowest free one when it appeared.
   (number 0)
@@ -360,11 +364,24 @@ fresh snapshots.  Runs on the canvas thread."
               (upload-snapshot luvland window))))
     (layout-strip luvland)))
 
-(defun show (window texture view width height)
-  (setf (window-texture window) texture
+(defparameter *client-scale* 1
+  "Screen pixels per client pixel.  Above 1, clients are configured that much
+smaller and drawn scaled up, so a GPU-bound client such as a WebGL game on a
+small GPU fills the screen while drawing fewer pixels.  Luvland's own
+terminals are never scaled.")
+
+(defun client-scale (window)
+  (if (terminal-p (window-toplevel window)) 1 *client-scale*))
+
+(defun show (window texture view width height &optional copy-source)
+  "Show TEXTURE, WIDTH by HEIGHT pixels, as WINDOW's contents.  The window's
+size is in screen pixels."
+  (setf (window-copy-source window) copy-source
+        (window-copied-p window) nil
+        (window-texture window) texture
         (window-view window) view
-        (window-width window) width
-        (window-height window) height))
+        (window-width window) (round (* width (client-scale window)))
+        (window-height window) (round (* height (client-scale window)))))
 
 (defun upload-snapshot (luvland window)
   "Copy WINDOW's newest shm commit to its texture, if there is one this
@@ -421,31 +438,49 @@ or NIL when it cannot import dmabufs at all."
                                            (list wl:+drm-format-xrgb8888+ :bgra8-unorm)
                                            (list wl:+drm-format-abgr8888+ :rgba8-unorm)
                                            (list wl:+drm-format-xbgr8888+ :rgba8-unorm))
-              do (dolist (modifier (luv:dmabuf-modifiers
-                                    device (if srgb-p
-                                               (intern (format nil "~A-SRGB" format) :keyword)
-                                               format)))
-                   (push (cons fourcc modifier) formats)))
+              do (let ((format (if srgb-p
+                                   (intern (format nil "~A-SRGB" format) :keyword)
+                                   format)))
+                   ;; Layouts the GPU can only copy from too: scanout
+                   ;; buffers on V3D are LINEAR, which it cannot sample.
+                   (dolist (modifier (remove-duplicates
+                                      (append (luv:dmabuf-modifiers device format)
+                                              (luv:dmabuf-modifiers device format
+                                                                    :usage :copy-src))
+                                      :from-end t))
+                     (push (cons fourcc modifier) formats))))
         (when formats
           (list :main-device (wl:make-dev-t major minor)
                 :formats (nreverse formats)))))))
 
 (defun import-buffer (luvland buffer frame)
-  "BUFFER's imported (texture view), made now from FRAME's planes if need be."
+  "BUFFER's imported (texture view copy-source), made now from FRAME's planes
+if need be.  COPY-SOURCE is NIL when the import is sampled directly, and else
+the import itself, which ENCODE-WINDOWS copies into TEXTURE."
   (or (wl:dmabuf-host-data buffer)
       (let* ((device (luvland-device luvland))
-             (texture (luv:import-dmabuf-texture
-                       device
-                       (luv:make-texture-descriptor
-                        :label "Luvland client dmabuf"
-                        :size (list (wl:dmabuf-width buffer) (wl:dmabuf-height buffer))
-                        :dimensions :2d
-                        :format (fourcc-texture-format luvland (wl:dmabuf-format buffer))
-                        :usage '(:texture-binding))
-                       :modifier (wl:dmabuf-modifier buffer)
-                       :planes (wl:dmabuf-frame-planes frame)))
-             (import (list texture (luv:create device (luv:make-texture-view-descriptor
-                                                       :texture texture)))))
+             (size (list (wl:dmabuf-width buffer) (wl:dmabuf-height buffer)))
+             (format (fourcc-texture-format luvland (wl:dmabuf-format buffer)))
+             (modifier (wl:dmabuf-modifier buffer))
+             (sampled-p (member modifier (luv:dmabuf-modifiers device format)))
+             (source (luv:import-dmabuf-texture
+                      device
+                      (luv:make-texture-descriptor
+                       :label "Luvland client dmabuf"
+                       :size size :dimensions :2d :format format
+                       :usage (if sampled-p '(:texture-binding) '(:copy-src)))
+                      :modifier modifier
+                      :planes (wl:dmabuf-frame-planes frame)))
+             (texture (if sampled-p
+                          source
+                          (luv:create device (luv:make-texture-descriptor
+                                              :label "Luvland client dmabuf copy"
+                                              :size size :dimensions :2d :format format
+                                              :usage '(:copy-dst :texture-binding)))))
+             (import (list texture
+                           (luv:create device (luv:make-texture-view-descriptor
+                                               :texture texture))
+                           (unless sampled-p source))))
         (setf (wl:dmabuf-host-data buffer) import)
         ;; Forget the import when the client destroys the buffer.
         (wl:call-in-server
@@ -460,10 +495,12 @@ or NIL when it cannot import dmabufs at all."
 (defun drop-dead-imports (luvland)
   (loop for buffer = (sb-ext:atomic-pop (slot-value luvland 'dead-buffers))
         while buffer
-        do (destructuring-bind (&optional texture view) (wl:dmabuf-host-data buffer)
+        do (destructuring-bind (&optional texture view copy-source)
+               (wl:dmabuf-host-data buffer)
              (setf (wl:dmabuf-host-data buffer) nil)
              (retire luvland view)
-             (retire luvland texture))))
+             (retire luvland texture)
+             (retire luvland copy-source))))
 
 (defun take-dmabuf-frame (luvland window)
   "Show WINDOW's newest dmabuf frame, if there is one to claim; true if so."
@@ -471,9 +508,10 @@ or NIL when it cannot import dmabufs at all."
     (when frame
       (let ((buffer (wl:dmabuf-frame-buffer frame)))
         (handler-case
-            (destructuring-bind (texture view) (import-buffer luvland buffer frame)
+            (destructuring-bind (texture view copy-source) (import-buffer luvland buffer frame)
               (release-later luvland (shiftf (window-held-frame window) frame))
-              (show window texture view (wl:dmabuf-width buffer) (wl:dmabuf-height buffer))
+              (show window texture view (wl:dmabuf-width buffer) (wl:dmabuf-height buffer)
+                    copy-source)
               (setf (window-snapshot-serial window) (wl:dmabuf-frame-serial frame)))
           (error (condition)
             (push (list :import buffer condition) (luvland-failures luvland))
@@ -601,7 +639,8 @@ return to showing the focused window one to one."
 
 (defun reconfigure-windows (luvland)
   "Send each window the size and states it should have, if they changed."
-  (let ((size (fitted-window-size luvland))
+  (let ((size (mapcar (lambda (pixels) (round pixels *client-scale*))
+                      (fitted-window-size luvland)))
         (server (luvland-server luvland)))
     (unless (equal size (wl:server-initial-toplevel-size server))
       (setf (wl:server-initial-toplevel-size server) size))
@@ -684,14 +723,22 @@ contents into the swapchain image STATE belongs to."
 the world will be at TIME."
   (encode-terminals luvland encoder)
   ;; Imported dmabufs belong to their clients' queues until acquired, and an
-  ;; acquire cannot happen inside the pass.
+  ;; acquire or a copy cannot happen inside the pass.
   (let ((acquired '()))
     (dolist (window (luvland-windows luvland))
-      (let ((texture (window-texture window)))
-        (when (and (window-held-frame window) texture
-                   (not (member texture acquired)))
-          (luv:acquire-external-texture encoder texture)
-          (push texture acquired)))))
+      (let ((texture (window-texture window))
+            (source (window-copy-source window)))
+        (cond ((not (and (window-held-frame window) texture)))
+              (source
+               (unless (window-copied-p window)
+                 (luv:acquire-external-texture encoder source)
+                 (luv:encode encoder (luv:make-gpu-copy-texture-command
+                                      :source source :destination texture))
+                 (luv:prepare-texture encoder texture :texture-binding)
+                 (setf (window-copied-p window) t)))
+              ((not (member texture acquired))
+               (luv:acquire-external-texture encoder texture)
+               (push texture acquired))))))
   (let* ((state (frame-state luvland target))
          (view-projection (view-projection luvland time extent))
          (focus (luvland-focus luvland))
@@ -986,8 +1033,8 @@ where the camera ray through it meets the window's plane."
                     (v (/ (- (/ wh 2) wy) wh)))
                 (when (and (<= 0 u 1) (<= 0 v 1))
                   (return (values window
-                                  (* u (window-width window))
-                                  (* v (window-height window)))))))))))))
+                                  (/ (* u (window-width window)) (client-scale window))
+                                  (/ (* v (window-height window)) (client-scale window)))))))))))))
 
 (defmethod luv:handle-canvas-event ((luvland luvland) canvas (event luv:canvas-pointer-motion-event))
   (declare (ignore canvas))
