@@ -9,6 +9,7 @@
   ((kind :initarg :kind :reader reconstruction-kind)
    (neighbourhood-program :initform nil :accessor reconstruction-neighbourhood-program)
    (program :initform nil :accessor reconstruction-program)
+   (previous-sky-angle :initform nil :accessor reconstruction-previous-sky-angle)
    (previous-view :initform nil :accessor reconstruction-previous-view)
    (history-valid-p :initform nil :accessor reconstruction-history-valid-p)
    (history-used-p :initform nil :accessor reconstruction-history-used-p)))

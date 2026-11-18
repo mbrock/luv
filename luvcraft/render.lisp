@@ -357,36 +357,8 @@ Without an anchor the camera position itself starts one."
          (depth-radius +luvcraft-shadow-depth-radius+)
          (world-units-per-texel
            (/ (* 2.0 extent) +luvcraft-shadow-map-size+))
-         ;; Rotation still slides the lattice under the world, by the angle
-         ;; times the distance from the pivot.  Snapping the camera to a
-         ;; lattice through the world origin put that pivot at the origin, so
-         ;; a player standing a few hundred units out watched every shadow
-         ;; edge vibrate a texel many times a second however slow the day.
-         ;; The pivot is instead a persistent anchor that walks toward the
-         ;; camera in whole texels of this frame's basis: the lattice never
-         ;; shifts under translation, and it rotates about a point within a
-         ;; texel of the eye.  The anchor is kept in double precision so that
-         ;; the walk does not itself wobble the lattice.  #QWTQ6R
-         (anchor
-           (let* ((start (or anchor center))
-                  (delta (make-vec3 (- (vec3-x center) (vec3-x start))
-                                    (- (vec3-y center) (vec3-y start))
-                                    (- (vec3-z center) (vec3-z start))))
-                  (along-right
-                    (* (round (/ (vec3-dot delta right) world-units-per-texel))
-                       world-units-per-texel))
-                  (along-up
-                    (* (round (/ (vec3-dot delta up) world-units-per-texel))
-                       world-units-per-texel))
-                  (along-forward (vec3-dot delta forward)))
-             (flet ((walk (axis)
-                      (coerce (+ (vec3-component start axis)
-                                 (* along-right (vec3-component right axis))
-                                 (* along-up (vec3-component up axis))
-                                 (* along-forward
-                                    (vec3-component forward axis)))
-                              'double-float)))
-               (make-vec3 (walk :x) (walk :y) (walk :z)))))
+         (anchor (luv.arithmetic.lisp.vec3:snap-plane-origin
+                  center anchor right up world-units-per-texel))
          (center-right (vec3-dot anchor right))
          (center-up (vec3-dot anchor up)))
     (flet ((lane (axis scale offset)

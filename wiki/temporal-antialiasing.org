@@ -401,6 +401,41 @@ turning.  Both temporal SPIR-V modules pass =spirv-val=.
 shader path upscales with Moppe's resolve, and MetalFX stays the Metal
 default.  Those conditions now hold.
 
+* DONE Speech bubbles keep a steady edge behind blocks
+:PROPERTIES:
+:ID: QVDJ7V
+:END:
+
+At Luft's minimum scene scale, a single depth sample used to switch the
+gnome's bubble on and off along a foreground block after the world had
+already been reconstructed. The panel pass now draws the lettering at
+output resolution. For each panel pixel the temporal presenter remembers
+the last sixteen block visibility tests, one per jitter phase. The nearest
+foreground surface carries that history as the camera moves. Fully covered
+and fully exposed neighbourhoods take the new result immediately.
+
+In 48 daytime frames at the same camera pose, the largest frame-to-frame
+brightness change along the covered edge fell from 173 to about 4 on a
+0–255 scale. The visibility history is shared by MetalFX and the shader
+resolve described in #O18BY6.
+
+* DONE Small stars hold their light as the sky turns
+:PROPERTIES:
+:ID: 2C43HB
+:END:
+
+A star can be smaller than a scene pixel. The sky shader integrates its
+Gaussian spot over an estimate of that pixel's footprint, spreading the
+light while preserving its integral. At night the sky motion vector also
+accounts for the turn of the stars since the previous rendered frame.
+
+With a 464×318 scene reconstructed to 1236×846 on Metal, 48 frames of a
+fixed sky gave a mean frame-to-frame brightness change of 13.72 across
+bright star pixels on a 0–255 scale. The filtered stars gave 1.25.
+With the sky clock advancing, the same comparison fell from 7.65 to 1.07.
+The elapsed time driving the stars' own twinkle was held fixed in both
+experiments.
+
 * Luvcraft resolves from depth, not from motion vectors
 :PROPERTIES:
 :ID: HDC5D8

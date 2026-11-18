@@ -190,6 +190,27 @@
     (true (luv.msl:compile-msl specification))
     (true (luv.spir-v:compile-shader-specification specification))))
 
+(define-test shadow-lattice-follows-the-eye-through-a-moving-day
+  ;; Exercise the actual uniform packer, including ownership of the preceding
+  ;; origin. Here the original world-origin lattice slides rapidly at noon.
+  (let* ((shadow (make-instance 'render::sun-shadow))
+         (render::*light* (make-instance 'render::light :name :test
+                                         :shadow-half-extent 96.0 :shadow-depth-radius 160.0
+                                         :shadow-base-bias 0.0006 :shadow-filter-radius 1.25))
+         (camera (make-instance 'render:fly-camera :position (make-vec3 1024.5d0 1024.5d0 6.62d0))))
+    (flet ((footprint (hour)
+             (let* ((render::*sky-hour* hour)
+                    (view (render::capture-frame-view camera 640 480 #(0.0 0.0)))
+                    (lanes (render::camera-uniform-data view view '(0 0 0 0) 0 nil 0 1 nil shadow)))
+               (multiple-value-bind (x y) (funcall (render::light-clip-function lanes) 1027.0d0 1025.0d0 6d0)
+                 (mapcar (lambda (v) (* v 0.5 render::+shadow-map-size+)) (list x y))))))
+      (dolist (hour '(1d0 8d0 12d0 17d0))
+        (let ((before (footprint hour)) (after (footprint (+ hour (/ 24d0 72000)))))
+          (true (every (lambda (a b) (< (abs (- a b)) 0.01d0)) before after))))
+      (let ((before (footprint 12d0)))
+        (incf (vec3-x (render:camera-position camera)) 0.01d0)
+        (true (every (lambda (a b) (< (abs (- a b)) 0.001d0)) before (footprint 12d0)))))))
+
 (define-test player-frame-lanes-retain-both-headings
   (let* ((player (render::make-walking-character
                   :position (make-vec3 2.0 3.0 4.0)

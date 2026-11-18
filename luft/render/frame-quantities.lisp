@@ -44,7 +44,8 @@
        ((:xyz :quantity quantities:world-direction :unit :one)))
       (previous-camera-up :vec4
        :components
-       ((:xyz :quantity quantities:world-direction :unit :one)))
+       ((:xyz :quantity quantities:world-direction :unit :one)
+        (:w :quantity :angle :unit :radian)))
       (previous-camera-forward :vec4
        :components
        ((:xyz :quantity quantities:world-direction :unit :one)))
@@ -129,7 +130,8 @@
       ;; radians: the stars ride the same rotation as the sun and moon.
       (celestial-pole-vector :vec4
        :components
-       ((:xyz :quantity quantities:world-direction :unit :one)))
+       ((:xyz :quantity quantities:world-direction :unit :one)
+        (:w :quantity :angle :unit :radian)))
       ;; Star brightness, moon disc radiance, moon angular radius, and the
       ;; galaxy band's strength.
       (night-parameters :vec4))

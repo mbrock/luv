@@ -82,6 +82,23 @@ See #7K8UBF."
    (funcall function (vec3-y left) (vec3-y right))
    (funcall function (vec3-z left) (vec3-z right))))
 
+(defun snap-plane-origin (center previous right up spacing)
+  "Follow CENTER in whole grid steps along the orthonormal axes RIGHT and UP.
+The perpendicular coordinate follows CENTER freely. Keep the origin in double
+precision so a stationary grid does not drift over many frames. See #QWTQ6R."
+  (flet ((coordinate (axis) (coerce (vec3-component center axis) 'double-float)))
+    (let* ((center (make-vec3 (coordinate :x) (coordinate :y) (coordinate :z)))
+           (delta (map-vec3-binary #'- center (or previous center))))
+      (flet ((remainder-along (axis)
+               (nth-value 1 (round (vec3-dot delta axis) spacing))))
+        (let ((dx (remainder-along right))
+              (dy (remainder-along up)))
+          (flet ((origin (axis)
+                   (- (vec3-component center axis)
+                      (* dx (vec3-component right axis))
+                      (* dy (vec3-component up axis)))))
+            (make-vec3 (origin :x) (origin :y) (origin :z))))))))
+
 (defmethod lisp:lisp-binary-operation
     (function (left vec3) (right vec3))
   (map-vec3-binary function left right))

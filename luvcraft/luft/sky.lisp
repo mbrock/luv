@@ -219,22 +219,18 @@
                   :members #.(scene-uniform-prefix 34))))
   (let* ((divisor (swizzle (representation render-parameters) :z))
          (sample-ndc (- ndc (representation (swizzle temporal-parameters :xy))))
-         (ray (sky-view-ray sample-ndc camera-right camera-up camera-forward camera-projection divisor))
-         (previous-z (representation (dot ray (swizzle previous-camera-forward :xyz))))
-         (previous-clip
-           (vec4 (* (representation (dot ray (swizzle previous-camera-right :xyz)))
-                    (swizzle previous-camera-projection :x))
-                 (- (* (representation (dot ray (swizzle previous-camera-up :xyz)))
-                       (swizzle previous-camera-projection :y)))
-                 0.0 (mix 1.0 previous-z divisor)))
-         (current-clip (vec4 (swizzle sample-ndc :x) (swizzle sample-ndc :y) 0.0 1.0)))
+         (ray (sky-view-ray sample-ndc camera-right camera-up camera-forward camera-projection divisor)))
     (set-output color-output
                 (vec4 (luvcraft-sky-radiance
                        ray camera-position sun-vector sun-color-vector
                        zenith-color-vector horizon-color-vector fog-color-vector
                        atmosphere-parameters moon-vector celestial-pole-vector
                        night-parameters) 1.0))
-    (set-output motion-output (mesh-temporal-motion previous-clip current-clip))))
+    (set-output motion-output
+                (sky-motion ray sample-ndc divisor celestial-pole-vector moon-vector
+                            (swizzle (representation previous-camera-up) :w)
+                            previous-camera-right previous-camera-up previous-camera-forward
+                            previous-camera-projection))))
 
 (in-package #:luvcraft.luft.game)
 

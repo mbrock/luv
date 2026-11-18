@@ -1694,6 +1694,24 @@ holds a probe three units from an eye seven hundred units out to a
 hundredth of a texel across one frame of sun; and walking still leaves
 the footprint exactly still under sub-texel translation.
 
+** DONE Luft keeps the shadow grid near the player as the sun moves
+:PROPERTIES:
+:ID: TFI7MF
+:END:
+
+Luvcraft on Luft showed the same moving-sun shimmer as #QWTQ6R. At the
+player's position near (1024, 1024), a tiny turn of the sun swept the
+shadow map across nearby blocks. Both renderers now use the same
+[[lisp:luv.arithmetic.lisp.vec3:snap-plane-origin]] arithmetic. Each renderer remembers its own grid
+origin and moves it in whole shadow texels as the camera walks.
+
+In a fixed-camera Metal capture at 10 in the morning, the clock advanced
+one 60 Hz frame at a time through a twenty-minute day. Across 48 frames
+the mean absolute brightness change in a block-shadow crop fell from
+2.22 to 0.04 on a 0–255 scale. Freezing the sun gave 0.04 in the same
+crop. A regression test advances the sun and moon and walks the camera by
+less than one texel through Luft's light-uniform packer.
+
 ** DONE HDR crystal bloom
 :PROPERTIES:
 :ID: WLHDRB

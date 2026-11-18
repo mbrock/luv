@@ -5,7 +5,8 @@
 ;;; that borrow its view and comparison sampler and retire before this owner.
 
 (defclass sun-shadow (gpu-resource-owner)
-  ((texture :accessor sun-shadow-texture)
+  ((anchor :initform nil :accessor sun-shadow-anchor)
+   (texture :accessor sun-shadow-texture)
    (view :accessor sun-shadow-view)
    (sampler :accessor sun-shadow-sampler)))
 

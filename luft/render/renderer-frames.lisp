@@ -171,9 +171,9 @@ Publication and resize invalidate these bindings with all other frame joins."
       (renderer-frame-state-flame-effect-buffer frame)
       (renderer-depth-view renderer)))))
 
-(defun renderer-frame-present-bind-group (renderer frame)
+(defun renderer-frame-present-bind-group (renderer frame &optional coverage-history)
   (renderer-frame-component-binding
-   frame (list :present (renderer-composite-view renderer) (renderer-depth-view renderer)
+   frame (list :present coverage-history (renderer-composite-view renderer) (renderer-depth-view renderer)
                (renderer-bloom-primary-view renderer)
                (renderer-bloom-secondary-view renderer)
                (renderer-panel-color-view renderer) (renderer-panel-depth-view renderer)
@@ -186,7 +186,8 @@ Publication and resize invalidate these bindings with all other frame joins."
       (renderer-bloom-primary-view renderer)
       (renderer-bloom-secondary-view renderer)
       (renderer-panel-color-view renderer) (renderer-panel-depth-view renderer)
-      (renderer-target-generation-viewmodel-color-view (renderer-target-generation renderer))))))
+      (renderer-target-generation-viewmodel-color-view (renderer-target-generation renderer))
+      coverage-history))))
 
 (defun renderer-frame-lens-bind-group (renderer frame stage source)
   "Bind lens STAGE reading SOURCE to FRAME's camera upload."

@@ -344,12 +344,18 @@
                                :test #'equal)))
                (getf (first (luv::render-pass-descriptor-color-attachments pass)) :view))))
       (unwind-protect
-           (let (outputs histories)
+           (let (outputs histories previous-coverage)
              (true (eq :shader (render::renderer-temporal-resolve-kind renderer)))
              (true (= 1 (render::renderer-scene-sample-count renderer)))
              (true (null (render::renderer-scene-msaa-view renderer)))
              (true (equal '(480 360) (render::renderer-render-extent renderer)))
+             (true (equal '(640 480 1)
+                          (luv::texture-descriptor-size
+                           (test-gpu-descriptor (render::renderer-panel-color-texture renderer)))))
              (dotimes (index 3)
+               (when previous-coverage
+                 (true (eq previous-coverage (render::renderer-panel-coverage renderer :previous-p t))))
+               (setf previous-coverage (render::renderer-panel-coverage renderer))
                (let ((pass (make-instance 'gpu-test-encoder)))
                  (render::encode-renderer-scene renderer frame pass nil nil)
                  (render::encode-renderer-occlusion renderer frame pass)

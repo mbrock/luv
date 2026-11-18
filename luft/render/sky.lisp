@@ -92,7 +92,7 @@ the sky with the sun and moon instead of staying painted on the dome."
 A star is a point, so each cell hashes to a position, a magnitude, and a
 twinkling phase, and draws a small gaussian there.  Magnitude is a steep
 power of its hash: a few bright stars and a great many faint ones, which is
-the actual distribution overhead.  Luvcraft's star field, unchanged."
+the actual distribution overhead."
   (let* ((point (* direction 74.0))
          (cell (floor point))
          (local (fract point))
@@ -108,7 +108,17 @@ the actual distribution overhead.  Luvcraft's star field, unchanged."
          (magnitude (expt place-z 9.0))
          (twinkle (+ 0.74 (* 0.26 (sin (+ (* elapsed 2.3)
                                           (* place-x 43.0))))))
-         (spread (exp (* -230.0 radius))))
+         ;; Convolve the spot with the scene pixel in the sky's tangent plane.
+         ;; A half-pixel standard deviation suppresses subpixel flashes at
+         ;; the lowest scene resolution. Average the two squared pixel axes,
+         ;; broaden in the tangent plane, and scale the peak to preserve flux.
+         (dx (derivative-x point))
+         (dy (derivative-y point))
+         (variance (/ (+ (dot dx dx) (dot dy dy)) 8.0))
+         (shrink (/ 1.0 (+ 1.0 (* 460.0 variance))))
+         (height (dot offset direction))
+         (radial (* height height))
+         (spread (* shrink (exp (* -230.0 (+ radial (* shrink (- radius radial))))))))
     (* magnitude (* twinkle spread))))
 
 (define-shader-function night-sky-radiance
@@ -342,6 +352,25 @@ the cloud deck's self-shadow is not, so the moon lights the clouds' faces."
             night-parameters)))
     (set-output color-output (vec4 (representation radiance) 1.0))))
 
+(define-shader-function sky-motion
+    (ray sample-ndc divisor pole night previous-angle old-right old-up old-forward old-projection)
+  "Reproject the rotating night sky in perspective and the atelier's vertical sky in isometric."
+  (let* ((delta (- (swizzle (representation pole) :w) previous-angle))
+         (night-sky (* (swizzle (representation night) :w)
+                       (smoothstep -0.02 0.14 (swizzle (representation ray) :z))))
+         (direction (mix (representation ray)
+                         (celestial-ray (representation ray) (swizzle (representation pole) :xyz) delta)
+                         night-sky))
+         (x (dot direction (swizzle (representation old-right) :xyz)))
+         (y (dot direction (swizzle (representation old-up) :xyz)))
+         (z (max 0.0001 (dot direction (swizzle (representation old-forward) :xyz))))
+         ;; The isometric sky varies only vertically, with slope 0.38 per NDC.
+         (previous-ndc (if (< divisor 0.5)
+                           (vec2 (swizzle sample-ndc :x) (/ (- y) (* 0.38 z)))
+                           (/ (vec2 (* x (swizzle old-projection :x))
+                                    (* (- y) (swizzle old-projection :y))) z))))
+    (* (- previous-ndc sample-ndc) 0.5)))
+
 (define-live-shader sky-temporal-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
@@ -363,21 +392,10 @@ the cloud deck's self-shadow is not, so the moon lights the clouds' faces."
             ray camera-position sun-vector sun-color-vector
             zenith-color-vector horizon-color-vector fog-color-vector
             atmosphere-parameters moon-vector celestial-pole-vector
-            night-parameters))
-         (previous-z
-           (representation
-            (dot ray (swizzle previous-camera-forward :xyz))))
-         (previous-clip
-           (vec4 (* (representation
-                     (dot ray (swizzle previous-camera-right :xyz)))
-                    (swizzle previous-camera-projection :x))
-                 (- (* (representation
-                        (dot ray (swizzle previous-camera-up :xyz)))
-                       (swizzle previous-camera-projection :y)))
-                 0.0
-                 (mix 1.0 previous-z divisor)))
-         (current-clip
-           (vec4 (swizzle sample-ndc :x) (swizzle sample-ndc :y) 0.0 1.0)))
+            night-parameters)))
     (set-output color-output (vec4 (representation radiance) 1.0))
     (set-output motion-output
-                (mesh-temporal-motion previous-clip current-clip))))
+                (sky-motion ray sample-ndc divisor celestial-pole-vector moon-vector
+                            (swizzle (representation previous-camera-up) :w)
+                            previous-camera-right previous-camera-up previous-camera-forward
+                            previous-camera-projection))))

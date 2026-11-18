@@ -46,6 +46,10 @@
    (viewmodel-color-view :initform nil :reader renderer-target-generation-viewmodel-color-view)
    (viewmodel-depth-texture :initform nil :reader renderer-target-generation-viewmodel-depth-texture)
    (viewmodel-depth-view :initform nil :reader renderer-target-generation-viewmodel-depth-view)
+   (coverage-a-texture :initform nil)
+   (coverage-a-view :initform nil)
+   (coverage-b-texture :initform nil)
+   (coverage-b-view :initform nil)
    (panel-color-texture :initform nil :reader renderer-target-generation-panel-color-texture)
    (panel-color-view :initform nil :reader renderer-target-generation-panel-color-view)
    (panel-depth-texture :initform nil :reader renderer-target-generation-panel-depth-texture)
@@ -81,6 +85,14 @@
   (renderer-target-generation-panel-depth-texture (renderer-target-generation renderer)))
 (defun renderer-panel-depth-view (renderer)
   (renderer-target-generation-panel-depth-view (renderer-target-generation renderer)))
+
+(defun renderer-panel-coverage (renderer &key previous-p texture-p)
+  (let ((a-p (if previous-p (oddp (renderer-frame-index renderer))
+                 (evenp (renderer-frame-index renderer)))))
+    (slot-value (renderer-target-generation renderer)
+                (if a-p
+                    (if texture-p 'coverage-a-texture 'coverage-a-view)
+                    (if texture-p 'coverage-b-texture 'coverage-b-view)))))
 
 (defun renderer-temporal-scaler (renderer)
   (renderer-target-generation-temporal-scaler
@@ -256,7 +268,8 @@ without one, presentation enlarges it directly."
       (render-scale-extent extent (renderer-scene-share renderer))))
 
 (defparameter *renderer-output-images*
-  '(:resolved :history :composite :viewmodel-color :viewmodel-depth :presentation :bloom-primary :bloom-secondary)
+  '(:resolved :history :composite :panel-color :panel-depth :coverage-a :coverage-b
+    :viewmodel-color :viewmodel-depth :presentation :bloom-primary :bloom-secondary)
   "The images sized by the output, which a scene-only resize keeps.")
 
 (defun make-renderer-target-generation (renderer extent &optional previous)
@@ -344,8 +357,11 @@ starts over."
         (image :composite :rgba16-float extent '(:render-attachment :texture-binding))
         (image :viewmodel-color :rgba16-float extent '(:render-attachment :texture-binding))
         (image :viewmodel-depth :depth32-float extent :render-attachment)
-        (image :panel-color :rgba16-float render-extent '(:render-attachment :texture-binding))
-        (image :panel-depth :depth32-float render-extent '(:render-attachment :texture-binding))
+        (when (renderer-temporal-p renderer)
+          (dolist (name '(:coverage-a :coverage-b))
+            (image name :rg16-uint extent '(:render-attachment :texture-binding :copy-dst))))
+        (image :panel-color :rgba16-float extent '(:render-attachment :texture-binding))
+        (image :panel-depth :depth32-float extent '(:render-attachment :texture-binding))
         (image :bloom-primary :rgba16-float (bloom-extent extent)
                '(:render-attachment :texture-binding))
         (image :bloom-secondary :rgba16-float (bloom-extent extent)

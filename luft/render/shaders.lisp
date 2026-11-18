@@ -1886,6 +1886,72 @@ moves at a parallax the pane's own motion vector cannot describe."
          (factor (presentation-medium pigmented neutral)))
     (set-output color-output (vec4 factor 1.0))))
 
+;;; Store the last sixteen visibility tests in X and their population plus one
+;;; in Y. Y=0 marks pixels with no panel last frame. A complete Halton cycle
+;;; gives a fixed silhouette while the panel ink is sampled at output density.
+(define-shader-function panel-coverage-history
+    (scene-depth history uv depth-uv panel-z texel output-texel
+     eye right up forward projection divisor old-eye old-right old-up old-forward old-projection)
+  (let* ((size (/ (vec2 1.0 1.0) texel))
+         (pixel (floor (* depth-uv size)))
+         (centre (swizzle (texel-load scene-depth (scene-texel pixel 0.0 0.0 size)) :x))
+         (bit (if (< panel-z centre) (uint 1.0) (uint 0.0)))
+         ;; The nearest surface carries the occlusion edge under camera motion.
+         (depths (vec4 (swizzle (texel-load scene-depth (scene-texel pixel -1.0 -1.0 size)) :x)
+                       (swizzle (texel-load scene-depth (scene-texel pixel 1.0 -1.0 size)) :x)
+                       (swizzle (texel-load scene-depth (scene-texel pixel -1.0 1.0 size)) :x)
+                       (swizzle (texel-load scene-depth (scene-texel pixel 1.0 1.0 size)) :x)))
+         (near (min centre (min (min (swizzle depths :x) (swizzle depths :y))
+                                (min (swizzle depths :z) (swizzle depths :w)))))
+         (far (max centre (max (max (swizzle depths :x) (swizzle depths :y))
+                               (max (swizzle depths :z) (swizzle depths :w)))))
+         (z (view-depth near projection divisor))
+         (ndc (- (* uv 2.0) (vec2 1.0 1.0)))
+         (xy (* (/ ndc (swizzle projection :xy)) (mix 1.0 z divisor)))
+         (world (assume-quantity
+                 (+ (swizzle (representation eye) :xyz)
+                    (* (swizzle (representation right) :xyz) (swizzle xy :x))
+                    (* (swizzle (representation up) :xyz) (- (swizzle xy :y)))
+                    (* (swizzle (representation forward) :xyz) z))
+                 :quantity quantities:world-position :unit quantities:cell))
+         (old-clip (mesh-view-clip world old-eye old-right old-up old-forward old-projection divisor))
+         (old-uv (+ (* 0.5 (/ (swizzle old-clip :xy) (max 0.00001 (swizzle old-clip :w))))
+                    (vec2 0.5 0.5)))
+         (output-size (/ (vec2 1.0 1.0) output-texel))
+         ;; Rounding every reprojected bit mask to the nearest pixel can
+         ;; round in the same direction for sixteen frames of a slow pan.
+         ;; Distribute that fractional pixel over the existing Halton cycle.
+         (phase (/ (- depth-uv uv) texel))
+         (old-pixel (floor (+ (* old-uv output-size) phase)))
+         (old (texel-load history (scene-texel old-pixel 0.0 0.0 output-size)))
+         (old-bits (swizzle old :x))
+         (old-count (swizzle old :y))
+         (updated (uvec2 (logior (ldb (byte 16 0) (ash old-bits 1)) bit)
+                         (- (+ old-count bit) (ldb (byte 1 15) old-bits)))))
+    ;; A newly exposed or completely occluded pixel takes effect immediately.
+    (if (and (> (swizzle (representation old-eye) :w) 0.5)
+             (> (swizzle old-clip :w) 0.0)
+             (>= (swizzle old-uv :x) 0.0) (< (swizzle old-uv :x) 1.0)
+             (>= (swizzle old-uv :y) 0.0) (< (swizzle old-uv :y) 1.0)
+             (> old-count (uint 0.0)) (>= panel-z near) (< panel-z far))
+        updated
+        (uvec2 (* bit (uint 65535.0)) (+ (uint 1.0) (* bit (uint 16.0)))))))
+
+(defvar *temporal-panel-coverage-p* nil)
+
+(define-shader-abstraction panel-coverage (alpha panel-z scene-z uv depth-uv texel)
+  (if *temporal-panel-coverage-p*
+      `(if (> ,alpha 0.0)
+           (panel-coverage-history
+            scene-depth coverage-history ,uv ,depth-uv ,panel-z ,texel
+            (representation (swizzle lens-extent :zw))
+            camera-position camera-right camera-up camera-forward camera-projection
+            (swizzle (representation render-parameters) :z)
+            previous-camera-position previous-camera-right previous-camera-up
+            previous-camera-forward previous-camera-projection)
+           (uvec2 (uint 0.0) (uint 0.0)))
+      `(uvec2 (uint 0.0) (if (< ,panel-z ,scene-z) (uint 17.0) (uint 1.0)))))
+
 (define-live-shader present-fragment-specification
     (:stage :fragment
      :inputs ((ndc :vec2 :location 0))
@@ -1967,7 +2033,8 @@ moves at a parallax the pane's own motion vector cannot describe."
          ;; Compare only their completed depth, never coplanar command depths.
          (panel (sample panel-color scene-sampler uv))
          (panel-z (swizzle (sample panel-depth scene-sampler uv) :x))
-         (panel-visible (if (< panel-z depth) 1.0 0.0))
+         (coverage (panel-coverage (swizzle panel :w) panel-z depth uv depth-uv texel))
+         (panel-visible (/ (max 0.0 (- (float (swizzle coverage :y)) 1.0)) 16.0))
          (panel-alpha (* (swizzle panel :w) panel-visible))
          (scene-share (assume-quantity (- 1.0 panel-alpha) :unit :one))
          (panel-radiance
@@ -2036,6 +2103,18 @@ moves at a parallax the pane's own motion vector cannot describe."
     (set-output color-output
                 (vec4 (mix presented cross-color crosshair)
                       1.0))))
+
+(defun temporal-present-fragment-specification ()
+  (let* ((source (shader-object-source-form (present-fragment-specification)))
+         (options (copy-tree (third source)))
+         (*temporal-panel-coverage-p* t))
+    (setf (getf options :outputs)
+          (append (getf options :outputs) '((coverage-output :uvec2 :location 1)))
+          (getf options :resources)
+          (append (getf options :resources) '((coverage-history :uint-texture-2d :binding 9))))
+    (parse-shader-specification
+     'temporal-present-fragment options
+     (list (append (fourth source) '((set-output coverage-output coverage)))))))
 
 (define-live-shader hdr-copy-fragment-specification
     (:stage :fragment

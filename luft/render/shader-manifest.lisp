@@ -20,6 +20,7 @@
     present-vertex-specification
     ambient-occlusion-fragment-specification
     present-fragment-specification
+    temporal-present-fragment-specification
     sky-fragment-specification
     sky-temporal-fragment-specification
     exposure-probe-fragment-specification

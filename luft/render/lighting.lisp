@@ -267,13 +267,8 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
 
 (update-light-from-sky *light* *sky-hour*)
 
-(defun light-shadow-rows (light center)
-  "Return a texel-stable orthographic world-to-shadow transform.
-
-The first two rows map the square light plane to clip [-1,1].  The third maps
-the signed light depth around CENTER to [0,1].  CENTER is snapped in the light
-plane so camera translation cannot slide a shadow edge by a fraction of a
-texel."
+(defun light-shadow-rows (light center &optional previous-anchor)
+  "Return the orthographic shadow rows and their next camera-local grid origin."
   (let* ((sun (light-key-direction light))
          (forward (vec3-scale sun -1.0))
          ;; The orbit axis stays transverse even at noon with zero tilt.
@@ -283,44 +278,44 @@ texel."
          (extent (light-shadow-half-extent light))
          (depth-radius (light-shadow-depth-radius light))
          (world-units-per-texel (/ (* 2.0 extent) +shadow-map-size+))
-         (center-right
-           (* (round (/ (vec3-dot center right) world-units-per-texel))
-              world-units-per-texel))
-         (center-up
-           (* (round (/ (vec3-dot center up) world-units-per-texel))
-              world-units-per-texel))
-         (center-forward (vec3-dot center forward)))
+         (anchor (luv.arithmetic.lisp.vec3:snap-plane-origin
+                  center previous-anchor right up world-units-per-texel)))
     (flet ((row (axis scale offset)
              (list (* (vec3-x axis) scale)
                    (* (vec3-y axis) scale)
                    (* (vec3-z axis) scale)
                    offset)))
-      (append
-       (row right (/ extent) (- (/ center-right extent)))
-       (row up (/ extent) (- (/ center-up extent)))
-       (row forward (/ (* 2.0 depth-radius))
-            (- 0.5 (/ center-forward (* 2.0 depth-radius))))
-       '(0.0 0.0 0.0 1.0)))))
+      (values
+       (append
+        (row right (/ extent) (- (/ (vec3-dot anchor right) extent)))
+        (row up (/ extent) (- (/ (vec3-dot anchor up) extent)))
+        (row forward (/ (* 2.0 depth-radius))
+             (- 0.5 (/ (vec3-dot anchor forward) (* 2.0 depth-radius))))
+        '(0.0 0.0 0.0 1.0))
+       anchor))))
 
-(defun light-uniform-data (light center &optional (exposure 1.0f0))
-  "Return LIGHT's nine vec4 lanes for the frame uniform ABI.
+(defun light-uniform-data (light center &optional (exposure 1.0f0) previous-anchor)
+  "Return LIGHT's nine vec4 uniform lanes and the new shadow lattice origin.
 
 The sun lanes carry the key light: the sun by day and the moon by night."
   (flet ((vec3-lane (value fourth)
            (list (vec3-x value) (vec3-y value)
                  (vec3-z value) fourth)))
-    (append
-     (vec3-lane (light-key-direction light) (light-sun-angular-width light))
-     (coerce (light-key-color light) 'list)
-     (list (aref (light-sky-color light) 0)
-           (aref (light-sky-color light) 1)
-           (aref (light-sky-color light) 2)
-           exposure)
-     (coerce (light-ground-color light) 'list)
-     (light-shadow-rows light center)
-     (list (/ +shadow-map-size+) (/ +shadow-map-size+)
-           (light-shadow-base-bias light)
-           (light-shadow-filter-radius light)))))
+    (multiple-value-bind (rows anchor) (light-shadow-rows light center previous-anchor)
+      (values
+       (append
+        (vec3-lane (light-key-direction light) (light-sun-angular-width light))
+        (coerce (light-key-color light) 'list)
+        (list (aref (light-sky-color light) 0)
+              (aref (light-sky-color light) 1)
+              (aref (light-sky-color light) 2)
+              exposure)
+        (coerce (light-ground-color light) 'list)
+        rows
+        (list (/ +shadow-map-size+) (/ +shadow-map-size+)
+              (light-shadow-base-bias light)
+              (light-shadow-filter-radius light)))
+       anchor))))
 
 ;;; The lens and atmosphere.  Bloom and shafts run on exposed scene-linear
 ;;; light after temporal reconstruction; the grade follows in presentation.

@@ -147,7 +147,8 @@ final pass."
               (coerce (second pointer) 'single-float)
               (coerce (/ width) 'single-float)
               (coerce (/ height) 'single-float))
-      ink-strength (first (first figures)) bevel-width exposure first-person-p)
+      ink-strength (first (first figures)) bevel-width exposure first-person-p
+      (renderer-sun-shadow renderer))
      :jitter jitter :view view
      :player-p (and figures t)
      :effect-time effect-time
@@ -203,9 +204,15 @@ final pass."
   (encode-renderer-presentation renderer frame encoder surface-texture overlay-encoder))
 
 (defun upload-renderer-frame (renderer frame camera-uniform-data effect-time)
-  (when (renderer-shader-temporal-p renderer)
-    ;; These W components are padding to every geometry consumer.  The shader
-    ;; resolve reads them as its per-frame validity and accumulation weight.
+  (when (renderer-temporal-p renderer)
+    ;; The two resolves share history validity. The sky also reprojects the
+    ;; rotation between the actual encoded frames, including paused clocks.
+    (let* ((state (renderer-reconstruction renderer))
+           (angle (aref camera-uniform-data 131)))
+      (setf (aref camera-uniform-data 35)
+            (if (renderer-history-valid-p renderer)
+                (or (reconstruction-previous-sky-angle state) angle) angle)
+            (reconstruction-previous-sky-angle state) angle))
     (setf (aref camera-uniform-data 27)
           (if (renderer-history-valid-p renderer) 1.0f0 0.0f0)
           (aref camera-uniform-data 31) *temporal-history-weight*))
@@ -648,6 +655,14 @@ World and screen instruments follow distinct pixel budgets; see #LEEWJB."
          (finishing (renderer-finishing renderer))
          (world-view (renderer-target-generation-presentation-view generation))
          (world-texture (renderer-target-generation-presentation-texture generation))
+         (coverage-p (renderer-temporal-p renderer))
+         (previous (when coverage-p
+                     (let ((texture (renderer-panel-coverage renderer :previous-p t :texture-p t)))
+                       (unless (renderer-history-used-p renderer)
+                         (encode encoder (make-gpu-clear-texture-command
+                                          :texture texture :color #(0.0 0.0 0.0 0.0))))
+                       (prepare-texture encoder texture :texture-binding)
+                       (renderer-panel-coverage renderer :previous-p t))))
          (present-pass
            (begin-render-pass
             encoder
@@ -655,9 +670,12 @@ World and screen instruments follow distinct pixel budgets; see #LEEWJB."
              :label "luft bounded world presentation"
              :color-attachments
              `((:view ,world-view :load-op :clear :store-op :store
-                :clear-value #(0.0 0.0 0.0 1.0)))))))
+                :clear-value #(0.0 0.0 0.0 1.0))
+               ,@(when coverage-p
+                   `((:view ,(renderer-panel-coverage renderer) :load-op :clear :store-op :store
+                      :clear-value #(0 0 0 0)))))))))
     (encode-presentation finishing present-pass
-                         (renderer-frame-present-bind-group renderer frame))
+                         (renderer-frame-present-bind-group renderer frame previous))
     (end-pass present-pass)
     (prepare-texture encoder world-texture :texture-binding)
     (let* ((program (finishing-display-program finishing))

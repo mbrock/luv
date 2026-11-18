@@ -136,17 +136,6 @@ places them after the sampled textures, Direct3D in u-registers."
     (:storage-texture :storage-texture)
     (:sampler :sampler)))
 
-(defun shader-resource-target (expression)
-  "The resource EXPRESSION denotes through references and bindings, or NIL."
-  (loop
-    (unless (typep expression 'shader-reference)
-      (return nil))
-    (let ((target (shader-reference-target expression)))
-      (typecase target
-        (shader-resource (return target))
-        (shader-binding (setf expression (shader-binding-expression target)))
-        (t (return nil))))))
-
 (defun map-shader-specification-expressions (function specification)
   "Call FUNCTION once on every expression SPECIFICATION reaches, including
 the bodies of inline functions and folds seen through their bindings."

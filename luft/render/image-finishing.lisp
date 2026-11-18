@@ -22,7 +22,7 @@
   (:documentation
    "Bind one lens-chain STAGE (:bright, :horizontal, :vertical, or :shafts)
 to its SOURCE view and the frame's CAMERA uniform."))
-(defgeneric make-presentation-binding (finishing device scene depth camera bloom shafts panel-color panel-depth viewmodel))
+(defgeneric make-presentation-binding (finishing device scene depth camera bloom shafts panel-color panel-depth viewmodel &optional coverage-history))
 (defgeneric encode-composite (finishing pass binding))
 (defgeneric encode-lens-stage (finishing stage pass binding))
 (defgeneric encode-presentation (finishing pass binding))
@@ -44,13 +44,15 @@ to its SOURCE view and the frame's CAMERA uniform."))
                         :camera-state camera))
 
 (defmethod make-presentation-binding
-    ((finishing image-finishing) device scene depth camera bloom shafts panel-color panel-depth viewmodel)
-  (make-program-binding (finishing-present-program finishing) device
+    ((finishing image-finishing) device scene depth camera bloom shafts panel-color panel-depth viewmodel
+     &optional coverage-history)
+  (apply #'make-program-binding (finishing-present-program finishing) device
                         :scene scene :scene-sampler (finishing-sampler finishing)
                         :scene-depth depth :camera-state camera
                         :bloom bloom :shafts shafts
                         :panel-color panel-color :panel-depth panel-depth
-                        :viewmodel viewmodel))
+                        :viewmodel viewmodel
+                        (when coverage-history (list :coverage-history coverage-history))))
 
 (defmethod encode-composite ((finishing image-finishing) pass binding)
   (encode-program (finishing-composite-program finishing) pass binding
@@ -74,14 +76,15 @@ to its SOURCE view and the frame's CAMERA uniform."))
 (defun make-image-finishing (device color-format)
   (let ((finishing (make-instance 'image-finishing :output-format color-format)))
     (with-gpu-construction (finishing)
-      (flet ((program (label fragment format)
+      (flet ((program (label fragment format &optional auxiliary-format)
                (own-gpu-object
                 finishing
                 (make-drawing-program
                  device :label label
                  :vertex (shaders:present-vertex-specification)
                  :fragment fragment
-                 :targets `((:format ,format))))))
+                 :targets `((:format ,format)
+                            ,@(when auxiliary-format `((:format ,auxiliary-format))))))))
         (setf (finishing-occlusion-program finishing)
               (own-gpu-object
                finishing
@@ -114,7 +117,9 @@ to its SOURCE view and the frame's CAMERA uniform."))
                        (shaders::hdr-copy-fragment-specification) color-format)
               (finishing-present-program finishing)
               (program "luft HDR presentation"
-                       (shaders:present-fragment-specification) color-format))))))
+                       (if *temporal-upscaling-p* (shaders::temporal-present-fragment-specification)
+                           (shaders:present-fragment-specification))
+                       color-format (when *temporal-upscaling-p* :rg16-uint)))))))
 
 (in-package #:luft.render.shaders)
 

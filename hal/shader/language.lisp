@@ -1538,6 +1538,17 @@ silent loss of meaning."
            :form source-form :reason :invalid-sample-coordinate-quantity
            :details specification)))
 
+(defun shader-resource-target (expression)
+  "The resource EXPRESSION denotes through references and bindings, or NIL."
+  (loop
+    (unless (typep expression 'shader-reference)
+      (return nil))
+    (let ((target (shader-reference-target expression)))
+      (typecase target
+        (shader-resource (return target))
+        (shader-binding (setf expression (shader-binding-expression target)))
+        (t (return nil))))))
+
 (defmethod infer-shader-call-quantity-specification
     ((operator (eql 'sample)) operands source-form)
   (declare (ignore operator))
@@ -1546,25 +1557,25 @@ silent loss of meaning."
       (require-semantic-operands operands source-form '(2))
       (require-dimensionless-coordinate
        (shader-expression-quantity-specification coordinate) source-form)))
-  (let ((texture (shader-reference-target (first operands))))
+  (let ((texture (shader-resource-target (first operands))))
     (shader-resource-sample-quantity-specification texture)))
 
 (defmethod infer-shader-call-quantity-layout
     ((operator (eql 'sample)) operands source-form)
   (declare (ignore operator source-form))
-  (let ((texture (shader-reference-target (first operands))))
+  (let ((texture (shader-resource-target (first operands))))
     (shader-resource-sample-quantity-layout texture)))
 
 (defmethod infer-shader-call-quantity-specification
     ((operator (eql 'texel-load)) operands source-form)
   (declare (ignore operator source-form))
-  (let ((texture (shader-reference-target (first operands))))
+  (let ((texture (shader-resource-target (first operands))))
     (shader-resource-sample-quantity-specification texture)))
 
 (defmethod infer-shader-call-quantity-layout
     ((operator (eql 'texel-load)) operands source-form)
   (declare (ignore operator source-form))
-  (let ((texture (shader-reference-target (first operands))))
+  (let ((texture (shader-resource-target (first operands))))
     (shader-resource-sample-quantity-layout texture)))
 
 (defmethod infer-shader-call-quantity-specification

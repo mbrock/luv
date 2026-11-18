@@ -11,6 +11,7 @@
            #:vec3-length
            #:vec3-list
            #:vec3-normalize
+           #:snap-plane-origin
            #:vec3-scale
            #:vec3-x
            #:vec3-y

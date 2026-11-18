@@ -1091,6 +1091,12 @@
               (math:quantity-specification-name
                (shader:shader-expression-quantity-specification x))))))
 
+(shader:define-shader-function fetch-probe-texel (image)
+  (shader:texel-load image (shader:uvec2 (shader:uint 0.0) (shader:uint 0.0))))
+
+(shader:define-shader-function sample-probe-texel (image sampler uv)
+  (sample image sampler uv))
+
 (define-test texture-samples-can-publish-semantic-channel-layouts
   (let* ((specification
            (shader:parse-shader-specification
@@ -1106,9 +1112,9 @@
                       ((:rgb :quantity :linear-rgb)
                        (:a :quantity :opacity)))
                (sampler :sampler :binding 1)))
-            '((let* ((texel (sample image sampler uv))
+            '((let* ((texel (sample-probe-texel image sampler uv))
                      (rgb (swizzle texel :rgb))
-                     (alpha (swizzle texel :a)))
+                     (alpha (swizzle (fetch-probe-texel image) :a)))
                 (set-output rgb-output rgb)))))
          (image (first (shader:shader-specification-resources specification)))
          (texel (binding-named 'texel specification))
