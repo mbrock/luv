@@ -94,6 +94,8 @@ exactly what an encoder would have written.")
    #:chunk-content-message-digest #:chunk-content-message-content
    #:bye-message #:make-bye-message #:bye-message-p #:bye-message-reason
    #:bye-message-text
+   #:companion-follow-message #:make-companion-follow-message
+   #:companion-follow-message-companion #:companion-follow-message-player
    #:companion-message #:make-companion-message #:companion-message-p
    #:companion-message-companion
    #:companion-tell-message #:make-companion-tell-message #:companion-tell-message-p

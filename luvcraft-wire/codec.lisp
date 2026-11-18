@@ -566,6 +566,12 @@ build from the guest's own stock."
   (kind (:enum :gnome :cat :fantus) :gnome)
   (position :position (vector 0d0 0d0 0d0)))
 
+(define-message companion-follow-message 24 :reliable
+  "A guest asks its companion to follow its own player or stay (empty player).
+The host confirms a change to all guests and sends current follows on joining."
+  (companion :string "")
+  (player :string ""))
+
 (define-message pose-message 32 :unreliable
   (player :string "")
   (pose :pose (make-pose)))

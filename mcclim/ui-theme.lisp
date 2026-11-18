@@ -87,7 +87,7 @@
   "Paint an action, its semantic mark, and its keyboard shortcut."
   (let* ((center (/ (+ top bottom) 2))
          (ink (ui-ink (if (eq role :inset) :text :on-accent)))
-         (key-width (if (> (length key) 1) 27 17))
+         (key-width (max 17 (+ 7 (text-size medium key :text-style (make-text-style :sans-serif :roman (ui-text-size :key))))))
          (key-x (- right key-width 6)))
     (draw-ui-surface medium left top right bottom :fill role :edge (if hovered :focus :border)
                      :rim (ui-metric (if hovered :focus-width :border-width))

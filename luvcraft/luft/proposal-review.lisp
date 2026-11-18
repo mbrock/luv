@@ -114,17 +114,6 @@
   '((:y "Yes" "Y" :affirm 92) (:t "Talk" "T" :discuss 98)
     (:n "No" "N" :decline 88) (:escape "Later" "Esc" :inset 96)))
 
-;; Embed the two CLIM image arrays in the compiled game, including standalone builds.
-(defparameter *proposal-portraits*
-  (list :fantus (clim:make-pattern
-                 #.(clim:read-bitmap-file (asdf:system-relative-pathname
-                                           :luvcraft "luvcraft/companions/portraits/fantus.png")
-                                          :format :png) nil)
-        :gnome (clim:make-pattern
-                #.(clim:read-bitmap-file (asdf:system-relative-pathname
-                                          :luvcraft "luvcraft/companions/portraits/gnome.png")
-                                         :format :png) nil)))
-
 (defclass proposal-pane (mcluv:transparent-gpu-application-pane) ())
 (mcluv:define-ui-themed-pane proposal-pane)
 
@@ -157,7 +146,7 @@
          (style (clim:make-text-style :sans-serif :bold (mcluv:ui-text-size :heading))))
     (multiple-value-bind (width height) (review-bar-size compact)
       (mcluv:draw-ui-panel pane 0 0 width height))
-    (clim:draw-pattern* pane (getf *proposal-portraits* kind) 11 8)
+    (clim:draw-pattern* pane (getf *companion-portraits* kind) 11 8)
     (clim:draw-text* pane (string-capitalize kind) 78 23 :align-y :center
                      :text-size (mcluv:ui-text-size :caption) :text-face :bold :ink (mcluv:ui-ink :muted))
     (clim:draw-text* pane (luvcraft.agent::fit-to-width pane title style (if compact 328 365))
@@ -202,9 +191,12 @@
 
 (defmethod render:encode-viewer-overlay :around
     ((overlay mcluv:luvcraft-hud-widget-overlay) (viewer luvcraft-viewer) pass surface)
-  (when (or (not (typep (render:viewer-modal-focus viewer) 'companion-proposal))
-            (typep overlay 'proposal-card))
-    (call-next-method)))
+  (let ((focus (render:viewer-modal-focus viewer)))
+    (when (typecase focus
+            (companion-proposal (typep overlay 'proposal-card))
+            (luft-companion (eq overlay (luvcraft.agent::gnome-dialogue focus)))
+            (t t))
+      (call-next-method))))
 
 (defmethod render:encode-viewer-overlay :around
     ((bubble luvcraft.agent::gnome-bubble-overlay) (viewer luvcraft-viewer) pass surface)

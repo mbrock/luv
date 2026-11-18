@@ -258,6 +258,39 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
 (defclass luft-cat (luft-companion luvcraft.agent:cat) ())
 (defclass luft-fantus (luft-companion luvcraft.agent:fantus) ())
 
+;; Embed the two CLIM image arrays in the compiled game, including standalone builds.
+(defparameter *companion-portraits*
+  (list :fantus (clim:make-pattern
+                 #.(clim:read-bitmap-file (asdf:system-relative-pathname
+                                           :luvcraft "luvcraft/companions/portraits/fantus.png")
+                                          :format :png) nil)
+        :gnome (clim:make-pattern
+                #.(clim:read-bitmap-file (asdf:system-relative-pathname
+                                          :luvcraft "luvcraft/companions/portraits/gnome.png")
+                                         :format :png) nil)))
+
+(defmethod luvcraft.agent::dialogue-portrait ((agent luft-companion))
+  (getf *companion-portraits* (inhabitant-kind (presented-inhabitant agent))))
+
+(defmethod luvcraft.agent::dialogue-follow-label ((agent luft-companion))
+  (let ((viewer (luvcraft.agent::gnome-session agent)))
+    (if (equal (following-player (presented-inhabitant agent)) (player-id (viewer-local-player viewer)))
+        "Stay here" "Follow me")))
+
+(clim:define-command (com-toggle-companion-follow :command-table luvcraft-world) ((agent 'luft-companion))
+  (let* ((viewer (render:viewer-command-viewer)) (inhabitant (presented-inhabitant agent))
+         (id (player-id (viewer-local-player viewer))))
+    (when (eq agent (render:viewer-modal-focus viewer))
+      (request-companion-follow (viewer-world viewer) inhabitant (unless (equal id (following-player inhabitant)) id))
+      (when (string= "" (luvcraft.agent::gnome-draft agent))
+        (render:unfocus-viewer viewer)
+        (when (and (render:viewer-canvas viewer) (typep (render:viewer-mode viewer) 'render:first-person-mode))
+          (luv:set-canvas-relative-pointer-mode (render:viewer-canvas viewer) t)
+          (setf (render:viewer-pointer-captured-p viewer) t))))))
+
+(defmethod luvcraft.agent::choose-dialogue-follow ((agent luft-companion))
+  (clim:execute-frame-command (luvcraft.agent::gnome-session agent) (list 'com-toggle-companion-follow agent)))
+
 (defmethod luvcraft.agent::companion-ground-height ((viewer luvcraft-viewer) x z ceiling floor)
   (multiple-value-bind (face cx cy cz point)
       (terrain:raycast-face (render:viewer-source viewer)
@@ -367,6 +400,21 @@ Hands and triangle-based creatures use independent render paths. #O9H3CW")
   (luvcraft:luvcraft-focus-entered agent viewer))
 (defmethod render:viewer-focus-left ((agent luft-companion) (viewer luvcraft-viewer))
   (luvcraft:luvcraft-focus-left agent viewer))
+(defmethod luvcraft.agent::conversation-sight-clear-p ((agent luft-companion) world from to)
+  (declare (ignore world))
+  ;; Cast outward from the companion so a camera embedded in a journaled
+  ;; wall is rejected too. The native Luft scene owns those edits.
+  (let* ((viewer (luvcraft.agent::gnome-session agent))
+         (eye (host-position viewer from))
+         (target (host-position viewer to))
+         (direction (vec3:make-vec3 (- (vec3:vec3-x eye) (vec3:vec3-x target))
+                                    (- (vec3:vec3-y eye) (vec3:vec3-y target))
+                                    (- (vec3:vec3-z eye) (vec3:vec3-z target))))
+         (distance (vec3:vec3-length direction)))
+    (or (< distance 0.001)
+        (null (terrain:raycast-face (render:viewer-source viewer) target direction
+                                    :max-distance (+ distance 0.12))))))
+
 (defmethod render:viewer-focus-camera-pose ((agent luft-companion) (viewer luvcraft-viewer))
   (let ((pose (luvcraft:luvcraft-focus-camera-pose agent viewer)))
     (render:make-camera-pose :position (host-position viewer (luvcraft::camera-pose-position pose))

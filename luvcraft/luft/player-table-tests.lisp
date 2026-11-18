@@ -116,6 +116,36 @@ the cons PROMPTS; only the network is replaced."
     (push companion (host::world-agents world))
     companion))
 
+(define-test follow-tracks-a-moving-player-and-stays-on-command
+  (let* ((world (session-test-world))
+         (gnome (summon-test-companion world 1052 1060))
+         (player (host:find-world-player world "ada"))
+         (body (terrain:character-body (host:player-character player))))
+    (flet ((walk () (loop repeat 900 do (host::advance-world-companions world 1/60)))
+           (gap () (host::companion-distance (host::inhabitant-position gnome) (terrain:body-position body))))
+      ;; Close its initial straight path after it has already set off.
+      (host::request-companion-follow world gnome "ada")
+      (loop repeat 30 do (host::advance-world-companions world 1/60))
+      (let* ((scene (host:world-scene world))
+             (wall (loop for y from 1059 to 1061 append
+                     (loop for dz below 3 collect (list (air-cell world 1056 y dz) nil luvcraft::*stone-block*)))))
+        (is eq :sequenced (nth-value 1 (terrain:sequence-world-events scene wall)))
+        (is = 9 (terrain:apply-queued-world-events scene nil nil)))
+      (walk)
+      (true (< (gap) 2.6))
+      (setf (terrain:body-position body) (v:make-vec3 1059.5 1054.5 (ground world 1059 1054)))
+      (walk)
+      (true (< (gap) 2.6))
+      (let* ((p (terrain:body-position body)) (before (host::inhabitant-position gnome)))
+        (setf (terrain:body-position body) (v:make-vec3 (v:vec3-x p) (v:vec3-y p) (+ 14 (v:vec3-z p))))
+        (walk)
+        (true (< (host::companion-distance before (host::inhabitant-position gnome)) 0.1)))
+      (host::request-companion-follow world gnome nil)
+      (setf (terrain:body-position body) (v:make-vec3 1052.5 1060.5 (ground world 1052 1060)))
+      (walk)
+      (true (> (gap) 5))
+      (true (null (host::inhabitant-provider gnome))))))
+
 (defun pump-companions (sessions &rest arguments &key (until (constantly nil)) &allow-other-keys)
   "PUMP SESSIONS, moving every world's companions along with them."
   (apply #'pump sessions
@@ -145,6 +175,14 @@ the cons PROMPTS; only the network is replaced."
                                                           guest-world (host::inhabitant-id gnome))))))
             (true (host::inhabitant-mirror-p mirror))
             (is eq :gnome (host::inhabitant-kind mirror))
+            (host::request-companion-follow guest-world mirror "bea")
+            (true (pump-companions (list session guest)
+                                   :until (lambda () (equal "bea" (host::following-player mirror)))))
+            (is equal "bea" (host::following-player gnome))
+            (host::request-companion-follow guest-world mirror nil)
+            (true (pump-companions (list session guest)
+                                   :until (lambda () (null (host::following-player mirror)))))
+            (true (null (host::following-player gnome)))
             ;; Bea asks; the host's companion hears her, and both see its reply.
             (host::tell-inhabitant guest-world mirror "Hello there")
             (true (pump-companions

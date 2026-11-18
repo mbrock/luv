@@ -44,19 +44,59 @@
        :destination (and destination (site-wire destination))
        :pose pose :owner (or (inhabitant-owner inhabitant) "")))))
 
+(defun companion-player-position (player)
+  (if (player-track player)
+      (let ((shown (track-shown (player-track player))))
+        (when shown
+          (let ((p (pose-snapshot-position shown)))
+            (vec3:make-vec3 (svref p 0) (svref p 1) (svref p 2)))))
+      (when (player-character player)
+        (terrain:body-position (terrain:character-body (player-character player))))))
+
 (defun companion-attention-position (world inhabitant)
-  "Where the player INHABITANT attends to stands in WORLD, or NIL."
-  (let ((player (and (inhabitant-attending inhabitant)
-                     (find-world-player world (inhabitant-attending inhabitant)))))
-    (when player
-      (if (player-track player)
-          (let ((shown (track-shown (player-track player))))
-            (and shown (let ((p (pose-snapshot-position shown)))
-                         (vec3:make-vec3 (coerce (svref p 0) 'single-float)
-                                         (coerce (svref p 1) 'single-float)
-                                         (coerce (svref p 2) 'single-float)))))
-          (and (player-character player)
-               (terrain:body-position (terrain:character-body (player-character player))))))))
+  (let ((player (find-world-player world (inhabitant-attending inhabitant))))
+    (and player (companion-player-position player))))
+
+(defun following-player (inhabitant)
+  (let ((follow (inhabitant-follow inhabitant)))
+    (and follow (companion-follow-player follow))))
+
+(defun follow-message (inhabitant player)
+  (wire:make-companion-follow-message :companion (inhabitant-id inhabitant) :player (or player "")))
+
+(defun set-companion-follow-target (world inhabitant player)
+  (unless (equal player (following-player inhabitant))
+    (when (inhabitant-follow inhabitant)
+      (stop-follow-route inhabitant (inhabitant-follow inhabitant)))
+    (setf (inhabitant-follow inhabitant) (and player (make-companion-follow :player player)))
+    (when (typep (world-session world) 'host-session)
+      (session-broadcast (world-session world) (follow-message inhabitant player)))))
+
+(defun request-companion-follow (world inhabitant player)
+  (if (inhabitant-mirror-p inhabitant)
+      (let ((session (world-session world)))
+        (when (and (typep session 'guest-session) (eq (session-state session) :open))
+          (net:send-message (session-endpoint session) (follow-message inhabitant player)
+                            (session-peer session))))
+      (set-companion-follow-target world inhabitant player)))
+
+(defmethod handle-session-message ((session host-session) peer (message wire:companion-follow-message))
+  (let* ((world (session-world session))
+         (guest (guest-peer-player session peer))
+         (inhabitant (find-world-inhabitant world (wire:companion-follow-message-companion message)))
+         (target (wire:companion-follow-message-player message)))
+    (when (and guest inhabitant (not (inhabitant-mirror-p inhabitant)))
+      (cond ((equal target (player-id guest)) (set-companion-follow-target world inhabitant target))
+            ((and (equal target "") (equal (player-id guest) (following-player inhabitant)))
+             (set-companion-follow-target world inhabitant nil))))))
+
+(defmethod handle-session-message ((session guest-session) peer (message wire:companion-follow-message))
+  (declare (ignore peer))
+  (let* ((world (session-world session))
+         (inhabitant (find-world-inhabitant world (wire:companion-follow-message-companion message)))
+         (target (wire:companion-follow-message-player message)))
+    (when (and inhabitant (inhabitant-mirror-p inhabitant))
+      (set-companion-follow-target world inhabitant (unless (equal target "") target)))))
 
 (defun host-companions (session)
   "The companions SESSION's world keeps itself."
@@ -71,7 +111,9 @@
                       (wire:make-companion-message
                        :companion (companion-wire inhabitant
                                                   :pose (companion-wire-pose session inhabitant)))
-                      peer)))
+                      peer)
+    (when (following-player inhabitant)
+      (net:send-message (session-endpoint session) (follow-message inhabitant (following-player inhabitant)) peer))))
 
 (defun broadcast-companion-changes (session)
   "Tell every guest about each companion whose words, attention, or journey
@@ -80,13 +122,15 @@ changed since they were last told, and each that has gone."
         (here (host-companions session)))
     (dolist (inhabitant here)
       ;; The pose travels on its own; only the rest makes news.
-      (let ((still (companion-wire inhabitant)))
-        (unless (equalp still (gethash (inhabitant-id inhabitant) sent))
+      (let ((still (companion-wire inhabitant)) (previous (gethash (inhabitant-id inhabitant) sent)))
+        (unless (equalp still previous)
           (setf (gethash (inhabitant-id inhabitant) sent) still)
           (session-broadcast
            session (wire:make-companion-message
                     :companion (companion-wire inhabitant
-                                               :pose (companion-wire-pose session inhabitant)))))))
+                                               :pose (companion-wire-pose session inhabitant))))
+          (when (and (null previous) (following-player inhabitant))
+            (session-broadcast session (follow-message inhabitant (following-player inhabitant)))))))
     (dolist (id (loop for id being the hash-keys of sent
                       unless (find id here :key #'inhabitant-id :test #'equal)
                         collect id))

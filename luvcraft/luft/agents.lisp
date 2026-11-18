@@ -4,6 +4,9 @@
 ;;; Provider turns, CLIM argument parsing, transcripts and socket lifetime
 ;;; belong to the same application-agent harness used by old Luvcraft.
 
+(defstruct companion-follow
+  player route last-position (delay 0.0) (attempt 0))
+
 (defclass inhabitant ()
   ;; Locomotion quantities belong to CHARACTER's declared terrain body, not
   ;; duplicate agent slots. These slots are identities, dialogue and handles.
@@ -18,6 +21,7 @@
    (asked :initarg :asked :initform nil :accessor inhabitant-asked)
    (said :initarg :said :initform nil :accessor inhabitant-said)
    (approval :initform nil :accessor inhabitant-approval)
+   (follow :initform nil :accessor inhabitant-follow)
    (journey :initform nil :accessor inhabitant-journey)
    (lock :initform (sb-thread:make-mutex :name "inhabitant provider") :reader inhabitant-lock)
    (opening :initform nil :accessor inhabitant-opening)
@@ -341,7 +345,96 @@ or :WORKING -- and the name of the tool it is using, if any."
   (if (inhabitant-mirror-p inhabitant)
       (inhabitant-mirrored-destination inhabitant)
       (let ((journey (inhabitant-journey inhabitant)))
-        (and journey (terrain:walking-route-destination (journey-route journey))))))
+        (let ((route (or (and journey (journey-route journey))
+                         (and (inhabitant-follow inhabitant)
+                              (companion-follow-route (inhabitant-follow inhabitant))))))
+          (and route (eq :running (terrain:walking-route-status route))
+               (terrain:walking-route-destination route))))))
+
+(defun stop-follow-route (inhabitant follow)
+  (let ((character (inhabitant-character inhabitant)))
+    (when (and (companion-follow-route follow)
+               (eq (terrain:character-controller character) (companion-follow-route follow)))
+      (terrain:cancel-character-route character "paused following"))
+    (setf (companion-follow-route follow) nil)))
+
+(defun follow-waypoints (cells)
+  "Keep turns and steps. On straight level runs a follower can stride past cell centers."
+  (loop for (a b c) on cells
+        when (or (null c)
+                 (/= (luft:site-z a) (luft:site-z b))
+                 (/= (luft:site-z b) (luft:site-z c))
+                 (/= (- (luft:site-x b) (luft:site-x a)) (- (luft:site-x c) (luft:site-x b)))
+                 (/= (- (luft:site-y b) (luft:site-y a)) (- (luft:site-y c) (luft:site-y b))))
+          collect b into corners
+        finally (return (and cells (cons (first cells) (remove nil corners))))))
+
+(defun within-follow-distance-p (world body target)
+  (let* ((p (terrain:body-position body))
+         (dx (- (vec3:vec3-x p) (vec3:vec3-x target)))
+         (dy (- (vec3:vec3-y p) (vec3:vec3-y target))))
+    (and (< (+ (* dx dx) (* dy dy)) (* 2.4 2.4))
+         (or (< (abs (- (vec3:vec3-z p) (vec3:vec3-z target))) 1.4)
+             ;; Wait on the ground when a flying player hovers overhead.
+             (not (terrain:body-standable-cell-p body (world-scene world)
+                                                 (floor (vec3:vec3-x target)) (floor (vec3:vec3-y target))
+                                                 (floor (vec3:vec3-z target))))))))
+
+(defun follow-destination (world inhabitant target attempt)
+  "Pick a supported foot cell, biased toward the near side of the player.
+Long distances are covered in short legs. Try another approach after a blockage."
+  (let* ((p (inhabitant-position inhabitant))
+         (dx (- (vec3:vec3-x target) (vec3:vec3-x p)))
+         (dy (- (vec3:vec3-y target) (vec3:vec3-y p)))
+         (distance (max 0.01 (sqrt (+ (* dx dx) (* dy dy)))))
+         (leg (min 10.0 (max 0.0 (- distance 1.6))))
+         (side (nth (mod attempt 5) '(0 1 -1 2 -2)))
+         (x (floor (+ (vec3:vec3-x p) (/ (- (* leg dx) (* side dy)) distance))))
+         (y (floor (+ (vec3:vec3-y p) (/ (+ (* leg dy) (* side dx)) distance))))
+         (z (floor (if (or (> distance 12) (> (- (vec3:vec3-z target) (vec3:vec3-z p)) 8))
+                       (vec3:vec3-z p) (vec3:vec3-z target))))
+         (body (terrain:character-body (inhabitant-character inhabitant))))
+    (when (ground-resident-p world x y)
+      (loop for dz in '(0 -1 1 -2 2 -3 3 -4 4 -5 -6 -7 -8)
+            for foot = (+ z dz)
+            when (terrain:body-standable-cell-p body (world-scene world) x y foot)
+              return (agent-cell world x y foot)))))
+
+(defun advance-companion-follow (world inhabitant follow seconds)
+  (let* ((character (inhabitant-character inhabitant))
+         (player (find-world-player world (companion-follow-player follow)))
+         (target (and player (companion-player-position player)))
+         (p (inhabitant-position inhabitant)))
+    (cond
+      ((null player) (set-companion-follow-target world inhabitant nil))
+      ((or (null target) (inhabitant-journey inhabitant) (inhabitant-approval inhabitant)
+           (within-follow-distance-p world (terrain:character-body character) target))
+       (stop-follow-route inhabitant follow)
+       (setf (companion-follow-last-position follow) nil (companion-follow-attempt follow) 0))
+      ((and (minusp (decf (companion-follow-delay follow) seconds))
+            (terrain:body-grounded-p (terrain:character-body character)))
+       ;; Check motion and the moving goal occasionally, never run A* every frame.
+       (setf (companion-follow-delay follow) 0.9)
+       (let* ((route (companion-follow-route follow))
+              (last (companion-follow-last-position follow))
+              (stuck (and last (< (companion-distance p last) 0.15)))
+              (attempt (if stuck (incf (companion-follow-attempt follow))
+                           (setf (companion-follow-attempt follow) 0)))
+              (goal (follow-destination world inhabitant target attempt)))
+         (setf (companion-follow-last-position follow) (vec3:make-vec3
+                                                          (vec3:vec3-x p) (vec3:vec3-y p) (vec3:vec3-z p)))
+         (unless (and route (not stuck) (eq :running (terrain:walking-route-status route))
+                      (eql goal (terrain:walking-route-destination route)))
+           (stop-follow-route inhabitant follow)
+           (when goal
+             (let* ((terrain::*walking-path-visit-limit* 320)
+                    (route (terrain:start-character-route character (world-scene world)
+                                                          (luft:site-x goal) (luft:site-y goal) (luft:site-z goal))))
+               (setf (terrain:walking-route-cells route) (follow-waypoints (terrain:walking-route-cells route))
+                     (companion-follow-route follow) route)))))))
+    (when (and target (companion-follow-route follow)
+               (eq :running (terrain:walking-route-status (companion-follow-route follow))))
+      (max (terrain:character-speed character) (min 9.0 (* 0.9 (companion-distance p target)))))))
 
 (defun advance-world-companions (world seconds)
   (initialize-world-agents world)
@@ -350,12 +443,21 @@ or :WORKING -- and the name of the tool it is using, if any."
         ;; A guest's copy walks where the host's poses say.
         (advance-companion-mirror inhabitant seconds)
         (let* ((p (inhabitant-position inhabitant))
-               (journey (inhabitant-journey inhabitant)))
+               (journey (inhabitant-journey inhabitant))
+               (speed (when (inhabitant-follow inhabitant)
+                        (advance-companion-follow world inhabitant (inhabitant-follow inhabitant) seconds))))
           (hear-inhabitant-provider inhabitant)
           ;; Each companion's clock freezes independently where its ground has no
           ;; collision, so it never falls through ground that is only drawn (#I6O4J6).
           (when (ground-resident-p world (floor (vec3:vec3-x p)) (floor (vec3:vec3-y p)))
-            (terrain:advance-world-simulation (inhabitant-simulation inhabitant) seconds))
+            (let ((simulation (inhabitant-simulation inhabitant)))
+              (if speed
+                  (let* ((character (inhabitant-character inhabitant)) (usual-speed (terrain:character-speed character)))
+                    (unwind-protect
+                         (progn (setf (terrain:character-speed character) speed)
+                                (terrain:advance-world-simulation simulation seconds))
+                      (setf (terrain:character-speed character) usual-speed)))
+                  (terrain:advance-world-simulation simulation seconds))))
           (when journey
             (when (> (- (get-internal-real-time) (journey-started journey))
                      (* 120 internal-time-units-per-second))

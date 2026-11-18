@@ -1354,7 +1354,12 @@ library path cleared, and shader validation needs =spirv-val= on PATH.
 =luvcraft/luft/game= now owns gnome, cat, and Fantus inhabitants. G summons
 a gnome; Tab focuses a nearby looked-at companion, T talks to the selected
 companion through the original inline dialogue, and F7 selects another.
-M-x offers Summon Cat and
+The focused dialogue shares the proposal's paper panel, type and keycaps.
+Enter sends a typed message. Click Follow me or press F2 to have the
+companion walk after your player. Focus it again and choose Stay here to
+stop. Follow uses short terrain routes, tries a different approach when
+progress stalls, and yields to tool journeys and construction review.
+A guest asks the host to follow its player. M-x offers Summon Cat and
 Summon Fantus. A proposal opens a review card and the camera orbits its
 highlighted cells. The companion's portrait sits beside the question on a
 Field Atelier panel (#9Z486I). Yes (Y), Talk (T), No (N), and Later (Esc)

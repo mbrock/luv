@@ -95,6 +95,7 @@
                                              :content (octets 0 255 17 34)))
        (in-world (make-bye-message :reason :foreign-world :text "wrong world"))
        (in-world (make-companion-message :companion (sample-companion)))
+       (in-world (make-companion-follow-message :companion "gnome-k3x9q" :player "bea"))
        (in-world (make-companion-tell-message :companion "gnome-k3x9q"
                                               :text "Kan du hämta en sten?"))
        (in-world (make-companion-pose-message :companion "gnome-k3x9q" :pose (sample-pose)))

@@ -453,6 +453,25 @@ provider was already installed."
            gnome)
           (t gnome))))
 
+(defgeneric dialogue-follow-label (gnome)
+  (:method (gnome) nil))
+
+(defgeneric dialogue-portrait (gnome)
+  (:method (gnome) nil))
+
+(defgeneric choose-dialogue-follow (gnome))
+
+(defun submit-dialogue (gnome session)
+  (let ((approval (embodied-agent-pending-approval gnome))
+        (prompt (string-trim " " (gnome-draft gnome))))
+    (setf (gnome-draft gnome) "")
+    (cond (approval
+           (unless (string= prompt "") (steer-tool-approval approval prompt)))
+          ((string= prompt "") (luvcraft:unfocus-luvcraft-session session))
+          (t
+           (handler-case (gnome-ask gnome prompt)
+             (error (condition) (gnome-say gnome (format nil "(~A)" condition))))))))
+
 (defmethod luvcraft:handle-luvcraft-focus-event
     ((gnome embodied-agent) session canvas (event luv:canvas-key-press-event))
   (let ((key (luv:canvas-key-event-key-name event))
@@ -472,17 +491,11 @@ provider was already installed."
          ((:escape :tab)
           (luvcraft:unfocus-luvcraft-session session))
          ((:return :keypad-enter)
-          (let ((prompt (string-trim " " (gnome-draft gnome))))
-            (setf (gnome-draft gnome) "")
-            (cond (approval
-                   (unless (string= prompt "")
-                     (steer-tool-approval approval prompt)))
-                  ((string= prompt "")
-                   (luvcraft:unfocus-luvcraft-session session))
-                  (t
-                   (handler-case (gnome-ask gnome prompt)
-                     (error (condition)
-                       (gnome-say gnome (format nil "(~A)" condition))))))))
+          (submit-dialogue gnome session))
+         (:f2
+          (when (and (null modifiers) (not (luv:canvas-key-event-repeat-p event))
+                     (dialogue-follow-label gnome))
+            (choose-dialogue-follow gnome)))
          (:backspace
           (let ((draft (gnome-draft gnome)))
             (when (plusp (length draft))
@@ -820,8 +833,13 @@ candidate that loses to release or another publication is detached and closed."
 (defclass gnome-dialogue-pane (mcluv:transparent-gpu-application-pane) ()
   (:documentation "A pane that paints nothing but its card: the view shows through."))
 
+(mcluv:define-ui-themed-pane gnome-dialogue-pane)
+
 (define-application-frame gnome-dialogue ()
-  ((gnome :initarg :gnome :reader dialogue-gnome))
+  ((gnome :initarg :gnome :reader dialogue-gnome)
+   (width :initform 800 :accessor dialogue-panel-width)
+   (height :initform 126 :accessor dialogue-panel-height)
+   (hover :initform nil :accessor dialogue-hover))
   (:menu-bar nil)
   ;; The pane is the whole frame: a layout pane around it would paint its
   ;; own background, and there is nothing to lay out.
@@ -873,6 +891,7 @@ candidate that loses to release or another publication is detached and closed."
              :said (if thinking-p nil answer)
              :thinking (and thinking-p (animation-phase 0.35 4))
              :proposal proposal-p
+             :follow (dialogue-follow-label gnome)
              :draft draft
              :caret (animation-phase 0.53 2)))
       ;; Walked away, the player still hears a fresh line as a subtitle;
@@ -929,13 +948,71 @@ candidate that loses to release or another publication is detached and closed."
 (defparameter *dialogue-margin* 36
   "The card's inner margin, left and right.")
 
+(defun paper-dialogue-p (view)
+  (and (getf view :focused) (not (getf view :proposal))))
+
+(defun map-dialogue-actions (frame follow function)
+  "Paint and hit test against the same logical rectangles."
+  (let ((w (dialogue-panel-width frame)) (h (dialogue-panel-height frame)))
+    (when follow
+      (funcall function :follow follow "F2" :affirm (- w 264) 14 (- w 114) 54))
+    (funcall function :close "Close" "Esc" :inset (- w 106) 14 (- w 14) 54)
+    (funcall function :send "Send" "Enter" :discuss (- w 125) (- h 57) (- w 14) (- h 15))))
+
+(defun draw-paper-dialogue (pane frame view)
+  (let* ((gnome (dialogue-gnome frame))
+         (width (dialogue-panel-width frame))
+         (portrait (dialogue-portrait gnome))
+         (body (make-text-style :sans-serif :roman (mcluv:ui-text-size :body)))
+         (caption (make-text-style :sans-serif :roman (mcluv:ui-text-size :caption)))
+         (asked (getf view :asked)) (said (getf view :said))
+         (lines (and said (wrap-to-width pane said body (- width 34))))
+         (visible (if (> (length lines) *dialogue-said-lines*)
+                      (cons "…" (last lines (1- *dialogue-said-lines*))) lines))
+         (thinking (getf view :thinking))
+         (draft (getf view :draft))
+         (y 68)
+         (height (+ y (if asked 20 0) (if thinking 23 (* 21 (length visible))) 62)))
+    (setf (dialogue-panel-height frame) height)
+    (mcluv:draw-ui-panel pane 0 0 width height)
+    (when portrait (draw-pattern* pane portrait 10 5))
+    (draw-text* pane (string-capitalize (getf view :name)) (if portrait 76 16) 33
+                :align-y :center :ink (mcluv:ui-ink :text) :text-face :bold :text-size (mcluv:ui-text-size :heading))
+    (when asked
+      (draw-text* pane (fit-to-width pane (format nil "You: ~A" asked) caption (- width 34))
+                  16 y :align-y :top :text-style caption :ink (mcluv:ui-ink :muted))
+      (incf y 20))
+    (when thinking
+      (draw-thinking-dots pane 23 (+ y 10) thinking (mcluv:ui-ink :accent)))
+    (dolist (line visible)
+      (draw-text* pane (fit-to-width pane line body (- width 34)) 16 y
+                  :align-y :top :text-style body :ink (mcluv:ui-ink :text))
+      (incf y 21))
+    (let* ((center (- height 36))
+           (available (- width 177))
+           (shown (loop for start from 0 to (length draft) for tail = (subseq draft start)
+                        when (<= (text-size pane tail :text-style body) available) return tail)))
+      (mcluv:draw-ui-surface pane 14 (- center 21) (- width 133) (+ center 21)
+                             :fill :raised :edge :accent :radius (mcluv:ui-metric :control-radius))
+      (draw-text* pane (if (zerop (length draft)) "Say something…" shown) 28 center
+                  :align-y :center :text-style body :ink (mcluv:ui-ink (if (equal draft "") :muted :text)))
+      (when (zerop (getf view :caret))
+        (let ((x (+ 26 (text-size pane shown :text-style body))))
+          (draw-rectangle* pane x (- center 9) (+ x 2) (+ center 9) :ink (mcluv:ui-ink :accent)))))
+    (map-dialogue-actions
+     frame (getf view :follow)
+     (lambda (key label shortcut role left top right bottom)
+       (mcluv:draw-ui-action pane left top right bottom label shortcut role :hovered (eq key (dialogue-hover frame)))))))
+
 (defmethod handle-repaint ((pane gnome-dialogue-pane) region)
   (declare (ignore region))
   (let* ((gnome (dialogue-gnome (pane-frame pane)))
          (view (dialogue-view gnome)))
+    (when (paper-dialogue-p view)
+      (return-from handle-repaint (draw-paper-dialogue pane (pane-frame pane) view)))
     (when view
       (destructuring-bind (&key focused name asked said thinking proposal
-                             draft caret)
+                             draft caret &allow-other-keys)
           view
         (let* ((accent (embodied-agent-accent-ink gnome))
                (card-left 30)
@@ -1045,6 +1122,38 @@ candidate that loses to release or another publication is detached and closed."
 (defmethod luvcraft:luvcraft-overlay-stage ((overlay gnome-dialogue-overlay))
   (declare (ignore overlay)) :hud)
 
+(defun dialogue-action-at (overlay event)
+  (let ((uv (mcluv:luvcraft-widget-texture-coordinate overlay (luv:canvas-pointer-event-x event)
+                                                      (luv:canvas-pointer-event-y event))))
+    (when uv
+      (let* ((frame (mcluv:widget-overlay-frame overlay))
+             (x (* (first uv) *dialogue-width*)) (y (* (second uv) *dialogue-height*)))
+        (map-dialogue-actions
+         frame (dialogue-follow-label (dialogue-gnome frame))
+         (lambda (key label shortcut role left top right bottom)
+           (declare (ignore label shortcut role))
+           (when (and (<= left x right) (<= top y bottom))
+             (return-from dialogue-action-at key)))))))
+  nil)
+
+(defmethod luvcraft:handle-luvcraft-focus-event
+    ((gnome embodied-agent) session canvas (event luv:canvas-pointer-event))
+  (declare (ignore canvas))
+  (let ((overlay (gnome-dialogue gnome)))
+    (when (and overlay (not (embodied-agent-pending-approval gnome)))
+      (let* ((frame (mcluv:widget-overlay-frame overlay)) (key (dialogue-action-at overlay event)))
+        (unless (eq key (dialogue-hover frame))
+          (setf (dialogue-hover frame) key)
+          (repaint-gnome-dialogue gnome))
+        (when (and (typep event 'luv:canvas-pointer-button-press-event)
+                   (eq :left (luv:canvas-pointer-event-button event)))
+          (case key
+            (:close (luvcraft:unfocus-luvcraft-session session))
+            (:follow (choose-dialogue-follow gnome))
+            (:send (when (plusp (length (string-trim " " (gnome-draft gnome))))
+                     (submit-dialogue gnome session) (repaint-gnome-dialogue gnome))))))))
+  t)
+
 (defmethod luvcraft:luvcraft-focus-score ((overlay gnome-dialogue-overlay) session)
   (declare (ignore overlay session)) nil)
 
@@ -1054,13 +1163,19 @@ candidate that loses to release or another publication is detached and closed."
   (declare (ignore overlay session canvas event))
   nil)
 
+(defun dialogue-focus-inset (gnome)
+  (let ((overlay (gnome-dialogue gnome)))
+    (if (and overlay (not (embodied-agent-pending-approval gnome)))
+        (+ 14 (dialogue-panel-height (mcluv:widget-overlay-frame overlay)))
+        *conversation-card-inset*)))
+
 (defmethod luvcraft:luvcraft-overlay-focus-insets
     ((overlay gnome-dialogue-overlay) session)
   ;; The card is up for good once made; it covers the view only while its
   ;; agent is the one being talked to.
   (if (eq (dialogue-overlay-gnome overlay)
           (luvcraft:luvcraft-session-modal-focus session))
-      (values 0.0 0.0 0.0 (float *conversation-card-inset*))
+      (values 0.0 0.0 0.0 (float (dialogue-focus-inset (dialogue-overlay-gnome overlay))))
       (values 0.0 0.0 0.0 0.0)))
 
 (defun dialogue-screen-state (overlay)
@@ -1092,7 +1207,11 @@ candidate that loses to release or another publication is detached and closed."
     ((overlay gnome-dialogue-overlay) session pass surface-texture)
   (declare (ignore pass))
   (mcluv:prepare-direct-widget-overlay
-   overlay session surface-texture (dialogue-screen-state overlay))
+   overlay session surface-texture
+   (if (paper-dialogue-p (dialogue-visible-state overlay))
+       (let ((frame (mcluv:widget-overlay-frame overlay)))
+         (mcluv:bottom-hud-screen-state overlay (dialogue-panel-width frame) (dialogue-panel-height frame)))
+       (dialogue-screen-state overlay)))
   overlay)
 
 (defun repaint-gnome-dialogue (gnome)
@@ -1103,10 +1222,12 @@ candidate that loses to release or another publication is detached and closed."
       (setf (dialogue-visible-state overlay) (dialogue-view gnome)))))
 
 (defmethod luvcraft:refresh-luvcraft-overlay ((overlay gnome-dialogue-overlay) session)
-  (declare (ignore session))
-  (unless (equal (dialogue-view (dialogue-overlay-gnome overlay))
-                 (dialogue-visible-state overlay))
-    (repaint-gnome-dialogue (dialogue-overlay-gnome overlay)))
+  (let* ((frame (mcluv:widget-overlay-frame overlay))
+         (width (max 410 (min 840 (- (luv:canvas-logical-size (luvcraft:luvcraft-session-canvas session)) 24)))))
+    (when (or (mcluv:ui-theme-changed-p frame) (/= width (dialogue-panel-width frame))
+              (not (equal (dialogue-view (dialogue-overlay-gnome overlay)) (dialogue-visible-state overlay))))
+      (setf (dialogue-panel-width frame) width)
+      (repaint-gnome-dialogue (dialogue-overlay-gnome overlay))))
   overlay)
 
 (defun make-embedded-frame (session frame-class &rest initargs)
@@ -1772,6 +1893,9 @@ clear, and so does FROM being inside a block."
 (defparameter *conversation-sight-half-width* 0.4
   "How far either side of the agent's middle the camera must see, in blocks.")
 
+(defgeneric conversation-sight-clear-p (agent world from to)
+  (:method (agent world from to) (sight-clear-p world from to)))
+
 (defun conversation-yaw (agent world preferred distance height)
   "The first approach yaw from PREFERRED whose camera sees all of AGENT.
 
@@ -1790,8 +1914,8 @@ at the middle and at either side, across the view."
               when (loop for side in (list 0d0 (- *conversation-sight-half-width*)
                                            *conversation-sight-half-width*)
                          always (loop for y in heights
-                                      always (sight-clear-p
-                                              world eye
+                                      always (conversation-sight-clear-p
+                                              agent world eye
                                               (luvcraft::make-vec3
                                                (+ x (* side (cos yaw)))
                                                y
@@ -1802,8 +1926,7 @@ at the middle and at either side, across the view."
 (defmethod luvcraft:luvcraft-focus-camera-pose ((gnome embodied-agent) session)
   "Frame the agent and the cloud above it between the HUD's top and the card.
 
-The camera is level, at a height SOLVE-LEVEL-FRAMING chooses, so the figure
-is seen from its own eye line."
+A short viewport tilts the camera to keep its eye above the ground."
   (or (alexandria:when-let ((approval (embodied-agent-pending-approval gnome)))
         (tool-approval-focus-camera-pose approval gnome session))
       (multiple-value-bind (inset-left inset-top inset-right inset-bottom)
@@ -1829,17 +1952,18 @@ is seen from its own eye line."
                 (solve-level-framing
                  band-bottom band-top rows
                  (+ inset-top 28d0)
-                 (- rows (max inset-bottom *conversation-card-inset*) 12d0)
+                 (max (+ inset-top 90d0)
+                      (- rows (max inset-bottom (dialogue-focus-inset gnome)) 12d0))
                  fov)
               ;; Walls and builds come between: swing round to a clear view.
-              (let ((yaw (conversation-yaw
-                          gnome (luvcraft:luvcraft-session-world session)
-                          yaw distance height)))
+              (let* ((eye-height (max height (+ band-bottom 0.85d0)))
+                     (yaw (conversation-yaw gnome (luvcraft:luvcraft-session-world session)
+                                            yaw distance eye-height)))
                 (luvcraft::make-camera-pose
                  (luvcraft::make-vec3 (- x (* (sin yaw) distance))
-                                      height
+                                      eye-height
                                       (- z (* (cos yaw) distance)))
-                 yaw 0d0 fov))))))))
+                 yaw (atan (- height eye-height) distance) fov))))))))
 
 ;;; ---------------------------------------------------------------------
 ;;; Realizing the transcript, on the canvas thread, once a frame.
