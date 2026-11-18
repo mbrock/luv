@@ -163,7 +163,11 @@ their own, and keep their author across saves."
 
 ;;; Reuse the existing semantic approval lifecycle and off-canvas settlement.
 ;;; Only its validated payload and detachment are specific to this world.
-(defclass companion-edit-approval (luvcraft.agent:tool-approval)
+(defclass companion-proposal (luvcraft.agent:tool-approval)
+  ((reviewed-p :initform nil :accessor proposal-reviewed-p)
+   (card :initform nil :accessor proposal-card)))
+
+(defclass companion-edit-approval (companion-proposal)
   ((cell :initarg :cell :reader approval-cell)
    (placement :initarg :placement :reader approval-placement)
    (original :initarg :original :reader approval-original)))
@@ -182,21 +186,18 @@ their own, and keep their author across saves."
                        (approval-cell approval) (approval-placement approval))
     (unless (eq status :edited) (error "~A" result))))
 
-(defmethod luvcraft.agent::detach-tool-approval ((approval companion-edit-approval))
-  (setf (inhabitant-approval (luvcraft.agent::tool-approval-presence approval)) nil))
+(defmethod luvcraft.agent::detach-tool-approval :after ((approval companion-proposal))
+  (let ((viewer (luvcraft.agent::tool-approval-session approval))
+        (inhabitant (luvcraft.agent::tool-approval-presence approval)))
+    (when (and viewer (eq approval (render:viewer-modal-focus viewer)))
+      (render:unfocus-viewer viewer))
+    (when (eq approval (inhabitant-approval inhabitant))
+      (setf (inhabitant-approval inhabitant) nil))))
 
-(defun install-companion-approval (approval description)
-  (let* ((viewer (luvcraft.agent::tool-approval-session approval))
-         (inhabitant (luvcraft.agent::tool-approval-presence approval))
-         (workbench (and viewer (luv.workbench:application-workbench viewer))))
+(defun install-companion-approval (approval)
+  (let ((inhabitant (luvcraft.agent::tool-approval-presence approval)))
     (when (inhabitant-approval inhabitant) (error "An edit is already proposed."))
-    (setf (inhabitant-approval inhabitant) approval)
-    (when workbench
-      (luv.workbench:show-workbench-message
-       workbench
-       (list (format nil "~A proposes ~A" (inhabitant-kind inhabitant) description)
-             "Y approve · N decline · T request changes") :seconds 120))
-    approval))
+    (setf (inhabitant-approval inhabitant) approval)))
 
 (clim:define-presentation-method clim:present
     (object (type companion-edit-approval) stream (view clim:textual-view) &key)
@@ -216,9 +217,9 @@ their own, and keep their author across saves."
                                     :original (terrain:scene-material-placement-at
                                                (world-scene world) cell))))
       (validate-agent-reach world inhabitant cell)
-      (install-companion-approval approval (format nil "~A at (~D ~D ~D)" material x y z)))))
+      (install-companion-approval approval))))
 
-(defclass companion-box-approval (luvcraft.agent:tool-approval)
+(defclass companion-box-approval (companion-proposal)
   ((changes :initarg :changes :reader box-approval-changes)))
 
 (defmethod luvcraft.agent::validate-tool-approval ((approval companion-box-approval))
@@ -247,9 +248,6 @@ their own, and keep their author across saves."
       (unless events (error "Construction rejected: ~A." status))
       (sync-world-authored-blocks world)
       (setf (world-springs-initialized-p world) nil))))
-
-(defmethod luvcraft.agent::detach-tool-approval ((approval companion-box-approval))
-  (setf (inhabitant-approval (luvcraft.agent::tool-approval-presence approval)) nil))
 
 (clim:define-presentation-method clim:present
     (object (type companion-box-approval) stream (view clim:textual-view) &key)
@@ -290,23 +288,7 @@ their own, and keep their author across saves."
                                       :agent luv.application-agent:*current-agent*
                                       :changes changes)))
         (luvcraft.agent::validate-tool-approval approval)
-        (install-companion-approval approval (format nil "~D ~A blocks" volume material))))))
-
-(defmethod render:viewer-figures :around ((viewer luvcraft-viewer))
-  (append (call-next-method)
-          (loop for inhabitant in (world-agents (viewer-world viewer))
-                for approval = (inhabitant-approval inhabitant)
-                when (typep approval 'companion-box-approval)
-                  append (loop for (cell) in (box-approval-changes approval)
-                               for center = (vec3:make-vec3 (+ 0.5 (luft:site-x cell))
-                                                           (+ 0.5 (luft:site-y cell))
-                                                           (+ 0.5 (luft:site-z cell)))
-                               collect (let ((figure (render:box-figure
-                                                      center center 0.0 1.0 '(0.46 0.46 0.46)
-                                                      '(0.25 0.95 1.5))))
-                                         ;; Reuse the bright, unshadowed fragment boxes.
-                                         (setf (fourth (fourth figure)) 3.0)
-                                         figure)))))
+        (install-companion-approval approval)))))
 
 (defun show-companion-message (viewer inhabitant)
   (let ((agent (ensure-inhabitant-presentation viewer inhabitant)))
@@ -329,7 +311,7 @@ their own, and keep their author across saves."
         ((player-ball-in-hand-p (viewer-local-player viewer))
          "Ball · left throw · right marbles · B put away")
         ((and inhabitant (inhabitant-approval inhabitant))
-         "Proposed edit · Y approve · N decline · T revise")
+         "Proposed edit · T review · Y approve · N decline")
         ((eq activity :opening) "Opening conversation…")
         ((member activity '(:thinking :working))
          (format nil "~(~A~): ~A · T talk" (inhabitant-kind inhabitant) (or tool "thinking…")))
@@ -362,14 +344,7 @@ their own, and keep their author across saves."
                          (summon-inhabitant viewer))))
     (setf (viewer-conversation-agent viewer) inhabitant)
     (if (inhabitant-approval inhabitant)
-        (luv.workbench:open-workbench-prompt
-         (luv.workbench:application-workbench viewer)
-         :label "What should change?"
-         :function (lambda (text)
-                     (call-companion-ui viewer
-                      (lambda ()
-                        (unless (string= "" (string-trim " " text))
-                          (luvcraft.agent:steer-tool-approval (inhabitant-approval inhabitant) text))))))
+        (render:focus-viewer viewer (inhabitant-approval inhabitant))
         (render:focus-viewer viewer (ensure-inhabitant-presentation viewer inhabitant)))))
 
 (clim:define-command (com-next-companion :command-table luvcraft-world

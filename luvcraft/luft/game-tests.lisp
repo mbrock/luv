@@ -507,7 +507,27 @@ The player is format 1's RESUME, or a players-table RECORD."
            (approval (apply (first command) (rest command))))
       (true (zerop (terrain:world-journal-head journal)))
       (is = 2 (length (host::box-approval-changes approval)))
+      (is equal "Add 2 blocks of bricks" (host::proposal-title approval))
+      (let* ((pose (host::proposal-orbit-pose approval viewer 0 1))
+             (p (render::camera-pose-position pose))
+             (q (render::camera-pose-position (host::proposal-orbit-pose approval viewer pi 1))))
+        ;; The orbit brackets the center of the inclusive box in world space.
+        (true (< (v:vec3-x q) 1033 (v:vec3-x p)))
+        (true (< (abs (- (v:vec3-y p) 1030.5)) 0.01))
+        (true (> (v:vec3-z p) 32.5))
+        (true (minusp (render::camera-pose-pitch pose))))
       (luvcraft.agent:deny-tool-approval approval)
+      (true (null (host::inhabitant-approval fantus)))
+      (true (zerop (terrain:world-journal-head journal))))
+    (let ((proposal (host::com-propose-cell 1032 1030 32 "bricks")))
+      (is equal "Place bricks" (host::proposal-title proposal))
+      ;; The review owns its decision even if the conversation selection changed.
+      (setf (render:viewer-modal-focus viewer) proposal
+            (host::viewer-conversation-agent viewer) nil)
+      (luv:handle-canvas-event viewer nil
+                               (make-instance 'luv:canvas-key-press-event :key-name :n :timestamp 0))
+      (is eq :denied (luvcraft.agent:tool-approval-state proposal))
+      (true (null (render:viewer-modal-focus viewer)))
       (true (null (host::inhabitant-approval fantus)))
       (true (zerop (terrain:world-journal-head journal))))
     (let ((approval (host::com-propose-block-box "bricks" 1032 1030 32 1033 1030 32)))

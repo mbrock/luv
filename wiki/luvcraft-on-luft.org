@@ -1355,10 +1355,10 @@ library path cleared, and shader validation needs =spirv-val= on PATH.
 a gnome; Tab focuses a nearby looked-at companion, T talks to the selected
 companion through the original inline dialogue, and F7 selects another.
 M-x offers Summon Cat and
-Summon Fantus. Y approves a proposed edit, N declines, and T returns
-revision guidance. Conversation and approval keys work with the pointer
-released as well as captured. Y/N/T approval stays simple; T's revision
-prompt still belongs to the shell.
+Summon Fantus. A proposal opens a review card and the camera orbits its
+highlighted cells. Y builds, N declines, and T opens the shell's revision
+prompt. The card also accepts clicks. Esc leaves a proposal pending; T
+reopens the selected companion's review. Other proposals wait their turn.
 
 The application-agent frame boundary now specializes the generic game
 host rather than the atelier. Each companion uses that shared harness,

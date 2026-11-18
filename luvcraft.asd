@@ -244,6 +244,7 @@
                (:file "luvcraft/luft/agents")
                (:file "luvcraft/luft/agent-tools")
                (:file "luvcraft/luft/presentation")
+               (:file "luvcraft/luft/proposal-review")
                (:file "luvcraft/luft/feedback")
                (:file "luvcraft/luft/body-drawing")
                (:file "luvcraft/luft/riding")
