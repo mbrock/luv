@@ -111,19 +111,20 @@ presentation, not new HUD requirements.
 :END:
 
 The first implementation lives in =mcclim/ui-theme.lisp=. It blends Quiet
-Atelier (#7LQLC4) with Field Kit (#JJSCKE): opaque bone panels, forest text,
-moss controls, terracotta selection, and quiet hairline borders. Material
+Atelier (#7LQLC4) with Field Kit (#JJSCKE): warm paper panels, dark brown labels,
+moss controls, terracotta selection, and ochre borders. Material
 thumbnails keep their actual colors. UI paints are authored as sRGB hex and
 decoded once into the renderer's linear-light colors.
 
 | Role | sRGB |
 |------+------|
-| Surface / raised / inset | F3EFE4 / FAF7EF / E9E5D8 |
-| Text / muted | 233E33 / 3E4B40 |
-| Border / forest | C7CBBB / 1F3D2E |
-| Accent / on-accent | 5B704D / FAF7EF |
+| Surface / raised / inset | FFEDC5 / FFF7E3 / F2DCAD |
+| Text / muted | 392B23 / 514131 |
+| Border / forest | D5AC73 / 1F3D2E |
+| Accent / on-accent | 5B704D / FFFBEF |
 | Selection / selection-soft | B95135 / E7A889 |
 | Keyboard focus / hover | 314F3D / E0E6D5 |
+| Affirm / discuss / decline | 3C772D / 216CA1 / A63D38 |
 | Error | A52F2A |
 
 =mcluv:*ui-theme*= is the shared immutable paint owner. Widgets consume
@@ -132,6 +133,10 @@ decoded once into the renderer's linear-light colors.
 the recurring shapes. =ui-metric= owns the shared radii and rim widths;
 widget layout and hit testing retain their existing common geometry.
 This deliberately small library does not introduce a second widget system.
+
+The proposal bar, prompt, messages, and command search use =draw-ui-panel=
+for the paper surface and shallow shadow. The proposal bar uses
+=draw-ui-action= for its named choices, distinct marks, and keycaps.
 
 Quickbar, full and picture-first inventory, metabar, status, key help,
 command search, prompts/messages, source-update panel, lobby, and the generic

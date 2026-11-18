@@ -320,17 +320,7 @@ Named options retain the command's defaults; M-x asks for required arguments."
     (with-bounding-rectangle* (left top right-edge bottom) pane
       (with-sheet-medium (medium pane)
         (ensure-command-menu-gpu-medium medium)
-        ;; Every surface is an analytic primitive.  Layered filled roundrects
-        ;; provide borders without invoking McCLIM's decomposed outline path.
-        (draw-analytic-rounded-rectangle*
-         medium (+ left 7) (+ top 9) (- right-edge 1) (- bottom 1)
-         :radius 18 :ink (ui-ink :shadow))
-        (draw-analytic-rounded-rectangle*
-         medium left top right-edge bottom
-         :radius 18 :ink (ui-ink :border))
-        (draw-analytic-rounded-rectangle*
-         medium (+ left 2) (+ top 2) (- right-edge 2) (- bottom 2)
-         :radius 16 :ink (ui-ink :surface))
+        (draw-ui-panel medium left top right-edge bottom)
         (draw-text* pane "M-x" margin 30
                     :align-y :center :text-size (ui-text-size :heading) :text-face :bold
                     :ink (ui-ink :text))

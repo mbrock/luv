@@ -1249,7 +1249,8 @@ that he is standing on something."
                (tone-output :vec3 :location 1 :interpolation :flat)
                (current-output :vec4 :location 2)
                (previous-output :vec4 :location 3)
-               (body-light-output :vec4 :location 4 :interpolation :flat))
+               (body-light-output :vec4 :location 4 :interpolation :flat)
+               (face-output :vec4 :location 5))
      :resources ((camera-state :uniform-block :binding 0 :members #.*scene-uniform-members*)
                  (figure-instances :storage-buffer :binding 1 :element :vec4)
                  (box-vertices :storage-buffer :binding 2 :element :vec4)))
@@ -1280,6 +1281,17 @@ that he is standing on something."
                 (vec4 (+ (swizzle current :x) (* (swizzle jitter :x) (swizzle current :w)))
                       (+ (swizzle current :y) (* (swizzle jitter :y) (swizzle current :w)))
                       (swizzle current :z) (swizzle current :w)))
+    ;; Face-local coordinates and size let game surfaces repeat their material
+    ;; independently of the outer box boundary.
+    (let* ((extent (swizzle shape :xyz))
+           (point (+ extent local))
+           (side-x (abs (swizzle local-normal :x)))
+           (cap (abs (swizzle local-normal :z))))
+      (set-output face-output
+                  (vec4 (mix (swizzle point :x) (swizzle point :y) side-x)
+                        (mix (swizzle point :z) (swizzle point :y) cap)
+                        (* 2.0 (mix (swizzle extent :x) (swizzle extent :y) side-x))
+                        (* 2.0 (mix (swizzle extent :z) (swizzle extent :y) cap)))))
     (set-output normal-output (player-world-direction local-normal (swizzle heading :xy)))
     (set-output tone-output (swizzle tone :xyz))
     (set-output current-output current)

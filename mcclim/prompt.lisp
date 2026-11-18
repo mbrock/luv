@@ -185,14 +185,6 @@ first candidate chosen, for a menu that is answered without typing."
        (values :continue nil))
       (t (values :continue nil)))))
 
-(defun draw-prompt-panel (pane left top right bottom ink)
-  (draw-analytic-rounded-rectangle* pane (+ left 6) (+ top 8) (- right 1) (- bottom 1)
-                                    :radius 14 :ink (ui-ink :shadow))
-  (draw-analytic-rounded-rectangle* pane left top right bottom
-                                    :radius 14 :ink (ui-ink :border))
-  (draw-analytic-rounded-rectangle* pane (+ left 2) (+ top 2) (- right 2) (- bottom 2)
-                                    :radius 12 :ink ink))
-
 (defmethod handle-repaint ((pane prompt-pane) region)
   (declare (ignore region))
   (let ((frame (pane-frame pane)))
@@ -209,7 +201,7 @@ first candidate chosen, for a menu that is answered without typing."
              (text (prompt-text frame))
              (text-x (+ +prompt-margin+ 12 label-width))
              (text-width (text-size pane text :text-style *prompt-text-style*)))
-        (draw-prompt-panel pane 0 0 width height (ui-ink :surface))
+        (draw-ui-panel pane 0 0 width height)
         (draw-text* pane label (+ +prompt-margin+ 12) field-y
                     :align-y :center :text-style *prompt-text-style*
                     :ink (ui-ink :accent))
@@ -313,7 +305,7 @@ SECONDS NIL it stays until replaced or cleared."
       (with-sheet-medium (medium pane)
         (ensure-command-menu-gpu-medium medium))
       (with-bounding-rectangle* (left top right bottom) pane
-        (draw-prompt-panel pane 0 0 (- right left) (- bottom top) (ui-ink :surface))
+        (draw-ui-panel pane 0 0 (- right left) (- bottom top))
         (loop for line in (message-lines frame)
               for y from (+ +message-margin+ (/ +message-line-height+ 2))
                 by +message-line-height+

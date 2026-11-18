@@ -1356,8 +1356,10 @@ a gnome; Tab focuses a nearby looked-at companion, T talks to the selected
 companion through the original inline dialogue, and F7 selects another.
 M-x offers Summon Cat and
 Summon Fantus. A proposal opens a review card and the camera orbits its
-highlighted cells. Y builds, N declines, and T opens the shell's revision
-prompt. The card also accepts clicks. Esc leaves a proposal pending; T
+highlighted cells. The companion's portrait sits beside the question on a
+Field Atelier panel (#9Z486I). Yes (Y), Talk (T), No (N), and Later (Esc)
+accept pointer or keyboard input. Talk opens the shell's revision prompt.
+Narrow windows put the actions on a second row. Esc leaves a proposal pending; T
 reopens the selected companion's review. Other proposals wait their turn.
 
 The application-agent frame boundary now specializes the generic game
@@ -1381,7 +1383,9 @@ parking a provider forever behind an edit or a departed chunk.
 The cat uses Luna with the basic movement, observation, and single-cell
 tools. Fantus uses Sol and the gnome uses Astra, both at high reasoning
 effort with Fast requested. Both can propose a box of ordinary blocks.
-The view draws the empty cells as blue blocks until the player decides.
+The preview tiles the proposed material across one box. A continuous
+antialiased rim follows the outside edges and softer seams mark individual
+blocks. Both are shaded on the same surface as the material during orbit.
 Approval checks reach, occupancy, and the journal again, then records
 the whole box as one transaction. Live Lisp belongs to the gnome in solo
 worlds.

@@ -38,6 +38,48 @@
      :outputs ((creature-motion :vec2 :location 1)))
   (set-output creature-motion (mesh-temporal-motion creature-previous creature-current)))
 
+(define-live-shader proposal-surface-specification
+    (:stage :fragment
+     :inputs ((normal :vec3 :location 0)
+              (tile-pairs :vec3 :location 1 :interpolation :flat)
+              (current :vec4 :location 2) (previous :vec4 :location 3)
+              (body-light :vec4 :location 4 :interpolation :flat)
+              (face :vec4 :location 5))
+     :outputs ((color-output :vec4 :location 0) (motion-output :vec2 :location 1))
+     :resources ((camera-state :uniform-block :binding 0 :members #.*scene-uniform-members*)
+                 (block-atlas :texture-2d :binding 3 :sample-transfer :srgb-to-linear)))
+  (let* ((size (swizzle face :zw))
+         (uv (swizzle face :xy))
+         (pair (dot tile-pairs (abs normal)))
+         (positive (floor (/ pair 256.0)))
+         (tile (if (> (+ (swizzle normal :x) (swizzle normal :y) (swizzle normal :z)) 0.0)
+                   positive (- pair (* positive 256.0))))
+         (cells (* (/ uv size) (floor (+ size (vec2 0.5 0.5)))))
+         (atlas-v (if (> (abs (swizzle normal :z)) 0.5) (swizzle cells :y) (- (swizzle cells :y))))
+         (texel (floor (* (fract (vec2 (swizzle cells :x) atlas-v)) #.(float luvcraft::+block-atlas-tile-size+))))
+         (albedo (swizzle (texel-load block-atlas
+                                      (uvec2 (uint (+ (* tile #.(float luvcraft::+block-atlas-tile-size+))
+                                                      (swizzle texel :x))) (uint (swizzle texel :y)))) :xyz))
+         (sun (representation (swizzle sun-vector :xyz)))
+         (shade (+ 0.46 (* 0.22 (max 0.0 (swizzle normal :z))) (* 0.38 (max 0.0 (dot normal sun)))))
+         (paint (* albedo shade (+ 0.65 (* 0.35 (swizzle body-light :w)))))
+         ;; Measure the distance to the four exterior edges in raster pixels.
+         ;; One filtered stroke on the surface shares its depth and motion.
+         (footprint (max (+ (abs (derivative-x uv)) (abs (derivative-y uv))) (vec2 0.0001 0.0001)))
+         (edge (/ (min uv (- size uv)) footprint))
+         (distance (min (swizzle edge :x) (swizzle edge :y)))
+         (rim (- 1.0 (smoothstep 0.8 2.0 distance)))
+         (keyline (- 1.0 (smoothstep 1.8 2.9 distance)))
+         ;; A quiet joint between adjacent blocks preserves their count. It
+         ;; fades when multiple joints would fall in one sample.
+         (grid (/ (abs (- (fract (+ cells (vec2 0.5 0.5))) (vec2 0.5 0.5))) footprint))
+         (joint (* (- 1.0 (smoothstep 0.3 1.1 (min (swizzle grid :x) (swizzle grid :y))))
+                   (- 1.0 (smoothstep 0.12 0.5 (max (swizzle footprint :x) (swizzle footprint :y))))))
+         (color (mix (* paint (- 1.0 (* 0.40 joint)) (- 1.0 (* 0.38 keyline)))
+                     (vec3 0.96 0.82 0.53) rim)))
+    (set-output color-output (vec4 color 1.0))
+    (set-output motion-output (mesh-temporal-motion previous current))))
+
 (in-package #:luvcraft.luft.game)
 
 (defun creature-shader-specification (stage temporal-p)
@@ -74,7 +116,8 @@
 ;;; Keep the original creature mesh builder AND surface program. Only the
 ;;; frame ABI changes: these Y-up vertices sample Luft's actual sun map.
 (defclass creature-figure-drawing (ball-figure-drawing)
-  ((surface :accessor creature-surface)
+  ((proposal-program :accessor proposal-program)
+   (surface :accessor creature-surface)
    (shadow :accessor creature-shadow)
    (atlas :accessor creature-atlas)
    (normal-atlas :accessor creature-normal-atlas)
@@ -82,7 +125,8 @@
    (comparison :accessor creature-comparison)))
 
 (defclass creature-figure-binding (ball-figure-binding)
-  ((source-buffer :initform nil :accessor creature-source-buffer)
+  ((proposal-binding :accessor proposal-binding)
+   (source-buffer :initform nil :accessor creature-source-buffer)
    (vertices :accessor creature-vertices)
    (positions :accessor creature-positions)
    (uniforms :accessor creature-uniforms)
@@ -122,7 +166,17 @@
                               (:shader-location 2 :offset 24 :format :float32x3)
                               (:shader-location 3 :offset 36 :format :float32x3)
                               (:shader-location 4 :offset 48 :format :float32x2))))))
-        (setf (creature-surface drawing)
+        (setf (proposal-program drawing)
+              (render::own-gpu-object
+               drawing
+               (render:make-drawing-program
+                device :label "Outlined proposal material"
+                :vertex (luft.render.shaders::figure-box-vertex-specification)
+                :fragment (luft.render.shaders::proposal-surface-specification)
+                :targets (mapcar (lambda (format) `(:format ,format)) formats)
+                :sample-count samples
+                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :less)))
+              (creature-surface drawing)
               (render::own-gpu-object
                drawing
                (render:make-drawing-program
@@ -176,7 +230,14 @@ Lane 19 is the original tile identity, not a sampled or averaged colour."
     (destructuring-bind (device camera shadow sampler) (render::figure-binding-inputs binding)
       (declare (ignore sampler))
       (flet ((own (descriptor) (render::own-gpu-resource binding device descriptor)))
-        (setf (creature-vertices binding)
+        (setf (proposal-binding binding)
+              (render::own-gpu-object
+               binding (render:make-program-binding
+                        (proposal-program drawing) device :camera-state camera
+                        :figure-instances (render::figure-binding-buffer binding)
+                        :box-vertices (render::figure-box-vertices drawing)
+                        :block-atlas (creature-atlas drawing)))
+              (creature-vertices binding)
               (own (luv:make-buffer-descriptor
                     :size (* (render::figure-binding-capacity binding) 36 56)
                     :usage '(:vertex :copy-dst)))
@@ -289,9 +350,13 @@ Lane 19 is the original tile identity, not a sampled or averaged colour."
   (let ((runs (render::figure-binding-runs binding)))
     (unwind-protect
          (progn
-           (setf (render::figure-binding-runs binding) (remove 4 runs :key #'first))
+           (setf (render::figure-binding-runs binding) (remove-if (lambda (run) (member (first run) '(4 5))) runs))
            (call-next-method)
-           (encode-creatures drawing pass binding nil))
+           (encode-creatures drawing pass binding nil)
+           (loop for (kind start count) in runs when (= kind 5) do
+             (render:encode-program (proposal-program drawing) pass (proposal-binding binding)
+                                    (luv:make-gpu-draw-command :vertex-count 36 :first-instance start
+                                                               :instance-count count))))
       (setf (render::figure-binding-runs binding) runs))))
 
 (defmethod render::encode-scene-drawing-shadow :after

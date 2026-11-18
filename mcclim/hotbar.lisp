@@ -160,11 +160,12 @@
   "How wide the hotbar is drawn in a viewport VIEWPORT-WIDTH logical pixels
 wide, and how far above the viewport's bottom its top edge reaches.  It is
 centred, scaled down when the viewport is narrower than it, and sits 28
-pixels above the bottom, as HOTBAR-SCREEN-STATE places it."
+pixels above the bottom, as BOTTOM-HUD-SCREEN-STATE places it."
   (let ((scale (min 1.0 (/ (- viewport-width 24.0) +hotbar-width+))))
     (values (* +hotbar-width+ scale) (+ 28.0 (* *hotbar-height* scale)))))
 
-(defun hotbar-screen-state (overlay)
+(defun bottom-hud-screen-state (overlay &optional content-width content-height)
+  "Center the painted part of a retained sheet above the lower viewport edge."
   (let* ((source-size (widget-overlay-logical-size overlay))
          (viewport-size
            (multiple-value-list
@@ -175,16 +176,19 @@ pixels above the bottom, as HOTBAR-SCREEN-STATE places it."
          (source-height (second source-size))
          (viewport-width (first viewport-size))
          (viewport-height (second viewport-size))
-         (scale (min 1.0 (/ (- viewport-width 24.0) source-width)))
+         (paint-width (or content-width source-width))
+         (paint-height (or content-height source-height))
+         (scale (min 1.0 (/ (max 1 (- viewport-width 24.0)) paint-width)))
          (half-width (/ (* source-width scale) viewport-width))
          (half-height (/ (* source-height scale) viewport-height))
          (bottom-margin (/ 28.0 viewport-height))
-         (center-y (- 1.0 bottom-margin half-height)))
+         (center-x (/ (* (- source-width paint-width) scale) viewport-width))
+         (center-y (+ (- 1.0 bottom-margin (/ (* 2 paint-height scale) viewport-height)) half-height)))
     (make-array
      12 :element-type 'single-float
      :initial-contents
      (mapcar (lambda (value) (coerce value 'single-float))
-             (list 0.0 center-y 0.0 1.0
+             (list center-x center-y 0.0 1.0
                    half-width 0.0 0.0 0.0
                    0.0 half-height 0.0 0.0)))))
 
@@ -192,7 +196,7 @@ pixels above the bottom, as HOTBAR-SCREEN-STATE places it."
     ((overlay luvcraft-hotbar-overlay) session pass surface-texture)
   (declare (ignore pass))
   (prepare-direct-widget-overlay
-   overlay session surface-texture (hotbar-screen-state overlay))
+   overlay session surface-texture (bottom-hud-screen-state overlay))
   overlay)
 
 (luv:zdefmethod (luvcraft:refresh-luvcraft-overlay :zone :hotbar/refresh)
@@ -235,7 +239,7 @@ pixels above the bottom, as HOTBAR-SCREEN-STATE places it."
 (defmethod luvcraft:luvcraft-overlay-focus-insets
     ((overlay luvcraft-hotbar-overlay) session)
   (declare (ignore session))
-  (let* ((state (hotbar-screen-state overlay))
+  (let* ((state (bottom-hud-screen-state overlay))
          (height
            (second
             (multiple-value-list

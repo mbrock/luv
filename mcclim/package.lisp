@@ -22,6 +22,7 @@
   (:export #:luv-port
            #:ui-theme #:make-field-atelier-theme #:*ui-theme*
            #:ui-ink #:ui-metric #:ui-text-size #:ui-theme-changed-p
+           #:bottom-hud-screen-state #:define-ui-themed-pane #:draw-ui-panel #:draw-ui-action
            #:draw-ui-surface #:draw-ui-tile #:draw-ui-keycap
            #:draw-ui-slider #:draw-ui-switch
            #:instrument-canvas

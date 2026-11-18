@@ -229,7 +229,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   ;; The birthday meadow's save kind lives with the party; its saves play too.
-  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "luvcraft-wire/net"
+  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "luvcraft-wire/net" "mcclim-bitmaps"
                "alexandria")
   :serial t
   :components ((:file "luvcraft/luft/game-package")
@@ -244,6 +244,8 @@
                (:file "luvcraft/luft/agents")
                (:file "luvcraft/luft/agent-tools")
                (:file "luvcraft/luft/presentation")
+               (:static-file "luvcraft/companions/portraits/fantus.png")
+               (:static-file "luvcraft/companions/portraits/gnome.png")
                (:file "luvcraft/luft/proposal-review")
                (:file "luvcraft/luft/feedback")
                (:file "luvcraft/luft/body-drawing")

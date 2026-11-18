@@ -19,11 +19,12 @@
   (%make-ui-theme
    :name :field-atelier
    :inks (loop for (role hex) in
-                 '((:surface #xf3efe4) (:raised #xfaf7ef) (:inset #xe9e5d8)
-                   (:forest #x1f3d2e) (:border #xc7cbbb) (:text #x233e33) (:muted #x3e4b40)
-                   (:accent #x5b704d) (:on-accent #xfaf7ef)
+                 '((:surface #xffedc5) (:raised #xfff7e3) (:inset #xf2dcad)
+                   (:forest #x1f3d2e) (:border #xd5ac73) (:text #x392b23) (:muted #x514131)
+                   (:accent #x5b704d) (:on-accent #xfffbef)
                    (:selection #xb95135) (:selection-soft #xe7a889)
                    (:focus #x314f3d) (:hover #xe0e6d5) (:track #xd4d6c7)
+                   (:affirm #x3c772d) (:discuss #x216ca1) (:decline #xa63d38)
                    (:danger #xa52f2a) (:shadow #x26342b))
                append (list role (if (eq role :shadow)
                                      (compose-in (ui-hex-ink hex) (make-opacity 0.18))
@@ -41,7 +42,7 @@
   (ecase role (:key 12) (:caption 14) (:body 16) (:heading 20)))
 
 (defun ui-metric (role)
-  (ecase role (:panel-radius 12) (:control-radius 6) (:tile-radius 6)
+  (ecase role (:panel-radius 15) (:control-radius 10) (:tile-radius 6)
          (:border-width 1) (:focus-width 2)))
 
 (defvar *ui-theme-observers* (make-hash-table :test #'eq :weakness :key :synchronized t))
@@ -62,6 +63,12 @@
    medium (+ left rim) (+ top rim) (- right rim) (- bottom rim)
    :radius (max 0 (- radius rim)) :ink (ui-ink fill)))
 
+(defun draw-ui-panel (medium left top right bottom)
+  "Draw the shared paper panel and its shallow shadow."
+  (draw-analytic-rounded-rectangle* medium (+ left 1) (+ top 3) right bottom
+                                    :radius (ui-metric :panel-radius) :ink (ui-ink :shadow))
+  (draw-ui-surface medium left top (- right 1) (- bottom 3)))
+
 (defun draw-ui-tile (medium left top right bottom &key selected hovered focused)
   (draw-ui-surface
    medium left top right bottom :radius (ui-metric :tile-radius)
@@ -75,6 +82,38 @@
   (draw-text* medium label (+ x (/ width 2)) (+ y (/ height 2))
               :align-x :center :align-y :center :text-size (ui-text-size :key)
               :ink (ui-ink :text)))
+
+(defun draw-ui-action (medium left top right bottom label key role &key hovered)
+  "Paint an action, its semantic mark, and its keyboard shortcut."
+  (let* ((center (/ (+ top bottom) 2))
+         (ink (ui-ink (if (eq role :inset) :text :on-accent)))
+         (key-width (if (> (length key) 1) 27 17))
+         (key-x (- right key-width 6)))
+    (draw-ui-surface medium left top right bottom :fill role :edge (if hovered :focus :border)
+                     :rim (ui-metric (if hovered :focus-width :border-width))
+                     :radius (ui-metric :control-radius))
+    (let ((x (+ left 14)))
+      (case role
+        (:discuss
+         (draw-analytic-rounded-rectangle* medium (- x 7) (- center 6) (+ x 7) (+ center 4)
+                                           :radius 4 :ink ink)
+         (draw-analytic-rounded-rectangle* medium (- x 5) (+ center 1) (- x 2) (+ center 7)
+                                           :radius 1 :ink ink))
+        (:affirm
+         ;; A check drawn from two round-ended strokes works in every font.
+         (flet ((stroke (cx cy length angle)
+                  (draw-analytic-rounded-rectangle*
+                   medium (- cx (/ length 2)) (- cy 1.5) (+ cx (/ length 2)) (+ cy 1.5)
+                   :radius 1.5 :ink ink :transformation (make-rotation-transformation* angle cx cy))))
+           (stroke (- x 3.8) (+ center 1.5) 8 (/ pi 4))
+           (stroke (+ x 2.3) center 13 (- (/ pi 4)))))
+        (:decline
+         (draw-text* medium "×" x center :align-x :center :align-y :center
+                     :text-size 18 :text-face :bold :ink ink))))
+    (draw-text* medium label (/ (+ left (if (eq role :inset) 3 21) key-x) 2) center
+                :align-x :center :align-y :center :text-size (ui-text-size :body)
+                :text-face :bold :ink ink)
+    (draw-ui-keycap medium key key-x (- center 9) :width key-width :height 18)))
 
 (defun draw-ui-slider (medium left right y fraction)
   (let ((x (+ left (* (max 0 (min 1 fraction)) (- right left)))))

@@ -12,41 +12,62 @@
     (companion-edit-approval
      (values (approval-cell proposal) (approval-cell proposal)))))
 
+(defun proposal-block (proposal)
+  (etypecase proposal
+    (companion-box-approval (third (first (box-approval-changes proposal))))
+    (companion-edit-approval
+     (let ((placement (or (approval-placement proposal) (approval-original proposal))))
+       (when placement (luvcraft:block-kind-named (terrain:material-placement-name placement)))))))
+
 (defun proposal-title (proposal)
-  (flet ((label (name) (substitute #\Space #\- (string-downcase name))))
+  (let* ((block (proposal-block proposal))
+         (label (and block (substitute #\Space #\- (string-downcase (luvcraft:block-kind-name block))))))
     (etypecase proposal
       (companion-box-approval
-       (let ((changes (box-approval-changes proposal)))
-         (format nil "Add ~D block~:P of ~A" (length changes)
-                 (label (luvcraft:block-kind-name (third (first changes)))))))
+       (let ((count (length (box-approval-changes proposal)))
+             (noun (subseq label (1+ (or (position #\Space label :from-end t) -1)))))
+         (if (member noun '("bricks" "planks" "tiles") :test #'string=)
+             (format nil "Add ~D ~A?" count (if (= count 1) (string-right-trim "s" label) label))
+             (format nil "Add ~D ~A block~P?" count label count))))
       (companion-edit-approval
-       (if (approval-placement proposal)
-           (format nil "~A ~A" (if (approval-original proposal) "Replace with" "Place")
-                   (label (terrain:material-placement-name (approval-placement proposal))))
-           "Remove one block")))))
+       (cond ((null (approval-placement proposal)) "Remove this block?")
+             ((approval-original proposal) (format nil "Replace with ~A?" label))
+             (t (format nil "Add ~A?" label)))))))
 
-(defun proposal-preview-figure (cell replacing)
-  (let* ((center (vec3:make-vec3 (+ 0.5 (luft:site-x cell)) (+ 0.5 (luft:site-y cell))
-                                 (+ 0.5 (luft:site-z cell))))
-         (figure (render:box-figure center center 0.0 1.0
-                                    (if replacing '(0.505 0.505 0.505) '(0.46 0.46 0.46))
-                                    '(0.25 0.95 1.5))))
-    (setf (fourth (fourth figure)) 3.0)
-    figure))
+(defun proposal-preview-figure (proposal)
+  "A single depth-writing box. Its face tiles come from the same atlas as the inventory."
+  (let ((block (proposal-block proposal)))
+    (unless block (return-from proposal-preview-figure nil))
+    (multiple-value-bind (low high) (proposal-corners proposal)
+      (let* ((half (mapcar (lambda (axis) (/ (1+ (- (funcall axis high) (funcall axis low))) 2.0))
+                           (list #'luft:site-x #'luft:site-y #'luft:site-z)))
+             (center (vec3:make-vec3 (+ (luft:site-x low) (first half))
+                                     (+ (luft:site-y low) (second half))
+                                     (+ (luft:site-z low) (third half))))
+             ;; Keep the preview just inside air cells or just outside an occupied cell.
+             (offset (if (and (typep proposal 'companion-edit-approval) (approval-original proposal))
+                         0.006 -0.003)))
+        (flet ((tile (name)
+                 (luvcraft:block-atlas-tile-offset
+                  (luvcraft:block-face-tile block (find name luvcraft::*block-faces*
+                                                        :key #'luvcraft:block-face-name)))))
+          (let ((figure (render:box-figure
+                         center center 0.0 1.0 (mapcar (lambda (h) (+ h offset)) half)
+                         ;; One pair per Luft axis, negative face in the low 8 bits.
+                         (list (+ (tile :left) (* 256 (tile :right)))
+                               (+ (tile :back) (* 256 (tile :front)))
+                               (+ (tile :bottom) (* 256 (tile :top)))))))
+            (setf (fourth (fourth figure)) 5.0)
+            figure))))))
 
 (defmethod render:viewer-figures :around ((viewer luvcraft-viewer))
   (let ((focus (render:viewer-modal-focus viewer)))
     (append (call-next-method)
             (loop for inhabitant in (world-agents (viewer-world viewer))
                   for proposal = (inhabitant-approval inhabitant)
-                  when (and proposal (or (not (typep focus 'companion-proposal)) (eq proposal focus)))
-                    append (etypecase proposal
-                             (companion-box-approval
-                              (loop for (cell) in (box-approval-changes proposal)
-                                    collect (proposal-preview-figure cell nil)))
-                             (companion-edit-approval
-                              (list (proposal-preview-figure (approval-cell proposal)
-                                                             (approval-original proposal)))))))))
+                  for figure = (when (and proposal (or (not (typep focus 'companion-proposal)) (eq proposal focus)))
+                                 (proposal-preview-figure proposal))
+                  when figure collect figure))))
 
 (defun proposal-orbit-pose (proposal viewer angle aspect)
   (multiple-value-bind (low high) (proposal-corners proposal)
@@ -87,55 +108,81 @@
                                           (luvcraft.agent::tool-approval-created-at proposal))))
                          (/ (max 1 width) (max 1 height)))))
 
-(defconstant +review-width+ 510)
-(defconstant +review-height+ 126)
+(defconstant +review-sheet-width+ 868)
+(defconstant +review-sheet-height+ 132)
 (defparameter *review-buttons*
-  '((:y "Build" 16 122) (:t "Ask for changes" 131 323) (:n "Decline" 332 494)))
+  '((:y "Yes" "Y" :affirm 92) (:t "Talk" "T" :discuss 98)
+    (:n "No" "N" :decline 88) (:escape "Later" "Esc" :inset 96)))
+
+;; Embed the two CLIM image arrays in the compiled game, including standalone builds.
+(defparameter *proposal-portraits*
+  (list :fantus (clim:make-pattern
+                 #.(clim:read-bitmap-file (asdf:system-relative-pathname
+                                           :luvcraft "luvcraft/companions/portraits/fantus.png")
+                                          :format :png) nil)
+        :gnome (clim:make-pattern
+                #.(clim:read-bitmap-file (asdf:system-relative-pathname
+                                          :luvcraft "luvcraft/companions/portraits/gnome.png")
+                                         :format :png) nil)))
 
 (defclass proposal-pane (mcluv:transparent-gpu-application-pane) ())
+(mcluv:define-ui-themed-pane proposal-pane)
 
 (clim:define-application-frame proposal-frame ()
-  ((proposal :initarg :proposal :reader frame-proposal))
+  ((proposal :initarg :proposal :reader frame-proposal)
+   (compact :initform nil :accessor review-compact-p)
+   (hovered :initform nil :accessor review-hovered))
   (:menu-bar nil)
   (:panes (card (clim:make-pane 'proposal-pane :background luvcraft.agent::+clear-ink+
-                                :width +review-width+ :height +review-height+)))
+                                :width +review-sheet-width+ :height +review-sheet-height+)))
   (:layouts (default card)))
+
+(defun review-bar-size (compact)
+  (if compact (values 420 128) (values +review-sheet-width+ 76)))
+
+(defun map-review-buttons (compact function)
+  (let ((x (if compact 12 460)) (top (if compact 72 16)))
+    (dolist (button *review-buttons*)
+      (destructuring-bind (key label shortcut role width) button
+        (funcall function key label shortcut role x top (+ x width) (+ top 42))
+        (incf x (+ width 7))))))
 
 (defmethod clim:handle-repaint ((pane proposal-pane) region)
   (declare (ignore region))
-  (let* ((proposal (frame-proposal (clim:pane-frame pane)))
+  (let* ((frame (clim:pane-frame pane))
+         (proposal (frame-proposal frame))
          (kind (inhabitant-kind (luvcraft.agent::tool-approval-presence proposal)))
-         (cream (luvcraft.agent::display-color 0.98 0.96 0.88))
-         (green (luvcraft.agent::display-color 0.71 0.89 0.75))
-         (dark (luvcraft.agent::display-color 0.10 0.16 0.15))
-         (secondary (luvcraft.agent::display-color 0.21 0.29 0.27)))
-    (mcluv:draw-analytic-rounded-rectangle* pane 0 0 +review-width+ +review-height+
-                                            :radius 18 :ink dark)
-    (clim:draw-text* pane (format nil "~:(~A~)'s proposal" kind) 19 25
-                     :text-family :sans-serif :text-face :bold :text-size 16 :ink green)
-    (clim:draw-text* pane "Esc   Later" 490 25 :align-x :right :text-size 14 :ink cream)
-    (let* ((title (proposal-title proposal))
-           (style (clim:make-text-style :serif :roman 30))
-           (width (max 1 (clim:text-size pane title :text-style style))))
-      (clim:draw-text* pane title 18 60 :text-family :serif
-                       :text-size (min 30 (floor (* 30 (- +review-width+ 36)) width)) :ink cream))
-    (loop for (key label left right) in *review-buttons*
-          for primary = (eq key :y)
-          for text = (if (and primary (typep proposal 'companion-edit-approval))
-                         "Apply" label)
-          do (mcluv:draw-analytic-rounded-rectangle* pane left 76 right 112 :radius 9
-                                                     :ink (if primary green secondary))
-             (clim:draw-text* pane (format nil "~A   ~A" key text) (/ (+ left right) 2) 94
-                              :align-x :center :align-y :center :text-family :sans-serif
-                              :text-size 16 :text-face :bold :ink (if primary dark cream)))))
+         (compact (review-compact-p frame))
+         (title (proposal-title proposal))
+         (style (clim:make-text-style :sans-serif :bold (mcluv:ui-text-size :heading))))
+    (multiple-value-bind (width height) (review-bar-size compact)
+      (mcluv:draw-ui-panel pane 0 0 width height))
+    (clim:draw-pattern* pane (getf *proposal-portraits* kind) 11 8)
+    (clim:draw-text* pane (string-capitalize kind) 78 23 :align-y :center
+                     :text-size (mcluv:ui-text-size :caption) :text-face :bold :ink (mcluv:ui-ink :muted))
+    (clim:draw-text* pane (luvcraft.agent::fit-to-width pane title style (if compact 328 365))
+                     78 47 :align-y :center :text-style style :ink (mcluv:ui-ink :text))
+    (map-review-buttons compact
+                        (lambda (key label shortcut role left top right bottom)
+                          (mcluv:draw-ui-action pane left top right bottom label shortcut role
+                                                :hovered (eq key (review-hovered frame)))))))
 
 (defclass proposal-card (mcluv:luvcraft-hud-widget-overlay) ())
 
 (defmethod luvcraft:luvcraft-overlay-stage ((card proposal-card)) :hud)
 
+(defmethod luvcraft:refresh-luvcraft-overlay ((card proposal-card) viewer)
+  (let* ((frame (mcluv:widget-overlay-frame card))
+         (compact (< (luv:canvas-logical-size (render:viewer-canvas viewer)) 720)))
+    (when (or (mcluv:ui-theme-changed-p frame) (not (eq compact (review-compact-p frame))))
+      (setf (review-compact-p frame) compact)
+      (mcluv:repaint-gpu-mirror (mcluv::widget-overlay-mirror card)))))
+
 (defmethod luvcraft:encode-luvcraft-overlay ((card proposal-card) viewer pass surface)
   (declare (ignore pass))
-  (mcluv:prepare-direct-widget-overlay card viewer surface (mcluv::hotbar-screen-state card)))
+  (multiple-value-bind (width height) (review-bar-size (review-compact-p (mcluv:widget-overlay-frame card)))
+    (mcluv:prepare-direct-widget-overlay card viewer surface
+                                         (mcluv:bottom-hud-screen-state card width height))))
 
 (defmethod render:viewer-focus-entered ((proposal companion-proposal) (viewer luvcraft-viewer))
   (setf (viewer-conversation-agent viewer) (luvcraft.agent::tool-approval-presence proposal)
@@ -188,24 +235,48 @@
                      (unless (string= "" (string-trim " " text))
                        (luvcraft.agent:steer-tool-approval proposal text)))))))
 
+(clim:define-command (com-answer-proposal :command-table luvcraft-world)
+    ((proposal 'companion-proposal) (key 'symbol))
+  (let ((viewer (render:viewer-command-viewer)))
+    (when (eq proposal (render:viewer-modal-focus viewer))
+      (review-action proposal viewer key))))
+
+(defun answer-proposal (viewer proposal key)
+  (when (assoc key *review-buttons*)
+    (clim:execute-frame-command viewer (list 'com-answer-proposal proposal key))))
+
 (defmethod render:handle-viewer-focus-event
     ((proposal companion-proposal) (viewer luvcraft-viewer) canvas (event luv:canvas-key-press-event))
   (declare (ignore canvas))
   (when (and (null (luv:canvas-key-event-modifiers event))
              (not (luv:canvas-key-event-repeat-p event)))
-    (review-action proposal viewer (luv:canvas-key-event-key-name event))))
+    (answer-proposal viewer proposal (luv:canvas-key-event-key-name event))))
+
+(defun review-button-at (card event)
+  (let ((uv (mcluv:luvcraft-widget-texture-coordinate
+             card (luv:canvas-pointer-event-x event) (luv:canvas-pointer-event-y event))))
+    (when uv
+      (let ((x (* (first uv) +review-sheet-width+)) (y (* (second uv) +review-sheet-height+)))
+        (map-review-buttons
+         (review-compact-p (mcluv:widget-overlay-frame card))
+         (lambda (key label shortcut role left top right bottom)
+           (declare (ignore label shortcut role))
+           (when (and (<= left x right) (<= top y bottom))
+             (return-from review-button-at key)))))))
+  nil)
+
+(defmethod render:handle-viewer-focus-event
+    ((proposal companion-proposal) (viewer luvcraft-viewer) canvas (event luv:canvas-pointer-motion-event))
+  (declare (ignore canvas))
+  (let* ((card (proposal-card proposal)) (frame (mcluv:widget-overlay-frame card))
+         (key (review-button-at card event)))
+    (unless (eq key (review-hovered frame))
+      (setf (review-hovered frame) key)
+      (mcluv:repaint-gpu-mirror (mcluv::widget-overlay-mirror card)))))
 
 (defmethod render:handle-viewer-focus-event
     ((proposal companion-proposal) (viewer luvcraft-viewer) canvas
      (event luv:canvas-pointer-button-press-event))
   (declare (ignore canvas))
   (when (eq :left (luv:canvas-pointer-event-button event))
-    (let ((uv (mcluv:luvcraft-widget-texture-coordinate
-               (proposal-card proposal) (luv:canvas-pointer-event-x event)
-               (luv:canvas-pointer-event-y event))))
-      (when uv
-        (let ((x (* (first uv) +review-width+)) (y (* (second uv) +review-height+)))
-          (cond ((and (> x 408) (< y 38)) (review-action proposal viewer :escape))
-                ((<= 76 y 112)
-                 (loop for (key label left right) in *review-buttons*
-                       when (<= left x right) return (review-action proposal viewer key)))))))))
+    (answer-proposal viewer proposal (review-button-at (proposal-card proposal) event))))

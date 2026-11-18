@@ -845,4 +845,7 @@
     (dolist (surface '(:surface :raised :inset :selection-soft))
       (dolist (text '(:text :muted))
         (true (>= (/ (+ 0.05 (luminance surface))
-                     (+ 0.05 (luminance text))) 4.5))))))
+                     (+ 0.05 (luminance text))) 4.5))))
+    (dolist (action '(:affirm :discuss :decline))
+      (true (>= (/ (+ 0.05 (luminance :on-accent))
+                   (+ 0.05 (luminance action))) 4.5)))))
