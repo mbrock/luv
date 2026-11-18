@@ -211,6 +211,23 @@
         (incf (vec3-x (render:camera-position camera)) 0.01d0)
         (true (every (lambda (a b) (< (abs (- a b)) 0.001d0)) before (footprint 12d0)))))))
 
+(define-test sunrise-block-edges-cross-shadow-rows-at-different-times
+  ;; In Luvcraft the pole follows the world's Y axis. A straight block edge
+  ;; along Y used to cross a whole column of shadow texel centres at once.
+  (let* ((render::*sky-sunset-azimuth* (make-vec3 -1 0 0))
+         (light (make-instance 'render::light :name :test :shadow-half-extent 96.0
+                                              :shadow-depth-radius 160.0 :shadow-base-bias 0.0006))
+         (center (make-vec3 1024.5d0 1024.5d0 11d0)))
+    (dolist (hour '(1d0 6.65d0 7.25d0 12d0 17d0))
+      (let* ((rows (render::light-shadow-rows (render::update-light-from-sky light hour) center))
+             ;; The Y coefficients of the two rows project that edge into the map.
+             (slope (/ (second rows) (sixth rows)))
+             (phases (loop for row below 8 collect (mod (* row slope) 1d0))))
+        ;; A sweep of one eighth of a texel may switch at most two of the
+        ;; eight neighbouring rows, including intervals that wrap at 1.
+        (dolist (start phases)
+          (true (<= (count-if (lambda (phase) (< (mod (- phase start) 1d0) 0.125d0)) phases) 2)))))))
+
 (define-test player-frame-lanes-retain-both-headings
   (let* ((player (render::make-walking-character
                   :position (make-vec3 2.0 3.0 4.0)

@@ -5,7 +5,7 @@
 (defun make-luvcraft-light ()
   (make-instance 'render::light :name :luvcraft
                  :shadow-half-extent 96.0 :shadow-depth-radius 160.0
-                 :shadow-base-bias 0.0006 :shadow-filter-radius 1.25))
+                 :shadow-base-bias 0.0006))
 
 (defmethod render::host-sky-hour ((viewer luvcraft-viewer))
   (luvcraft::sky-clock-hour (world-sky-clock (viewer-world viewer))))

@@ -4,7 +4,7 @@
 ;;; dense lanes packed from this object once per frame; fragments do not carry
 ;;; objects or dispatch through the lighting vocabulary.
 
-(defparameter +shadow-map-size+ 1024
+(defparameter +shadow-map-size+ 2048
   "Resolution of LUFT's single sun-shadow map.")
 
 (defclass light ()
@@ -39,7 +39,7 @@
                         :reader light-shadow-depth-radius)
    (shadow-base-bias :initarg :shadow-base-bias
                      :accessor light-shadow-base-bias)
-   (shadow-filter-radius :initarg :shadow-filter-radius
+   (shadow-filter-radius :initarg :shadow-filter-radius :initform 2.1
                          :accessor light-shadow-filter-radius))
   (:documentation
    "One inspectable environment light, packed into raw per-frame GPU lanes.
@@ -61,8 +61,7 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
        :ground-color #(0.22 0.17 0.12 1.0)
        :shadow-half-extent 96.0
        :shadow-depth-radius 160.0
-       :shadow-base-bias 0.0006
-       :shadow-filter-radius 1.25))
+       :shadow-base-bias 0.0006))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The day clock
@@ -267,17 +266,25 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
 
 (update-light-from-sky *light* *sky-hour*)
 
-(defun light-shadow-rows (light center &optional previous-anchor)
+(define-lisp-arithmetic-function shadow-grid-right
+    ((transverse :quantity quantities:world-direction :unit :one :tensor-order 1)
+     (across :quantity quantities:world-direction :unit :one :tensor-order 1))
+  ;; A reciprocal-golden-ratio slope staggers coverage along straight block
+  ;; edges. Adjacent rows cross the edge at different fractions of a texel. #83TQJS
+  (math:normalize (+ transverse (* #.(/ (- (sqrt 5d0) 1d0) 2d0) across))))
+
+(defun light-shadow-rows (light center &optional previous-anchor (size +shadow-map-size+))
   "Return the orthographic shadow rows and their next camera-local grid origin."
   (let* ((sun (light-key-direction light))
          (forward (vec3-scale sun -1.0))
          ;; The orbit axis stays transverse even at noon with zero tilt.
          (orbit-axis (sky-celestial-pole))
-         (right (vec3-normalize (vec3-cross orbit-axis forward)))
+         (transverse (vec3-normalize (vec3-cross orbit-axis forward)))
+         (right (shadow-grid-right transverse (vec3-cross forward transverse)))
          (up (vec3-cross forward right))
          (extent (light-shadow-half-extent light))
          (depth-radius (light-shadow-depth-radius light))
-         (world-units-per-texel (/ (* 2.0 extent) +shadow-map-size+))
+         (world-units-per-texel (/ (* 2.0 extent) size))
          (anchor (luv.arithmetic.lisp.vec3:snap-plane-origin
                   center previous-anchor right up world-units-per-texel)))
     (flet ((row (axis scale offset)
@@ -294,14 +301,15 @@ shadow map follows whichever it is (LIGHT-KEY-DIRECTION)."))
         '(0.0 0.0 0.0 1.0))
        anchor))))
 
-(defun light-uniform-data (light center &optional (exposure 1.0f0) previous-anchor)
+(defun light-uniform-data (light center &optional (exposure 1.0f0) previous-anchor
+                                         (size +shadow-map-size+))
   "Return LIGHT's nine vec4 uniform lanes and the new shadow lattice origin.
 
 The sun lanes carry the key light: the sun by day and the moon by night."
   (flet ((vec3-lane (value fourth)
            (list (vec3-x value) (vec3-y value)
                  (vec3-z value) fourth)))
-    (multiple-value-bind (rows anchor) (light-shadow-rows light center previous-anchor)
+    (multiple-value-bind (rows anchor) (light-shadow-rows light center previous-anchor size)
       (values
        (append
         (vec3-lane (light-key-direction light) (light-sun-angular-width light))
@@ -312,7 +320,7 @@ The sun lanes carry the key light: the sun by day and the moon by night."
               exposure)
         (coerce (light-ground-color light) 'list)
         rows
-        (list (/ +shadow-map-size+) (/ +shadow-map-size+)
+        (list (/ size) (/ size)
               (light-shadow-base-bias light)
               (light-shadow-filter-radius light)))
        anchor))))

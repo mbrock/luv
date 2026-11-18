@@ -288,7 +288,8 @@ shift, not a drawing instance. Former pose rows remain reserved in the ABI."
                 (or focus character)
                 (multiple-value-bind (lanes anchor)
                     (light-uniform-data (current-light) (frame-view-position view) exposure
-                                        (and shadow (sun-shadow-anchor shadow)))
+                                        (and shadow (sun-shadow-anchor shadow))
+                                        (if shadow (sun-shadow-size shadow) +shadow-map-size+))
                   (when shadow (setf (sun-shadow-anchor shadow) anchor))
                   lanes)
                 previous-character character-direction

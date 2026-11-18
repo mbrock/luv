@@ -5,7 +5,8 @@
 ;;; that borrow its view and comparison sampler and retire before this owner.
 
 (defclass sun-shadow (gpu-resource-owner)
-  ((anchor :initform nil :accessor sun-shadow-anchor)
+  ((size :initform +shadow-map-size+ :reader sun-shadow-size)
+   (anchor :initform nil :accessor sun-shadow-anchor)
    (texture :accessor sun-shadow-texture)
    (view :accessor sun-shadow-view)
    (sampler :accessor sun-shadow-sampler)))
@@ -17,7 +18,8 @@
             (own-gpu-resource
              shadow device
              (make-texture-descriptor
-              :label "luft sun shadow depth" :size (list +shadow-map-size+ +shadow-map-size+)
+              :label "luft sun shadow depth"
+              :size (list (sun-shadow-size shadow) (sun-shadow-size shadow))
               :dimensions :2d :format :depth32-float :usage '(:render-attachment :texture-binding)))
             (sun-shadow-view shadow)
             (own-gpu-resource shadow device

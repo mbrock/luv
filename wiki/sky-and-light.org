@@ -1712,6 +1712,38 @@ the mean absolute brightness change in a block-shadow crop fell from
 crop. A regression test advances the sun and moon and walks the camera by
 less than one texel through Luft's light-uniform packer.
 
+** DONE A rising sun moves a straight block shadow a little at a time
+:PROPERTIES:
+:ID: 83TQJS
+:END:
+
+After #TFI7MF, the sun advanced every frame but a nearby shadow could
+still jump backwards. The long edges of a block lined up with rows of
+the shadow map. Several neighbouring depth samples switched together as
+the edge crossed their centres. Rolling the sampling grid about the
+light direction by a fixed 31.7 degrees staggers those crossings.
+The grid keeps its camera-local origin and its stable solar-orbit basis.
+
+The 2048-square depth map covers the same 192 cells. Its nine existing
+comparison taps now have a spacing of 2.1 texels, or about 0.20 cells.
+The angle and density were tested separately. Keeping the original
+1024-square map and changing the angle helped. Doubling the resolution
+alone left visible jumps. Together they smoothed the moving edge with
+one shadow pass and 12 MiB of additional depth storage.
+
+In the live Metal scene, the camera faced the stone block on the sandy
+shelf. At 07:15, 180 frames advanced a twenty-minute day at 60 Hz. To
+measure a hitch, average brightness in ground patches over groups of
+four frames, then take the change between successive brightness steps.
+The 99th percentile of the largest hitch per patch fell from 5.19 to
+0.37 brightness levels on a 0–255 scale. At 06:39 it fell from 4.12
+to 0.38. The noon and frozen-sun controls changed by less than 0.02.
+
+With just the shadow visible, one edge beside the block used to move six
+pixels in a four-frame interval. It moved at most 0.17 pixels in the same
+trace after the change, measured on a 614×420 image. The scene continued
+to light up and the shadow travelled throughout the shot.
+
 ** DONE HDR crystal bloom
 :PROPERTIES:
 :ID: WLHDRB
