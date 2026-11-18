@@ -11,6 +11,18 @@
             (values application inhabitant nil)
             (values (viewer-world application) inhabitant application))))))
 
+(defmethod luv.application-agent:command-tool-runs-on-canvas-p ((command (eql 'com-eval)))
+  nil)
+
+(clim:define-command (com-eval :command-table luvcraft-world :name "Eval")
+    ((form 'string))
+  "Evaluate a Common Lisp form in the live game image. LUFT.RENDER:*VIEWER* is the game view. Schedule frame-owned changes with LUV.APPLICATION-AGENT:CALL-IN-APPLICATION-FRAME."
+  (multiple-value-bind (world inhabitant viewer) (companion-command-context)
+    (declare (ignore world))
+    (unless (gnome-live-lisp-p viewer inhabitant)
+      (error "Live Lisp is a solo gnome tool."))
+    (luvcraft.agent:com-eval form)))
+
 (defun material-from-name (name)
   (unless (string-equal name "air")
     (game:block-placement (luvcraft:block-kind-named (intern (string-upcase name) :keyword)))))
@@ -173,6 +185,19 @@ their own, and keep their author across saves."
 (defmethod luvcraft.agent::detach-tool-approval ((approval companion-edit-approval))
   (setf (inhabitant-approval (luvcraft.agent::tool-approval-presence approval)) nil))
 
+(defun install-companion-approval (approval description)
+  (let* ((viewer (luvcraft.agent::tool-approval-session approval))
+         (inhabitant (luvcraft.agent::tool-approval-presence approval))
+         (workbench (and viewer (luv.workbench:application-workbench viewer))))
+    (when (inhabitant-approval inhabitant) (error "An edit is already proposed."))
+    (setf (inhabitant-approval inhabitant) approval)
+    (when workbench
+      (luv.workbench:show-workbench-message
+       workbench
+       (list (format nil "~A proposes ~A" (inhabitant-kind inhabitant) description)
+             "Y approve · N decline · T request changes") :seconds 120))
+    approval))
+
 (clim:define-presentation-method clim:present
     (object (type companion-edit-approval) stream (view clim:textual-view) &key)
   (format stream "Proposed cell: ~A ~A" (luvcraft.agent:tool-approval-state object)
@@ -191,13 +216,97 @@ their own, and keep their author across saves."
                                     :original (terrain:scene-material-placement-at
                                                (world-scene world) cell))))
       (validate-agent-reach world inhabitant cell)
-      (setf (inhabitant-approval inhabitant) approval)
-      (when (luv.workbench:application-workbench viewer)
-        (luv.workbench:show-workbench-message
-         (luv.workbench:application-workbench viewer)
-         (list (format nil "~A proposes ~A at (~D ~D ~D)" (inhabitant-kind inhabitant) material x y z)
-               "Y approve · N decline · T request changes") :seconds 120))
-      approval)))
+      (install-companion-approval approval (format nil "~A at (~D ~D ~D)" material x y z)))))
+
+(defclass companion-box-approval (luvcraft.agent:tool-approval)
+  ((changes :initarg :changes :reader box-approval-changes)))
+
+(defmethod luvcraft.agent::validate-tool-approval ((approval companion-box-approval))
+  (let* ((world (viewer-world (luvcraft.agent::tool-approval-session approval)))
+         (scene (world-scene world))
+         (inhabitant (luvcraft.agent::tool-approval-presence approval)))
+    (dolist (change (box-approval-changes approval))
+      (destructuring-bind (cell before after) change
+        (declare (ignore before after))
+        (validate-agent-reach world inhabitant cell)
+        (when (or (companion-occupies-cell-p world cell)
+                  (some (lambda (body) (terrain:body-overlaps-cell-p body cell))
+                        (terrain:simulation-bodies (world-simulation world))))
+          (error "A body is in the proposed box."))
+        (multiple-value-bind (old known-p) (terrain:world-cell-value scene cell)
+          (unless (and known-p (null old))
+            (error "The proposed box needs empty, loaded cells.")))))))
+
+(defmethod luvcraft.agent::commit-tool-approval ((approval companion-box-approval))
+  (let* ((world (viewer-world (luvcraft.agent::tool-approval-session approval)))
+         (inhabitant (luvcraft.agent::tool-approval-presence approval)))
+    (multiple-value-bind (events status)
+        (terrain:sequence-world-events
+         (world-scene world) (box-approval-changes approval)
+         :actor (inhabitant-actor inhabitant) :cause :edit)
+      (unless events (error "Construction rejected: ~A." status))
+      (sync-world-authored-blocks world)
+      (setf (world-springs-initialized-p world) nil))))
+
+(defmethod luvcraft.agent::detach-tool-approval ((approval companion-box-approval))
+  (setf (inhabitant-approval (luvcraft.agent::tool-approval-presence approval)) nil))
+
+(clim:define-presentation-method clim:present
+    (object (type companion-box-approval) stream (view clim:textual-view) &key)
+  (format stream "Construction proposal (~D blocks): ~A~@[. ~A~]"
+          (length (box-approval-changes object))
+          (luvcraft.agent:tool-approval-state object)
+          (luvcraft.agent:tool-approval-note object)))
+
+(clim:define-command (com-propose-block-box :command-table luvcraft-world
+                                            :name "Propose Block Box")
+    ((material 'string)
+     (from-x 'integer) (from-y 'integer) (from-z 'integer)
+     (to-x 'integer) (to-y 'integer) (to-z 'integer))
+  "Preview filling the empty box between two inclusive corners with one ordinary, unlimited block material. The box must be within reach and contain at most 512 cells. Wait for the player's approval."
+  (multiple-value-bind (world inhabitant viewer) (companion-command-context)
+    (unless viewer (error "A construction preview needs an open world view."))
+    (unless (member (inhabitant-kind inhabitant) '(:gnome :fantus))
+      (error "This companion cannot propose construction."))
+    (let* ((block (luvcraft:block-kind-named (intern (string-upcase material) :keyword)))
+           (placement (game:block-placement block))
+           (volume (* (1+ (abs (- from-x to-x)))
+                      (1+ (abs (- from-y to-y)))
+                      (1+ (abs (- from-z to-z))))))
+      (unless (and placement (luvcraft::block-kind-placeable-p block)
+                   (not (luvcraft:block-kind-carried-p block))
+                   (eq :none (terrain:material-kind-body
+                              (terrain:material-placement-kind placement))))
+        (error "Box construction needs an ordinary block material."))
+      (when (> volume luvcraft.agent::*maximum-construction-proposal-cells*)
+        (error "That box has too many cells (~D)." volume))
+      (let* ((changes
+               (loop for z from (min from-z to-z) to (max from-z to-z) append
+                 (loop for y from (min from-y to-y) to (max from-y to-y) append
+                   (loop for x from (min from-x to-x) to (max from-x to-x)
+                         collect (list (agent-cell world x y z) nil block)))))
+             (approval (make-instance 'companion-box-approval
+                                      :session viewer :presence inhabitant
+                                      :agent luv.application-agent:*current-agent*
+                                      :changes changes)))
+        (luvcraft.agent::validate-tool-approval approval)
+        (install-companion-approval approval (format nil "~D ~A blocks" volume material))))))
+
+(defmethod render:viewer-figures :around ((viewer luvcraft-viewer))
+  (append (call-next-method)
+          (loop for inhabitant in (world-agents (viewer-world viewer))
+                for approval = (inhabitant-approval inhabitant)
+                when (typep approval 'companion-box-approval)
+                  append (loop for (cell) in (box-approval-changes approval)
+                               for center = (vec3:make-vec3 (+ 0.5 (luft:site-x cell))
+                                                           (+ 0.5 (luft:site-y cell))
+                                                           (+ 0.5 (luft:site-z cell)))
+                               collect (let ((figure (render:box-figure
+                                                      center center 0.0 1.0 '(0.46 0.46 0.46)
+                                                      '(0.25 0.95 1.5))))
+                                         ;; Reuse the bright, unshadowed fragment boxes.
+                                         (setf (fourth (fourth figure)) 3.0)
+                                         figure)))))
 
 (defun show-companion-message (viewer inhabitant)
   (let ((agent (ensure-inhabitant-presentation viewer inhabitant)))

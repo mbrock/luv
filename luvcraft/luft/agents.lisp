@@ -197,7 +197,7 @@ companion arrives from its host and is addressed then: NIL meanwhile."
       (setf (viewer-conversation-agent viewer) companion))))
 
 (defparameter *inhabitant-tools*
-  '(com-look-around com-cell-at com-walk-to com-place-cell com-fetch-block com-propose-cell))
+  '(com-look-around com-cell-at com-walk-to com-place-cell com-fetch-block))
 
 (defparameter *inhabitant-instructions*
   "You are a friendly embodied companion in Luvcraft on Luft. Your tools act
@@ -205,17 +205,42 @@ through your body, not the player's camera. Coordinates are integer cells;
 X and Y are horizontal, Z is UP. Look around first. Walk to a clear foot cell
 before building or fetching. Walking waits for arrival. Fetch mines a nearby
 block after walking to it and puts it in the player's inventory. Place uses
-the player's inventory (or creative mode). Never claim an error succeeded.
-Propose-cell asks the player to approve an edit; ordinary single-cell placing
-is immediate. Build larger things one cell at a time. Keep replies short.")
+the player's inventory (or creative mode). Ordinary single-cell placing is
+immediate. Never claim an error succeeded. Keep replies short.")
+
+(defun gnome-live-lisp-p (viewer inhabitant)
+  ;; A connected guest can talk to the host's companions. Live eval grants
+  ;; the game process's authority, so reserve it for a local solo world.
+  (and (eq (inhabitant-kind inhabitant) :gnome)
+       (typep viewer 'luvcraft-viewer)
+       (null (world-session (viewer-world viewer)))))
+
+(defun inhabitant-provider-options (viewer inhabitant)
+  (let* ((cat-p (eq (inhabitant-kind inhabitant) :cat))
+         (lisp-p (gnome-live-lisp-p viewer inhabitant)))
+    (list :model (ecase (inhabitant-kind inhabitant)
+                   (:cat "gpt-6-luna")
+                   (:fantus "gpt-6.2-sol")
+                   (:gnome "gpt-6.2-astra"))
+          :reasoning-effort (if cat-p "low" "high")
+          :service-tier (unless cat-p "fast")
+          :commands (append *inhabitant-tools*
+                            (unless cat-p '(com-propose-cell com-propose-block-box))
+                            (when lisp-p '(com-eval)))
+          :instructions
+          (concatenate 'string *inhabitant-instructions*
+                       (if cat-p ""
+                           " Use propose-cell or propose-block-box to preview a change and ask the player before applying it.")
+                       (if lisp-p
+                           " Eval runs Common Lisp in the live game. Use it for local game work the player asks you to do."
+                           "")))))
 
 (defun open-inhabitant-provider (viewer inhabitant)
-  (let ((agent (luv.application-agent:make-application-agent
+  (let ((agent (apply #'luv.application-agent:make-application-agent
                 :class 'inhabitant-agent :application viewer
                 :initargs (list :inhabitant inhabitant)
-                :model luvcraft.agent::*default-agent-model*
-                :commands *inhabitant-tools* :instructions *inhabitant-instructions*
-                :reasoning-effort "medium" :api-key (render::viewer-openai-api-key viewer))))
+                :api-key (render::viewer-openai-api-key viewer)
+                (inhabitant-provider-options viewer inhabitant))))
     (setf (openai:agent-response-id agent) (inhabitant-conversation inhabitant))
     agent))
 

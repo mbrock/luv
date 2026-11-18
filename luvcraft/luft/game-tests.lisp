@@ -463,6 +463,70 @@ The player is format 1's RESUME, or a players-table RECORD."
         (assert (typep (render:viewer-player viewer) 'host::luvcraft-character))
         viewer))))
 
+(define-test companion-powers-follow-their-kind-and-keep-live-lisp-solo
+  (let* ((viewer (make-instance 'host:luvcraft-viewer
+                                :source (luft.world:make-mountain-sanctuary-scene)))
+         (world (host:viewer-world viewer))
+         (gnome (make-instance 'host::inhabitant :kind :gnome)))
+    (dolist (row '((:cat "gpt-6-luna" "low" nil nil nil)
+                   (:fantus "gpt-6.2-sol" "high" "fast" t nil)
+                   (:gnome "gpt-6.2-astra" "high" "fast" t t)))
+      (destructuring-bind (kind model effort tier proposal-p eval-p) row
+        (let* ((options (host::inhabitant-provider-options
+                         viewer (make-instance 'host::inhabitant :kind kind)))
+               (commands (getf options :commands)))
+          (is equal (list model effort tier)
+              (mapcar (lambda (key) (getf options key)) '(:model :reasoning-effort :service-tier)))
+          (is eq proposal-p (not (null (member 'host::com-propose-cell commands))))
+          (is eq proposal-p (not (null (member 'host::com-propose-block-box commands))))
+          (is eq eval-p (not (null (member 'host::com-eval commands)))))))
+    (let ((luv.application-agent:*current-agent*
+            (make-instance 'host::inhabitant-agent :application viewer :inhabitant gnome :model "test")))
+      (is eq :live-lisp (host::com-eval ":live-lisp"))
+      (setf (host:world-session world) :connected)
+      (true (not (member 'host::com-eval
+                         (getf (host::inhabitant-provider-options viewer gnome) :commands))))
+      (fail (host::com-eval "(+ 1 2)")))))
+
+(define-test companion-box-is-previewed-then-sequenced-as-one-transaction
+  (let* ((block-world (luvcraft:make-empty-little-block-world :chunk-height 16))
+         (scene (hollow-walk-test-scene block-world))
+         (viewer (make-instance 'host:luvcraft-viewer :source scene :luvcraft-world block-world))
+         (world (host:viewer-world viewer))
+         (fantus (host::make-inhabitant world :fantus (v:make-vec3 1030.5 1030.5 32.0)))
+         (luv.application-agent:*current-agent*
+           (make-instance 'host::inhabitant-agent :application viewer :inhabitant fantus :model "test"))
+         (journal (terrain:streaming-scene-journal scene))
+         (first (host::agent-cell world 1032 1030 32))
+         (second (host::agent-cell world 1033 1030 32)))
+    (push fantus (host::world-agents world))
+    (let* ((tool (luv.application-agent:make-command-tool 'host::com-propose-block-box))
+           (args (openai::decode-json
+                  "{\"material\":\"bricks\",\"from-x\":1032,\"from-y\":1030,\"from-z\":32,\"to-x\":1033,\"to-y\":1030,\"to-z\":32}"))
+           (command (luv.application-agent:command-tool-parse tool args))
+           (approval (apply (first command) (rest command))))
+      (true (zerop (terrain:world-journal-head journal)))
+      (is = 2 (length (host::box-approval-changes approval)))
+      (luvcraft.agent:deny-tool-approval approval)
+      (true (null (host::inhabitant-approval fantus)))
+      (true (zerop (terrain:world-journal-head journal))))
+    (let ((approval (host::com-propose-block-box "bricks" 1032 1030 32 1033 1030 32)))
+      (terrain:sequence-world-events scene (list (list second nil luvcraft::*stone-block*)))
+      (luvcraft.agent:approve-tool-approval approval)
+      (is eq :failed (luvcraft.agent:tool-approval-state approval))
+      (true (null (terrain:world-cell-value scene first)))
+      (is = 1 (terrain:world-journal-head journal)))
+    (let ((approval (host::com-propose-block-box "bricks" 1032 1031 32 1033 1031 32)))
+      (luvcraft.agent:approve-tool-approval approval)
+      (is eq :approved (luvcraft.agent:tool-approval-state approval))
+      (is = 3 (terrain:world-journal-head journal))
+      (let* ((events (terrain:world-journal-events journal))
+             (a (aref events 1))
+             (b (aref events 2)))
+        (is = (terrain:world-event-transaction a) (terrain:world-event-transaction b))
+        (is equal (host::inhabitant-actor fantus) (terrain:world-event-actor a))
+        (is eq luvcraft::*bricks-block* (terrain:world-event-after b))))))
+
 (defun walk-hollow-route (viewer points)
   "Walk POINTS continuously; return simulated seconds, travel and largest frame step."
   (let* ((scene (render:viewer-source viewer))

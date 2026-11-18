@@ -1378,6 +1378,14 @@ is bounded and ray-checked, failed or occupied edits spend nothing, and
 companions freeze outside resident terrain. A walk times out rather than
 parking a provider forever behind an edit or a departed chunk.
 
+The cat uses Luna with the basic movement, observation, and single-cell
+tools. Fantus uses Sol and the gnome uses Astra, both at high reasoning
+effort with Fast requested. Both can propose a box of ordinary blocks.
+The view draws the empty cells as blue blocks until the player decides.
+Approval checks reach, occupancy, and the journal again, then records
+the whole box as one transaction. Live Lisp belongs to the gnome in solo
+worlds.
+
 The first cut used simple box models. The current presentation reuses the
 original SDF gnome, cat and Fantus bodies, the original focused dialogue and
 the unchanged McCLIM thought cloud (#JZWPAI). A neutral host protocol owns
