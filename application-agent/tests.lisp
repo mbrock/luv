@@ -60,6 +60,22 @@
 (defun join-test-turn (turn &optional (timeout 1.0))
   (or (agent:wait-for-turn turn :timeout timeout) :timeout))
 
+(define-test retry-restores-streamed-dialogue-to-the-last-completed-round
+  (let ((agent (make-test-agent))
+        (turn (make-instance 'agent:turn :prompt "test")))
+    (setf (agent::%application-agent-current-turn agent) turn)
+    (flet ((event (type &optional delta)
+             (openai:handle-agent-event agent (openai::json-object "type" type "delta" delta))))
+      (event "response.output_text.delta" "Built. ")
+      (event "client.response.start")
+      (event "response.output_text.delta" "unfinished")
+      (event "response.reasoning_summary_text.delta" "unfinished")
+      (event "client.response.retry")
+      (event "client.response.start")
+      (event "response.output_text.delta" "Ready!")
+      (true (equal "Built. Ready!" (agent:turn-text turn)))
+      (true (equal "" (agent:turn-thought turn))))))
+
 (define-test ask-returns-before-provider-turn-completes
   (let ((started (sb-thread:make-semaphore :count 0))
         (finish (sb-thread:make-semaphore :count 0))

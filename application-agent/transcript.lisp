@@ -33,6 +33,8 @@
   ((prompt :initarg :prompt :reader turn-prompt)
    (thought :initform "" :accessor turn-thought)
    (text :initform "" :accessor turn-text)
+   (round-text :initform "" :accessor turn-round-text)
+   (round-thought :initform "" :accessor turn-round-thought)
    (%calls :initform '() :accessor %turn-calls)
    (status :initform :queued :accessor turn-status)
    (error :initform nil :accessor turn-error)

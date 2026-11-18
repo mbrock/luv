@@ -15,6 +15,17 @@
              (format stream "The OpenAI response failed: ~A"
                      (openai-error-detail condition)))))
 
+(define-condition connection-interrupted (openai-error) ()
+  (:report (lambda (condition stream)
+             (declare (ignore condition))
+             (write-string "The connection was interrupted. Try talking to me again." stream))))
+
+(defparameter *response-idle-timeout* 120
+  "Seconds to wait for another provider event. Player decisions and tools have no deadline.")
+
+(defparameter *reconnect-delays* '(0.25 1)
+  "Delays before retrying one interrupted provider request.")
+
 (define-condition missing-api-key (openai-error) ()
   (:default-initargs :detail "OPENAI_API_KEY is not set and no fallback supplied one")
   (:report (lambda (condition stream)
@@ -92,6 +103,8 @@ object represented as a CL-JSON alist.  Specialize CALL-TOOL for behavior."))
               :reader agent-turn-lock)
    (created-p :initform nil :accessor agent-created-p)
    (closed-p :initform nil :accessor agent-closed-p)
+   ;; A completed tool round awaiting delivery, including its exact local results.
+   (pending-round :initform nil :accessor agent-pending-round)
    (response-id :initform nil :accessor agent-response-id))
   (:documentation
    "One persistent Responses conversation over a WebSocket connection.  Turns
@@ -159,18 +172,20 @@ HANDLE-AGENT-EVENT and CALL-TOOL on its own agent."
   (setf api-key (ensure-api-key api-key))
   (unless model
     (error 'openai-error :detail ":MODEL is required"))
-  (connect-agent
-   (apply #'make-instance class
-          :model model :instructions (or instructions "")
-          :tools tools :reasoning-effort reasoning-effort
-          :reasoning-summary reasoning-summary :service-tier service-tier
-          :url url :api-key api-key
-          initargs)))
+  (let ((agent (apply #'make-instance class
+                      :model model :instructions (or instructions "")
+                      :tools tools :reasoning-effort reasoning-effort
+                      :reasoning-summary reasoning-summary :service-tier service-tier
+                      :url url :api-key api-key initargs))
+        (delays *reconnect-delays*))
+    (loop
+      (handler-case (return (connect-agent agent))
+        (connection-interrupted (condition)
+          (unless delays (error condition))
+          (sleep (pop delays)))))))
 
 (defparameter *connection-lifetime* (* 55 60)
-  "Seconds after which a turn opens a fresh connection before starting.  The
-server ends Responses WebSockets at 60 minutes, which would otherwise land in
-the middle of some turn.")
+  "Age in seconds at which the next response.create opens a fresh connection.")
 
 (defun connect-agent (agent)
   "Open a fresh WebSocket for AGENT, replacing any previous one.
@@ -183,8 +198,7 @@ old connection cannot end a turn on the new one."
                  `(("authorization" . ,(format nil "Bearer ~A" (agent-api-key agent)))
                    ("content-type" . "application/json")))))
     (flet ((enqueue (event)
-             (when (eq socket (agent-socket agent))
-               (enqueue-agent-event agent event))))
+             (enqueue-agent-event agent event socket)))
       (websocket-driver:on :message socket
                            (lambda (message)
                              (handler-case (enqueue (decode-json message))
@@ -197,28 +211,35 @@ old connection cannot end a turn on the new one."
                              (enqueue (list :closed code reason)))))
     (let ((old (agent-socket agent)))
       (sb-thread:with-mutex ((agent-event-lock agent))
+        (when (agent-closed-p agent) (error 'agent-closed :detail "already closed"))
         (setf (agent-socket agent) socket
               (agent-events agent) '()))
       (when (and old (eq :open (websocket-driver:ready-state old)))
         (ignore-errors
          (websocket-driver:send old "" :type :close :code 1000))))
-    (websocket-driver:start-connection socket)
+    (handler-case (sb-sys:with-deadline (:seconds 20)
+                    (websocket-driver:start-connection socket))
+      ((or sb-sys:deadline-timeout stream-error usocket:socket-error usocket:ns-error) (condition)
+        (error 'connection-interrupted :detail condition)))
+    (when (agent-closed-p agent)
+      (ignore-errors (websocket-driver:send socket "" :type :close :code 1000))
+      (error 'agent-closed :detail "already closed"))
     (setf (agent-connected-at agent) (get-universal-time))
     agent))
 
 (defgeneric ensure-agent-connection (agent)
-  (:documentation "Prepare AGENT's connection for a new turn."))
+  (:documentation "Prepare AGENT's connection for the next response.create."))
 
 (defmethod ensure-agent-connection ((agent agent))
-  "Prepare AGENT's connection for a new turn.
-
-Nothing is in flight between turns, so anything queued since the last one --
-typically the server's connection-limit error and the close that follows -- is
-stale and discarded.  A connection that is gone or near its lifetime is
-replaced; the conversation continues under RESPONSE-ID either way."
+  "Each request follows a terminal response or starts on a fresh socket.
+Queued events between requests, including a close during a tool, are stale."
   (when (agent-closed-p agent)
     (error 'agent-closed :detail "already closed"))
   (sb-thread:with-mutex ((agent-event-lock agent))
+    (when (some (lambda (event) (or (member (first event) '(:closed :transport-error))
+                                    (equal (json-value event :type) "error")))
+                (agent-events agent))
+      (setf (agent-connected-at agent) nil))
     (setf (agent-events agent) '()))
   (let ((socket (agent-socket agent))
         (connected-at (agent-connected-at agent)))
@@ -235,23 +256,30 @@ replaced; the conversation continues under RESPONSE-ID either way."
 WEBSOCKET-DRIVER forcibly destroys its reader thread in CLOSE-CONNECTION;
 doing that while SBCL is in SSL I/O can corrupt the image.  A close frame lets
 the reader receive the peer's reply and finish in its own thread instead."
-  (unless (agent-closed-p agent)
-    (setf (agent-closed-p agent) t)
-    (websocket-driver:send (agent-socket agent) "" :type :close :code 1000))
+  (let ((socket (sb-thread:with-mutex ((agent-event-lock agent))
+                  (unless (agent-closed-p agent)
+                    (setf (agent-closed-p agent) t)
+                    (sb-thread:condition-broadcast (agent-event-ready agent))
+                    (agent-socket agent)))))
+    (when (and socket (eq :open (websocket-driver:ready-state socket)))
+      (websocket-driver:send socket "" :type :close :code 1000)))
   agent)
 
-(defun enqueue-agent-event (agent event)
+(defun enqueue-agent-event (agent event &optional socket)
   (sb-thread:with-mutex ((agent-event-lock agent))
-    (setf (agent-events agent) (nconc (agent-events agent) (list event)))
-    (sb-thread:condition-notify (agent-event-ready agent)))
+    (when (or (null socket) (eq socket (agent-socket agent)))
+      (setf (agent-events agent) (nconc (agent-events agent) (list event)))
+      (sb-thread:condition-notify (agent-event-ready agent))))
   event)
 
 (defun next-agent-event (agent)
   (sb-thread:with-mutex ((agent-event-lock agent))
-    (loop while (null (agent-events agent))
-          do (sb-thread:condition-wait (agent-event-ready agent)
-                                       (agent-event-lock agent)))
-    (pop (agent-events agent))))
+    (loop
+      (when (agent-closed-p agent) (error 'agent-closed :detail "already closed"))
+      (when (agent-events agent) (return (pop (agent-events agent))))
+      (unless (sb-thread:condition-wait (agent-event-ready agent) (agent-event-lock agent)
+                                        :timeout *response-idle-timeout*)
+        (error 'connection-interrupted :detail "Timed out waiting for a response event.")))))
 
 (defun json-key-name (key)
   (remove-if-not #'alphanumericp (string key)))
@@ -309,6 +337,8 @@ previous response id, so each event carries only what is new."
          (cons "tool_choice" "auto")
          (cons "parallel_tool_calls" t)
          (cons "stream" t))
+   (when (agent-reasoning-effort agent)
+     (list (cons "include" #("reasoning.encrypted_content"))))
    (if (agent-service-tier agent)
        (list (cons "service_tier" (agent-service-tier agent)))
        '())
@@ -327,10 +357,21 @@ previous response id, so each event carries only what is new."
 (defgeneric send-json (agent object)
   (:documentation "Send OBJECT as one JSON message on AGENT's connection."))
 
+(defmethod send-json :before ((agent agent) object)
+  (declare (ignore object))
+  ;; A local tool can wait for its player longer than the socket lives.
+  (ensure-agent-connection agent))
+
 (defmethod send-json ((agent agent) object)
   (when (agent-closed-p agent)
     (error 'agent-closed :detail "already closed"))
-  (websocket-driver:send (agent-socket agent) (json-string object)))
+  (let ((message (json-string object)))
+    (handler-case (sb-sys:with-deadline (:seconds 20)
+                    (websocket-driver:send (agent-socket agent) message))
+      (error (condition) (error 'connection-interrupted :detail condition)))
+    ;; The driver can silently drop a write to a closing socket.
+    (unless (eq :open (websocket-driver:ready-state (agent-socket agent)))
+      (error 'connection-interrupted :detail "Socket closed during send."))))
 
 (defun tool-for-call (agent name)
   (find name (agent-tools agent) :key #'tool-name :test #'string=))
@@ -384,106 +425,123 @@ previous response id, so each event carries only what is new."
       (when (string= (json-value part :type) "output_text")
         (write-string (json-value part :text) stream)))))
 
-(defun agent-turn (agent text)
-  "Send TEXT and synchronously run one complete agent turn.
+(defstruct response-round
+  ;; INPUT is incremental under PARENT. REPLAY holds the current turn back to
+  ;; BASE in case the server no longer recognizes an intermediate response.
+  parent input base replay)
 
-Text and reasoning deltas reach HANDLE-AGENT-EVENT immediately in this
-calling thread.  Function calls run their TOOL here too, as their items
-complete; when the response completes with calls outstanding, a further
-response.create carries every function_call_output under the previous
-response id, and the loop continues until a response completes with none.
+(defun receive-response (agent)
+  "Read one generation to completion before dispatching any local tool."
+  (let ((text "") (reasoning "") (items '()) (text-items (make-hash-table :test #'equal)))
+    (loop for event = (next-agent-event agent) do
+      (when (member (first event) '(:closed :transport-error))
+        (error 'connection-interrupted :detail (rest event)))
+      (let ((type (json-value event :type)))
+        (cond
+          ((or (member type '("error" "response.failed" "response.incomplete") :test #'equal)
+               (and (equal type "response.done")
+                    (member (json-value (json-value event :response) :status)
+                            '("failed" "cancelled" "incomplete") :test #'equal)))
+           (let* ((response (json-value event :response))
+                  (detail (or (json-value event :error) (json-value response :error) response event)))
+             (error (if (member (json-value detail :code)
+                                '("websocket_connection_limit_reached" "websocket_connection_timeout"
+                                  "websocket_timeout" "request_timeout") :test #'equal)
+                        'connection-interrupted 'agent-failed)
+                    :detail detail)))
+          ((equal type "response.output_text.delta")
+           (setf (gethash (json-value event :item-id) text-items) t
+                 text (append-string text (json-value event :delta))))
+          ((member type '("response.reasoning_summary_text.delta" "response.reasoning_text.delta")
+                   :test #'equal)
+           (setf reasoning (append-string reasoning (json-value event :delta))))
+          ((equal type "response.output_item.done")
+           (push (json-value event :item) items)))
+        (handle-agent-event agent event)
+        (when (member type '("response.completed" "response.done") :test #'equal)
+          (let* ((response (json-value event :response))
+                 (output (or (json-value response :output) (nreverse items))))
+            (unless (json-value response :id)
+              (error 'agent-failed :detail "Completed response has no id."))
+            (loop for item in output
+                  when (and (equal "message" (json-value item :type))
+                            (not (gethash (json-value item :id) text-items)))
+                    do (setf text (append-string text (output-item-text item))))
+            (return (values response output text reasoning))))))))
 
-Only then does the turn become the agent's RESPONSE-ID.  A turn that fails
-part way, perhaps with function calls still unanswered, leaves the
-conversation where the last finished turn left it, so the next turn can
-still continue it.
-
-A conversation the server no longer has -- a response id saved with the
-world and offered to a new connection, which unstored responses do not
-survive -- cannot be continued at all.  The turn then forgets it and starts
-the conversation afresh, rather than failing on the same id forever."
-  (sb-thread:with-mutex ((agent-turn-lock agent))
+(defun request-round (agent round)
+  "Retry only the current response.create. No tools run inside a retry."
+  (let ((delays *reconnect-delays*))
     (loop
-      (block attempt
-        (handler-bind
-            ((agent-failed
-               (lambda (condition)
-                 (when (and (agent-response-id agent)
-                            (previous-response-missing-p condition))
-                   (setf (agent-response-id agent) nil)
-                   (return-from attempt)))))
-          (return (run-agent-turn agent text)))))))
+      (when (agent-closed-p agent) (error 'agent-closed :detail "already closed"))
+      (handler-case
+          (progn
+            (handle-agent-event agent (json-object "type" "client.response.start"))
+            (send-json agent (response-create agent (response-round-input round)
+                                              (response-round-parent round)))
+            (setf (agent-created-p agent) t)
+            (return (receive-response agent)))
+        (connection-interrupted (condition)
+          (setf (agent-connected-at agent) nil)
+          (when (agent-closed-p agent) (error 'agent-closed :detail "already closed"))
+          (unless delays (error condition))
+          (handle-agent-event agent (json-object "type" "client.response.retry"))
+          (sleep (pop delays)))
+        (agent-failed (condition)
+          (unless (and (response-round-parent round)
+                       (consp (openai-error-detail condition))
+                       (equal "previous_response_not_found"
+                              (json-value (openai-error-detail condition) :code)))
+            (error condition))
+          ;; Keep this turn's executed calls paired with their results. If
+          ;; its base is also gone (e.g. an old save), drop that pointer too.
+          (setf (response-round-parent round)
+                (unless (equal (response-round-parent round) (response-round-base round))
+                  (response-round-base round))
+                (response-round-input round) (response-round-replay round))
+          (handle-agent-event agent (json-object "type" "client.response.retry")))))))
 
-(defun previous-response-missing-p (condition)
-  "Whether CONDITION is the server saying the turn's previous response is gone."
-  (let ((detail (openai-error-detail condition)))
-    (and (consp detail)
-         (equal (json-value detail :code) "previous_response_not_found"))))
+(defun replay-output-item (item)
+  "Recover input items from a completed round without relying on remote item IDs."
+  (let ((type (json-value item :type)))
+    (cond
+      ((equal type "function_call")
+       (json-object "type" type "call_id" (json-value item :call-id)
+                    "name" (json-value item :name) "arguments" (json-value item :arguments)))
+      ((equal type "message")
+       (json-object "role" "assistant" "content" (output-item-text item)))
+      ((and (equal type "reasoning") (json-value item :encrypted-content))
+       (json-object "type" type "summary" #()
+                    "encrypted_content" (json-value item :encrypted-content))))))
 
-(defun run-agent-turn (agent text)
-  "Run one turn of AGENT-TURN, holding AGENT's turn lock."
-  (ensure-agent-connection agent)
-  (let ((text-output "") (reasoning-output "") (usage nil) (done nil)
-        (previous (agent-response-id agent))
-        (items-with-text-deltas (make-hash-table :test #'equal))
-        (outputs '()))
-    (send-json agent (response-create agent (user-input text) previous))
-    (setf (agent-created-p agent) t)
-    (loop until done
-          for event = (next-agent-event agent)
-          do (cond
-               ((and (consp event) (eq (first event) :transport-error))
-                (error 'agent-failed :detail (second event)))
-               ((and (consp event) (eq (first event) :closed))
-                ;; The next turn reconnects unless CLOSE-AGENT ended AGENT.
-                (error 'agent-closed :detail (third event)))
-               (t
-                (handle-agent-event agent event)
-                (let ((type (json-value event :type)))
-                  (cond
-                   ((string= type "response.output_text.delta")
-                    (setf (gethash (json-value event :item-id)
-                                   items-with-text-deltas)
-                          t)
-                    (setf text-output
-                          (append-string text-output (json-value event :delta))))
-                   ((or (string= type "response.reasoning_summary_text.delta")
-                        (string= type "response.reasoning_text.delta"))
-                    (setf reasoning-output
-                          (append-string reasoning-output (json-value event :delta))))
-                   ((and (string= type "response.output_item.done")
-                         (let ((item (json-value event :item)))
-                           (and item (string= (json-value item :type) "function_call"))))
-                    (push (tool-result agent (json-value event :item)) outputs))
-                   ((and (string= type "response.output_item.done")
-                         (let ((item (json-value event :item)))
-                           (and item (string= (json-value item :type) "message"))))
-                    (setf text-output
-                          (let ((item (json-value event :item)))
-                            (if (gethash (json-value item :id)
-                                         items-with-text-deltas)
-                                text-output
-                                (append-string text-output
-                                               (output-item-text item))))))
-                   ((member type '("response.completed" "response.done") :test #'string=)
-                    (let ((response (json-value event :response)))
-                      (when response
-                        (let ((id (json-value response :id)))
-                          (when id (setf previous id)))
-                        (setf usage (json-value response :usage))))
-                    (if outputs
-                        (progn
-                          (send-json agent (response-create
-                                            agent (reverse outputs) previous))
-                          (setf outputs '()))
-                        (setf done t
-                              (agent-response-id agent) previous)))
-                   ((string= type "response.failed")
-                    (error 'agent-failed :detail (json-value event :response)))
-                   ((string= type "error")
-                    (error 'agent-failed :detail (or (json-value event :error) event))))))))
-    (make-instance 'agent-response :text text-output :reasoning reasoning-output
-                   :id (agent-response-id agent) :usage usage)))
+(defun agent-turn (agent text)
+  "Run each completed batch of tools once, retaining its results through reconnects."
+  (sb-thread:with-mutex ((agent-turn-lock agent))
+    (let* ((user (user-input text))
+           (pending (agent-pending-round agent))
+           (round (if pending (copy-response-round pending)
+                      (make-response-round :base (agent-response-id agent)
+                                           :parent (agent-response-id agent))))
+           (text-output "") (reasoning-output ""))
+      (setf (response-round-input round) (append (response-round-input round) user)
+            (response-round-replay round) (append (response-round-replay round) user))
+      (loop
+        (multiple-value-bind (response output words reasoning) (request-round agent round)
+          (let ((calls (remove-if-not (lambda (item) (equal "function_call" (json-value item :type))) output))
+                (id (json-value response :id)))
+            (setf text-output (append-string text-output words)
+                  reasoning-output (append-string reasoning-output reasoning))
+            (unless calls
+              (setf (agent-response-id agent) id (agent-pending-round agent) nil)
+              (return (make-instance 'agent-response :text text-output :reasoning reasoning-output
+                                     :id id :usage (json-value response :usage))))
+            (when (agent-closed-p agent) (error 'agent-closed :detail "already closed"))
+            (let* ((results (mapcar (lambda (call) (tool-result agent call)) calls))
+                   (replay (append (response-round-replay round)
+                                   (remove nil (mapcar #'replay-output-item output)) results)))
+              (setf round (make-response-round :parent id :input results
+                                               :base (response-round-base round) :replay replay)
+                    (agent-pending-round agent) round))))))))
 
 (defun append-string (string suffix)
   (if suffix

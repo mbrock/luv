@@ -9,6 +9,15 @@
 
 (in-package #:luvcraft.luft.tests)
 
+(define-test palette-reload-preserves-open-world-materials
+  (let* ((original (game::make-luvcraft-palette))
+         (refreshed (game::make-luvcraft-palette original))
+         (block (luvcraft:block-kind-named :yellow-wool))
+         (before (game:block-placement block original))
+         (after (game:block-placement block refreshed)))
+    (is eq before after)
+    (true (luv.domains:identity-vocabulary-offset (game:luvcraft-palette-vocabulary original) after nil))))
+
 (define-test distinctive-materials-reach-the-renderer-descriptors
   (let* ((palette game:*luvcraft-palette*)
          (vocabulary (game:luvcraft-palette-vocabulary palette))

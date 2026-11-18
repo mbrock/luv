@@ -196,9 +196,9 @@ own glow and its neighbours' as glass, and stays solid underfoot.")
   (or (find name *block-surfaces* :key #'cddddr :test #'member)
       (first (member :stone *block-surfaces* :key #'first))))
 
-(defun block-material-kind (kind)
-  (make-instance
-   'terrain:material-kind
+(defun block-material-kind (kind &optional existing)
+  (terrain:ensure-semantic-instance
+   existing 'terrain:material-kind
    :name (luvcraft:block-kind-name kind)
    :base-tone (block-face-tone kind :side)
    :top-tone (case (luvcraft:block-kind-name kind)
@@ -240,16 +240,16 @@ The material vocabulary is closed (#R7MAN5): every film stands on the one
 a block's entity, such as which video a film holds, stays in Luvcraft's
 authored edits."))
 
-(defun make-luvcraft-palette ()
+(defun make-luvcraft-palette (&optional previous)
   (let* ((by-name (make-hash-table :test #'eq))
          (placements
            (loop for kind in luvcraft::*block-kinds*
                  for name = (luvcraft:block-kind-name kind)
+                 for old = (and previous (gethash name (luvcraft-palette-by-name previous)))
                  collect (setf (gethash name by-name)
-                               (make-instance
-                                'terrain:material-placement
-                                :name name
-                                :kind (block-material-kind kind))))))
+                               (terrain:ensure-semantic-instance
+                                old 'terrain:material-placement :name name
+                                :kind (block-material-kind kind (and old (terrain:material-placement-kind old))))))))
     (make-instance 'luvcraft-palette
                    :vocabulary (domains:make-identity-vocabulary-domain
                                 :members placements :limit #xff)
@@ -258,7 +258,8 @@ authored edits."))
 (defvar *luvcraft-palette* nil
   "Luvcraft's block kinds as a Luft palette, built when this system loads.")
 
-(setf *luvcraft-palette* (make-luvcraft-palette))
+;; Live scenes and journal validation hold these placements by EQ identity.
+(setf *luvcraft-palette* (make-luvcraft-palette *luvcraft-palette*))
 
 (defun block-placement (block &optional (palette *luvcraft-palette*))
   "The placement for the material of Luvcraft block identity BLOCK, or NIL

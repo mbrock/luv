@@ -193,6 +193,14 @@
       (let ((type (event-value event :type)))
         (when (stringp type)
           (cond
+            ((equal type "client.response.start")
+             (setf (turn-round-text turn) (turn-text turn)
+                   (turn-round-thought turn) (turn-thought turn)))
+            ((equal type "client.response.retry")
+             (setf (turn-text turn) (turn-round-text turn)
+                   (turn-thought turn) (turn-round-thought turn))
+             (notify-agent-observers agent :text turn)
+             (notify-agent-observers agent :thought turn))
             ((member type '("response.reasoning_summary_text.delta"
                             "response.reasoning_text.delta")
                      :test #'string=)

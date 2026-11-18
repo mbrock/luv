@@ -256,6 +256,16 @@ functions by name, so a redefinition reaches agents already standing in the
 world; the stranded gnome was revived in place and recalled its plank square
 and the flowers it meant to grow there.
 
+A construction proposal can stay open past the socket's hour. The client
+checks the connection before each =response.create=, including the request
+that carries the player's decision. It waits for the complete response
+before running its tools. It keeps the resulting call IDs and outputs
+until the continuation succeeds, so a retry delivers the same results.
+If the service has lost the parent response, the client sends the current
+turn's input, completed calls, and results on the new chain. A quiet
+network read times out after two minutes. Waiting for the player has no
+network deadline.
+
 * Gnomes and cats are inhabitants of the saved world
 :PROPERTIES:
 :ID: 9AONMH

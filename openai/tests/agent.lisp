@@ -121,30 +121,81 @@
 (defun request-previous (request)
   (cdr (assoc "previous_response_id" request :test #'string=)))
 
-(define-test failed-turn-keeps-the-conversation
-  (let ((agent (make-instance 'scripted-agent
-                              :model "gpt-5.6-terra" :socket nil
-                              :tools (list (make-instance 'echo-tool :name "echo"))
-                              :script '())))
-    ;; A finished turn becomes the conversation.
-    (setf (scripted-agent-script agent)
-          (list (list (scripted-completion "resp_1"))))
-    (openai:agent-turn agent "hello")
-    (true (string= "resp_1" (openai:agent-response-id agent)))
-    ;; A turn that calls a tool and then loses its connection must not leave
-    ;; the conversation at a response whose call has no output.
-    (setf (scripted-agent-script agent)
-          (list (list (scripted-call "call_1") (scripted-completion "resp_2"))
-                (list '(:closed 1006 "gone"))))
-    (fail (openai:agent-turn agent "build something") 'openai:agent-closed)
-    (true (string= "resp_2" (request-previous (first (scripted-agent-requests agent)))))
-    (true (string= "resp_1" (openai:agent-response-id agent)))
-    ;; The next turn continues from the last finished one.
-    (setf (scripted-agent-script agent)
-          (list (list (scripted-completion "resp_3"))))
-    (openai:agent-turn agent "what did I just ask?")
-    (true (string= "resp_1" (request-previous (first (scripted-agent-requests agent)))))
-    (true (string= "resp_3" (openai:agent-response-id agent)))))
+(defclass counting-tool (echo-tool)
+  ((count :initform 0 :accessor tool-count)))
+
+(defmethod openai:call-tool :before ((tool counting-tool) arguments agent)
+  (declare (ignore arguments agent))
+  (incf (tool-count tool)))
+
+(defun scripted-error (code)
+  (openai::json-object "type" "error" "error" (openai::json-object "code" code)))
+
+(define-test reconnect-resumes-after-the-tool-only-once
+  (let* ((openai::*reconnect-delays* '(0 0))
+         (tool (make-instance 'counting-tool :name "echo"))
+         (agent (make-instance 'scripted-agent :model "test" :tools (list tool)
+                               :script (list
+                                        ;; An incomplete generation cannot start a tool.
+                                        (list (scripted-call "abandoned") '(:closed 1006 "gone"))
+                                        (list (scripted-call "approved") (scripted-completion "resp_tool"))
+                                        (list (scripted-error "websocket_connection_limit_reached"))
+                                        (list (scripted-error "previous_response_not_found"))
+                                        (list (scripted-completion "resp_ok"))))))
+    (setf (openai:agent-response-id agent) "base")
+    (openai:agent-turn agent "build")
+    (destructuring-bind (replay retry continuation regenerated initial) (scripted-agent-requests agent)
+      (true (equal initial regenerated))
+      (true (equal retry continuation))
+      (true (equal "resp_tool" (request-previous retry)))
+      (true (equal "base" (request-previous replay)))
+      (let ((input (openai::json-value replay :input)))
+        (true (= 3 (length input)))
+        (true (equal "function_call" (openai::json-value (second input) :type)))
+        (true (equal "function_call_output" (openai::json-value (third input) :type)))
+        (true (every (lambda (item) (equal "approved" (openai::json-value item :call-id))) (rest input)))))
+    (true (= 1 (tool-count tool)))
+    (true (equal "resp_ok" (openai:agent-response-id agent)))))
+
+(define-test failed-completion-does-not-dispatch-its-tools
+  (let* ((tool (make-instance 'counting-tool :name "echo"))
+         (agent (make-instance 'scripted-agent :model "test" :tools (list tool)
+                               :script (list (list (scripted-call "a")
+                                                   '((:type . "response.done")
+                                                     (:response (:status . "incomplete"))))))))
+    (fail (openai:agent-turn agent "build") 'openai:agent-failed)
+    (true (zerop (tool-count tool)))))
+
+(define-test silent-connection-has-a-bound-and-keeps-settled-tools
+  (let* ((openai::*response-idle-timeout* 0.02)
+         (openai::*reconnect-delays* '(0))
+         (tool (make-instance 'counting-tool :name "echo"))
+         (agent (make-instance 'scripted-agent :model "test" :tools (list tool)
+                               :script (list (list (scripted-call "a") (scripted-completion "r"))
+                                             nil nil))))
+    (fail (openai:agent-turn agent "build") 'openai::connection-interrupted)
+    (true (= 3 (length (scripted-agent-requests agent))))
+    (setf (scripted-agent-script agent) (list (list (scripted-completion "done"))))
+    (openai:agent-turn agent "are you back?")
+    (let* ((request (first (scripted-agent-requests agent)))
+           (input (openai::json-value request :input)))
+      (true (equal "r" (request-previous request)))
+      (true (equal "a" (openai::json-value (first input) :call-id)))
+      (true (equal "user" (openai::json-value (second input) :role))))
+    (true (= 1 (tool-count tool)))))
+
+(define-test explicit-close-wakes-reader-and-old-callback-is-ignored
+  (let ((agent (make-instance 'scripted-agent :model "test" :script nil)))
+    (openai::enqueue-agent-event agent '(:closed 1006 "stale") :old-socket)
+    (false (openai::agent-events agent))
+    (let ((reader (sb-thread:make-thread
+                   (lambda ()
+                     (handler-case (openai::next-agent-event agent)
+                       (openai:agent-closed () :closed))))))
+      (openai:close-agent agent)
+      (true (eq :closed (sb-thread:join-thread reader :timeout 2 :default :timeout))))
+    (fail (openai:agent-turn agent "hello") 'openai:agent-closed)
+    (false (scripted-agent-requests agent))))
 
 (define-test missing-conversation-starts-afresh
   ;; A response id saved with the world outlives the server's memory of it.
