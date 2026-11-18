@@ -1048,6 +1048,12 @@ candidate that loses to release or another publication is detached and closed."
 (defmethod luvcraft:luvcraft-focus-score ((overlay gnome-dialogue-overlay) session)
   (declare (ignore overlay session)) nil)
 
+(defmethod luvcraft:handle-luvcraft-overlay-event
+    ((overlay gnome-dialogue-overlay) session canvas (event luv:canvas-pointer-event))
+  "Let clicks through the dialogue card. The companion itself owns conversation focus."
+  (declare (ignore overlay session canvas event))
+  nil)
+
 (defmethod luvcraft:luvcraft-overlay-focus-insets
     ((overlay gnome-dialogue-overlay) session)
   ;; The card is up for good once made; it covers the view only while its

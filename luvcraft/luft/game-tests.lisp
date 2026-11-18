@@ -345,6 +345,48 @@
           (luvcraft.agent::gnome-said-at agent) (get-internal-real-time))
     (is equal "Old reply" (getf (luvcraft.agent::dialogue-view agent) :said))))
 
+(defclass dialogue-test-canvas (luv:sdl-canvas) ())
+
+(defmethod luv:set-canvas-relative-pointer-mode ((canvas dialogue-test-canvas) enabled)
+  enabled)
+
+(defclass dialogue-test-mirror (mcluv::luv-gpu-mirror) ())
+
+(defmethod luv:handle-canvas-event
+    ((mirror dialogue-test-mirror) canvas (event luv:canvas-pointer-button-press-event))
+  (declare (ignore mirror canvas event))
+  nil)
+
+(define-test clicking-a-companion-subtitle-returns-to-play
+  (let* ((viewer (make-instance 'host:luvcraft-viewer
+                                :source (luft.world:make-mountain-sanctuary-scene)))
+         (canvas (make-instance 'dialogue-test-canvas))
+         (agent (make-instance 'luvcraft.agent:fantus :session viewer))
+         (overlay (make-instance 'luvcraft.agent::gnome-dialogue-overlay
+                                 :session viewer :gnome agent
+                                 :mirror (make-instance 'dialogue-test-mirror :target canvas))))
+    ;; Lay out the card without realizing a native window or GPU mirror.
+    (setf (slot-value viewer 'render::canvas) canvas
+          (mcluv::widget-overlay-render-state overlay)
+          (luvcraft.agent::dialogue-screen-state overlay))
+    (render:add-viewer-overlay viewer overlay)
+    (destructuring-bind (x y &rest projection)
+        (mcluv::direct-mirror-projected-screen-vertex
+         (mcluv::widget-overlay-render-state overlay)
+         (luv:canvas-width canvas) (luv:canvas-height canvas) 0.5 0.5)
+      (declare (ignore projection))
+      (true (mcluv::luvcraft-widget-texture-coordinate overlay x y))
+      ;; The card has the same screen area whether or not it shows a subtitle.
+      (dolist (said '("Still here." nil))
+        (setf (luvcraft.agent::gnome-said agent) said
+              (luvcraft.agent::gnome-said-at agent) (get-internal-real-time)
+              (render:viewer-pointer-captured-p viewer) nil)
+        (luv:handle-canvas-event viewer canvas
+                                 (make-instance 'luv:canvas-pointer-button-press-event
+                                                :timestamp 0 :x x :y y :button :left))
+        (true (null (render:viewer-modal-focus viewer)))
+        (true (render:viewer-pointer-captured-p viewer))))))
+
 (defclass gated-sdf-test-overlay (luvcraft.agent::sdf-agent-body-overlay) ())
 
 (defmethod render:encode-viewer-overlay
