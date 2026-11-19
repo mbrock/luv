@@ -194,10 +194,43 @@ their own, and keep their author across saves."
     (when (eq approval (inhabitant-approval inhabitant))
       (setf (inhabitant-approval inhabitant) nil))))
 
+(defun gnome-auto-approve-build-p (viewer inhabitant)
+  (and viewer
+       (eq inhabitant (viewer-auto-approved-gnome viewer))
+       (null (world-session (viewer-world viewer)))))
+
+(defun selected-solo-gnome (viewer)
+  (let ((inhabitant (viewer-conversation-agent viewer)))
+    (when (and inhabitant (eq :gnome (inhabitant-kind inhabitant))
+               (null (world-session (viewer-world viewer))))
+      inhabitant)))
+
+(defun selected-gnome-auto-approve-builds-p (viewer)
+  (let ((gnome (selected-solo-gnome viewer)))
+    (and gnome (eq gnome (viewer-auto-approved-gnome viewer)))))
+
+(defun (setf selected-gnome-auto-approve-builds-p) (enabled-p viewer)
+  (let ((gnome (or (selected-solo-gnome viewer) (error "Select a gnome in a solo game first."))))
+    (when (or enabled-p (eq gnome (viewer-auto-approved-gnome viewer)))
+      (setf (viewer-auto-approved-gnome viewer) (and enabled-p gnome)))
+    (when enabled-p
+      (let ((approval (inhabitant-approval gnome)))
+        (when (and approval (eq viewer (luvcraft.agent::tool-approval-session approval)))
+          (luvcraft.agent:approve-tool-approval approval)))))
+  enabled-p)
+
+(luv.knobs:define-knob gnome-auto-approve-builds
+    (:group :player :class 'luv.knobs:switch-knob :label "gnome auto-approve builds" :type boolean
+     :quantity (:quantity :dimensionless :unit :one))
+  (selected-gnome-auto-approve-builds-p session))
+
 (defun install-companion-approval (approval)
-  (let ((inhabitant (luvcraft.agent::tool-approval-presence approval)))
+  (let ((inhabitant (luvcraft.agent::tool-approval-presence approval))
+        (viewer (luvcraft.agent::tool-approval-session approval)))
     (when (inhabitant-approval inhabitant) (error "An edit is already proposed."))
-    (setf (inhabitant-approval inhabitant) approval)))
+    (if (gnome-auto-approve-build-p viewer inhabitant)
+        (luvcraft.agent:approve-tool-approval approval)
+        (setf (inhabitant-approval inhabitant) approval))))
 
 (clim:define-presentation-method clim:present
     (object (type companion-edit-approval) stream (view clim:textual-view) &key)
@@ -206,7 +239,7 @@ their own, and keep their author across saves."
 
 (clim:define-command (com-propose-cell :command-table luvcraft-world :name "Propose Cell")
     ((x 'integer) (y 'integer) (z 'integer) (material 'string))
-  "Propose a cell edit without changing terrain; wait for the player's Y/N decision."
+  "Propose a cell edit for review or automatic approval, according to the game settings."
   (multiple-value-bind (world inhabitant viewer) (companion-command-context)
     (when (inhabitant-approval inhabitant) (error "An edit is already proposed."))
     (let* ((cell (agent-cell world x y z))
@@ -261,7 +294,7 @@ their own, and keep their author across saves."
     ((material 'string)
      (from-x 'integer) (from-y 'integer) (from-z 'integer)
      (to-x 'integer) (to-y 'integer) (to-z 'integer))
-  "Preview filling the empty box between two inclusive corners with one ordinary, unlimited block material. The box must be within reach and contain at most 512 cells. Wait for the player's approval."
+  "Propose filling the empty box between two inclusive corners with one ordinary, unlimited block material. The box must be within reach and contain at most 512 cells. The game settings determine whether review is required."
   (multiple-value-bind (world inhabitant viewer) (companion-command-context)
     (unless viewer (error "A construction preview needs an open world view."))
     (unless (member (inhabitant-kind inhabitant) '(:gnome :fantus))

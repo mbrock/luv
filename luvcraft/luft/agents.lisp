@@ -234,7 +234,7 @@ immediate. Never claim an error succeeded. Keep replies short.")
           :instructions
           (concatenate 'string *inhabitant-instructions*
                        (if cat-p ""
-                           " Use propose-cell or propose-block-box to preview a change and ask the player before applying it.")
+                           " Use propose-cell or propose-block-box for build proposals. The game settings determine whether the player reviews them or they are approved automatically.")
                        (if lisp-p
                            " Eval runs Common Lisp in the live game. Use it for local game work the player asks you to do."
                            "")))))

@@ -13,11 +13,11 @@
                     luvcraft::physics-substeps))
           (remove-if-not
            (lambda (knob)
-             (or (eq (symbol-package (luv.knobs:knob-name knob))
-                     (find-package :luvcraft.luft.game))
-                 (and (eq (symbol-package (luv.knobs:knob-name knob))
-                          (find-package :luvcraft))
-                      (eq :text (luv.knobs:knob-group knob)))))
+             (let ((name (luv.knobs:knob-name knob)))
+               (cond ((eq name 'gnome-auto-approve-builds) (selected-solo-gnome viewer))
+                     ((eq (symbol-package name) (find-package :luvcraft.luft.game)) t)
+                     ((eq (symbol-package name) (find-package :luvcraft))
+                      (eq :text (luv.knobs:knob-group knob))))))
            luv.knobs:*knobs*)))
 
 (defmethod luv.knobs:knob-rebuild-p :around

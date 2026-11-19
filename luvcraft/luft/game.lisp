@@ -33,6 +33,8 @@
          :documentation "The first-person hands, bob, and held item that this view draws.")
    (conversation-agent :initform nil :accessor viewer-conversation-agent
                        :documentation "The companion this view addresses with T, Y, and N.")
+   (auto-approved-gnome :initform nil :accessor viewer-auto-approved-gnome
+                        :documentation "The gnome whose build proposals this solo view auto-approves.")
    (previous-animal-figures :initform (make-hash-table :test #'eq)
                             :reader viewer-previous-animal-figures
                             :documentation "Each turtle's boxes as this view last drew them, for motion.")
