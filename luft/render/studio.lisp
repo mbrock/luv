@@ -548,7 +548,9 @@ before the operation boundary, or it would encode through resources which the
   same canvas thread has just retired."
   (refresh-viewer-tracy-capture viewer)
   (dolist (overlay (copy-list (viewer-overlays viewer)))
-    (refresh-viewer-overlay overlay viewer))
+    ;; Refreshing a companion can remove and release its current thought cloud.
+    (when (member overlay (viewer-overlays viewer) :test #'eq)
+      (refresh-viewer-overlay overlay viewer)))
   ;; Inspector repaint is semantic and therefore sparse.  Shader definitions
   ;; are independently live, so the static retained stream still refreshes its
   ;; direct compositor here, before ENCODE-RENDERER-FRAME opens a pass.

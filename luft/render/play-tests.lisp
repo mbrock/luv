@@ -31,6 +31,37 @@
     (render:stop-viewer viewer)
     (true (= 3 (length (car log))))))
 
+(defclass refresh-test-overlay ()
+  ((refresh :initarg :refresh :reader test-overlay-refresh)))
+
+(defmethod render:refresh-viewer-overlay ((overlay refresh-test-overlay) viewer)
+  (funcall (test-overlay-refresh overlay) viewer))
+
+(define-test refreshing-an-overlay-can-replace-a-dependent-overlay
+  (let* ((viewer (make-instance 'render:game-host
+                                :source (world:make-mountain-sanctuary-scene)
+                                :renderer :test-renderer))
+         (refreshed nil)
+         (old (make-instance 'refresh-test-overlay
+                             :refresh (lambda (viewer)
+                                        (declare (ignore viewer))
+                                        (push :old refreshed))))
+         (new (make-instance 'refresh-test-overlay
+                             :refresh (lambda (viewer)
+                                        (declare (ignore viewer))
+                                        (push :new refreshed))))
+         (parent (make-instance 'refresh-test-overlay
+                                :refresh (lambda (viewer)
+                                           (push :parent refreshed)
+                                           (render:remove-viewer-overlay viewer old)
+                                           (render:add-viewer-overlay viewer new)))))
+    (render:add-viewer-overlay viewer parent)
+    (render:add-viewer-overlay viewer old)
+    (render::prepare-viewer-frame-renderer viewer)
+    (true (equal '(:parent) refreshed))
+    (render::prepare-viewer-frame-renderer viewer)
+    (true (equal '(:new :parent :parent) refreshed))))
+
 (define-test game-host-shares-player-instruments-not-the-ateliers-camera-modes
   (let* ((scene (world:make-mountain-sanctuary-scene))
          (host (make-instance 'render:game-host :source scene))
