@@ -269,6 +269,22 @@ wedged image looks like, and the difference has to be visible from here.")
       (error "swash ~{~A~^ ~} failed with exit code ~D"
              arguments (sb-ext:process-exit-code process)))))
 
+(defun first-whitespace-delimited-field (line)
+  (let* ((trimmed (string-left-trim '(#\Space #\Tab) line))
+         (end (position-if (lambda (character)
+                             (member character '(#\Space #\Tab)))
+                           trimmed)))
+    (subseq trimmed 0 end)))
+
+(defun swash-session-running-p (instance)
+  (find (lisp-instance-id instance)
+        ;; Invoking Swash without arguments lists running sessions.
+        (split-lines (run-swash-output))
+        :key #'first-whitespace-delimited-field
+        :test #'string=))
+
+(defvar *swash-session-running-probe* #'swash-session-running-p)
+
 (defun json-value (name object)
   (cdr (assoc name object :test #'string=)))
 
@@ -460,70 +476,59 @@ wedged image looks like, and the difference has to be visible from here.")
             instances))))
 
 (defun stale-lisp-selection-error (instances)
-  (error "Stale managed Lisp~P ~{~A~^, ~} must be selected by full session ID; use ./sly --lisp ID status, log, stop, or restart"
+  (error "Stale managed Lisp~P ~{~A~^, ~}; use ./sly --lisp ID status, log, stop, or restart"
          (length instances)
          (mapcar #'lisp-instance-id instances)))
 
-(defun choose-lisp (&key start-if-missing allow-explicit-stale refuse-if-stale
+(defun choose-lisp (&key start-if-missing allow-stale
                          (instances nil instances-supplied-p))
   (when (and *lisp-selector* (zerop (length *lisp-selector*)))
     (error "Lisp selector must not be empty"))
   (let* ((all (if instances-supplied-p instances (lisp-instances)))
          (running (remove-if-not #'running-lisp-p all))
+         (stale (remove-if-not #'stale-lisp-p all))
+         (root (namestring *project-root*))
          (exact-instance
            (and *lisp-selector*
                 (find *lisp-selector* all
                       :key #'lisp-instance-id :test #'string=)))
-         ;; An unhealthy session is deliberately never a work target. Lifecycle
-         ;; commands may recover one only through its complete Swash identity;
-         ;; names and prefixes are not precise enough for a destructive action.
-         (explicit-stale
-           (and allow-explicit-stale
-                exact-instance
-                (stale-lisp-p exact-instance)
-                exact-instance))
-         (eligible (if explicit-stale
-                       (cons explicit-stale running)
-                       running))
+         (local-stale
+           (remove-if-not (lambda (instance)
+                            (same-root-p (lisp-instance-root instance) root))
+                          stale))
          (candidates
            (cond
-             ((and exact-instance (running-lisp-p exact-instance))
+             ((and exact-instance
+                   (or (running-lisp-p exact-instance)
+                       (and allow-stale (stale-lisp-p exact-instance))))
               (list exact-instance))
-             (explicit-stale (list explicit-stale))
              (*lisp-selector*
-              (matching-lisps *lisp-selector* eligible))
+              (matching-lisps *lisp-selector* running))
              (t
-              (remove-if-not
-               (lambda (instance)
-                 (same-root-p (lisp-instance-root instance)
-                              (namestring *project-root*)))
-               running))))
+              (or (remove-if-not (lambda (instance)
+                                   (same-root-p (lisp-instance-root instance) root))
+                                 running)
+                  (and allow-stale local-stale)))))
          (stale-matches
            (and *lisp-selector*
-                (matching-lisps *lisp-selector*
-                                (remove-if-not #'stale-lisp-p all))))
-         (stale-for-root
-           (remove-if-not
-            (lambda (instance)
-              (and (stale-lisp-p instance)
-                   (same-root-p (lisp-instance-root instance)
-                                (namestring *project-root*))))
-            all)))
+                (matching-lisps *lisp-selector* stale))))
     (cond
       ((and stale-matches
-            (null exact-instance))
+            (not (and exact-instance (eq exact-instance (first candidates)))))
        (stale-lisp-selection-error stale-matches))
       ((null candidates)
        (cond
-         (stale-matches
-          (stale-lisp-selection-error stale-matches))
          (*lisp-selector*
           (print-lisp-list)
           (error "No running Lisp matches ~S" *lisp-selector*))
-         ((and stale-for-root (or start-if-missing refuse-if-stale))
-          (stale-lisp-selection-error stale-for-root))
-         (start-if-missing (start-server :quiet t))
+         (start-if-missing
+          (let ((unhealthy (remove-if-not *swash-session-running-probe* local-stale)))
+            (when unhealthy
+              (stale-lisp-selection-error unhealthy))
+            (start-server :quiet t)))
          (t nil)))
+      ((and (cdr candidates) (stale-lisp-p (first candidates)))
+       (stale-lisp-selection-error candidates))
       ((cdr candidates)
        (print-lisp-list)
        (if *lisp-selector*
@@ -1162,22 +1167,6 @@ the frames after CODE failed, else 0."
     (with-slynk-handshake-timeout
       (assert-stream-listener-project stream))))
 
-(defun first-whitespace-delimited-field (line)
-  (let* ((trimmed (string-left-trim '(#\Space #\Tab) line))
-         (end (position-if (lambda (character)
-                             (member character '(#\Space #\Tab)))
-                           trimmed)))
-    (subseq trimmed 0 end)))
-
-(defun swash-session-running-p (instance)
-  (find (lisp-instance-id instance)
-        ;; The pinned Swash lists running sessions with no arguments. -a is
-        ;; not supported, and prevented retirement of dead registry entries.
-        (split-lines (run-swash-output))
-        :key #'first-whitespace-delimited-field
-        :test #'string=))
-
-(defvar *swash-session-running-probe* #'swash-session-running-p)
 (defvar *swash-stop-runner*
   (lambda (instance)
     (run-swash "stop" (lisp-instance-id instance))))
@@ -1214,8 +1203,7 @@ host is still present, Swash remains the only authority allowed to stop it."
           (format t "The external Slynk endpoint is not running on ~A:~D.~%"
                   *host* *port*)))
     (return-from stop-server nil))
-  (let ((instance (choose-lisp :allow-explicit-stale t
-                               :refuse-if-stale t)))
+  (let ((instance (choose-lisp :allow-stale t)))
     (if (null instance)
         (progn
           (format t "This checkout has no running Lisp.~%")
@@ -1229,8 +1217,7 @@ host is still present, Swash remains the only authority allowed to stop it."
 (defun restart-server ()
   (when (attach-only-p)
     (error "restart manages a Swash Lisp, not a standalone luvcraft"))
-  (let ((instance (choose-lisp :allow-explicit-stale t
-                               :refuse-if-stale t)))
+  (let ((instance (choose-lisp :allow-stale t)))
     (if instance
         (let ((name (lisp-instance-name instance)))
           (stop-managed-lisp instance)
@@ -1257,7 +1244,7 @@ host is still present, Swash remains the only authority allowed to stop it."
      (format t "Lisp ~A (~A) is still starting.~%"
              (lisp-instance-id instance) (lisp-instance-name instance)))
     (t
-     (format t "Lisp ~A (~A) is stale or unhealthy; inspect its log, then stop or restart it by full session ID.~%"
+     (format t "Lisp ~A (~A) is stale or unhealthy; inspect its log, then stop or restart it.~%"
              (lisp-instance-id instance) (lisp-instance-name instance)))))
 
 (defun server-status ()
@@ -1270,13 +1257,12 @@ host is still present, Swash remains the only authority allowed to stop it."
                   *host* *port*)))
     (return-from server-status nil))
   (report-managed-server-status
-   (choose-lisp :allow-explicit-stale t)))
+   (choose-lisp :allow-stale t)))
 
 (defun print-server-log-tail ()
   (when (attach-only-p)
     (error "log is available for Swash-managed Lisps, not standalone luvcraft"))
-  (let ((instance (choose-lisp :allow-explicit-stale t
-                               :refuse-if-stale t)))
+  (let ((instance (choose-lisp :allow-stale t)))
     (if instance
         (run-swash "poll" (lisp-instance-id instance))
         (format t "This checkout has no running Lisp.~%"))))

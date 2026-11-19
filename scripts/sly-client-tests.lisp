@@ -121,13 +121,35 @@
     (true (string= "/tmp/luv/" (sly-client::lisp-instance-root instance)))
     (true (eq :ready (sly-client::lisp-instance-state instance)))))
 
-(define-test stale-lisps-require-explicit-lifecycle-selection
+(define-test implicit-lifecycle-selection-prefers-running-lisps
+  (let* ((sly-client::*project-root* #P"/tmp/luv/")
+         (sly-client::*lisp-selector* nil)
+         (stale
+           (sly-client::make-lisp-instance
+            :id "STA123" :root "/tmp/luv/" :state :stale))
+         (other
+           (sly-client::make-lisp-instance
+            :id "OTH123" :root "/tmp/luv2/" :state :stale))
+         (running
+           (sly-client::make-lisp-instance
+            :id "RUN123" :root "/tmp/luv/" :state :ready)))
+    (true (eq stale (sly-client::choose-lisp
+                     :instances (list other stale) :allow-stale t)))
+    (true (eq running (sly-client::choose-lisp
+                       :instances (list stale running) :allow-stale t)))
+    (false (sly-client::choose-lisp :instances (list other) :allow-stale t))
+    (setf (sly-client::lisp-instance-root other) "/tmp/luv/")
+    (fail (sly-client::choose-lisp :instances (list other stale) :allow-stale t)
+          'error)))
+
+(define-test stale-lisps-are-only-selected-for-lifecycle-commands
   (let* ((sly-client::*project-root* #P"/tmp/luv/")
          (stale
            (sly-client::make-lisp-instance
             :id "STA123" :name "stale" :root "/tmp/luv/"
             :state :stale :pid 12345 :port 4005)))
-    (let ((sly-client::*lisp-selector* nil))
+    (let ((sly-client::*lisp-selector* nil)
+          (sly-client::*swash-session-running-probe* (constantly t)))
       (false (sly-client::choose-lisp :instances (list stale)))
       (fail
        (sly-client::choose-lisp
@@ -136,14 +158,14 @@
     (let ((sly-client::*lisp-selector* "STA123"))
       (true (eq stale
                 (sly-client::choose-lisp
-                 :instances (list stale) :allow-explicit-stale t)))
+                 :instances (list stale) :allow-stale t)))
       (fail
        (sly-client::choose-lisp :instances (list stale))
        'error))
     (let ((sly-client::*lisp-selector* "STA"))
       (fail
        (sly-client::choose-lisp
-        :instances (list stale) :allow-explicit-stale t)
+        :instances (list stale) :allow-stale t)
        'error))))
 
 (define-test swash-running-probe-uses-the-supported-list-command
@@ -214,7 +236,7 @@ printf 'ID       STATUS\\nLIVE123  running\\n'
     (false (sly-client::matching-lisps "" (list other)))
     (fail
      (sly-client::choose-lisp
-      :instances (list other) :allow-explicit-stale t)
+      :instances (list other) :allow-stale t)
      'error)))
 
 (define-test activity-events-carry-registry-identity
