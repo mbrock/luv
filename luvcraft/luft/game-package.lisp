@@ -7,7 +7,7 @@
                     (#:wire #:luvcraft.wire)
                     (#:net #:luvcraft.wire.net))
   (:documentation "The Luvcraft on Luft game: a world, its players, and their views (#32DUBY).")
-  (:export #:play
+  (:export #:play #:play-from-launcher
            #:*starting-hotbar*
            ;; The world, which runs without a window.
            #:luvcraft-world

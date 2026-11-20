@@ -22,6 +22,16 @@
   (:documentation
    "Bind one lens-chain STAGE (:bright, :horizontal, :vertical, or :shafts)
 to its SOURCE view and the frame's CAMERA uniform."))
+;; A long-lived image may still have the renderer method from before temporal
+;; coverage. CLOS checks installed methods before it accepts a new lambda list.
+(eval-when (:load-toplevel :execute)
+  (when (fboundp 'make-presentation-binding)
+    (let* ((generic (fdefinition 'make-presentation-binding))
+           (arguments (sb-mop:generic-function-lambda-list generic)))
+      (unless (intersection arguments lambda-list-keywords)
+        (let* ((types (cons 'image-finishing (make-list (1- (length arguments)) :initial-element t)))
+               (method (find-method generic nil (mapcar #'find-class types) nil)))
+          (when method (remove-method generic method)))))))
 (defgeneric make-presentation-binding (finishing device scene depth camera bloom shafts panel-color panel-depth viewmodel &optional coverage-history))
 (defgeneric encode-composite (finishing pass binding))
 (defgeneric encode-lens-stage (finishing stage pass binding))

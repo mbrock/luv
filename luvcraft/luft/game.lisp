@@ -316,6 +316,24 @@ from the head when it opened, or NIL for the watermark."))
           viewer-arguments :pathname :seed :relief :world-height :terrain-bevels-p
           :host :join :port :player-id :name)))
 
+(defun play-from-launcher (&rest options &key fullscreen-p &allow-other-keys)
+  "Open Luvcraft, or bring the ordinary solo world forward if it is already open."
+  (let* ((viewer render:*viewer*)
+         (save (gethash viewer render::*viewer-world-saves*)))
+    (cond
+      ((and (null luvcraft:*session*) (null viewer))
+       (apply #'play options))
+      ((and (null luvcraft:*session*) (typep viewer 'luvcraft-viewer)
+            (null (world-session (viewer-world viewer)))
+            (null (alexandria:remove-from-plist options :fullscreen-p))
+            save (equal (render::viewer-world-save-pathname save) (luvcraft::default-luvcraft-world-pathname)))
+       (let ((canvas (render:viewer-canvas viewer)))
+         (when (and fullscreen-p (not (luv:canvas-fullscreen-p canvas)))
+           (luv:set-canvas-fullscreen canvas t))
+         (luv:raise-canvas canvas))
+       viewer)
+      (t (error "Another game is playing; call STOP-PLAYING first.")))))
+
 (defun play (&rest viewer-arguments
              &key (pathname (luvcraft::default-luvcraft-world-pathname)
                             pathname-p)

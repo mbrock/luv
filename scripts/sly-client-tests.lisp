@@ -99,6 +99,21 @@
     (true (string= (format nil "This checkout has no running Lisp.~%")
                    output))))
 
+(define-test solo-play-can-prefer-the-checkout-image
+  (let* ((sly-client::*project-root* #P"/tmp/luv/")
+         (sly-client::*lisp-selector* nil)
+         (sly-client::*swash-events-provider* (fixed-journal-provider nil))
+         (normal (sly-client::make-lisp-instance :id "LUV123" :name "luv" :root "/tmp/luv/" :state :ready))
+         (demo (sly-client::make-lisp-instance :id "DEM123" :name "demo" :root "/tmp/luv/" :state :ready))
+         (other (sly-client::make-lisp-instance :id "OTH123" :name "luv" :root "/tmp/other/" :state :ready))
+         (instances (list demo other normal)))
+    (true (eq normal (sly-client::choose-lisp :instances instances :preferred-name "luv")))
+    (true (eq demo (sly-client::choose-lisp :instances (list other demo) :preferred-name "luv")))
+    (let ((sly-client::*lisp-selector* "demo"))
+      (true (eq demo (sly-client::choose-lisp :instances instances :preferred-name "luv"))))
+    (setf (sly-client::lisp-instance-name demo) "luv")
+    (fail (sly-client::choose-lisp :instances instances :preferred-name "luv") 'error)))
+
 (define-test tagged-ready-event-discovers-an-orphaned-start
   (let* ((ready
            (journal-event

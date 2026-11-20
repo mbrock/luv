@@ -480,7 +480,7 @@ wedged image looks like, and the difference has to be visible from here.")
          (length instances)
          (mapcar #'lisp-instance-id instances)))
 
-(defun choose-lisp (&key start-if-missing allow-stale
+(defun choose-lisp (&key start-if-missing allow-stale preferred-name
                          (instances nil instances-supplied-p))
   (when (and *lisp-selector* (zerop (length *lisp-selector*)))
     (error "Lisp selector must not be empty"))
@@ -509,6 +509,11 @@ wedged image looks like, and the difference has to be visible from here.")
                                    (same-root-p (lisp-instance-root instance) root))
                                  running)
                   (and allow-stale local-stale)))))
+         (preferred (and preferred-name (not *lisp-selector*) (cdr candidates)
+                         (remove-if-not (lambda (instance)
+                                          (and (running-lisp-p instance)
+                                               (equal preferred-name (lisp-instance-name instance))))
+                                        candidates)))
          (stale-matches
            (and *lisp-selector*
                 (matching-lisps *lisp-selector* stale))))
@@ -529,6 +534,7 @@ wedged image looks like, and the difference has to be visible from here.")
          (t nil)))
       ((and (cdr candidates) (stale-lisp-p (first candidates)))
        (stale-lisp-selection-error candidates))
+      ((and preferred (null (rest preferred))) (first preferred))
       ((cdr candidates)
        (print-lisp-list)
        (if *lisp-selector*
@@ -692,12 +698,12 @@ wedged image looks like, and the difference has to be visible from here.")
      *managed-lisp* "sly-activity" (format nil "./sly ~A" *current-command*)
      (format nil "LUV_COMMAND=~A" *current-command*))))
 
-(defun ensure-server ()
+(defun ensure-server (&key preferred-name)
   (if (attach-only-p)
       (unless (connection-available-p)
         (error "The requested external Slynk endpoint is not accepting connections on ~A:~D"
                *host* *port*))
-      (let ((instance (choose-lisp :start-if-missing t)))
+      (let ((instance (choose-lisp :start-if-missing t :preferred-name preferred-name)))
         (if (eq (lisp-instance-state instance) :ready)
             (select-managed-lisp instance)
             (wait-for-lisp instance :quiet nil))
@@ -1711,8 +1717,9 @@ peers ~:[none~;~:*~{~A~^, ~}~]; chunk hashes ~D equal, ~D different.~%"
   (format stream "  ./sly start [--name NAME]~%")
   (format stream "  ./sly --lisp ID-or-NAME COMMAND ...~%~%")
   (format stream "Without --lisp, a command selects the sole running Lisp for this checkout.~%")
-  (format stream "If there is none, work commands start one; if there are several, selection~%")
-  (format stream "is intentionally required. RESTART creates a new Swash incarnation.~%")
+  (format stream "If there is none, work commands start one. With several, ordinary solo Luvcraft~%")
+  (format stream "play prefers the checkout-named image; otherwise select one with --lisp.~%")
+  (format stream "RESTART creates a new Swash incarnation.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
   (format stream "Usage: ./sly play [luvcraft|luft|luvcraft-on-luft|luvcraft-old|wizard|luvland] [--fullscreen]|stop-playing|status|restart~%")
@@ -2076,7 +2083,8 @@ as a plist of PLAY keywords (Luvcraft on Luft only)."
       (parse-play-arguments arguments)
     (when (attach-only-p)
       (error "play owns the durable image; a standalone luvcraft is already playing"))
-    (ensure-server)
+    (ensure-server :preferred-name (and (member target '(:luvcraft :luvcraft-on-luft))
+                                        (null options) (default-lisp-name)))
     (when *managed-lisp*
       (format t "Opening ~A in Lisp ~A (~A).~%"
               (string-downcase (symbol-name target))
@@ -2108,10 +2116,8 @@ as a plist of PLAY keywords (Luvcraft on Luft only)."
        (evaluate
         (format nil
                 "(progn
-                   (asdf:load-system :luvcraft/luft/game)
-                   (when (or luvcraft:*session* luft.render:*viewer*)
-                     (error \"Another game is playing; call STOP-PLAYING first.\"))
-                   (uiop:symbol-call :luvcraft.luft.game :play~:[~; :fullscreen-p t~]~{ ~S~}))"
+                   (luv:load-systems-live :luvcraft/luft/game)
+                   (uiop:symbol-call :luvcraft.luft.game :play-from-launcher~:[~; :fullscreen-p t~]~{ ~S~}))"
                 fullscreen-p options)
         "CL-USER"))
       (:wizard
