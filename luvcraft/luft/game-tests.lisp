@@ -9,6 +9,40 @@
 
 (in-package #:luvcraft.luft.game.tests)
 
+(defstruct held-item-test-binding descriptor released-p)
+
+(defmethod luv:create ((device (eql 'held-item-test-device)) descriptor)
+  (make-held-item-test-binding :descriptor descriptor))
+
+(defmethod luv:destroy ((binding held-item-test-binding))
+  (setf (held-item-test-binding-released-p binding) t))
+
+(define-test held-item-rebinds-when-the-host-replaces-borrowed-inputs
+  (let* ((drawing (make-instance 'host::held-item-drawing))
+         (legacy-group (make-held-item-test-binding))
+         (vertices (make-held-item-test-binding))
+         (frame (list legacy-group vertices)))
+    (dolist (slot '(host::atlas host::sampler host::layout host::comparison host::normal))
+      (setf (slot-value drawing slot) slot))
+    (flet ((binding (uniforms shadow)
+             (host::held-item-frame-binding frame drawing 'held-item-test-device uniforms shadow)))
+      (let* ((first (binding :camera :shadow))
+             (same (binding :camera :shadow))
+             (new-shadow (binding :camera :replacement))
+             (new-camera (binding :new-camera :replacement))
+             (entries (luv::bind-group-descriptor-entries (held-item-test-binding-descriptor new-camera))))
+        (true (held-item-test-binding-released-p legacy-group))
+        (is eq first same)
+        (true (held-item-test-binding-released-p first))
+        (true (held-item-test-binding-released-p new-shadow))
+        (is eq :new-camera (getf (third entries) :resource))
+        (is eq :replacement (getf (fourth entries) :resource))
+        (true (not (held-item-test-binding-released-p vertices)))
+        (true (not (held-item-test-binding-released-p new-camera)))
+        (host::release-held-item-frame frame)
+        (true (held-item-test-binding-released-p vertices))
+        (true (held-item-test-binding-released-p new-camera))))))
+
 (define-test player-instruments-share-the-old-quickbar-without-spending-stock
   (let* ((player (host:make-luvcraft-player
                   :hotbar (list (game:block-placement luvcraft::*grass-block*))))

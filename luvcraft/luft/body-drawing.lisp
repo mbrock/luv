@@ -63,7 +63,10 @@
                                 :depth-write-enabled t :depth-compare :less)))))))
 
 (defun release-held-item-frame (frame)
-  (dolist (resource frame) (luv:destroy resource)))
+  (destructuring-bind (group vertices &rest borrowed) frame
+    (declare (ignore borrowed))
+    (when group (luv:destroy group))
+    (luv:destroy vertices)))
 
 (defmethod render:evict-viewer-overlay-frame-key ((drawing held-item-drawing) key)
   (luv:evict-canvas-frame-resource-key (held-item-frames drawing) key #'release-held-item-frame))
@@ -77,43 +80,47 @@
 (defmethod render:refresh-viewer-overlay ((drawing held-item-drawing) (viewer luvcraft-viewer))
   (luv:refresh-live-shader-pipeline (held-item-pipeline drawing)))
 
+(defun held-item-frame-binding (frame drawing device uniforms shadow)
+  ;; The drawable slot can survive a renderer rebuild. Only the group borrows
+  ;; the host's current shadow view and uniforms. Keep the slot's vertex buffer.
+  (destructuring-bind (group vertices &optional previous-uniforms previous-shadow) frame
+    (declare (ignore vertices))
+    (if (and group (eq uniforms previous-uniforms) (eq shadow previous-shadow))
+        group
+        (let ((replacement
+                (luv:create device
+                            (luv:make-bind-group-descriptor
+                             :layout (held-item-layout drawing)
+                             :entries `((:binding 0 :resource ,(held-item-atlas drawing))
+                                        (:binding 1 :resource ,(held-item-sampler drawing))
+                                        (:binding 2 :resource ,uniforms)
+                                        (:binding 3 :resource ,shadow)
+                                        (:binding 4 :resource ,(held-item-sampler drawing))
+                                        (:binding 5 :resource ,(held-item-comparison drawing))
+                                        (:binding 6 :resource ,(held-item-normal drawing)))))))
+          ;; Older live images have just (group vertices) in this slot.
+          (setf (first frame) replacement (cddr frame) (list uniforms shadow))
+          (when group (luv:destroy group))
+          replacement))))
+
 (defmethod render:encode-viewer-overlay
     ((drawing held-item-drawing) (viewer luvcraft-viewer) pass surface)
   (when (and (viewer-body-visible-p viewer)
              (luvcraft::player-body-hand-item (viewer-body viewer)))
-    (luvcraft.agent::sdf-agent-scene-bind-group viewer surface)
-    (let* ((state (companion-presentation viewer))
-           (uniforms (second (luv:canvas-frame-resource
-                              (presentation-frames state) (render:viewer-context viewer) surface
-                              (lambda (&rest ignored) (declare (ignore ignored)) (error "Missing frame")))))
+    (let* ((device (render:viewer-device viewer))
+           (uniforms (luvcraft.agent::sdf-agent-frame-uniform-buffer viewer surface))
+           (shadow (render::renderer-shadow-view (render:viewer-renderer viewer)))
            (frame (luv:canvas-frame-resource
                    (held-item-frames drawing) (render:viewer-context viewer) surface
                    (lambda (key target)
                      (declare (ignore key target))
-                     (let* ((device (render:viewer-device viewer))
-                            (buffer (luv:create device (luv:make-buffer-descriptor
-                                                        :size luvcraft::+player-body-buffer-size+
-                                                        :usage '(:vertex :copy-dst))))
-                            (group (handler-case
-                                       (luv:create
-                                        device
-                                        (luv:make-bind-group-descriptor
-                                         :layout (held-item-layout drawing)
-                                         :entries
-                                         `((:binding 0 :resource ,(held-item-atlas drawing))
-                                           (:binding 1 :resource ,(held-item-sampler drawing))
-                                           (:binding 2 :resource ,uniforms)
-                                           (:binding 3 :resource ,(render::renderer-shadow-view (render:viewer-renderer viewer)))
-                                           (:binding 4 :resource ,(held-item-sampler drawing))
-                                           (:binding 5 :resource ,(held-item-comparison drawing))
-                                           (:binding 6 :resource ,(held-item-normal drawing)))))
-                                     (error (condition)
-                                       (luv:destroy buffer)
-                                       (error condition)))))
-                       (list group buffer)))))
+                     (list nil (luv:create device (luv:make-buffer-descriptor
+                                                   :size luvcraft::+player-body-buffer-size+
+                                                   :usage '(:vertex :copy-dst)))))))
+           (group (held-item-frame-binding frame drawing device uniforms shadow))
            (vertices (luvcraft::player-body-vertices viewer)))
       (luv:write-buffer (second frame) vertices)
       (luv:set-pipeline pass (luv:live-shader-pipeline-native-pipeline (held-item-pipeline drawing)))
-      (luv:set-bind-group pass 0 (first frame))
+      (luv:set-bind-group pass 0 group)
       (luv:set-vertex-buffer pass 0 (second frame))
       (luv:draw pass (/ (length vertices) luvcraft::+block-mesh-floats-per-vertex+) 1))))
