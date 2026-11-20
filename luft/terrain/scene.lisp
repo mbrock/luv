@@ -552,3 +552,33 @@ stair topology. #WSEK3C"
     (when present-p
       (domains:identity-vocabulary-member (scene-material-vocabulary scene)
                                           offset))))
+
+;;; A fixture is a block drawn as an attachment, such as a lantern: its
+;;; material has an attachment form, and its cell is the attachment's
+;;; clearance (see REALIZE-FIXTURE-CELLS).  Unlike a builder's attachment,
+;;; it is authored, so it can be mined and its support changed.
+
+(defun fixture-attachment-p (attachment)
+  (and (material-kind-attachment-form (surface-attachment-material attachment)) t))
+
+(defun scene-fixture-at (scene cell)
+  "The fixture attachment realized in CELL of SCENE, or NIL."
+  (find-if (lambda (attachment)
+             (and (= cell (surface-attachment-clearance-cell attachment))
+                  (fixture-attachment-p attachment)))
+           (scene-attachments scene)))
+
+(defun fixture-placement-offset (vocabulary attachment)
+  "The vocabulary offset of the block ATTACHMENT was realized from."
+  (position (surface-attachment-material attachment)
+            (domains:identity-vocabulary-members vocabulary)
+            :key #'material-placement-kind))
+
+(defun scene-authored-placement-at (scene cell)
+  "The placement authored at CELL: its solid material, or the fixture there."
+  (or (scene-material-placement-at scene cell)
+      (let ((fixture (scene-fixture-at scene cell)))
+        (and fixture
+             (domains:identity-vocabulary-member
+              (scene-material-vocabulary scene)
+              (fixture-placement-offset (scene-material-vocabulary scene) fixture))))))

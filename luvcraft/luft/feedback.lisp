@@ -36,10 +36,11 @@ Cancel interior triangle edges, retaining concave joins as well as bevels."
          (edges (make-hash-table :test #'equal)))
     ;; The old game marks the cell face even for shaped blocks. Keep that
     ;; convention for fixtures, whose geometry is not a star-atlas surface.
-    (let ((placement (terrain:scene-material-placement-at scene cell)))
+    (let ((placement (terrain:scene-authored-placement-at scene cell)))
       (when (and placement
-                 (not (eq :none (terrain:material-kind-body
-                                (terrain:material-placement-kind placement)))))
+                 (let ((kind (terrain:material-placement-kind placement)))
+                   (or (not (eq :none (terrain:material-kind-body kind)))
+                       (terrain:material-kind-attachment-form kind))))
         (let ((others (remove axis '(0 1 2))))
           (return-from target-face-boundary
             (loop for (u v) in '((0 0) (1 0) (1 1) (0 1))

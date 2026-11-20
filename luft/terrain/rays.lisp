@@ -14,7 +14,7 @@
                  (/ (- direction))))
         (t (values 0 most-positive-single-float most-positive-single-float))))
 
-(defun ray-entry-face (solid cell-x cell-y cell-z axis step)
+(defun ray-entry-face (solid occupancy cell-x cell-y cell-z axis step)
   "Return the outward face through which a ray entered CELL along AXIS."
   (let* ((domain (luft:fiber-store-domain solid))
          (anchor-x (+ cell-x (if (and (eq axis :x) (minusp step)) 1 0)))
@@ -24,19 +24,31 @@
                    (:x luft:+yz-face-extent+)
                    (:y luft:+xz-face-extent+)
                    (:z luft:+xy-face-extent+)))
-         (geometry (luft:make-site domain anchor-x anchor-y anchor-z extent 1))
-         (occupancy (lambda (x y z) (inspection-cell-bit solid x y z))))
+         (geometry (luft:make-site domain anchor-x anchor-y anchor-z extent 1)))
     (luft:orient-face-outward domain geometry occupancy)))
 
-(defun raycast-face (source origin direction &key (max-distance 600.0))
+(defun raycast-face (source origin direction &key (max-distance 600.0) fixtures)
   "Follow a continuous ray from ORIGIN along DIRECTION into SOURCE's cells.
 
 Return the first outward face it meets, the occupied cell's X, Y, and Z, the
 point where it met the face, and the distance travelled, as six values; or
 NIL when nothing solid lies within MAX-DISTANCE.  Tied edge and corner
 crossings advance together, so a ray never reports a cell it merely touches.
-Unknown cells -- outside the domain or not resident -- read as air."
+Unknown cells -- outside the domain or not resident -- read as air.
+With FIXTURES, a scene's fixtures, such as lanterns, stop the ray too, as a
+pointer aiming at one expects; bodies and the ground still pass them."
   (let* ((solid (inspection-source-solid source))
+         (fixture-cells
+           (and fixtures (typep source 'scene)
+                (loop for attachment across (scene-attachments source)
+                      for cell = (surface-attachment-clearance-cell attachment)
+                      when (fixture-attachment-p attachment)
+                        collect (list (luft:site-x cell) (luft:site-y cell)
+                                      (luft:site-z cell)))))
+         (occupancy (lambda (x y z)
+                      (if (member (list x y z) fixture-cells :test #'equal)
+                          1
+                          (inspection-cell-bit solid x y z))))
          (direction (vec3-normalize direction))
          (x (floor (vec3-x origin)))
          (y (floor (vec3-y origin)))
@@ -54,9 +66,9 @@ Unknown cells -- outside the domain or not resident -- read as air."
     (multiple-value-setq (step-z next-z delta-z)
       (ray-axis-crossings (vec3-z origin) (vec3-z direction)))
     (loop
-      (when (= 1 (inspection-cell-bit solid x y z))
+      (when (= 1 (funcall occupancy x y z))
         (when entry-axis
-          (let ((face (ray-entry-face solid x y z entry-axis entry-step)))
+          (let ((face (ray-entry-face solid occupancy x y z entry-axis entry-step)))
             (when face
               (return
                 (values face x y z

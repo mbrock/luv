@@ -27,18 +27,25 @@ while SITE's chunk is resident."
     (cond
       (present-p (values value t))
       ((null (streaming-scene-source scene))
-       (values (scene-material-placement-at scene site) t))
+       (values (scene-authored-placement-at scene site) t))
       (t
        (let ((resident (world-site-resident-chunk scene site)))
          (if resident
              (multiple-value-bind (offset occupied-p)
                  (gethash site (resident-cell-chunk-material-cells resident))
-               (values (world-source-baseline-value
-                        (streaming-scene-source scene)
-                        (and occupied-p
-                             (domains:identity-vocabulary-member
-                              (scene-material-vocabulary scene) offset)))
-                       t))
+               (let* ((vocabulary (scene-material-vocabulary scene))
+                      ;; A generated fixture is realized out of the table.
+                      (fixture (and (not occupied-p)
+                                    (find site (resident-cell-chunk-attachments resident)
+                                          :key #'surface-attachment-clearance-cell)))
+                      (offset (if fixture
+                                  (fixture-placement-offset vocabulary fixture)
+                                  offset)))
+                 (values (world-source-baseline-value
+                          (streaming-scene-source scene)
+                          (and (or occupied-p fixture)
+                               (domains:identity-vocabulary-member vocabulary offset)))
+                         t)))
              (values nil nil)))))))
 
 (defun world-visible-value (scene site)
@@ -48,28 +55,6 @@ while SITE's chunk is resident."
     (if pending
         (values (world-event-before pending) t)
         (world-cell-value scene site))))
-
-(defun world-attachment-conflict-p (scene site)
-  "Whether changing SITE would disturb a surface attachment, made or queued."
-  (or (scene-edit-attachment-conflict-p scene site)
-      (let ((resident (world-site-resident-chunk scene site)))
-        (and resident
-             (some (lambda (attachment)
-                     (or (= site (surface-attachment-support-cell attachment))
-                         (= site (surface-attachment-clearance-cell attachment))))
-                   (resident-cell-chunk-attachments resident))))
-      ;; A queued fixture is not an attachment yet, but will be one.
-      (let ((domain (scene-domain scene)))
-        (some (lambda (event)
-                (let ((placement (world-value-placement (world-event-after event)))
-                      (fixture (world-event-site event)))
-                  (and placement
-                       (material-kind-attachment-form
-                        (material-placement-kind placement))
-                       (or (= site fixture)
-                           (eql site (luft:step-site domain fixture :z -1))
-                           (eql site (luft:step-site domain fixture :z 1))))))
-              (streaming-scene-pending-events scene)))))
 
 (defun world-change-refusal (scene site before after head known-p)
   "Why SCENE refuses changing SITE from BEFORE to AFTER at value HEAD, or NIL."
@@ -83,7 +68,7 @@ while SITE's chunk is resident."
             (null (domains:identity-vocabulary-offset
                    (scene-material-vocabulary scene) placement nil))))
      :unknown-material)
-    ((world-attachment-conflict-p scene site) :attachment)))
+    ((scene-edit-attachment-conflict-p scene site) :attachment)))
 
 (defun sequence-world-events (scene changes &key actor tick cause)
   "Check and record CHANGES, each (SITE BEFORE AFTER), as one transaction.
@@ -137,7 +122,7 @@ refused change.  A later change in CHANGES sees the earlier ones' values."
             scene production-system key token 0)))
        nil)
       (t
-       (let ((current (scene-material-placement-at scene site)))
+       (let ((current (scene-authored-placement-at scene site)))
          (cond
            ;; A chunk materialized after EVENT was sequenced already has it.
            ((eq current after) nil)

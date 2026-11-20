@@ -258,6 +258,7 @@ this package draws; the renderer and the ateliers use it.")
            #:scene-edit-old-placement
            #:scene-material-cells
            #:scene-material-placement-at
+           #:scene-authored-placement-at
            #:scene-material-vocabulary
            #:scene-mesh-generation
            #:scene-mesh-generation-light-generation

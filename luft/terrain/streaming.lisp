@@ -131,10 +131,46 @@ propagates light; otherwise every cohort shares SCENE's one field."
   (content-revision 0 :type (integer 0 *) :read-only t))
 
 (defun scene-edit-attachment-conflict-p (scene cell)
-  "Whether changing CELL would invalidate a retained surface attachment."
+  "Whether changing CELL would invalidate a retained builder attachment.
+
+A fixture is authored, so an edit re-realizes it instead (REALIZE-FIXTURE-COLUMN)."
   (loop for attachment across (scene-attachments scene)
-        thereis (or (= cell (surface-attachment-support-cell attachment))
-                    (= cell (surface-attachment-clearance-cell attachment)))))
+        thereis (and (not (fixture-attachment-p attachment))
+                     (or (= cell (surface-attachment-support-cell attachment))
+                         (= cell (surface-attachment-clearance-cell attachment))))))
+
+(defun realize-fixture-column (scene cell offset)
+  "Re-realize the fixtures that CELL holding OFFSET, or air for NIL, decides.
+
+A fixture stands on the cell below it, else hangs from the one above, so an
+edit decides only the fixtures in CELL and its two vertical neighbours, which
+read two cells further each way.  Return those three cells' new material
+offsets as an alist, NIL for air or a fixture, and their fixture attachments."
+  (let* ((domain (scene-domain scene))
+         (vocabulary (scene-material-vocabulary scene))
+         (column (make-hash-table :test #'eql))
+         (inner nil))
+    (loop for dz from -2 to 2
+          for site = (luft:step-site domain cell :z dz)
+          when site
+            do (when (<= -1 dz 1) (push site inner))
+               (multiple-value-bind (present present-p)
+                   (material-cell-at (scene-material-cells scene) site)
+                 (let ((fixture (and (not present-p) (scene-fixture-at scene site))))
+                   (cond (present-p (setf (gethash site column) present))
+                         (fixture (setf (gethash site column)
+                                        (fixture-placement-offset vocabulary fixture)))))))
+    (if offset (setf (gethash cell column) offset) (remhash cell column))
+    (let ((attachments (realize-fixture-cells domain vocabulary column)))
+      (values (loop for site in inner collect (cons site (values (gethash site column))))
+              (remove-if-not (lambda (attachment)
+                               (member (surface-attachment-clearance-cell attachment) inner))
+                             attachments)))))
+
+(defun same-attachment-p (left right)
+  (and (= (surface-attachment-support-cell left) (surface-attachment-support-cell right))
+       (= (surface-attachment-clearance-cell left) (surface-attachment-clearance-cell right))
+       (eq (surface-attachment-material left) (surface-attachment-material right))))
 
 (zdefun (edit-streaming-scene-cell :zone :luft/edit-cell)
     (scene cell new-placement)
@@ -176,6 +212,12 @@ this at a frame boundary."
                    (= 1 (luft:fibers-cell-bit old-chunk (luft:site-x cell)
                                               (luft:site-y cell) (luft:site-z cell))))
         (error "Scene occupancy and material state disagree at ~S." cell))
+      ;; A realized fixture's cell is air to the fibers but authored.
+      (let ((fixture (and (not occupied-p) (scene-fixture-at scene cell))))
+        (when fixture
+          (setf old-offset (fixture-placement-offset
+                            (scene-material-vocabulary scene) fixture)
+                occupied-p t)))
       (cond ((and new-placement occupied-p)
              (return-from edit-streaming-scene-cell
                (values nil :occupied nil)))
@@ -189,105 +231,127 @@ this at a frame boundary."
         (when (and new-placement (null new-offset))
           (return-from edit-streaming-scene-cell
             (values nil :unknown-material nil)))
-        (let* ((attachment
-                 (when (and new-placement
-                            (material-kind-attachment-form
-                             (material-placement-kind new-placement)))
-                   (let ((nearby (make-hash-table :test #'eql)))
-                     (setf (gethash cell nearby) new-offset)
-                     (dolist (dz '(-1 1))
-                       (let ((neighbor (luft:step-site domain cell :z dz)))
-                         (when neighbor
-                           (multiple-value-bind (offset present-p)
-                               (material-cell-at (scene-material-cells scene) neighbor)
-                             (when present-p (setf (gethash neighbor nearby) offset))))))
-                     (first (realize-fixture-cells
-                             domain (scene-material-vocabulary scene) nearby)))))
-               (unchanged-products
-                 (streaming-products-outside-cell scene cell))
-               (material-cells (material-store-with-cell
-                                (scene-material-cells scene) cell
-                                (unless attachment new-offset)))
-               (bit (if (and new-placement (not attachment)) 1 0))
-               (new-chunk (luft:fibers-with-cell
-                           old-chunk (luft:site-x cell) (luft:site-y cell)
-                           (luft:site-z cell) bit))
-               (new-solid (luft:copy-fiber-store solid))
-               (light-revision (1+ (scene-authored-light-revision scene))))
-          ;; Collision keeps its window; the resident store below has the edit.
-          (when (or (null (streaming-scene-source scene))
-                    (luft:fiber-store-chunk solid key))
-            (setf (luft:fiber-store-chunk new-solid key) new-chunk))
-          (let* ((sources
-                   (let ((sources
-                           (remove cell (copy-seq (scene-authored-light-sources scene))
-                                   :key #'luft::%voxel-light-source-cell)))
-                     (when (and new-placement (not attachment))
-                       (let ((emission (material-kind-packed-light-emission
-                                        (material-placement-kind new-placement))))
-                         (unless (zerop emission)
-                           (setf sources
-                                 (concatenate 'vector sources
-                                              (vector (luft:make-voxel-light-source
-                                                       cell emission)))))))
-                     (coerce (sort sources #'<)
-                             '(simple-array (unsigned-byte 64) (*)))))
-                 ;; Regional light re-solves only the tiles around CELL when
-                 ;; the edit's cohort is meshed; one whole field is solved now.
-                 (base-generation
-                   (if (scene-regional-light-p scene)
-                       (scene-authored-light-generation scene)
-                       (solve-realized-light-generation
-                        domain material-cells
-                        (scene-authored-light-opacity-table scene)
-                        (if (scene-voxel-light-propagation-p scene) sources #())
-                        (scene-authored-light-provenance scene) light-revision
-                        (make-realized-light-seeds #() #())
-                        :field-revision light-revision)))
-                 (content-revision (1+ (scene-content-revision scene)))
-                 (edit
-                   (%make-scene-edit
-                    cell
-                    (and occupied-p
-                         (domains:identity-vocabulary-member
-                          (scene-material-vocabulary scene) old-offset))
-                    new-placement content-revision))
-                 (mesh-cache
-                   (rebase-streaming-star-products
-                    unchanged-products key new-chunk
-                    (gethash key (material-store-chunks material-cells)))))
-            ;; These values are replace-only.  Existing worker snapshots retain
-            ;; the old store, fibers, hash table, and light generation.
-            (setf (scene-solid scene) new-solid
-                  (scene-material-cells scene) material-cells
-                  (scene-attachments scene)
-                  (if attachment
-                      (concatenate 'vector (scene-attachments scene) (vector attachment))
-                      (scene-attachments scene))
-                  (scene-authored-light-sources scene) sources
-                  (scene-authored-light-revision scene) light-revision
-                  (scene-authored-light-generation scene) base-generation
-                  (scene-content-revision scene) content-revision)
-            (unless (scene-regional-light-p scene)
-              (setf (streaming-scene-light-generation scene) base-generation))
-            (if (streaming-scene-source scene)
-                (let ((local-materials
-                        (gethash key (material-store-chunks material-cells))))
-                  (setf (gethash key (streaming-scene-store scene))
-                        (%make-resident-cell-chunk
-                         key
-                         (incf (streaming-scene-next-incarnation scene))
-                         new-chunk local-materials
-                         (let ((old (gethash key (streaming-scene-store scene))))
-                           (append (and old (resident-cell-chunk-attachments old))
-                                   (when attachment (list attachment)))))))
-                (if (luft:fibers-empty-p new-chunk)
-                    (remhash key (streaming-scene-store scene))
+        (multiple-value-bind (column realized)
+            (realize-fixture-column scene cell new-offset)
+          (let* ((vocabulary (scene-material-vocabulary scene))
+                 (changed
+                   (remove-if (lambda (entry)
+                                (eql (cdr entry)
+                                     (material-cell-at (scene-material-cells scene)
+                                                       (car entry))))
+                              column))
+                 (retired
+                   (loop for attachment across (scene-attachments scene)
+                         when (and (fixture-attachment-p attachment)
+                                   (assoc (surface-attachment-clearance-cell attachment)
+                                          column)
+                                   (notany (lambda (new) (same-attachment-p attachment new))
+                                           realized))
+                           collect attachment))
+                 (added
+                   (remove-if (lambda (new)
+                                (find-if (lambda (old)
+                                           (and (fixture-attachment-p old)
+                                                (same-attachment-p old new)))
+                                         (scene-attachments scene)))
+                              realized))
+                 (unchanged-products
+                   (streaming-products-outside-cell scene cell))
+                 (material-cells
+                   (reduce (lambda (store entry)
+                             (material-store-with-cell store (car entry) (cdr entry)))
+                           changed :initial-value (scene-material-cells scene)))
+                 (new-chunk
+                   (reduce (lambda (fibers entry)
+                             (let ((site (car entry)))
+                               (luft:fibers-with-cell
+                                fibers (luft:site-x site) (luft:site-y site)
+                                (luft:site-z site) (if (cdr entry) 1 0))))
+                           changed :initial-value old-chunk))
+                 (new-solid (luft:copy-fiber-store solid))
+                 (light-revision (1+ (scene-authored-light-revision scene))))
+            ;; Collision keeps its window; the resident store below has the edit.
+            (when (or (null (streaming-scene-source scene))
+                      (luft:fiber-store-chunk solid key))
+              (setf (luft:fiber-store-chunk new-solid key) new-chunk))
+            (let* ((sources
+                     (let ((sources
+                             (remove-if (lambda (source)
+                                          (assoc (luft::%voxel-light-source-cell source)
+                                                 changed))
+                                        (scene-authored-light-sources scene))))
+                       (loop for (site . offset) in changed
+                             for emission = (and offset
+                                                 (material-kind-packed-light-emission
+                                                  (material-placement-kind
+                                                   (domains:identity-vocabulary-member
+                                                    vocabulary offset))))
+                             when (and emission (not (zerop emission)))
+                               do (setf sources
+                                        (concatenate 'vector sources
+                                                     (vector (luft:make-voxel-light-source
+                                                              site emission)))))
+                       (coerce (sort (copy-seq sources) #'<)
+                               '(simple-array (unsigned-byte 64) (*)))))
+                   ;; Regional light re-solves only the tiles around CELL when
+                   ;; the edit's cohort is meshed; one whole field is solved now.
+                   (base-generation
+                     (if (scene-regional-light-p scene)
+                         (scene-authored-light-generation scene)
+                         (solve-realized-light-generation
+                          domain material-cells
+                          (scene-authored-light-opacity-table scene)
+                          (if (scene-voxel-light-propagation-p scene) sources #())
+                          (scene-authored-light-provenance scene) light-revision
+                          (make-realized-light-seeds #() #())
+                          :field-revision light-revision)))
+                   (content-revision (1+ (scene-content-revision scene)))
+                   (edit
+                     (%make-scene-edit
+                      cell
+                      (and occupied-p
+                           (domains:identity-vocabulary-member
+                            (scene-material-vocabulary scene) old-offset))
+                      new-placement content-revision))
+                   (mesh-cache
+                     (rebase-streaming-star-products
+                      unchanged-products key new-chunk
+                      (gethash key (material-store-chunks material-cells)))))
+              ;; These values are replace-only.  Existing worker snapshots retain
+              ;; the old store, fibers, hash table, and light generation.
+              (setf (scene-solid scene) new-solid
+                    (scene-material-cells scene) material-cells
+                    (scene-attachments scene)
+                    (concatenate 'vector
+                                 (remove-if (lambda (old) (member old retired))
+                                            (scene-attachments scene))
+                                 added)
+                    (scene-authored-light-sources scene) sources
+                    (scene-authored-light-revision scene) light-revision
+                    (scene-authored-light-generation scene) base-generation
+                    (scene-content-revision scene) content-revision)
+              (unless (scene-regional-light-p scene)
+                (setf (streaming-scene-light-generation scene) base-generation))
+              (if (streaming-scene-source scene)
+                  (let ((local-materials
+                          (gethash key (material-store-chunks material-cells))))
                     (setf (gethash key (streaming-scene-store scene))
-                          new-chunk)))
-            (setf (streaming-scene-mesh-cache scene)
-                  mesh-cache)
-            (values edit :edited key)))))))
+                          (%make-resident-cell-chunk
+                           key
+                           (incf (streaming-scene-next-incarnation scene))
+                           new-chunk local-materials
+                           (let ((old (gethash key (streaming-scene-store scene))))
+                             (append (and old (set-difference
+                                               (resident-cell-chunk-attachments old)
+                                               retired))
+                                     added)))))
+                  (if (luft:fibers-empty-p new-chunk)
+                      (remhash key (streaming-scene-store scene))
+                      (setf (gethash key (streaming-scene-store scene))
+                            new-chunk)))
+              (setf (streaming-scene-mesh-cache scene)
+                    mesh-cache)
+              (values edit :edited key))))))))
 
 (defun reset-streaming-scene-publication (scene)
   "Forget renderer publication while retaining source-owned resident values."

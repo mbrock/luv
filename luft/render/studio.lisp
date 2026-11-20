@@ -328,7 +328,8 @@ at the atelier boundary where a person has selected one site."))
 The terrain's RAYCAST-FACE answers the query; the inspection is the one
 sparse object boundary over the chunk fibers and dense face records."
   (multiple-value-bind (face x y z point distance)
-      (raycast-face source origin direction :max-distance max-distance)
+      (raycast-face source origin direction :max-distance max-distance
+                                            :fixtures t)
     (when face
       (make-site-inspection source face x y z point distance))))
 
@@ -1672,7 +1673,7 @@ ACTION is :SMASH, :BUILD, or :PICK; return the inspected site, or NIL."
         (:pick
          (let ((source (viewer-source viewer)))
            (when (typep source 'scene)
-             (let ((placement (scene-material-placement-at
+             (let ((placement (scene-authored-placement-at
                                source (site-inspection-cell inspection))))
                (when placement
                  (viewer-pick-material viewer placement)))))))

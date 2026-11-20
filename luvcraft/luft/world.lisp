@@ -428,7 +428,7 @@ conserve stock too."
          (inventory (luvcraft:player-inventory player))
          (entry (and block (luvcraft:block-inventory-entry-for inventory block)))
          (finite-p (and block (luvcraft:block-kind-carried-p block)))
-         (old (terrain:scene-material-placement-at (world-scene world) cell))
+         (old (terrain:scene-authored-placement-at (world-scene world) cell))
          (original (world-authored-block world cell))
          (old-block (and old (or (and original
                                        (eq old (game:block-placement original)) original)

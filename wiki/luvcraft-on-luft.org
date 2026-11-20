@@ -141,6 +141,12 @@ bodies, and attachment bodies read the accepted field.  Placing a supported
 lantern through either game's edit path realizes its attachment before the
 next remesh, retaining the original placement in the source's edit overlay
 for reloads.  Unsupported lanterns remain cubes, as on initial materialization.
+A lantern is authored, unlike a builder's torch, so the refusal covers only
+builder attachments: mining a lantern, its support, or the cell above or below it
+re-realizes the fixtures of that column, so a lantern whose floor is mined
+hangs from its ceiling or becomes a cube, exactly as the chunk would
+rematerialize.  The pointer's ray stops at a lantern's cell, which bodies
+and the ground still treat as air.
 
 A game's palette reaches the terrain in two places.  A scene builder takes
 a material vocabulary and the placements a cell gets by default, and a

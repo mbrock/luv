@@ -617,3 +617,42 @@ Unlike SXHASH this freezes a portable, independently captured baseline."
                (terrain:%make-resident-cell-chunk
                 key 99 (terrain:resident-cell-chunk-fibers resident) reversed
                 (reverse (terrain:resident-cell-chunk-attachments resident))))))))))
+
+(define-test a-lantern-and-its-support-can-be-mined
+  ;; Picking aims at the lantern itself, and every edit around it re-realizes
+  ;; its column as a peer raising the chunk from the journal would.
+  (let* ((source (game:make-luvcraft-world-source :seed 121 :relief :meadow :height 32))
+         (domain (terrain:world-source-domain source))
+         (key (luft:chunk-key-at 1024 1024))
+         (scene (game:make-luvcraft-streaming-scene source))
+         (lantern (game:block-placement luvcraft::*lantern-block*))
+         (stone (game:block-placement luvcraft::*stone-block*)))
+    (setf (gethash key (terrain:streaming-scene-store scene))
+          (nth-value 1 (terrain:world-source-chunk-hash source key)))
+    (terrain:rebuild-authored-world-resident-values scene (list key))
+    (let ((z (loop for z from 31 downto 0
+                   when (= 1 (luft:fiber-store-cell-bit (terrain:scene-solid scene) 1050 1030 z))
+                     return z)))
+      (flet ((edit (dz placement)
+               (is eq :edited
+                   (nth-value 1 (terrain:edit-world-cell
+                                 scene (luft:make-site domain 1050 1030 (+ z dz)
+                                                       luft:+cell-extent+ 1)
+                                 placement)))
+               (is string= (terrain:world-source-chunk-hash source key)
+                   (terrain:streaming-scene-chunk-hash scene key)))
+             (lantern-solid-p ()
+               (= 1 (luft:fiber-store-cell-bit (terrain:scene-solid scene) 1050 1030 (1+ z)))))
+        (edit 1 lantern)
+        (is = (1+ z) (nth-value 3 (terrain:raycast-face
+                                   scene (luv.arithmetic.lisp.vec3:make-vec3 1050.5 1030.5 (+ z 5.5))
+                                   (luv.arithmetic.lisp.vec3:make-vec3 0 0 -1) :fixtures t)))
+        (edit 2 stone)                  ; a ceiling above the standing lantern
+        (edit 0 nil)                    ; its support mined: it hangs
+        (false (lantern-solid-p))
+        (edit 2 nil)                    ; its ceiling mined too: a cube
+        (true (lantern-solid-p))
+        (edit 0 stone)                  ; it stands again
+        (false (lantern-solid-p))
+        (edit 1 nil)
+        (is = 0 (length (terrain:scene-attachments scene)))))))
