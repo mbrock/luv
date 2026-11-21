@@ -1,5 +1,19 @@
 (in-package #:luv.tests)
 
+(define-test a-failed-live-load-releases-the-lock-before-reporting-the-error
+  (let ((luv::*live-system-load-lock* (sb-thread:make-mutex))
+        (luv::*open-sdl-canvases* nil)
+        (failure (make-condition 'simple-error :format-control "failed load")))
+    (multiple-value-bind (condition owner)
+        (block reported
+          (handler-bind ((error (lambda (condition)
+                                  (return-from reported
+                                    (values condition (sb-thread:mutex-owner luv::*live-system-load-lock*))))))
+            (luv:call-with-live-system-load (lambda () (error failure)))))
+      (true (eq condition failure))
+      (false owner))
+    (true (equal '(:ready nil) (multiple-value-list (luv:call-with-live-system-load (constantly :ready)))))))
+
 (define-test release-report-attempts-every-step-in-source-order
   (let ((events nil)
         (condition nil))

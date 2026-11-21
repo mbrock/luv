@@ -122,8 +122,8 @@ is recorded in this image.
 
 Swash also makes multiple images and worktrees explicit. `./sly list` shows
 them all; create one with `./sly start --name experiment` and select it with
-`./sly --lisp experiment ...`. With several images in a checkout, ordinary
-solo `./sly play` prefers the unique image named after the checkout. Running
+`./sly --lisp experiment ...`. Ordinary solo `./sly play` uses the image named
+after the checkout and starts it if only experiments are running. Running
 it again brings the normal saved world forward. Other commands need an
 explicit selection when several images match.
 

@@ -982,25 +982,20 @@ Return FUNCTION's primary value and an alist of held canvases to their first
 post-load fence outcome.  If FUNCTION signals, release and fence first, then
 resignal the original condition.  Thus a failed live load cannot skip the
 terminal frame observation required by an updater or interactive presenter."
-  (sb-thread:with-mutex (*live-system-load-lock*)
-    (let ((canvases (open-canvases))
-          (result nil)
-          (failure nil)
-          (fences nil))
-      (handler-case
-          (setf result
-                (call-with-canvas-frames-held function canvases))
-        (error (condition)
-          (setf failure condition)))
-      (setf fences
-            (mapcar (lambda (canvas)
-                      (cons canvas
-                            (fence-canvas
-                             canvas :frames frames :timeout timeout)))
-                    canvases))
-      (when failure
-        (error failure))
-      (values result fences))))
+  ;; Unwind the lock before the interactive debugger sees a load failure.
+  ;; A terminal waiting at its restart prompt must not block the next launch.
+  (handler-case
+      (sb-thread:with-mutex (*live-system-load-lock*)
+        (let ((canvases (open-canvases))
+              (fences nil))
+          (values (unwind-protect
+                       (call-with-canvas-frames-held function canvases)
+                    (setf fences
+                          (mapcar (lambda (canvas)
+                                    (cons canvas (fence-canvas canvas :frames frames :timeout timeout)))
+                                  canvases)))
+                  fences)))
+    (error (condition) (error condition))))
 
 (defun load-systems-live (systems &key (frames 1) (timeout 5.0))
   "Load ASDF SYSTEMS while open canvases cannot observe partial redefinition.

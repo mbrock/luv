@@ -38,8 +38,14 @@
            #:present-fragment-specification
            #:present-vertex-specification))
 
+;; Install the engine vocabulary before DEFPACKAGE re-exports its symbols.
+;; The atelier adds LUFT.WORLD later. Omitting :USE on redefinition keeps
+;; that attachment when a live image recompiles the engine on its own.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (let ((renderer (or (find-package '#:luft.render) (make-package '#:luft.render :use nil))))
+    (use-package '(#:cl #:luv #:luft.terrain) renderer)))
+
 (defpackage #:luft.render
-  (:use #:cl #:luv #:luft.terrain)
   ;; Import the everyday vocabulary; keep prefixes for semantic quantities
   ;; and neighboring subsystems. These are the original symbols, not wrappers.
   (:import-from #:luv.arithmetic.lisp.vec3
