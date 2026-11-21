@@ -82,9 +82,14 @@ does in Luvcraft."
     (luvcraft::world-chunk-at world chunk-x 0 chunk-z)))
 
 (defparameter *luvcraft-generation-threads*
+  ;; On Darwin, SBCL can deadlock when GC signals a thread while another
+  ;; thread is reaping recently exited pthreads. Avoid making transient
+  ;; helpers here: terrain generation already runs on the mesh producer
+  ;; during streaming.
+  #+darwin 1
+  #-darwin
   (max 1 (1- (serapeum:count-cpus :default 2)))
-  "How many threads raise the sixteen Luvcraft chunks of one Luft chunk:
-every core but one, which stays with the window.
+  "How many threads raise the sixteen Luvcraft chunks of one Luft chunk.
 
 Each Luvcraft chunk is a pure function of its source, so they are computed
 apart and their cells handed to the terrain in the same order as from one
