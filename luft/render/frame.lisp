@@ -15,6 +15,10 @@
 
 (defvar *renderer-scene-overlay-encoder* nil
   "Optional host replay callback, called with the open depth-tested scene pass.")
+(defvar *renderer-temporal-scene-overlay-encoder* nil
+  "Optional host replay callback, called inside the temporal scene pass (color, motion, depth).")
+(defvar *renderer-current-frame* nil
+  "The renderer frame-state currently being encoded, for temporal scene overlays.")
 (defvar *renderer-world-panel-encoder* nil
   "Optional host replay callback for native-density world panels.")
 (defvar *renderer-viewmodel-encoder* nil
@@ -407,7 +411,6 @@ final pass."
 
 (defun encode-renderer-scene-drawings
     (renderer frame pass player-p construction-p &optional repetition-p visibility-p)
-  (declare (ignore repetition-p))
   ;; The atmosphere is scene-linear world radiance: geometry overwrites it,
   ;; the selected temporal implementation reconstructs it, and the exposure
   ;; probe meters the same pixels presentation will grade.
@@ -461,6 +464,14 @@ final pass."
                           (renderer-frame-lattice-bind-group renderer frame slot)
                           (make-gpu-draw-command :vertex-count 6
                                                  :instance-count (mesh-slot-lattice-point-count slot)))))))
+  ;; Temporal scene overlays share the main pass's color, motion and depth
+  ;; attachments so MetalFX and shader TAA reconstruct them at full quality.
+  (when (and *renderer-temporal-scene-overlay-encoder*
+             (not repetition-p)
+             (renderer-temporal-p renderer)
+             (null (renderer-scene-msaa-view renderer)))
+    (let ((*renderer-current-frame* frame))
+      (funcall *renderer-temporal-scene-overlay-encoder* pass)))
   ;; Without temporal targets the blended sheet ends the same pass.
   (unless (renderer-temporal-p renderer)
     (let ((residents (renderer-translucent-residents renderer)))

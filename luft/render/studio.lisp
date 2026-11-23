@@ -577,9 +577,14 @@ before the operation boundary, or it would encode through resources which the
   (let* ((*fixed-render-scale*
            (canvas-fixed-render-scale (viewer-canvas viewer)))
          (renderer (prepare-viewer-frame-renderer viewer))
+         (*renderer-temporal-scene-overlay-encoder*
+           (lambda (pass)
+             (encode-viewer-overlays viewer :temporal-scene pass surface-texture)))
          (*renderer-scene-overlay-encoder*
            (lambda (pass)
-             (encode-viewer-overlays viewer :scene pass surface-texture)))
+             (encode-viewer-overlays viewer :scene pass surface-texture)
+             (unless (renderer-temporal-p renderer)
+               (encode-viewer-overlays viewer :temporal-scene pass surface-texture))))
          (*renderer-viewmodel-encoder*
            (lambda (pass)
              (encode-viewer-overlays viewer :viewmodel pass surface-texture)))
