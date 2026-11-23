@@ -78,18 +78,6 @@
            (assemble (mcluv::lisp-machine-chassis-vertex-specification)))
      (cons "mcluv-chassis.frag.spv"
            (assemble (mcluv::lisp-machine-chassis-fragment-specification)))
-     (cons "gnome-sdf.vert.spv"
-           (assemble (luv.shader:shader-specification-for :gnome-sdf :vertex)))
-     (cons "gnome-sdf.frag.spv"
-           (assemble (luv.shader:shader-specification-for :gnome-sdf :fragment)))
-     (cons "cat-sdf.vert.spv"
-           (assemble (luv.shader:shader-specification-for :cat-sdf :vertex)))
-     (cons "cat-sdf.frag.spv"
-           (assemble (luv.shader:shader-specification-for :cat-sdf :fragment)))
-     (cons "fantus-sdf.vert.spv"
-           (assemble (luv.shader:shader-specification-for :fantus-sdf :vertex)))
-     (cons "fantus-sdf.frag.spv"
-           (assemble (luv.shader:shader-specification-for :fantus-sdf :fragment)))
      (cons "companion-mesh.vert.spv"
            (assemble (luv.shader:shader-specification-for :companion-mesh :vertex)))
      (cons "companion-mesh.frag.spv"

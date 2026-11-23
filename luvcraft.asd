@@ -88,22 +88,13 @@
                  (:file "film"))))
   :in-order-to ((test-op (test-op "luvcraft/core/test"))))
 
-(defsystem "luvcraft/light-reference"
-  :description "Test-only voxel-light oracle and differential diagnostics."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luvcraft/core")
-  :components ((:file "luvcraft/light-reference")))
-
 (defsystem "luvcraft/agent-bodies"
-  :description "Shared rigged companion mesh shaders and the historical SDF gallery."
+  :description "Shared rigged companion mesh shaders and proportion parameters."
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/core")
   :serial t
-  :components ((:file "luvcraft/agent/shaders")
-               (:file "luvcraft/agent/cat-shaders")
-               (:file "luvcraft/agent/fantus-shaders")
+  :components ((:file "luvcraft/agent/companion-knobs")
                (:file "luvcraft/agent/companion-mesh-shaders")))
 
 (defsystem "luvcraft/tools"
@@ -362,8 +353,7 @@
   :description "Executable claims for the world, shaders, and interactive slice."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/core" "luvcraft/light-reference"
-               "cl-dejavu" "luv/test-support")
+  :depends-on ("luvcraft/core" "cl-dejavu" "luv/test-support")
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "hal/shader/resource-tests")
@@ -372,7 +362,6 @@
                (:file "luvcraft/tests")
                (:file "luvcraft/renderer-tests")
                (:file "luvcraft/physics-tests")
-               (:file "luvcraft/light-tests")
                (:file "hal/metal/msl/tests")
                (:file "hal/webgpu/wgsl/tests")
                (:file "hal/metal/tests" :if-feature :darwin))
