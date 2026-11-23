@@ -82,16 +82,16 @@
       "locked": {
         "lastModified": 1787473849,
         "narHash": "sha256-q0oewh6VvdiOjBRKOMS1JAejIDtBSsqbs0K8Nruzno8=",
-        "ref": "master",
+        "owner": "mbrock",
+        "repo": "mcclim",
         "rev": "4df4240b108cb83a53d4ec90de982feec9fc8062",
-        "revCount": 8849,
-        "type": "git",
-        "url": "https://git.swa.sh/mcclim"
+        "type": "github"
       },
       "original": {
+        "owner": "mbrock",
         "ref": "master",
-        "type": "git",
-        "url": "https://git.swa.sh/mcclim"
+        "repo": "mcclim",
+        "type": "github"
       }
     },
     "nix-bundle": {

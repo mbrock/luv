@@ -15,7 +15,7 @@
   };
   inputs.ghostty.url = "github:ghostty-org/ghostty";
   inputs.mcclim = {
-    url = "git+https://git.swa.sh/mcclim?ref=master";
+    url = "github:mbrock/mcclim/master";
     flake = false;
   };
   inputs.cl-sdl3 = {
