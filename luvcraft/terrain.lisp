@@ -948,3 +948,96 @@ chunk and do not require neighboring live mutation."
                             do (emit *leaf-block* x (1+ crown) z)))
                     (emit *leaf-block* tree-x (+ crown 2) tree-z))))))))
       (nreverse landmarks))))
+
+(defclass block-chunk-load-payload ()
+  ((key :initarg :key :reader block-chunk-load-payload-key)
+   (content :initarg :content :reader block-chunk-load-payload-content)))
+
+(defclass block-chunk-load-request (production-request)
+  ((demand-token :initarg :demand-token
+                 :reader block-chunk-load-request-demand-token)))
+
+(defgeneric make-block-chunk-load-request (source world key demand-token priority))
+
+(defmethod make-block-chunk-load-request
+    ((source t) world key demand-token priority)
+  (declare (ignore world key demand-token priority))
+  nil)
+
+(defclass little-world-load-request (block-chunk-load-request)
+  ((seed :initarg :seed :reader little-world-load-request-seed)
+   (relief :initarg :relief :initform :alpine
+           :reader little-world-load-request-relief)
+   (width :initarg :width :reader little-world-load-request-width)
+   (height :initarg :height :reader little-world-load-request-height)
+   (depth :initarg :depth :reader little-world-load-request-depth)
+   (landmarks :initarg :landmarks :initform nil
+              :reader little-world-load-request-landmarks)
+   (edits :initarg :edits :initform nil
+          :reader little-world-load-request-edits)))
+
+(defmethod make-block-chunk-load-request
+    ((source little-world-source) world key demand-token priority)
+  (let* ((shape (voxel-space-chunk-shape (block-world-space world)))
+         (width (chunk-shape-width shape))
+         (height (chunk-shape-height shape))
+         (depth (chunk-shape-depth shape))
+         (captured-edits nil))
+    (maphash
+     (lambda (coordinate block)
+       (destructuring-bind (x y z) coordinate
+         (when (and (= (floor x width) (first key))
+                    (= (floor y height) (second key))
+                    (= (floor z depth) (third key)))
+           (push (list (block-identity-material block) x y z) captured-edits))))
+     (block-edit-overlay-entries (little-world-source-edits source)))
+    (make-instance
+     'little-world-load-request
+     :key (list :load key)
+     :priority priority
+     :seed (little-world-source-seed source)
+     :relief (little-world-source-relief source)
+     :demand-token demand-token
+     :width width :height height :depth depth
+     :landmarks (little-world-landmarks-for-chunk source world key)
+     :edits captured-edits)))
+
+(zdefmethod (perform-production-request :zone :production/load-chunk)
+    ((request little-world-load-request))
+  "Generate one isolated chunk and transfer only its dense content columns."
+  (destructuring-bind (chunk-x chunk-y chunk-z)
+      (second (production-request-key request))
+    (let* ((source (make-instance
+                    'little-world-source
+                    :seed (little-world-load-request-seed request)
+                    :relief (little-world-load-request-relief request)))
+           (width (little-world-load-request-width request))
+           (depth (little-world-load-request-depth request))
+           (world (make-block-world
+                   :chunk-width width
+                   :chunk-height (little-world-load-request-height request)
+                   :chunk-depth depth
+                   :source source))
+           (vocabulary (block-world-vocabulary world)))
+      (unless (zerop chunk-y)
+        (error "The little world currently materializes only chunk layer zero."))
+      (install-world-chunk-storage
+       world chunk-x chunk-y chunk-z
+       (make-block-content-column
+        (make-chunk-domain (block-world-space world)
+                           (make-chunk-coordinate chunk-x chunk-y chunk-z))
+        :vocabulary vocabulary
+        :indices (little-world-chunk-indices
+                  source vocabulary width
+                  (little-world-load-request-height request) depth
+                  (* chunk-x width) (* chunk-z depth))))
+      (dolist (landmark (little-world-load-request-landmarks request))
+        (destructuring-bind (block x y z) landmark
+          (setf (world-block-at world x y z) block)))
+      (dolist (edit (little-world-load-request-edits request))
+        (destructuring-bind (block x y z) edit
+          (setf (world-block-at world x y z) block)))
+      (let ((chunk (world-chunk-at world chunk-x chunk-y chunk-z)))
+        (make-instance 'block-chunk-load-payload
+                       :key (list chunk-x chunk-y chunk-z)
+                       :content (block-chunk-content chunk))))))

@@ -35,10 +35,6 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || github.sha }}
       - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            extra-substituters = https://luv.swa.sh/nix-cache?priority=30
-            extra-trusted-public-keys = luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG18Bw=
       - name: Prepare Developer ID keychain
         if: env.MACOS_NOTARIZE == 'true'
         env:
@@ -178,10 +174,6 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name || github.sha }}
       - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            extra-substituters = https://luv.swa.sh/nix-cache?priority=30
-            extra-trusted-public-keys = luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG18Bw=
       - uses: Mic92/hestia@v3
       - name: Build self-contained Linux download
         run: |

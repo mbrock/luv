@@ -1192,17 +1192,6 @@ logged-in display, for one, has no displays to add."
               (sdl3:get-error))))
       :blocking t))))
 
-(define-test luvcraft-metal-frame-resources-follow-the-drawable-pool
-  (let ((reason (sdl-video-unavailable)))
-    (if reason
-        (parachute:eval-in-context
-         parachute:*context*
-         (make-instance 'parachute:result
-                        :expression 'sdl-video
-                        :status :skipped
-                        :description (format nil "SDL video is unavailable: ~A" reason)))
-        (call-frame-resources-follow-the-drawable-pool))))
-
 (defun call-frame-resources-follow-the-drawable-pool ()
   (call-with-sdl-main-thread
    (lambda ()

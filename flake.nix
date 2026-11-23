@@ -1,13 +1,6 @@
 {
   description = "Luvcraft and Luft — Common Lisp GPU experiments";
 
-  nixConfig = {
-    extra-substituters = [ "https://luv.swa.sh/nix-cache?priority=30" ];
-    extra-trusted-public-keys = [
-      "luv.swa.sh-1:PpD45iCBkJ38ZkvlyZcLiGdIz6yVehXn3fm1JvG18Bw="
-    ];
-  };
-
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.nix-bundle = {
     url = "github:nix-community/nix-bundle";

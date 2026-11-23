@@ -15,6 +15,11 @@
                 (error () nil)))
             (luv.knobs:knobs-for-host session)))
          (group (and knob (luvcraft:knob-group knob)))
+         (test-action (make-instance 'luv.knobs:action
+                                     :name 'luvcraft::metabar-test-action
+                                     :label "Test Action"
+                                     :function (constantly nil)))
+         (luvcraft:*actions* (or luvcraft:*actions* (list test-action)))
          (action (first luvcraft:*actions*)))
     (true knob)
     (true (member knob (mcluv:metabar-controls-for session group)

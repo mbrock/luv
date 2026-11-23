@@ -116,7 +116,7 @@ SHADOW-FRAME-ROWS walks it after the camera in whole texels.")
    (springs :initform nil :accessor luvcraft-session-springs)
    (title-base :initarg :title-base :initform "luvcraft"
                :reader luvcraft-session-title-base)
-   (renderer :initarg :renderer :initform (make-instance 'luvcraft-renderer)
+   (renderer :initarg :renderer :initform nil
              :reader luvcraft-session-renderer)
    (world-text :initarg :world-text :initform nil
                :reader luvcraft-session-world-text)
@@ -1055,8 +1055,6 @@ A failed restoration is reported and its description kept, never dropped."
   "Every live shader pipeline coordinated by SESSION, optional ones included."
   (remove nil
           (append
-           (luvcraft-renderer-pipelines
-            (luvcraft-session-renderer session))
            (list (and (luvcraft-session-world-text session)
                       (world-text-run-pipeline
                        (luvcraft-session-world-text session))))
