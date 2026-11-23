@@ -62,23 +62,17 @@
         (ignore-errors (delete-file endpoint))))))
 
 (defun usage (&optional (stream *standard-output*))
-  (format stream "Usage: luvcraft [--metal | --vulkan] [--tracy] [--fullscreen] [--world FILE | --birthday]~%")
-  (format stream "       luvcraft [--help | --smoke-test PNG | --vulkan-smoke-test PNG | --metal-smoke-test PNG | --metal-text-closeup PNG | --metal-benchmark [FRAMES [CSV [SCENARIO [DENSITY]]]]]~%")
+  (format stream "Usage: luvcraft [--metal | --vulkan] [--tracy] [--fullscreen] [--world FILE]~%")
+  (format stream "       luvcraft [--help | --game-smoke-test PNG | --smoke-test PNG | --vulkan-smoke-test PNG | --metal-smoke-test PNG]~%")
   (format stream "~%")
   (format stream "With no arguments, resume the world using Metal 4 on macOS and Vulkan elsewhere.~%")
-  (format stream "The ordinary game uses Luft terrain, initially without bevels; Enter opens the metabar toggle.~%")
+  (format stream "The game uses Luft terrain, initially without bevels; Enter opens the metabar toggle.~%")
   (format stream "--metal and --vulkan explicitly select an interactive backend.~%")
   (format stream "--tracy exposes live frame and worker zones to Tracy 0.14.0.~%")
   (format stream "--fullscreen opens the game on the whole display instead of in a window.~%")
   (format stream "--world loads or creates the named persistent world.~%")
-  (format stream "--birthday opens directly into the persistent birthday party.~%")
   (format stream "--game-smoke-test PNG opens a temporary game, captures it, and checks save/reload.~%")
-  (format stream "--smoke-test renders one hidden frame with the platform default and exits.~%")
-  (format stream "--vulkan-smoke-test renders one hidden Vulkan frame and exits.~%")
-  (format stream "--metal-smoke-test renders one hidden Metal 4 frame and exits.~%")
-  (format stream "--metal-text-closeup renders the enlarged Slug world-text proof.~%")
-  (format stream "--metal-benchmark measures steady or streaming Metal frames; DENSITY is standard or retina.~%")
-  (format stream "--serve-surface renders a hidden game into the IOSurface named on stdin.~%"))
+  (format stream "--smoke-test, --vulkan-smoke-test, and --metal-smoke-test run the game smoke test on the selected backend.~%"))
 
 (defun make-metal-provider ()
   #+darwin
@@ -89,28 +83,16 @@
 (defun make-vulkan-provider ()
   (make-instance 'luv:vulkan-gpu-provider))
 
-(defun run-interactive (&key provider tracy-p fullscreen-p birthday-p
+(defun run-interactive (&key provider tracy-p fullscreen-p
                              (world-pathname
                                (default-luvcraft-world-pathname)))
   "Run luvcraft until its native window closes."
-  ;; Start before START-LUVCRAFT creates the producer.  Tracy thread names are
-  ;; emitted by the threads themselves as they begin, so attaching later would
-  ;; leave an otherwise useful worker lane anonymous.
   (when tracy-p (start-luvcraft-tracy))
-  (let* ((viewer
-           (if birthday-p
-               (progn
-                 (luvcraft.birthday:celebrate-birthday
+  (let* ((viewer (luvcraft.luft.game:play
                   :provider (or provider luv:*gpu-provider*)
-                  :fullscreen-p fullscreen-p)
-                 nil)
-               (luvcraft.luft.game:play
-                :provider (or provider luv:*gpu-provider*)
-                :fullscreen-p fullscreen-p :pathname world-pathname)))
-         (canvas (if viewer (luft.render:viewer-canvas viewer)
-                     (luvcraft-session-canvas *session*)))
-         (controller (if viewer (luft.render::viewer-stop-controller viewer)
-                         (luvcraft-session-stop-controller *session*))))
+                  :fullscreen-p fullscreen-p :pathname world-pathname))
+         (canvas (luft.render:viewer-canvas viewer))
+         (controller (luft.render::viewer-stop-controller viewer)))
     (unwind-protect
          (progn
            ;; Native close tears down beside SDL and closes the canvas last.
@@ -119,22 +101,20 @@
            (loop until (eq :closed (luv:canvas-state canvas))
                  do (when *macos-update-quit-requested*
                       (setf *macos-update-quit-requested* nil)
-                      (if viewer (luft.render:stop-viewer viewer) (stop-playing)))
+                      (luft.render:stop-viewer viewer))
                     (sleep 0.05))
            (let ((failure (luv::sdl-canvas-startup-error canvas)))
              (when failure (error failure)))
            ;; Report worker teardown failures in the executable too.
            (unless (eq :running (stop-controller-state controller))
              (wait-for-controlled-stop controller)))
-      (if viewer (luft.render:stop-viewer viewer) (stop-playing)))
+      (luft.render:stop-viewer viewer))
     (finish-macos-updates)))
 
 (defun parse-interactive-options (arguments)
   (let ((provider nil)
         (tracy-p nil)
         (fullscreen-p nil)
-        (birthday-p nil)
-        (world-option-p nil)
         (world-pathname (default-luvcraft-world-pathname)))
     (loop while arguments
           for argument = (pop arguments)
@@ -147,26 +127,15 @@
                 (setf tracy-p t))
                ((string= argument "--fullscreen")
                 (setf fullscreen-p t))
-               ((string= argument "--birthday")
-                (setf birthday-p t))
                ((string= argument "--world")
                 (unless arguments
                   (error "--world requires a pathname."))
-                (setf world-option-p t
-                      world-pathname (pathname (pop arguments))))
+                (setf world-pathname (pathname (pop arguments))))
                (t (return-from parse-interactive-options
-                    (values nil nil nil nil nil nil)))))
-    (when (and birthday-p world-option-p)
-      (error "--birthday uses its own persistent party world and cannot be combined with --world."))
-    (values provider world-pathname tracy-p fullscreen-p birthday-p t)))
+                    (values nil nil nil nil nil)))))
+    (values provider world-pathname tracy-p fullscreen-p t)))
 
-(defun run-smoke-test (pathname &optional provider)
-  (format t "Rendering ~A~%" pathname)
-  (capture-hidden-luvcraft-screenshot
-   pathname :provider (or provider luv:*gpu-provider*))
-  (format t "Wrote ~A~%" (truename pathname)))
-
-(defun run-game-smoke-test (pathname)
+(defun run-game-smoke-test (pathname &optional provider)
   "Exercise the shipped game's startup, lazy assets, frame loop, and save."
   ;; These meshes are normally loaded only when a companion appears. A bare
   ;; terrain frame would not detect a package that accidentally omitted them.
@@ -175,7 +144,9 @@
   (uiop:with-temporary-file (:pathname world :type "world")
     (delete-file world)
     (dotimes (pass 2)
-      (let* ((viewer (luvcraft.luft.game:play :pathname world :width 640 :height 480))
+      (let* ((viewer (luvcraft.luft.game:play
+                      :provider (or provider luv:*gpu-provider*)
+                      :pathname world :width 640 :height 480))
              (canvas (luft.render:viewer-canvas viewer))
              (scene (luft.render:viewer-source viewer))
              (deadline (+ (get-internal-real-time)
@@ -209,45 +180,12 @@
   (format t "Game startup, companion assets, frames, and save/reload passed: ~A~%"
           (truename pathname)))
 
-(defun run-metal-text-closeup (pathname)
-  (format t "Rendering Slug text close-up ~A~%" pathname)
-  (capture-hidden-luvcraft-text-closeup
-   pathname :provider (make-metal-provider))
-  (format t "Wrote ~A~%" (truename pathname)))
-
-(defun parse-frame-count (argument)
-  (let ((count (parse-integer argument :junk-allowed t)))
-    (unless (and count (plusp count)
-                 (string= argument (format nil "~D" count)))
-      (error "Frame count must be a positive integer, not ~S." argument))
-    count))
-
-(defun parse-benchmark-scenario (argument)
-  (cond ((or (null argument) (string= argument "steady")) :steady)
-        ((string= argument "streaming") :streaming)
-        (t (error "Benchmark scenario must be steady or streaming, not ~S."
-                  argument))))
-
-(defun parse-benchmark-density (argument)
-  (cond ((or (null argument) (string= argument "standard")) nil)
-        ((string= argument "retina") t)
-        (t (error "Benchmark density must be standard or retina, not ~S."
-                  argument))))
-
-(defun run-metal-benchmark
-    (&optional frame-count pathname scenario density)
-  (benchmark-luvcraft-frame-performance
-   :frame-count (if frame-count (parse-frame-count frame-count) 120)
-   :scenario (parse-benchmark-scenario scenario)
-   :high-pixel-density-p (parse-benchmark-density density)
-   :csv-pathname (or (and pathname (pathname pathname))
-                     #P"build/luvcraft-metal-benchmark.csv")))
+(defun run-smoke-test (pathname &optional provider)
+  (format t "Rendering ~A~%" pathname)
+  (run-game-smoke-test pathname provider))
 
 (defun dispatch (arguments)
   (cond
-    ;; Started inside a playing game's terminal wall: be its child.
-    ((and (null arguments) #+darwin (luvcraft-parent-socket-path) #-darwin nil)
-     (serve-luvcraft-parent))
     ((and (= (length arguments) 1)
           (member (first arguments) '("--help" "-h") :test #'string=))
      (usage))
@@ -267,26 +205,13 @@
      (run-smoke-test
       (pathname (second arguments))
       (make-vulkan-provider)))
-    ((and (= (length arguments) 2)
-          (string= (first arguments) "--metal-text-closeup"))
-     (run-metal-text-closeup (pathname (second arguments))))
-    ((and (= (length arguments) 1)
-          (string= (first arguments) "--serve-surface"))
-     #+darwin (serve-luvcraft-mirror)
-     #-darwin (error "--serve-surface needs IOSurface, which is Darwin only."))
-    ((and (<= 1 (length arguments) 5)
-          (string= (first arguments) "--metal-benchmark"))
-     (run-metal-benchmark
-      (second arguments) (third arguments) (fourth arguments)
-      (fifth arguments)))
     (t
      (multiple-value-bind
-           (provider world-pathname tracy-p fullscreen-p birthday-p interactive-p)
+           (provider world-pathname tracy-p fullscreen-p interactive-p)
          (parse-interactive-options arguments)
        (if interactive-p
            (run-interactive :provider provider :tracy-p tracy-p
                             :fullscreen-p fullscreen-p
-                            :birthday-p birthday-p
                             :world-pathname world-pathname)
            (progn
              (usage *error-output*)

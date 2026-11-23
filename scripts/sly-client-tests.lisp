@@ -17,18 +17,19 @@
       ((equal filters '("--event" "exited")) exited-events)
       (t (error "Unexpected test journal query: ~S" filters)))))
 
-(define-test play-default-and-explicit-legacy-target
+(define-test play-default-and-explicit-targets
   (loop for (arguments expected fullscreen)
           in '((nil :luvcraft nil)
                (("--fullscreen") :luvcraft t)
                (("luvcraft") :luvcraft nil)
                (("luvcraft-on-luft" "--fullscreen") :luvcraft-on-luft t)
-               (("luvcraft-old") :luvcraft-old nil))
+               (("luft") :luft nil))
         do (multiple-value-bind (target fullscreen-p)
                (sly-client::parse-play-arguments arguments)
              (true (eq expected target))
              (true (eq fullscreen fullscreen-p))))
-  (fail (sly-client::parse-play-arguments '("luvcraft" "luvcraft-old")) 'error)
+  (fail (sly-client::parse-play-arguments '("luvcraft" "luft")) 'error)
+  (fail (sly-client::parse-play-arguments '("luvcraft-old")) 'error)
   (fail (sly-client::parse-play-arguments '("--unknown")) 'error)
   ;; Multiplayer options become PLAY keywords, for Luvcraft on Luft only.
   (true (equal '(:player-id "guest" :join "localhost:47475")

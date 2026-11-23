@@ -1414,7 +1414,7 @@ peers ~:[none~;~:*~{~A~^, ~}~]; chunk hashes ~D equal, ~D different.~%"
                    "The wizard is playing: ./sly screenshot PNG; ./sly stop-playing closes it.")
                   ((search "LUVLAND" (string-upcase (princ-to-string answer)))
                    "Luvland is serving Wayland clients: ./sly stop-playing closes it.")
-                  (t "Nothing is playing: ./sly play starts Luvcraft on Luft; play luvcraft-old selects the original renderer.")))
+                  (t "Nothing is playing: ./sly play starts Luvcraft on Luft.")))
     (when answer
       (print-canvas-health (princ-to-string answer))
       (print-multiplayer-status))))
@@ -1716,8 +1716,8 @@ peers ~:[none~;~:*~{~A~^, ~}~]; chunk hashes ~D equal, ~D different.~%"
   (format stream "RESTART creates a new Swash incarnation.~%")
   (format stream "Prefix a client command with --luvcraft only to attach to a separate~%")
   (format stream "standalone build/luvcraft process.~%~%")
-  (format stream "Usage: ./sly play [luvcraft|luft|luvcraft-on-luft|luvcraft-old|wizard|luvland] [--fullscreen]|stop-playing|status|restart~%")
-  (format stream "       play defaults to Luvcraft on Luft; luvcraft-old selects the original renderer.~%")
+  (format stream "Usage: ./sly play [luvcraft|luft|luvcraft-on-luft|wizard|luvland] [--fullscreen]|stop-playing|status|restart~%")
+  (format stream "       play defaults to Luvcraft on Luft.~%")
   (format stream "       play luvcraft --host [--port N] [--seed N] opens the world to LAN guests (TCP/UDP 47475,~%")
   (format stream "         beacons on UDP 47474); play luvcraft --join HOST[:PORT] plays a host's world.~%")
   (format stream "         --name NAME and --player-id ID name the local player; two images on one Mac:~%")
@@ -1974,14 +1974,6 @@ peers ~:[none~;~:*~{~A~^, ~}~]; chunk hashes ~D equal, ~D different.~%"
            (format nil
                    "(progn
                       (cond
-                        (luvcraft:*session*
-                         (multiple-value-bind
-                               (pathname pixels width height format)
-                             (luvcraft:capture-luvcraft-screenshot
-                              luvcraft:*session* ~S)
-                           (declare (ignore pixels))
-                           (list (namestring (truename pathname))
-                                 width height format)))
                         ((let* ((package (find-package \"LUFT.RENDER\"))
                                 (viewer-symbol
                                   (and package (find-symbol \"*VIEWER*\" package))))
@@ -2023,9 +2015,9 @@ peers ~:[none~;~:*~{~A~^, ~}~]; chunk hashes ~D equal, ~D different.~%"
                            (list (namestring (truename pathname))
                                  width height format)))
                         (t
-                         (error \"No luvcraft game, LUFT viewer, wizard, or Luvland is open.\"))))"
-                   pathname pathname pathname pathname pathname)))
-    (evaluate code "LUVCRAFT")))
+                         (error \"No LUFT viewer, wizard, or Luvland is open.\"))))"
+                   pathname pathname pathname pathname)))
+    (evaluate code "CL-USER")))
 
 (defun parse-play-arguments (arguments)
   "Return the play target, whether fullscreen, and the multiplayer options
@@ -2054,7 +2046,7 @@ as a plist of PLAY keywords (Luvcraft on Luft only)."
                     (setf (getf options :name) (value)))
                    ((string= argument "--player-id")
                     (setf (getf options :player-id) (value)))
-                   ((member argument '("luvcraft" "luft" "luvland" "luvcraft-on-luft" "luvcraft-old" "wizard")
+                   ((member argument '("luvcraft" "luft" "luvland" "luvcraft-on-luft" "wizard")
                             :test #'string-equal)
                     (when target-specified-p
                       (error "play accepts one target, not both ~A and ~A" target argument))
@@ -2064,7 +2056,7 @@ as a plist of PLAY keywords (Luvcraft on Luft only)."
                          (string= argument "--" :end1 2))
                     (error "Unknown play option: ~A" argument))
                    (t
-                    (error "Unknown play target: ~A (expected luvcraft, luft, luvcraft-on-luft, luvcraft-old, wizard, or luvland)"
+                    (error "Unknown play target: ~A (expected luvcraft, luft, luvcraft-on-luft, wizard, or luvland)"
                            argument))))))
     (when (and options (not (member target '(:luvcraft :luvcraft-on-luft))))
       (error "--host, --join, --port, --seed, --name, and --player-id are for Luvcraft on Luft"))
@@ -2086,15 +2078,6 @@ as a plist of PLAY keywords (Luvcraft on Luft only)."
               (lisp-instance-name *managed-lisp*))
       (force-output))
     (ecase target
-      (:luvcraft-old
-       (evaluate
-        (format nil
-                "(progn
-                   (when luft.render:*viewer*
-                     (error \"LUFT is already playing; call STOP-PLAYING first.\"))
-                   (luvcraft:play~:[~; :fullscreen-p t~]))"
-                fullscreen-p)
-        "CL-USER"))
       (:luft
        (evaluate
         (format nil

@@ -48,7 +48,6 @@ code, classes, shaders, and tools.
 ./sly start                             # boot without opening a game
 ./sly play luft                         # current experiment
 ./sly play                              # Luvcraft on Luft, plain cube faces
-./sly play luvcraft-old                 # original Luvcraft renderer
 ./sly status                            # image, game, and canvas health
 ./sly screenshot build/frame.png       # capture the GPU frame
 ./sly stop-playing                      # close the window, keep the Lisp
