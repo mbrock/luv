@@ -38,17 +38,18 @@
                            lvk::tessellation-shader)
                           features (:struct lvk::physical-device-features))
                        (true (= geometry lvk::geometry-shader))
-                       (true (= 1 lvk::shader-int64))
+                       (true (= int64 lvk::shader-int64))
                        (true (zerop lvk::tessellation-shader))))
                    device))
-           (dolist (supported '(0 1))
-             (setf geometry supported)
-             (true (cffi:pointer-eq
-                    device (lvk:create-device (cffi:null-pointer) 0))))
-           ;; geometryShader support must not mask the existing Int64 floor.
-           (setf int64 0)
-           (fail (lvk:create-device (cffi:null-pointer) 0))
-           (true (= 2 creations)))
+           ;; Both geometryShader and shaderInt64 are optional (e.g. Pi 5 V3DV
+           ;; lacks shaderInt64) and must be enabled only when supported.
+           (dolist (pair '((0 0) (0 1) (1 0) (1 1)))
+             (destructuring-bind (supported-geometry supported-int64) pair
+               (setf geometry supported-geometry
+                     int64 supported-int64)
+               (true (cffi:pointer-eq
+                      device (lvk:create-device (cffi:null-pointer) 0)))))
+           (true (= 4 creations)))
       (setf (symbol-function query-symbol) original-query
             (symbol-function create-symbol) original-create))))
 

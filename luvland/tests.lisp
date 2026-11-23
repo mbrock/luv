@@ -178,7 +178,11 @@
   (if (null (ignore-errors (luv.ghostty:load-libghostty-vt)))
       (skip "libghostty-vt is not loadable" (true nil))
       (let* ((luvland (make-instance 'luvland::luvland))
-             (terminal (luvland::start-terminal :columns 40 :rows 4 :program '("cat"))))
+             ;; Disable BSD/macOS VSTATUS (which intercepts C-t as SIGINFO)
+             ;; before exec'ing cat, and wait for READY so stty has taken effect.
+             (terminal (luvland::start-terminal
+                        :columns 40 :rows 4
+                        :program '("sh" "-c" "stty status undef 2>/dev/null || true; printf READY; exec cat"))))
         (setf (luvland::luvland-command-frame luvland)
               (clim:make-application-frame 'luvland::luvland-frame :luvland luvland)
               (luvland::luvland-terminals luvland) (list terminal)
@@ -191,6 +195,7 @@
                     (control (key-name character)
                       (list key-name (code-char (- (char-code character) 96))
                             :modifiers '(:control) :unshifted character)))
+               (true (wait-until (lambda () (search "READY" (terminal-text terminal)))))
                (press :h #\h)
                (press :i #\i)
                ;; C-t n is Luvland's; C-t t sends C-t itself, which the tty
