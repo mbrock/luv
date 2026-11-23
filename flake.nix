@@ -394,7 +394,10 @@
             pname = "swash";
             version = "0-unstable-2026-09-04";
             src = swash;
-            vendorHash = "sha256-4l7ASCxpMCM92DwSuhi4hphdwnoPNbBLDXxQRdOEKDo=";
+            postPatch = ''
+              printf '\nreplace swa.sh/vterm => ./vterm\n' >> go.mod
+            '';
+            vendorHash = "sha256-KfLqutT9ngzHov7qNxpli33BU04UE+qIGCoQyJN+Cdk=";
             proxyVendor = true;
             subPackages = [ "cmd/swash" ];
             CGO_CFLAGS = "-I${swash}/cvendor";
