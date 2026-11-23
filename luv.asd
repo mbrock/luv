@@ -565,26 +565,6 @@ offsets and of headers."
              (uiop:symbol-call '#:luv.test-support '#:test-package
                                '#:luv.tests)))
 
-(defsystem "luv/showcase"
-  :description "Reproducible wiki screenshots and films rendered from named capture recipes."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luvcraft/agent" "luft/render")
-  :build-operation "luv:capture-op"
-  :serial t
-  :components ((:module "captures"
-                :serial t
-                :components ((:file "package")
-                             (:file "construction")
-                             (:file "pre-noon")
-                             (:file "day-cycle")
-                             (:file "gallery")
-                             (:file "gameplay-actions")
-                             (:file "characters-instruments")
-                             (:file "terminal-cinema")
-                             (:file "reference-plates")
-                             (:file "luft-portraits")))))
-
 (defsystem "luv/mcclim"
   :description "An experimental McCLIM backend presented through luv canvases."
   :version "0.0.1"

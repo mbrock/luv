@@ -1,4 +1,8 @@
-(in-package #:mcluv.surveyor-tests)
+(defpackage #:mcluv.metabar-tests
+  (:use #:cl #:parachute)
+  (:shadowing-import-from #:parachute #:true #:false))
+
+(in-package #:mcluv.metabar-tests)
 
 (define-test luvcraft-metabar-adapts-the-existing-knob-and-action-objects
   (let* ((session

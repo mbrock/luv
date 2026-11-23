@@ -548,26 +548,9 @@ shared semantic McCLIM compositor used by LUFT and other applications."
     :device (luvcraft::luvcraft-session-device session))
    :distance distance :width width :right-offset right-offset))
 
-(defun open-luvcraft-surveyor-map
-    (session &key (title "surveyor map")
-                  (distance 3.2) (width 3.2) (right-offset 0.0))
-  "Create and embed a live-world McCLIM surveyor map for SESSION."
-  (embed-luvcraft-frame
-   session
-   (open-surveyor-map
-    session :title title
-    :target (luvcraft:luvcraft-session-canvas session)
-    :context (luvcraft::luvcraft-session-context session)
-    :device (luvcraft::luvcraft-session-device session))
-   :distance distance :width width :right-offset right-offset))
-
 (defun close-luvcraft-widget-lab (overlay)
   "Remove and release an OPEN-LUVCRAFT-WIDGET-LAB overlay."
   (check-type overlay luvcraft-widget-overlay)
   (luvcraft:remove-luvcraft-overlay
    (widget-overlay-session overlay) overlay)
   nil)
-
-(defun close-luvcraft-surveyor-map (overlay)
-  "Remove and release an OPEN-LUVCRAFT-SURVEYOR-MAP overlay."
-  (close-luvcraft-widget-lab overlay))

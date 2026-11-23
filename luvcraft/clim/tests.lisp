@@ -34,8 +34,7 @@
 (define-test modal-hud-panes-use-the-direct-presentation-compositor
   (dolist (class '(luvcraft.clim::luvcraft-legend-overlay
                    luvcraft.clim::luvcraft-command-menu-overlay
-                   mcluv:luvcraft-source-update-overlay
-                   luvcraft.clim::luvcraft-tape-prompt-overlay))
+                   mcluv:luvcraft-source-update-overlay))
     (true (subtypep class 'mcluv:luvcraft-hud-widget-overlay))))
 
 (define-test keys-resolve-to-named-commands
@@ -82,7 +81,6 @@
 
 (define-test m-x-searches-the-executable-command-vocabulary
   (let ((entries (luvcraft-command-menu-entries)))
-    (true (assoc "Toggle Phone" entries :test #'string=))
     (true (assoc "Place Block" entries :test #'string=))
     (true (assoc "Toggle Tracy Capture" entries :test #'string=))
     (true (assoc "Toggle Lobby Panel" entries :test #'string=))
@@ -93,10 +91,6 @@
     (true (assoc "Export Presentation Timing" entries :test #'string=))
     (true (assoc "Review Source Update" entries :test #'string=))
     (true (assoc "Select Quickbar Slot" entries :test #'string=))
-    (true (equal '("Toggle Phone")
-                 (mapcar #'car
-                         (luvcraft.clim::matching-command-menu-entries
-                          entries "phone"))))
     ;; Words need not be adjacent, so the same finder scales to longer names.
     (true (equal '("Toggle Pointer Capture")
                  (mapcar #'car

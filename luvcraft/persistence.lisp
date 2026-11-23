@@ -1005,3 +1005,64 @@ monotonic ticket."
     (let ((condition (world-checkpoint-writer-condition writer)))
       (when condition (error condition))))
   nil)
+
+;;; Per-instance film entities carried in inventories and saves (#R7MAN5).
+(defclass film (block-entity)
+  ((video-id :initarg :video-id :reader film-video-id)
+   (title :initarg :title :initform nil :accessor film-title)
+   (uploader :initarg :uploader :initform nil :accessor film-uploader)
+   (duration :initarg :duration :initform nil :accessor film-duration
+             :documentation "Seconds, or NIL when unknown.")
+   (upload-date :initarg :upload-date :initform nil :accessor film-upload-date
+                :documentation "YYYYMMDD as a string, or NIL.")
+   (pathname :initarg :pathname :initform nil :accessor film-pathname
+             :documentation "Where the media is, or NIL.")))
+
+(defmethod block-entity-material ((film film)) *film-block*)
+
+(defmethod block-kind-carried-p ((block film)) t)
+
+(defvar *films* (make-hash-table :test 'equal)
+  "Every film this image knows, by video id, so a saved world and a saved
+bag that name the same video get the same object back.")
+
+(defun ensure-film (video-id &key title uploader duration upload-date pathname)
+  "Return the film for VIDEO-ID, making it or filling in what is now known."
+  (check-type video-id string)
+  (let ((film (gethash video-id *films*)))
+    (unless (typep film 'film)
+      (setf film (make-instance 'film :video-id video-id)
+            (gethash video-id *films*) film))
+    (when title (setf (film-title film) title))
+    (when uploader (setf (film-uploader film) uploader))
+    (when duration (setf (film-duration film) duration))
+    (when upload-date (setf (film-upload-date film) upload-date))
+    (when pathname (setf (film-pathname film) pathname))
+    film))
+
+(defun film-label (film)
+  "A short line naming FILM for a title bar or a bag."
+  (or (film-title film) (film-video-id film)))
+
+(defmethod block-save-description ((film film))
+  (list :film
+        :video-id (film-video-id film)
+        :title (film-title film)
+        :uploader (film-uploader film)
+        :duration (film-duration film)
+        :upload-date (film-upload-date film)
+        :pathname (and (film-pathname film)
+                       (namestring (film-pathname film)))))
+
+(defmethod restore-block-save-description ((kind (eql :film)) description)
+  (let ((video-id (description-value description :video-id "film value")))
+    (unless (stringp video-id)
+      (invalid-luvcraft-save "A film's video id must be a string, not ~S."
+                             video-id))
+    (flet ((field (key) (description-value description key "film value"
+                                           :optional t :default nil)))
+      (ensure-film video-id
+                   :title (field :title) :uploader (field :uploader)
+                   :duration (field :duration) :upload-date (field :upload-date)
+                   :pathname (let ((name (field :pathname)))
+                               (and name (pathname name)))))))

@@ -74,11 +74,6 @@
                  (:file "sky")
                  (:file "frame-performance")
                  (:file "text")
-                 (:file "sound")
-                 (:file "video-interop")
-                 (:file "video-interop-vulkan")
-                 (:file "video-interop-metal" :if-feature :darwin)
-                 (:file "video-screen")
                  (:file "renderer")
                  (:file "app")
                  (:file "riding")
@@ -88,16 +83,9 @@
                  (:file "temporal")
                  (:file "render")
                  (:file "play")
-                 (:file "mirror" :if-feature :darwin)
-                 (:file "portal" :if-feature :darwin)
-                 (:file "portal-server" :if-feature :darwin)
                  (:file "terminal-wall")
-                 (:file "phone")
-                 (:file "tape")
                  (:file "capture")
-                 (:file "film")
-                 (:file "benchmark")
-                 (:file "gazetteer"))))
+                 (:file "film"))))
   :in-order-to ((test-op (test-op "luvcraft/core/test"))))
 
 (defsystem "luvcraft/light-reference"
@@ -118,19 +106,6 @@
                (:file "luvcraft/agent/fantus-shaders")
                (:file "luvcraft/agent/companion-mesh-shaders")))
 
-(defsystem "luvcraft/web"
-  :description "Luvcraft's showcase and WebGPU body pages in the workshop wiki."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luvcraft/agent-bodies" "luv/wgsl" "luv-wiki" "cl-json"
-               "spinneret" "parenscript" "uiop")
-  :serial t
-  :components ((:file "luvcraft/web-package")
-               (:file "luvcraft/wiki-style")
-               (:file "luvcraft/showcase")
-               (:file "luvcraft/body-gallery-script")
-               (:file "luvcraft/body-gallery")))
-
 (defsystem "luvcraft/tools"
   :description "One-shot command-line tools for luvcraft development."
   :version "0.0.1"
@@ -146,7 +121,6 @@
     :components ((:file "package")
                  (:file "runner")
                  (:file "block-world")
-                 (:file "gazetteer")
                  (:file "lobby")
                  (:file "fingerprint")))))
 
@@ -164,7 +138,6 @@
   :depends-on ("luv/mcclim" "luvcraft/core")
   :serial t
   :components ((:file "mcclim/player-instruments")
-               (:file "mcclim/surveyor")
                (:file "mcclim/luvcraft")
                (:file "mcclim/luvcraft-source-update")
                (:file "mcclim/block-icon")
@@ -179,12 +152,11 @@
   :version "0.0.1"
   :depends-on ("luvcraft/mcclim" "luv/test-support")
   :serial t
-  :components ((:file "mcclim/surveyor-tests")
-               (:file "mcclim/luvcraft-metabar-tests"))
+  :components ((:file "mcclim/luvcraft-metabar-tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (uiop:symbol-call '#:luv.test-support '#:test-package
-                               '#:mcluv.surveyor-tests)))
+                               '#:mcluv.metabar-tests)))
 
 (defsystem "luvcraft/lobby/mcclim"
   :description "The shared lobby HUD placed in Luvcraft's final HUD pass."
@@ -228,8 +200,7 @@
   :description "Luvcraft on Luft as a game: its own viewer, keys, hotbar, and saves."
   :version "0.0.1"
   :author "Mikael Brockman"
-  ;; The birthday meadow's save kind lives with the party; its saves play too.
-  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luft/render" "luvcraft-wire/net" "mcclim-bitmaps"
+  :depends-on ("luvcraft/luft" "luvcraft/agent" "luft/render" "luvcraft-wire/net" "mcclim-bitmaps"
                "alexandria")
   :serial t
   :components ((:file "luvcraft/luft/game-package")
@@ -288,7 +259,7 @@
   :description "Luvcraft on Luft against Luvcraft's own streaming, cell for cell."
   :version "0.0.1"
   :author "Mikael Brockman"
-  :depends-on ("luvcraft/luft" "luvcraft/birthday" "luv/test-support")
+  :depends-on ("luvcraft/luft" "luv/test-support")
   :components ((:file "luvcraft/luft/tests"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
@@ -312,7 +283,6 @@
                              (:file "legend")
                              (:file "command-menu")
                              (:file "source-update")
-                             (:file "tape")
                              (:file "input"))))
   :in-order-to ((test-op (test-op "luvcraft/core/test")
                          (test-op "luv/mcclim/test")
@@ -376,23 +346,6 @@
              (uiop:symbol-call '#:luv.shader-validation
                                '#:validate-production-shaders)))
 
-(defsystem "luvcraft/birthday"
-  :description "A birthday party in the little world: meadow, gazebo, balloons, gnomes, fireworks."
-  :version "0.0.1"
-  :author "Mikael Brockman"
-  :depends-on ("luvcraft/agent")
-  :serial t
-  :components ((:module "luvcraft/birthday"
-                :serial t
-                :components ((:file "package")
-                             (:file "world")
-                             (:file "gazebo")
-                             (:file "balloons")
-                             (:file "gnomes")
-                             (:file "fireworks")
-                             (:file "marquee")
-                             (:file "party")))))
-
 (defsystem "luvcraft/program"
   :description "The standalone luvcraft executable with its live Slynk endpoint."
   :version "0.0.1"
@@ -410,7 +363,7 @@
   :version "0.0.1"
   :author "Mikael Brockman"
   :depends-on ("luvcraft/core" "luvcraft/light-reference"
-               "luvcraft/web" "cl-dejavu" "luv/test-support")
+               "cl-dejavu" "luv/test-support")
   :serial t
   :components ((:file "hal/shader/tests")
                (:file "hal/shader/resource-tests")
@@ -418,7 +371,6 @@
                (:file "luvcraft/world-tests")
                (:file "luvcraft/tests")
                (:file "luvcraft/renderer-tests")
-               (:file "luvcraft/video-interop-tests")
                (:file "luvcraft/physics-tests")
                (:file "luvcraft/light-tests")
                (:file "hal/metal/msl/tests")

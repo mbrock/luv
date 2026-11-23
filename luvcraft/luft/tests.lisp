@@ -209,17 +209,6 @@
         (true (gethash (cell -20 13 -30) materials))
         (true (gethash (cell -24 14 -30) materials))))))
 
-(define-test the-birthday-meadow-matches-luvcraft-cell-for-cell
-  ;; The party lawn at the origin, its flowers and its ring of trees, with a
-  ;; plank placed on the lawn the way the gazebo's edits are.
-  (multiple-value-bind (differences solid count)
-      (compare-luft-chunk 121 :alpine 32 (luft:chunk-key-at 1000 1000)
-                          (list (list luvcraft::*planks-block* 3 7 -4))
-                          :class 'luvcraft.birthday:birthday-world-source)
-    (is = 0 differences)
-    (true (< 10000 solid))
-    (is = solid count)))
-
 (defun write-save (world pathname &key resume)
   (luvcraft::write-luvcraft-save-description
    (luvcraft:make-luvcraft-save-description world) pathname)
@@ -401,7 +390,7 @@
 
 (define-test luft-edits-save-back-into-a-luvcraft-save
   (uiop:with-temporary-file (:pathname pathname :type "sexp")
-    (let ((world (luvcraft.birthday:make-birthday-world :seed 7 :chunk-radius nil)))
+    (let ((world (luvcraft:make-empty-little-block-world :seed 7 :relief :meadow)))
       ;; A film keeps its own reel; a block outside the Luft domain is kept.
       (luvcraft::record-block-edit
        (luvcraft:little-world-source-edits (luvcraft:block-world-source world))
@@ -446,7 +435,7 @@
       (let* ((little (luvcraft:block-world-source world))
              (entries (luvcraft::block-edit-overlay-entries
                        (luvcraft:little-world-source-edits little))))
-        (true (typep little 'luvcraft.birthday:birthday-world-source))
+        (true (typep little 'luvcraft:little-world-source))
         (is = 7 (luvcraft:little-world-source-seed little))
         (is = 3 (hash-table-count entries))
         (multiple-value-bind (block present-p) (gethash '(2 9 2) entries)
@@ -554,8 +543,7 @@ Unlike SXHASH this freezes a portable, independently captured baseline."
            (terrain:world-source-tag (apply #'game:make-luvcraft-world-source initargs))))
     (is string= (tag :seed 121) (tag :seed 121))
     (dolist (other (list (tag :seed 122) (tag :seed 121 :relief :meadow)
-                         (tag :seed 121 :height 32) (tag :seed 121 :offset 1040)
-                         (tag :seed 121 :little-class 'luvcraft.birthday:birthday-world-source)))
+                         (tag :seed 121 :height 32) (tag :seed 121 :offset 1040)))
       (false (string= (tag :seed 121) other))))
   ;; Edits travel as events, not in the tag.
   (let ((source (game:make-luvcraft-world-source :seed 121)))

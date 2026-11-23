@@ -1409,14 +1409,6 @@ completes."
       (sample luvcraft-frame-sample-shader-refresh-seconds
               :luvcraft/shader-refresh)
     (refresh-luvcraft-shaders session))
-  ;; The film's clock runs on the world's frames, so it advances here, before
-  ;; anything is encoded: the upload is an ordinary queue write, not part of
-  ;; this frame's command stream.
-  (when (luvcraft-session-video-screen session)
-    (place-video-screen-listener (luvcraft-session-video-screen session)
-                                 (luvcraft-session-camera session))
-    (advance-video-screen (luvcraft-session-video-screen session)
-                          (luvcraft-session-device session)))
   (let ((overlays (luvcraft-session-overlays session)))
     (zone (:luvcraft/refresh-overlays :value (length overlays))
       (dolist (overlay overlays)
@@ -1667,18 +1659,6 @@ completes."
                    (set-vertex-buffer
                     pass 0 (luvcraft-frame-particle-vertex-buffer frame))
                    (draw pass particle-vertex-count))
-                 ;; Before the text, so a caption drawn over the screen wins.
-                 (when (luvcraft-session-video-screen session)
-                   (let* ((screen (luvcraft-session-video-screen session))
-                          (group
-                            (refresh-video-screen-bind-group
-                             screen (luvcraft-session-device session)
-                             (luvcraft-frame-uniform-buffer frame))))
-                     (set-pipeline pass (video-screen-native-pipeline screen))
-                     (set-vertex-buffer pass 0 (video-screen-vertex-buffer screen))
-                     (set-vertex-buffer pass 1 (video-screen-instance-buffer screen))
-                     (set-bind-group pass 0 group)
-                     (draw pass 6 1)))
                  (when (luvcraft-session-world-text session)
                    (let ((text (luvcraft-session-world-text session)))
                      (set-pipeline pass (world-text-run-native-pipeline text))
@@ -2344,10 +2324,6 @@ quickbar instead, one slot per notch, the way every block game does."
     ((session luvcraft-session) canvas (event canvas-window-close-request-event))
   (declare (ignore canvas event))
   (let ((defer-close-p (request-luvcraft-quit session)))
-    ;; The window is going; the film's sound must not outlive it, playing on
-    ;; from a session nobody can see until something releases it.
-    (alexandria:when-let ((screen (luvcraft-session-video-screen session)))
-      (hush-video-screen screen))
     (when defer-close-p :defer-canvas-close)))
 
 (defmethod handle-canvas-event
@@ -2542,15 +2518,7 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
          (renderer nil)
          (world-text-glyph-cache nil)
          (world-text-run nil)
-         (video-screen nil)
          (session nil) (production-system nil) (completed-p nil))
-    ;; FFmpeg has to be dlopened before the canvas exists.  A tape's film plays
-    ;; on a wall at any moment, so waiting until the first one would attempt
-    ;; the first dlopen under Cocoa's running canvas and hang.  Preload the
-    ;; libraries here; no decoder or file is opened until a film plays.
-    (libav:load-libav)
-    (retry-decoded-video-picture-release-backlog)
-    (retry-video-screen-release-backlog)
     (open-canvas canvas)
     (unwind-protect
          (progn
@@ -2920,15 +2888,6 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
                              :lift world-text-lift
                              :world-units-per-em
                              world-text-units-per-em))))
-                  (screen
-                    (when video-pathname
-                      (setf video-screen
-                            (make-video-screen
-                             device camera video-pathname
-                             +luvcraft-scene-color-format+
-                             :distance video-distance
-                             :lift video-lift
-                             :height video-height))))
                   (renderer-owner
                     (setf renderer
                           (make-instance
@@ -2965,7 +2924,6 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
                     (make-instance
                      'luvcraft-session
                      :renderer renderer-owner
-                     :video-screen screen
                      :canvas canvas :device device :context context
                      :world world :mesher mesher
                      :checkpoint-writer checkpoint-writer
@@ -3081,9 +3039,6 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
                     (release-live-shader-pipeline pipeline)))
                 (dolist (resource resources)
                   (releasing :resource (destroy resource)))))
-          (when video-screen
-            (releasing :video-screen
-              (release-video-screen-or-retain video-screen)))
           (when world-text-run
             (releasing :world-text (release-world-text-run world-text-run)))
           (when world-text-glyph-cache
@@ -3138,12 +3093,6 @@ non-NIL value selects display-paced animation because FIFO scanout, rather
       ;; the renderer's pipeline and resource inventories during teardown.
       (releasing :renderer
         (release-luvcraft-component (luvcraft-session-renderer session)))
-      (when (luvcraft-session-video-screen session)
-        (let ((screen (luvcraft-session-video-screen session)))
-          (releasing :video-screen
-            (release-video-screen screen)
-            (when (video-screen-released-p screen)
-              (setf (luvcraft-session-video-screen session) nil)))))
       (when (luvcraft-session-world-text session)
         (releasing :world-text
           (release-world-text-run (luvcraft-session-world-text session))))

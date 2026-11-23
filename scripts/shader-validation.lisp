@@ -37,12 +37,6 @@
      (cons "terminal-cell.frag.spv"
            (assemble
             (luv.shader:shader-specification-for :terminal-cell :fragment)))
-     (cons "video-screen.vert.spv"
-           (assemble
-            (luv.shader:shader-specification-for :video-screen :vertex)))
-     (cons "video-screen.frag.spv"
-           (assemble
-            (luv.shader:shader-specification-for :video-screen :fragment)))
      (cons "terminal-screen.vert.spv"
            (assemble
             (luv.shader:shader-specification-for :terminal-screen :vertex)))

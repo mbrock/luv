@@ -16,12 +16,6 @@
     ()
   (luvcraft:toggle-luvcraft-inventory (luvcraft-command-session)))
 
-(define-command (com-toggle-phone :command-table luvcraft-world
-                                  :name "Toggle Phone"
-                                  :keystroke (#\f))
-    ()
-  (luvcraft:toggle-luvcraft-phone (luvcraft-command-session)))
-
 (define-command (com-toggle-ball :command-table luvcraft-world
                                  :name "Toggle Ball"
                                  :keystroke (#\b))

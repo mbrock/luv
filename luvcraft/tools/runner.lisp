@@ -130,8 +130,6 @@
      (usage))
     ((string= command "block-world")
      (command-block-world arguments))
-    ((string= command "gazetteer")
-     (command-gazetteer arguments))
     ((string= command "eval")
      (command-eval arguments))
     ((string= command "fingerprint")

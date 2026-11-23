@@ -1212,7 +1212,7 @@ logged-in display, for one, has no displays to add."
               (setf session
                     (start-luvcraft
                      :provider (make-instance 'metal-gpu-provider)
-                     :world (luvcraft::make-gazetteer-shadow-yard-world)
+                     :world (luvcraft:make-empty-little-block-world :seed 7 :relief :meadow)
                      :residency-radius 0
                      :visible-p nil :frames-per-second nil
                      :width 160 :height 100))

@@ -335,11 +335,6 @@
   (true (eq :viewmodel
             (luvcraft-overlay-stage (make-instance 'player-body)))))
 
-(define-test a-phone-screen-draws-over-the-phone-it-is-on
-  (true (eq :held-display
-            (luvcraft-overlay-stage
-             (allocate-instance (find-class 'phone-terminal-display))))))
-
 (define-test modal-focus-suspends-player-input-and-owns-events
   (let ((session (make-instance 'luvcraft-session))
         (first (make-instance 'recording-modal-focus))
@@ -606,45 +601,6 @@
     (fail (luvcraft::take-out-hand-item body nil item))
     (true (null (player-body-hand-item body)))
     (true (member item (luvcraft::player-body-pocket body)))))
-
-(define-test failed-phone-shell-is-neither-cached-nor-left-overlaid
-  (let* ((phone (make-instance 'phone))
-         (display (list :incomplete-phone-display))
-         (removed nil)
-         (symbols '(luvcraft::terminal-grid-columns-for-rows
-                    luvcraft::phone-font-pathname
-                    luvcraft::make-terminal-display
-                    luvcraft::attach-terminal-display-shell
-                    luvcraft::remove-luvcraft-overlay))
-         (originals (mapcar #'symbol-function symbols)))
-    (unwind-protect
-         (progn
-           (setf (symbol-function (first symbols))
-                 (lambda (&rest arguments)
-                   (declare (ignore arguments))
-                   (values 40 20))
-                 (symbol-function (second symbols))
-                 (lambda (weight)
-                   (declare (ignore weight))
-                   #P"fixture.ttf")
-                 (symbol-function (third symbols))
-                 (lambda (&rest arguments)
-                   (declare (ignore arguments))
-                   display)
-                 (symbol-function (fourth symbols))
-                 (lambda (made-display)
-                   (declare (ignore made-display))
-                   (error "fixture shell startup failed"))
-                 (symbol-function (fifth symbols))
-                 (lambda (session-display removed-display)
-                   (declare (ignore session-display))
-                   (setf removed removed-display)))
-           (fail (luvcraft::ensure-phone-display phone nil))
-           (true (null (phone-display phone)))
-           (true (eq display removed)))
-      (loop for symbol in symbols
-            for function in originals
-            do (setf (symbol-function symbol) function)))))
 
 (define-test software-cursor-follows-screen-pointer-coordinates
   (let ((center (luvcraft::make-luvcraft-cursor-vertices 200 100 100 50))
@@ -2702,32 +2658,6 @@
       (true (= 60 (rate 0.010d0)))
       (true (= 30 (rate 0.021d0)))
       (true (= 20 (rate 0.040d0))))))
-
-(define-test gazetteer-names-semantic-gameplay-views
-  (let* ((views (luvcraft-gazetteer-views))
-         (names (mapcar #'luvcraft-gazetteer-view-name views)))
-    (true (equal names (remove-duplicates names :test #'eq)))
-    (dolist (name '(:little-world-noon :little-world-dusk :shadow-forest
-                    :glow-floor :crystal-seam :shadow-yard))
-      (true (find name names)))
-    (let* ((view (find-luvcraft-gazetteer-view "crystal-seam"))
-           (world
-             (funcall (luvcraft::luvcraft-gazetteer-view-world-factory view))))
-      (true (eq (world-block-at world 16 1 8) *crystal-block*))
-      (true (= (nth-value 1 (world-light-at world 16 1 8))
-               (block-light-emission *crystal-block*)))
-      (true (= (nth-value 1 (world-light-at world 15 1 8))
-               (1- (block-light-emission *crystal-block*)))))))
-
-(define-test shadow-yard-gazetteer-has-raised-casters-over-receiver
-  (let* ((view (find-luvcraft-gazetteer-view "shadow-yard"))
-         (world (funcall (luvcraft::luvcraft-gazetteer-view-world-factory view))))
-    (true (eq (world-block-at world 7 0 7) luvcraft::*snow-block*))
-    (true (eq (world-block-at world 9 1 10) luvcraft::*stone-block*))
-    (true (eq (world-block-at world 10 8 10) luvcraft::*stone-block*))
-    (true (null (world-block-at world 9 9 10)))
-    (true (null (world-block-at world 8 1 4)))
-    (true (= (nth-value 0 (world-light-at world 7 1 7)) 15))))
 
 (define-test shadow-projection-ignores-subtexel-camera-translation
   (let* ((clock (make-instance 'sky-clock :pinned-day-fraction 0.42))

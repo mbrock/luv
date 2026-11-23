@@ -1059,10 +1059,7 @@ A failed restoration is reported and its description kept, never dropped."
             (luvcraft-session-renderer session))
            (list (and (luvcraft-session-world-text session)
                       (world-text-run-pipeline
-                       (luvcraft-session-world-text session)))
-                 (and (luvcraft-session-video-screen session)
-                      (video-screen-pipeline
-                       (luvcraft-session-video-screen session))))
+                       (luvcraft-session-world-text session))))
            (loop for overlay in (luvcraft-session-overlays session)
                  append (luvcraft-overlay-live-shader-pipelines overlay)))))
 
