@@ -31,6 +31,7 @@
                  (:file "gpu-frame-benchmarks")
                  (:file "luft-rendering-campaign")
                  (:file "luft-far-field")
+                 (:file "luft-voxel-lod-campaign")
                  (:file "mathematical-shaders")
                  (:file "hlsl-and-shaderc")
                  (:file "slug-bezier")

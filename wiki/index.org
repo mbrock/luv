@@ -136,6 +136,9 @@ The following are starting paths rather than a table of settled doctrine.
 - [[file:luft-far-field.org][Beauty in the breakdown: Luft's far field]] keeps the artistic direction:
   a vast, reliable landscape that can change drawing medium with scale,
   painterly aggregates, and small experiments without a predetermined renderer.
+- [[file:luft-voxel-lod-campaign.org][Luft voxel LOD campaign: honest 3D terrain across scales]] plans the move from
+  the 2.5D analytical heightfield horizon to isotropic, scale-covariant 3D
+  =chunk-fibers= and 256-star beveled LOD inside the pooled visibility buffer.
 - [[file:mathematical-shaders.org][Mathematical shaders as live Lisp objects]] records the typed expression
   language above the literal SPIR-V assembler, its deterministic CLOS
   lowering, and the McCLIM presentation browser connecting source to SSA.

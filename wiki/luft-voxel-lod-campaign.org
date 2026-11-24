@@ -1,0 +1,301 @@
+#+title: Luft voxel LOD campaign: honest 3D terrain across scales
+#+startup: overview
+
+* A basecamp for isotropic, voxel-accurate level of detail
+:PROPERTIES:
+:ID: INDOL7
+:END:
+
+Replace the 2.5D analytical heightfield horizon (=distant-terrain.lisp=) with a
+generic, scale-covariant 3D voxel LOD built directly on Luft's =chunk-fibers=,
+=chunk-materials=, 256-star beveled atlas, and pooled visibility buffer.
+
+A heightfield horizon proved that a 2.5 km panorama is affordable and worth
+having (#KK9136), but it cannot represent the heart of a block world: big
+mountains with architecture integrated into them — tunnels punched straight
+through a peak, arches spanning a valley, overhangs, caves, and lit windows
+recessed into a cliff.  Once distant terrain bypasses the 3D voxel solid with a
+heightmap, every 3D feature forces an ad-hoc fake projection (synthetic tree
+columns, synthetic cacti, solid-skirted building tops that cannot carve air).
+
+This campaign ledger sits beside [[file:luft-rendering-campaign.org][the rendering campaign]] (#O523R1) and
+[[file:luft-far-field.org][Beauty in the breakdown]] (#7Q17FX, #VK1FJV, #BBFT2Q).  Keep experiments small,
+preserve real measurements, test against real mountains and carved tunnels, and
+keep the current heightfield as a live A/B control until the 3D pyramid beats
+it cleanly on both appearance and GPU cost.
+
+* What the x = 896 seam actually revealed
+:PROPERTIES:
+:ID: VX29JP
+:END:
+
+Inspecting the live =:biomes= alpine panorama from =(1088.99, 1081.32, 39.06)=
+(0.99 cells east of chunk boundary =x = 1088=) and stepping 5 cells west
+shifts the =8×8= near-chunk window from =cx ∈ [14..21]= to =[13..20]=.  That
+instantly flips the 64-cell strip =x ∈ [832, 896)= (~193–257 cells ahead,
+cutting straight across the left hillside, central rocky bowl, and upper-right
+alpine summit) from Level-0 distant columns to near chunks.
+
+Five separate discontinuities stack onto that single seam:
+
+1. *Unrelated fake trees vs. real trees.*  Near chunks place real 3D trees in
+   =luvcraft/terrain.lisp= (=little-world-landmarks-for-chunk=, deterministic
+   16×16 chunk hash).  =sample-world-source-surface-grid= in
+   =luvcraft/luft/world-source.lisp= invents an unrelated 4×4 hash and extrudes
+   blocky =2×2×3= leaf pillars.  At the seam, whole clusters of green boxes
+   vanish while origami trees spawn in different positions.
+2. *45° beveled near slopes vs. 90° un-beveled distant box cliffs.*  With
+   bevels active (=0.30= global, =0.42= on grass/stone via #K5MKUT), steep near
+   hillsides are mostly angled 45° facets catching both sun and sky hemisphere
+   light.  Distant columns emit strictly horizontal tops (=normal.z = 1=) and
+   vertical cliff skirts (=normal.z = 0=) plus a flat =-12= AO penalty.  A
+   grazing mountain wall jumps from dark charcoal blocks to bright layered
+   stone in one frame (#7Q17FX, #VK1FJV).
+3. *Point-sampling aliasing on steep ridges and snowlines.*  A single center
+   height sample per =stride × stride= column shifts alpine ridgelines and
+   disagrees on the =slope <= 2= snowline test, popping snow caps and strata
+   onto crests when =cx = 13= arrives.
+4. *Lighting, AO, and scatter mismatch.*  Near terrain carries shadow-map
+   visibility, 3D voxel vertex AO, surface boulders, and carved caves; distant
+   columns carry cloud visibility only and a synthetic per-quad =enclosure= AO
+   that darkens around the fake =+3= leaf pillars.
+5. *Hard grid-aligned snaps.*  The near boundary swaps an entire 64-cell swath
+   in one frame with zero transition band.  Sixty-five cells further west,
+   crossing =x = 1024= snaps all four nested rings in =distant-ring-bounds=
+   simultaneously because =1024= is a common multiple of 128, 256, and 512.
+
+Patching tree hashes or adding landmark special cases to the heightfield is the
+wrong direction: even a bare, treeless peak pops sharply across items 2–5, and
+no heightmap patch can represent holes carved through rock.
+
+* Scale-covariant stars fit the existing visibility buffer
+:PROPERTIES:
+:ID: EML0YS
+:END:
+
+Production Metal terrain already renders through a compact two-RGBA8 visibility
+buffer backed by one pooled =terrain-arenas= (=sites=, =appearances=, =lights=)
+and one fullscreen material pass (#EAWKSG, #E5U8OV).  Every vertex call site —
+forward, visibility raster, and visibility material reconstruction — passes
+through =star-record-world= in =luft/render/shaders.lisp=.
+
+Because =site.z= in =terrain-sites= (=uvec4=) only uses 8 of its 32 bits
+(=0..255=), packing a 3-bit =lod-shift= (=0..4= → =scale = 2^k=) into bits
+=16..18= of =site.z= makes the entire 256-star pipeline scale-covariant with
+zero extra bytes per star:
+
+#+begin_src lisp
+(+ origin (* scale (+ anchor (* offset bevel))))
+#+end_src
+
+Consequences of unifying coarse LOD stars into the same visibility buffer:
+
+- *Scale-covariant geometry and bevels (#YGP21F).*  Steep =stride = 2, 4, 8, 16=
+  slopes retain their 45° beveled facets and #K5MKUT per-material bevel tiers,
+  matching near-field sun and sky irradiance instead of collapsing into dark
+  vertical walls.  Projected bevel triangles also stay =2^k×= wider in screen
+  space at the distances where =stride = 1= slivers begin to shimmer.
+- *True 3D topology and distant light.*  Tunnels, arches, bridges, overhangs,
+  caves, trees, and buildings all render through one 3D occupancy path.  Because
+  =terrain-lights= is already part of the star record, lantern- or crystal-lit
+  openings carved into a distant cliff can glow naturally at dusk (#BQMYNU).
+- *Zero overdraw shading and coherent distant retirement (#IE3WMY).*  Overlapping
+  mountain ridges pay only tiny visibility-ID writes.  In the single fullscreen
+  material pass, =lod-shift > 0= branches cleanly past the 3-tap =surface-height=
+  derivatives (whose =fade= is already zero past 120 cells) and 9-tap shadow-map
+  PCF while keeping identical =paper-surface-radiance=, material character,
+  cloud shadows, blocklight, and aerial perspective.
+- *Derivative-safe crossfading.*  =terrain-visibility-material-fragment-specification=
+  reconstructs per-pixel analytic same-triangle plane gradients rather than
+  using hardware =dFdx=/=dFdy= across screen neighbors.  Complementary fine/coarse
+  screen-space dithering inside the visibility pass therefore incurs zero
+  cross-pixel derivative corruption and zero Z-fighting, and perspective SSAO
+  is already faded to zero past 95 cells.
+
+* Measured baseline on alpine chunk (13, 16) and the cave-star catch
+:PROPERTIES:
+:ID: CLIAOO
+:END:
+
+Baseline measurements gathered live from the running M5 image on steep alpine
+chunk =(13, 16)= (=x ∈ [832, 896), y ∈ [1024, 1088)=) right ahead of the camera:
+
+| Measurement | Observed value | Notes |
+|---+---:|---|
+| Active near residency (=64= chunks, =stride = 1=) | 687,556 stars | Inside 2,097,152-star =sites= arena (33.5 MB) |
+| Active distant heightfield (=636= tiles, =L0..L3=) | 1,518,512 quads | Separate 33.5 MB GPU quad arena |
+| =generate-world-source-chunk= (=64×64×128=) | 19.05 ms | Single thread, 16 Luvcraft chunks + caves + landmarks |
+| =mesh-star-chunk= on =(13, 16)= (=stride = 1=) | 10.59 ms | 32,612 stars |
+| Unoptimized scalar =2×2×2= downsample of =(13, 16)= | 0.72 ms | Will drop under 0.1 ms with word-parallel bit ops |
+| =mesh-star-chunk= on downsampled =(13, 16)= (=stride = 2=) | 2.37 ms | 7,740–7,865 stars across thresholds 1, 3, 4, 5 |
+| =build-distant-tile-quads= (=L0=, =32×32= samples) | 1.36 ms | 2,695 quads |
+
+*The underground cave-star catch.*  A =64×64= open surface only produces ~6–8K
+stars; roughly 75% of chunk =(13, 16)='s 32,612 stars (and ~75% of its 7,786
+coarse stars) are sealed deep-underground caverns that cannot be seen from
+outside the mountain.
+
+*Generic fix: exterior-air reachability culling on coarse tiles.*  Before
+meshing any coarse tile (=stride >= 2=), run a 3D air flood-fill seeded from
+open sky (=z = top=) and the four open tile borders; mark unreachable sealed
+air pockets solid /for that coarse LOD only/.
+- Tunnels punched through mountains, cave mouths opening on cliffs, arches, and
+  windowed cliffside halls connect to exterior air and stay 100% hollow.
+- Unreachable deep bedrock pockets vanish, cutting coarse star counts by ~3–4×.
+- Because isotropic 3D downsampling halves Z alongside X and Y (=64×64×128= at
+  =stride 2=, =64×64×64= at =stride 4=, =64×64×32= at =stride 8=, =64×64×16= at
+  =stride 16=), a full 6 km × 6 km horizon (~48 tiles each at =L0..L2=, ~20 at
+  =L3=) totals roughly ~850K coarse stars + ~687K near stars ≈ 1.54M stars —
+  fitting inside the existing 2.1M-star GPU arena while retiring the separate
+  33.5 MB heightfield arena.
+
+* Generic 2×2×2 downsampling: symmetric occupancy and boundary-cell materials
+:PROPERTIES:
+:ID: NDXUW8
+:END:
+
+Downsampling eight fine cells (=2×2×2=) into one coarse cell requires clean,
+material-agnostic rules for occupancy, material, and coarse lighting:
+
+- *Occupancy filter.*  Union (=≥ 1/8= solid) preserves thin trees and walls but
+  plugs tunnels/windows and bloats mountains by +1 coarse cell per level.
+  Majority (=≥ 4/8= solid) is symmetric between solid and air: mountains hold
+  exact unbiased volume, tunnels and arches stay open, and subpixel 1-cell
+  detail retires cleanly.  Phase 1 should compare =thresh = 3= vs. =4= visually
+  on live trees, cliffs, and carved tunnels (and keep fractional =0..8= density,
+  #TI9NJP, in reserve if binary majority proves too harsh on thin canopies).
+- *Boundary-cell material voting.*  Taking the mode of all 8 fine cells lets
+  underground stone/dirt (6 interior cells) outvote a 1-cell grass, snow, or
+  masonry facade (2 surface cells), turning distant hills brown or gray.
+  Voting *only over exposed boundary cells* (solid cells adjacent to at least
+  one air cell — the 3-chain boundary) preserves every surface skin generically
+  without material-specific rules.
+- *Coarse 3D sky-AO and blocklight.*  Populate =terrain-lights= on coarse tiles
+  directly from coarse =chunk-fibers=: sky-AO (alpha nibble) from vertical
+  clear-column bit-scans (=fibers-column-clear-p=) plus local 3D corner
+  occupancy so tunnels darken inside and overhangs cast soft shade, and RGB
+  blocklight downsampled from emissive voxels / authored light edits.  Bevel
+  tiers in =lights.w= reuse the exact #K5MKUT corner =min= unchanged.
+
+* Two-tier coarse voxel pyramid: exact mips over a 3D coarse fallback
+:PROPERTIES:
+:ID: 2LGM4W
+:END:
+
+Generating 15,000 unexplored =stride = 1= chunks on cold start (~19 ms each) is
+not viable, yet we refuse to maintain two incompatible world models.  The
+unified protocol is that *every LOD ring consumes 3D =chunk-fibers= +
+=chunk-materials= at =stride = 2^k=*, backed by two provenance tiers inside one
+coarse voxel pyramid:
+
+1. *Exact bottom-up mip store (cached, then persisted).*  Whenever any
+   =stride = 1= chunk is generated or edited, its =2×2×2= downsample updates its
+   parent =stride = 2= quadrant in under 1 ms and cascades upward (=2 → 4 → 8 →
+   16=).  Single-cell edits — both solid placements and carved air — update
+   their ancestor column in =O(1)= per mip level.  A full 5 km × 5 km world's
+   =stride = 4/8/16= mips is only a few megabytes and can persist alongside the
+   save, keyed by seed and journal watermark.
+2. *Coarse-native 3D generator fallback.*  For never-yet-visited far chunks,
+   =world-source= populates a =stride = 2^k= =chunk-fibers= + =chunk-materials=
+   directly (~1–2 ms/tile): filtered 4-corner surface height (eliminating
+   point-sample ridge/snowline aliasing), true 3D strata, coarse 3D caves, and
+   *3D replay of both solid and carved-air journal edits* so authored mountain
+   tunnels, arches, and towers appear immediately at 2.5 km on load.
+3. *Background exact refinement.*  A low-priority background pass lazily bakes
+   the immediate =stride = 2= ring from exact =stride = 1= downsamples whenever
+   idle, upgrading coarse fallback tiles seamlessly to exact ground truth
+   (honest trees, boulders, micro-caves) with zero special-case code.
+
+* Subtle shader, domain, and residency invariants to protect
+:PROPERTIES:
+:ID: Q5MNJR
+:END:
+
+Traps identified before implementation so we do not rediscover them later:
+
+- *Signed / out-of-domain coordinates.*  Luvcraft currently declares an
+  =11×11=-bit domain (=0..2047=, =offset = 1024=), while the 2.5 km horizon
+  spans =[-1536, 4096)=.  Bias =site.x= and =site.y= by =+1048576= (=2^20=,
+  exact in =float32= before subtracting in =star-record-world=) so coarse stars
+  handle arbitrary signed coordinates without breaking existing saves.  Factor
+  coarse star selection out of =mesh-star-chunk= so it accepts any signed
+  world origin and 8-neighbor coarse apron rather than clamping to =[0, 2048)=.
+- *Scale-aware fragment coordinates.*  Two places in =luft/render/shaders.lisp=
+  assume =1 cell = 1.0=: =paper-surface-radiance= hashes
+  =(floor (- world (* normal 0.25)))= and the grass overhang =fringe= (#HYBFRT)
+  evaluates =(fract (- world.z 0.001))=.  Both must divide by =scale=, or
+  coarse grass cliffs will show horizontal zebra stripes and coarse facets will
+  carry sub-facet checker noise.
+- *No TAA history resets on coarse arrivals.*  =renderer-update-meshes=
+  invalidates MetalFX temporal history on near-chunk publication.  Coarse LOD
+  tiles must allocate and free slices directly in the shared =terrain-arenas=
+  on an independent cohort so streaming background tiles never flushes TAA.
+- *Preserve bevel angles across scales (#VK1FJV).*  Scale bevel insets linearly
+  with =scale= (=scale * bevel=) rather than clamping to 0.30 world cells;
+  clamping drains away diagonal normals at =stride = 4, 8, 16= and reintroduces
+  the brightness pop.
+- *Visual and performance oracles.*  Judge every phase against four concrete
+  cases: (1) the live alpine ridge seam at =x = 1088=, (2) a tunnel punched
+  straight through that mountain, (3) a valley arch and glowing recessed
+  cliffside window at dusk, and (4) native Metal GPU frame timings following
+  [[file:../.agents/metal-profiling.md][the Metal profiling runbook]].
+
+* NEXT Phase 1: scale-covariant star shader and live stride-2 spike
+:PROPERTIES:
+:ID: 4R3Y36
+:END:
+
+Build the smallest live proof before committing to the full pyramid:
+
+1. Pack =lod-shift= into =site.z= bits =16..18= and =+2^20= coordinate bias into
+   =site.x=/=site.y=; update =star-record-world= across visibility, forward, and
+   material passes; scale =paper-surface-radiance= cell hash and grass =fringe=;
+   add the coherent =lod-shift > 0= fast shading branch in the visibility
+   material shader.
+2. Implement generic =downsample-chunk-2x2x2= (word-parallel occupancy with
+   live-selectable threshold 3 vs. 4, boundary-cell material vote, exterior-air
+   culling, coarse 3D sky-AO, and #K5MKUT corner bevel tiers).
+3. Wire a live A/B switch rendering =stride = 2= downsampled star tiles right
+   across =x ∈ [832, 896)= in front of the current alpine camera, plus a carved
+   test tunnel through the ridge.
+
+Done when: live screenshots and motion checks show whether isotropic beveled
+=stride = 2= resolves the luminance/bevel/silhouette discontinuity, settle the
+=3/8= vs. =4/8= occupancy question on real trees and tunnels, and report M5 GPU
+frame impact.
+
+* TODO Phase 2: unified 3D coarse pyramid across L0..L3
+:PROPERTIES:
+:ID: AQCYEH
+:END:
+
+Extend the validated Phase 1 primitive into a full 2.5+ km 3D horizon:
+
+1. Build the signed-origin coarse star mesher with 8-neighbor coarse aprons
+   (eliminating artificial tile-border walls) and independent =terrain-arenas=
+   residency without TAA resets.
+2. Implement the two-tier coarse voxel pyramid: exact bottom-up mip store
+   (=1 → 2 → 4 → 8 → 16=, with =O(1)= solid and carved-air edit propagation)
+   over a coarse-native 3D =world-source= fallback (~1–2 ms/tile with filtered
+   heights, 3D strata, coarse caves, and 3D solid + air edit replay).
+3. Add low-priority background exact refinement for the inner =stride = 2= ring
+   and design compact mip-cache persistence alongside format-2 saves.
+
+* TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
+:PROPERTIES:
+:ID: 44LFVG
+:END:
+
+Close the seam in motion, prove the GPU budget, and delete the old heightfield:
+
+1. Keep a 1-tile ring overlap behind each finer ring and add a radial
+   complementary screen-space dither crossfade inside
+   =terrain-visibility-fragment-specification=, decoupling transition distance
+   from chunk-grid snaps (eliminating both the =x = 1088= near pop and the
+   =x = 1024= synchronized 4-ring snap).
+2. Compare static IGN vs. frame-phased dithering under MetalFX TAA while still,
+   walking, and flying fast across mountain silhouettes and carved tunnels.
+3. Run native Metal GPU comparisons against the heightfield control on the
+   hilltop panorama and moving flights; record results here and in
+   [[file:luft-rendering-campaign.org][the rendering campaign]], then retire =luft/render/distant-terrain.lisp=,
+   =distant-terrain-shaders.lisp=, and the heightfield =world-source= methods.
