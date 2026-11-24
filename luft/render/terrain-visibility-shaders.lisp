@@ -42,7 +42,8 @@
          (record (buffer-element terrain-vertices vertex-index))
          (world (star-record-world
                  record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-                              (float (swizzle site :z)))))
+                              (float (swizzle site :z)))
+                 (swizzle (representation render-parameters) :x)))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection
                                (swizzle (representation render-parameters) :z)))
@@ -94,7 +95,8 @@ The homogeneous divisor is the same MIX as MESH-VIEW-CLIP, not a mode guess."
     (star-record-world
      (buffer-element terrain-vertices ,index)
      (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-           (float (swizzle site :z))))))
+           (float (swizzle site :z)))
+     (swizzle (representation render-parameters) :x))))
 
 (defun terrain-visibility-light-form (index vertex-bindings)
   ;; The light packing is owned by the forward vertex shader, including its

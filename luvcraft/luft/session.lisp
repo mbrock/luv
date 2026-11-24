@@ -424,7 +424,7 @@ edit and its status as SCENE-EDIT does, or NIL and why not."))
   "The production system and bevel width a sequenced edit settles with."
   (let ((viewer (session-viewer session)))
     (if viewer
-        (values (render::viewer-production-system viewer) (render::viewer-bevel-width viewer))
+        (values (render::viewer-production-system viewer) luft:+mesh-bevel-width+)
         (values nil nil))))
 
 (defun sequence-guest-request (session player message)

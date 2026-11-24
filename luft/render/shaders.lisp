@@ -1348,15 +1348,18 @@ background parallax through the glass does not smear."
 ;;; sites.  A vertex reads its own record, its site, and the site's
 ;;; appearance; nothing is recomputed per corner and no mesh stage is needed.
 
-(define-shader-function star-record-world (record origin)
-  "The world point of one biased star-table RECORD at site ORIGIN."
-  (assume-quantity
-   (+ origin (/ (- (vec3 (float (swizzle record :x))
+(define-shader-function star-record-world (record origin bevel)
+  "The world point of one biased star-table RECORD at site ORIGIN with cell bevel BEVEL.
+Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sign {-1, 0, +1}."
+  (let* ((ticks (- (vec3 (float (swizzle record :x))
                          (float (swizzle record :y))
                          (float (swizzle record :z)))
-                   (vec3 8.0 8.0 8.0))
-                8.0))
-   :quantity quantities:world-position :unit quantities:cell))
+                   (vec3 8.0 8.0 8.0)))
+         (anchor (step (vec3 4.0 4.0 4.0) ticks))
+         (offset (- ticks (* anchor 8.0))))
+    (assume-quantity
+     (+ origin (+ anchor (* offset bevel)))
+     :quantity quantities:world-position :unit quantities:cell)))
 
 (define-live-shader terrain-vertex-specification
     (:stage :vertex
@@ -1399,7 +1402,8 @@ background parallax through the glass does not smear."
          (record (buffer-element terrain-vertices vertex-index))
          (world (star-record-world
                  record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-                              (float (swizzle site :z)))))
+                              (float (swizzle site :z)))
+                 (swizzle (representation render-parameters) :x)))
          (normal (assume-quantity
                   (swizzle (buffer-element terrain-normals
                                            (ldb (byte 16 16) (swizzle record :w)))
@@ -1572,7 +1576,8 @@ background parallax through the glass does not smear."
          (world (star-record-world
                  (buffer-element terrain-vertices vertex-index)
                  (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-                       (float (swizzle site :z))))))
+                       (float (swizzle site :z)))
+                 (swizzle (representation render-parameters) :x))))
     (set-output clip-position
                 (light-clip-position world shadow-row-x shadow-row-y
                                      shadow-row-z shadow-row-w))))

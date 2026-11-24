@@ -439,7 +439,7 @@ repeat the actor's own latest transaction rather than sequence a new change.")
        (multiple-value-bind (event status)
            (let ((actor (viewer-world-actor viewer))
                  (cause *viewer-world-edit-cause*)
-                 (bevel-width (viewer-bevel-width viewer)))
+                 (bevel-width luft:+mesh-bevel-width+))
              (case cause
                ((:undo :redo)
                 (multiple-value-bind (events status)
@@ -664,10 +664,26 @@ before the operation boundary, or it would encode through resources which the
         (draw))))
 
 (defun bevel-width-label (bevel-width)
-  (let ((divisor (gcd bevel-width luft:+mesh-cell-size+)))
-    (format nil "~D/~D"
-            (/ bevel-width divisor)
-            (/ luft:+mesh-cell-size+ divisor))))
+  (cond
+    ((zerop bevel-width) "0")
+    ((integerp bevel-width)
+     (let ((divisor (gcd bevel-width luft:+mesh-cell-size+)))
+       (format nil "~D/~D"
+               (/ bevel-width divisor)
+               (/ luft:+mesh-cell-size+ divisor))))
+    (t (format nil "~,2F" (/ bevel-width luft:+mesh-cell-size+)))))
+
+(defun viewer-bevel-proportion (viewer)
+  (/ (float (viewer-bevel-width viewer) 1.0f0)
+     (float luft:+mesh-cell-size+ 1.0f0)))
+
+(defun (setf viewer-bevel-proportion) (proportion viewer)
+  (let* ((clamped (min 0.5f0 (max 0.0f0 (float proportion 1.0f0))))
+         (ticks (* clamped luft:+mesh-cell-size+))
+         (nearest (round ticks)))
+    (setf (viewer-bevel-width viewer)
+          (if (< (abs (- ticks nearest)) 1e-4) nearest ticks))
+    clamped))
 
 (defun viewer-bevel-label (viewer)
   (if (viewer-terrain-bevels-p viewer)
@@ -1134,7 +1150,7 @@ input frame per tick."
        source (viewer-renderer viewer) production-system)
       ;; Sequenced edits wait out a cohort in flight, then show (#QQT86P).
       (apply-queued-world-events
-       source production-system (viewer-bevel-width viewer))
+       source production-system luft:+mesh-bevel-width+)
       ;; One complete neighborhood cohort crosses the owner boundary before
       ;; another residency change can invalidate it.
       (when (null (streaming-scene-replacement source))
@@ -1166,7 +1182,7 @@ input frame per tick."
   (let ((position (viewer-streaming-focus-position viewer)))
     (retarget-streaming-scene
      (viewer-source viewer) (viewer-production-system viewer)
-     (viewer-bevel-width viewer) (vec3-x position) (vec3-y position))))
+     luft:+mesh-bevel-width+ (vec3-x position) (vec3-y position))))
 
 (defparameter *streaming-preroll-seconds* 30
   "The longest a game host waits for its first terrain before showing anyway.")
@@ -2885,6 +2901,7 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
 (defmethod knobs:unit-abbreviation ((unit (eql 'pointer-pixel))) "px")
 
 (defclass bevel-knob (knobs:switch-knob) ())
+(defclass bevel-width-knob (knobs:scalar-knob) ())
 (defclass construction-knob (knobs:switch-knob) ())
 (defclass walking-speed-knob (knobs:scalar-knob) ())
 (defclass walking-gravity-knob (knobs:scalar-knob) ())
@@ -2899,6 +2916,19 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
     ;; Only the atlas changes; retain the published world, lighting, and
     ;; resident meshes rather than restarting streaming production.
     (refresh-viewer-shaders session))
+  (refresh-viewer-inspector session))
+
+(defmethod knobs:realize-knob progn ((knob bevel-width-knob) (session game-host))
+  (cond
+    ((and (plusp (viewer-bevel-width session))
+          (not (viewer-terrain-bevels-p session)))
+     (setf (viewer-terrain-bevels-p session) t)
+     (when (viewer-renderer session)
+       (refresh-viewer-shaders session)))
+    ((viewer-renderer session)
+     ;; Star-atlas geometry morphs continuously via RENDER-PARAMETERS.X with no
+     ;; mesh or shader rebuild; only reset temporal history so MetalFX snaps.
+     (setf (renderer-history-valid-p (viewer-renderer session)) nil)))
   (refresh-viewer-inspector session))
 
 (defun construction-lines-p () (plusp *wireframe*))
@@ -2941,6 +2971,11 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
     (:group :geometry :class 'bevel-knob :type boolean
      :quantity (:quantity :dimensionless :unit :one))
   (viewer-terrain-bevels-p session))
+(knobs:define-knob bevel-width
+    (:group :geometry :class 'bevel-width-knob :label "bevel width"
+     :quantity (:quantity quantities:bevel-proportion :unit :one)
+     :minimum 0.0 :maximum 0.5 :step 0.025)
+  (viewer-bevel-proportion session))
 (knobs:define-knob construction-lines
     (:group :geometry :class 'construction-knob :type boolean
      :quantity (:quantity :dimensionless :unit :one))
