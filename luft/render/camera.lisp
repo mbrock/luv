@@ -296,3 +296,18 @@ shift, not a drawing instance. Former pose rows remain reserved in the ABI."
                   lanes)
                 previous-character character-direction
                 (atmosphere-uniform-data *light* (or *flame-time* *sky-elapsed* 0.0))))))))
+
+(defun box-outside-clip-p (bounds clip)
+  "Whether all eight corners of BOUNDS lie outside one plane of CLIP's volume."
+  (let ((outside (make-array 6 :initial-element 0)))
+    (dolist (x (list (aref bounds 0) (aref bounds 3)))
+      (dolist (y (list (aref bounds 1) (aref bounds 4)))
+        (dolist (z (list (aref bounds 2) (aref bounds 5)))
+          (multiple-value-bind (cx cy cz cw) (funcall clip x y z)
+            (when (> cx cw) (incf (aref outside 0)))
+            (when (< cx (- cw)) (incf (aref outside 1)))
+            (when (> cy cw) (incf (aref outside 2)))
+            (when (< cy (- cw)) (incf (aref outside 3)))
+            (when (< cz 0.0) (incf (aref outside 4)))
+            (when (> cz cw) (incf (aref outside 5)))))))
+    (find 8 outside)))

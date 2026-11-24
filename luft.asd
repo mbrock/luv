@@ -114,6 +114,7 @@
                              (:file "lighting")
                              (:file "shaders")
                              (:file "terrain-visibility-shaders")
+                             (:file "distant-terrain-shaders")
                              (:file "world-text-shaders")
                              (:file "gpu-resources")
                              (:file "drawing-program")
@@ -144,6 +145,7 @@
                              (:file "renderer-frames")
                              (:file "world-text")
                              (:file "camera")
+                             (:file "distant-terrain")
                              (:file "frame")))))
 
 (defsystem "luft/world"

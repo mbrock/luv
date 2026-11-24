@@ -11,6 +11,8 @@
     terrain-visibility-material-fragment-specification
     terrain-shadow-vertex-specification
     terrain-shadow-rectangle-vertex-specification
+    distant-terrain-vertex-specification
+    distant-terrain-fragment-specification
     player-sdf-vertex-specification
     player-sdf-fragment-specification
     figure-box-vertex-specification

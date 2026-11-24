@@ -152,6 +152,18 @@ SHADOW-P is true for the sun's pass, or :TRANSLUCENT for the blended sheet."
               :shadow-p (eq shadow-p t)
               (when (eq shadow-p :translucent) '(:translucent-p t)))))))
 
+(defun renderer-frame-distant-terrain-bind-group (renderer frame)
+  "Bind RENDERER's distant-quads arena and shared descriptors to FRAME's camera."
+  (let* ((distant (renderer-distant-terrain renderer))
+         (quads (distant-terrain-quad-buffer distant))
+         (descriptors (terrain-arenas-descriptor-buffer (renderer-terrain-arenas renderer))))
+    (renderer-frame-component-binding
+     frame (list :distant-terrain quads descriptors)
+     (lambda ()
+       (make-distant-terrain-binding
+        (renderer-terrain renderer) (renderer-device renderer)
+        quads descriptors (renderer-frame-state-camera-buffer frame))))))
+
 (defun renderer-frame-visibility-binding (renderer frame material-p)
   "Join RENDERER's global pooled terrain arenas to this generation's visibility images."
   (let* ((arenas (renderer-terrain-arenas renderer))

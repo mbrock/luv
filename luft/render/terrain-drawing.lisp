@@ -26,6 +26,9 @@
    (visibility-program :initform nil :accessor terrain-visibility-program)
    (material-program :initform nil :accessor terrain-material-program)
    (shadow-program :accessor terrain-shadow-program)
+   ;; Distant terraced voxel columns beyond near chunk residency.
+   (distant-program :initform nil :accessor terrain-distant-program)
+   (distant-indices :initform nil :accessor terrain-distant-indices)
    ;; Barrels and crates standing in body cells (fixture-drawing.lisp).
    (fixtures :initform nil :accessor terrain-fixtures)))
 
@@ -179,6 +182,13 @@
           (multi-draw-indexed-indirect
            pass (terrain-scene-indices drawing) :uint32
            indirect draw-count byte-offset))))))
+
+(defun make-distant-terrain-binding (drawing device quads descriptors camera)
+  "Bind the global distant-quads arena, shared material descriptors, and camera."
+  (make-program-binding (terrain-distant-program drawing) device
+                        :distant-quads quads
+                        :material-descriptors descriptors
+                        :camera-state camera))
 
 (defun make-terrain-visibility-binding
     (drawing device arenas camera &key sites primitives shadow-map shadow-sampler)
@@ -456,6 +466,11 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                             (make-array 6 :element-type '(unsigned-byte 32)
                                           :initial-contents '(0 1 2 2 1 3))
                             shadow-indices)
+                        :index)
+                (terrain-distant-indices drawing)
+                (upload "luft distant terrain quad indices"
+                        (make-array 6 :element-type '(unsigned-byte 32)
+                                      :initial-contents '(0 1 2 2 1 3))
                         :index))))
       (setf (terrain-scene-program drawing)
             (own-gpu-object
@@ -464,6 +479,17 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
               device :label "luft site streams"
               :vertex (shaders:terrain-vertex-specification)
               :fragment fragment
+              :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
+              :sample-count sample-count
+              :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                               :depth-compare :greater)))
+            (terrain-distant-program drawing)
+            (own-gpu-object
+             drawing
+             (make-drawing-program
+              device :label "luft distant terraced terrain"
+              :vertex (shaders:distant-terrain-vertex-specification)
+              :fragment (shaders:distant-terrain-fragment-specification)
               :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
               :sample-count sample-count
               :depth-stencil '(:format :depth32-float :depth-write-enabled t

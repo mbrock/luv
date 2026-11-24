@@ -147,14 +147,23 @@
       (quantity 180.0 :quantity :view-distance :unit :cell)))))
 
 (define-shader-function luvcraft-atmospheric-surface
-    (radiance world eye forward divisor character sun fog zenith parameters)
-  "Original fog extinction, retaining Luft's shared sky-ground endpoint."
+    (radiance world eye forward divisor character sun fog zenith parameters horizon)
+  "Fog extinction retaining Luft's shared sky-ground endpoint.
+
+When HORIZON is positive (distant terrain active), switch from the legacy
+180-cell quadratic curtain to height-falling aerial perspective so alpine
+valleys hold mist while distant snowy peaks stay legible out to the horizon."
   (let* ((viewer (mix (swizzle character :xyz) (swizzle eye :xyz) divisor))
          (delta (- world viewer))
          (distance (sqrt (dot delta delta)))
          (direction (/ delta (max distance 0.001)))
-         (haze (luvcraft-surface-haze viewer world forward (swizzle fog :w)))
-         (edge (* divisor (smoothstep 180.0 310.0 distance)))
+         (haze (if (> horizon 0.0)
+                   (haze-amount viewer world (* (swizzle fog :w) 0.22)
+                                (* (swizzle parameters :w) 0.55))
+                   (luvcraft-surface-haze viewer world forward (swizzle fog :w))))
+         (edge-start (if (> horizon 0.0) (* horizon 0.72) 180.0))
+         (edge-end (if (> horizon 0.0) horizon 310.0))
+         (edge (* divisor (smoothstep edge-start edge-end distance)))
          (air (aerial-perspective-color (swizzle fog :xyz) direction sun
                                         (swizzle zenith :w))))
     (mix radiance air (max haze edge))))

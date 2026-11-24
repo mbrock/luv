@@ -1142,18 +1142,28 @@ input frame per tick."
         (when (>= (streaming-scene-frame-counter source)
                   (streaming-scene-frames-per-load source))
           (setf (streaming-scene-frame-counter source) 0)
-          (retarget-viewer-streaming viewer))))))
+          (retarget-viewer-streaming viewer)))
+      ;; Update concentric distant-terrain rings incrementally around the focus.
+      (let ((world-source (streaming-scene-source source))
+            (renderer (viewer-renderer viewer)))
+        (when (and renderer world-source (world-source-distant-terrain-p world-source))
+          (let ((position (viewer-streaming-focus-position viewer)))
+            (update-renderer-distant-terrain
+             renderer world-source (vec3-x position) (vec3-y position))))))))
+
+(defun viewer-streaming-focus-position (viewer)
+  "The world position around which VIEWER demands streamed and distant terrain."
+  (if (and (viewer-player viewer)
+           (not (typep (viewer-mode viewer) 'free-camera-mode)))
+      (body-position (character-body (viewer-player viewer)))
+      (camera-position (viewer-camera viewer))))
 
 (defun retarget-viewer-streaming (viewer)
   "Demand VIEWER's streamed terrain around its gameplay focus."
   ;; A following camera can cross a chunk seam while its player remains
   ;; on the other side. Collision residency belongs to the player; the
   ;; authored world's radius-one window also contains the camera view.
-  (let ((position
-          (if (and (viewer-player viewer)
-                   (not (typep (viewer-mode viewer) 'free-camera-mode)))
-              (body-position (character-body (viewer-player viewer)))
-              (camera-position (viewer-camera viewer)))))
+  (let ((position (viewer-streaming-focus-position viewer)))
     (retarget-streaming-scene
      (viewer-source viewer) (viewer-production-system viewer)
      (viewer-bevel-width viewer) (vec3-x position) (vec3-y position))))
@@ -1177,6 +1187,13 @@ nothing else is drawing with it yet."
         (when (drain-streaming-scene-production
                source (viewer-renderer viewer) production-system
                :limit most-positive-fixnum)
+          (let ((world-source (streaming-scene-source source))
+                (renderer (viewer-renderer viewer)))
+            (when (and renderer world-source (world-source-distant-terrain-p world-source))
+              (let ((position (viewer-streaming-focus-position viewer)))
+                (update-renderer-distant-terrain
+                 renderer world-source (vec3-x position) (vec3-y position)
+                 :budget 600))))
           (return t))
         (when (or (streaming-scene-production-errors source)
                   (> (get-internal-real-time) deadline))
@@ -2965,3 +2982,6 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
      :quantity (:quantity quantities:world-distance :unit resident-chunk)
      :minimum 0 :maximum 4 :step 1)
   (streaming-scene-residency-radius (viewer-source session)))
+(knobs:define-knob distant-terrain
+    (:group :streaming :class 'knobs:switch-knob :label "distant terrain")
+  *distant-terrain-p*)

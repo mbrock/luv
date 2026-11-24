@@ -11,6 +11,11 @@
                             (jump-speed (viewer-player viewer))
                             (residency-radius
                              (typep (viewer-source viewer) 'streaming-scene))
+                            (distant-terrain
+                             (and (typep (viewer-source viewer) 'streaming-scene)
+                                  (streaming-scene-source (viewer-source viewer))
+                                  (world-source-distant-terrain-p
+                                   (streaming-scene-source (viewer-source viewer)))))
                             (t t)))))
                  luv.knobs:*knobs*))
 

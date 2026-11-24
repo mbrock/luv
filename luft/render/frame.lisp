@@ -61,21 +61,6 @@ Missing residency retains the old creature open-sky fallback."
     (lambda (x y z)
       (values (row 72 x y z) (row 76 x y z) (row 80 x y z) (row 84 x y z)))))
 
-(defun box-outside-clip-p (bounds clip)
-  "Whether all eight corners of BOUNDS lie outside one plane of CLIP's volume."
-  (let ((outside (make-array 6 :initial-element 0)))
-    (dolist (x (list (aref bounds 0) (aref bounds 3)))
-      (dolist (y (list (aref bounds 1) (aref bounds 4)))
-        (dolist (z (list (aref bounds 2) (aref bounds 5)))
-          (multiple-value-bind (cx cy cz cw) (funcall clip x y z)
-            (when (> cx cw) (incf (aref outside 0)))
-            (when (< cx (- cw)) (incf (aref outside 1)))
-            (when (> cy cw) (incf (aref outside 2)))
-            (when (< cy (- cw)) (incf (aref outside 3)))
-            (when (< cz 0.0) (incf (aref outside 4)))
-            (when (> cz cw) (incf (aref outside 5)))))))
-    (find 8 outside)))
-
 (defun resident-drawn-p (resident shadow-p)
   "Whether this frame's SHADOW-P pass may see RESIDENT's terrain."
   (let ((bounds (resident-population-bounds resident))
@@ -229,6 +214,9 @@ final pass."
           (aref camera-uniform-data 121) (/ 1.0f0 (second bloom))
           (aref camera-uniform-data 122) (/ 1.0f0 (first extent))
           (aref camera-uniform-data 123) (/ 1.0f0 (second extent))))
+  ;; Write the active distant-terrain horizon fade distance into camera-forward.w
+  ;; (0.0 keeps the original near-residency fog and horizon fade unchanged).
+  (setf (aref camera-uniform-data 15) (renderer-distant-terrain-horizon renderer))
   (write-buffer (renderer-frame-state-camera-buffer frame) camera-uniform-data)
   (when (renderer-player renderer)
     (upload-scene-drawing-environment
@@ -313,6 +301,7 @@ final pass."
 (defun encode-renderer-scene
     (renderer frame encoder player-p construction-p &key repetition-p)
   (flush-terrain-arenas (renderer-terrain-arenas renderer) encoder)
+  (flush-distant-terrain-arena (renderer-distant-terrain renderer) encoder)
   (let ((visibility-p (renderer-terrain-visibility-p renderer)))
     (when visibility-p (encode-renderer-terrain-visibility renderer frame encoder))
     (flet ((target (multisampled single clear)
@@ -443,6 +432,12 @@ final pass."
              (renderer-terrain renderer) renderer frame pass binding visible)
             (dolist (resident visible)
               (draw-resident-fixture-bodies renderer frame pass resident))))))
+  ;; Distant terraced voxel columns fill beyond resident near chunks, early-Z
+  ;; rejected wherever near terrain has already claimed depth.
+  (when (member *benchmark-terrain-p* '(t :scene))
+    (let ((clip (and *terrain-culling-p* *frame-uniform-data*
+                     (camera-clip-function *frame-uniform-data*))))
+      (encode-renderer-distant-terrain renderer frame pass clip)))
   (when (plusp (renderer-flame-instance-count renderer))
     (encode-torch-bodies
      (renderer-torches renderer) pass

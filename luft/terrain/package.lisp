@@ -405,6 +405,9 @@ this package draws; the renderer and the ateliers use it.")
            #:world-source-edits
            #:world-source-material-vocabulary
            #:world-source-spawn
+           #:world-source-distant-terrain-p
+           #:world-source-surface-column
+           #:sample-world-source-surface-grid
            ;; World tags and chunk hashes (#RELI34).
            #:canonical-recipe-text
            #:material-vocabulary-digest

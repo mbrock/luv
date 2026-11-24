@@ -37,6 +37,55 @@ This is a view of the journal (#3F0SCZ); record events rather than change it."
 generates in chunk KEY.  A later call for the same cell wins.  Runs on a
 worker, so it must read only SOURCE's immutable description."))
 
+(defgeneric world-source-distant-terrain-p (source)
+  (:documentation
+   "Whether SOURCE supplies analytical distant surface columns beyond near residency.")
+  (:method ((source world-source))
+    (declare (ignore source))
+    nil))
+
+(defgeneric world-source-surface-column (source x y)
+  (:documentation
+   "Return (VALUES TOP-Z TOP-CODE SIDE-CODE) for the analytical column at Luft
+coordinates (X, Y), or NIL when empty/unsupported.  TOP-Z is the integer Z of
+the highest solid cell (its top face lies at TOP-Z + 1); TOP-CODE and SIDE-CODE
+are 8-bit vocabulary codes.")
+  (:method ((source world-source) x y)
+    (declare (ignore source x y))
+    nil))
+
+(defgeneric sample-world-source-surface-grid
+    (source origin-x origin-y stride count heights top-codes side-codes)
+  (:documentation
+   "Sample a (COUNT + 2) x (COUNT + 2) grid of analytical surface columns for
+SOURCE starting at (ORIGIN-X - STRIDE, ORIGIN-Y - STRIDE) in steps of STRIDE.
+
+HEIGHTS is a (SIMPLE-ARRAY (SIGNED-BYTE 32) (*)) receiving each column's top
+solid Z (-1 for empty). TOP-CODES and SIDE-CODES are (SIMPLE-ARRAY (UNSIGNED-BYTE 8) (*))
+receiving 8-bit vocabulary codes for the top face and cliff side.")
+  (:method ((source world-source) origin-x origin-y stride count heights top-codes side-codes)
+    (declare (type fixnum origin-x origin-y stride count)
+             (type (simple-array (signed-byte 32) (*)) heights)
+             (type (simple-array (unsigned-byte 8) (*)) top-codes side-codes))
+    (let ((pitch (+ count 2))
+          (half (ash stride -1)))
+      (dotimes (row pitch)
+        (let ((wy (+ origin-y (* (1- row) stride) half))
+              (row-base (* row pitch)))
+          (dotimes (col pitch)
+            (let ((wx (+ origin-x (* (1- col) stride) half))
+                  (idx (+ row-base col)))
+              (multiple-value-bind (top-z top-code side-code)
+                  (world-source-surface-column source wx wy)
+                (if top-z
+                    (setf (aref heights idx) top-z
+                          (aref top-codes idx) top-code
+                          (aref side-codes idx) (or side-code top-code))
+                    (setf (aref heights idx) -1
+                          (aref top-codes idx) 0
+                          (aref side-codes idx) 0))))))))
+    (values)))
+
 (defstruct (resident-cell-chunk
              (:constructor %make-resident-cell-chunk
                  (key incarnation fibers material-cells &optional attachments))

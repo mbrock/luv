@@ -177,6 +177,134 @@ WORLD is only read, for its chunk shape, so threads may share it."
                                    (placement block))))))))))))))
   (values))
 
+(defun luvcraft-block-material-code (vocabulary block)
+  "1-based terrain descriptor code for Luvcraft BLOCK in VOCABULARY, or 0."
+  (let ((placement (and block (block-placement block))))
+    (if placement
+        (1+ (domains:identity-vocabulary-offset vocabulary placement))
+        0)))
+
+(defmethod terrain:world-source-distant-terrain-p ((source luvcraft-world-source))
+  (subtypep (luvcraft-world-source-little-class source) 'luvcraft:little-world-source))
+
+(defmethod terrain:world-source-surface-column ((source luvcraft-world-source) x y)
+  (let* ((offset (luvcraft-world-source-offset source))
+         (height (luvcraft-world-source-height source))
+         (little (luvcraft-little-world-source source))
+         (vocab (terrain:world-source-material-vocabulary source))
+         (lx (- x offset))
+         (lz (- y offset))
+         (surface (luvcraft::little-world-surface-height little lx lz height))
+         (surface-material (luvcraft::little-world-surface-material
+                            little lx lz surface height))
+         (below-material (luvcraft::little-world-column-material
+                          little (max 0 (1- surface)) surface surface-material)))
+    (values surface
+            (luvcraft-block-material-code vocab surface-material)
+            (luvcraft-block-material-code vocab below-material))))
+
+(defmethod terrain:sample-world-source-surface-grid
+    ((source luvcraft-world-source) origin-x origin-y stride count heights top-codes side-codes)
+  (declare (type fixnum origin-x origin-y stride count)
+           (type (simple-array (signed-byte 32) (*)) heights)
+           (type (simple-array (unsigned-byte 8) (*)) top-codes side-codes))
+  (let* ((offset (luvcraft-world-source-offset source))
+         (height (luvcraft-world-source-height source))
+         (little (luvcraft-little-world-source source))
+         (alpine-p (eq (luvcraft-world-source-relief source) :alpine))
+         (vocab (terrain:world-source-material-vocabulary source))
+         (grass-code (luvcraft-block-material-code vocab luvcraft::*grass-block*))
+         (dirt-code (luvcraft-block-material-code vocab luvcraft::*dirt-block*))
+         (stone-code (luvcraft-block-material-code vocab luvcraft::*stone-block*))
+         (sand-code (luvcraft-block-material-code vocab luvcraft::*sand-block*))
+         (snow-code (luvcraft-block-material-code vocab luvcraft::*snow-block*))
+         (slate-code (luvcraft-block-material-code vocab luvcraft::*slate-block*))
+         (leaf-code (luvcraft-block-material-code vocab luvcraft::*leaf-block*))
+         (pitch (+ count 2))
+         (half (ash stride -1)))
+    (declare (type fixnum offset height pitch half)
+             (type (unsigned-byte 8) grass-code dirt-code stone-code
+                   sand-code snow-code slate-code leaf-code))
+    ;; Pass 1: analytical surface heights including the 1-cell neighbor border.
+    (dotimes (row pitch)
+      (let ((lz (- (+ origin-y (* (1- row) stride) half) offset))
+            (row-base (* row pitch)))
+        (declare (type fixnum lz row-base))
+        (dotimes (col pitch)
+          (let ((lx (- (+ origin-x (* (1- col) stride) half) offset)))
+            (declare (type fixnum lx))
+            (setf (aref heights (+ row-base col))
+                  (luvcraft::little-world-surface-height little lx lz height))))))
+    ;; Pass 2: biome surface & cliff materials from ground slopes.
+    (loop for row fixnum from 1 to count
+          for lz fixnum = (- (+ origin-y (* (1- row) stride) half) offset)
+          for row-base fixnum = (* row pitch) do
+      (loop for col fixnum from 1 to count
+            for lx fixnum = (- (+ origin-x (* (1- col) stride) half) offset)
+            for idx fixnum = (+ row-base col)
+            for h fixnum = (aref heights idx)
+            for max-diff fixnum = (max (abs (- h (aref heights (1+ idx))))
+                                       (abs (- h (aref heights (1- idx))))
+                                       (abs (- h (aref heights (+ idx pitch))))
+                                       (abs (- h (aref heights (- idx pitch)))))
+            for slope fixnum = (floor (+ max-diff half) stride)
+            for mat = (luvcraft::little-world-surface-material
+                       little lx lz h height slope)
+            do (cond
+                 ((eq mat luvcraft::*grass-block*)
+                  (let ((forested-p
+                          (> (luvcraft::little-world-value-noise little lx lz 48 29)
+                             -0.35d0)))
+                    (if forested-p
+                        (let ((hash (luvcraft::little-world-hash
+                                     little
+                                     (floor lx (max 4 stride))
+                                     (floor lz (max 4 stride)))))
+                          (cond
+                            ((and (<= stride 4) (zerop (mod hash 5)))
+                             (setf (aref top-codes idx) leaf-code
+                                   (aref side-codes idx) leaf-code))
+                            ((and (> stride 4) (zerop (mod hash 4)))
+                             (setf (aref top-codes idx) leaf-code
+                                   (aref side-codes idx)
+                                   (if (> max-diff 3) stone-code dirt-code)))
+                            (t
+                             (setf (aref top-codes idx) grass-code
+                                   (aref side-codes idx)
+                                   (if (> max-diff 3) stone-code dirt-code)))))
+                        (setf (aref top-codes idx) grass-code
+                              (aref side-codes idx)
+                              (if (> max-diff 3) stone-code dirt-code)))))
+                 ((eq mat luvcraft::*snow-block*)
+                  (setf (aref top-codes idx) snow-code
+                        (aref side-codes idx)
+                        (if (and alpine-p (> max-diff 2)) stone-code snow-code)))
+                 ((eq mat luvcraft::*stone-block*)
+                  (setf (aref top-codes idx) stone-code
+                        (aref side-codes idx) stone-code))
+                 ((eq mat luvcraft::*slate-block*)
+                  (setf (aref top-codes idx) slate-code
+                        (aref side-codes idx) stone-code))
+                 ((eq mat luvcraft::*sand-block*)
+                  (setf (aref top-codes idx) sand-code
+                        (aref side-codes idx) sand-code))
+                 (t
+                  (let ((code (luvcraft-block-material-code vocab mat)))
+                    (setf (aref top-codes idx) code
+                          (aref side-codes idx) code))))))
+    ;; Pass 3: raise close-LOD forested canopy tufts after slopes are settled.
+    (when (<= stride 4)
+      (loop for row fixnum from 1 to count
+            for row-base fixnum = (* row pitch) do
+        (loop for col fixnum from 1 to count
+              for idx fixnum = (+ row-base col)
+              when (and (= (aref top-codes idx) leaf-code)
+                        (= (aref side-codes idx) leaf-code))
+                do (let ((h (aref heights idx)))
+                     (when (< (+ h 4) height)
+                       (setf (aref heights idx) (+ h 3))))))))
+  (values))
+
 (defun luvcraft-column-top (source x z)
   "One above the highest generated block of Luvcraft column X, Z in SOURCE."
   (let* ((little (luvcraft-little-world-source source))

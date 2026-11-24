@@ -889,7 +889,8 @@ that density along the straight ray."
 (define-shader-abstraction atmospheric-surface
     (radiance world eye forward divisor character sun fog zenith parameters)
   `(,(or *surface-atmosphere-function* 'paper-atmospheric-surface)
-    ,radiance ,world ,eye ,forward ,divisor ,character ,sun ,fog ,zenith ,parameters))
+    ,radiance ,world ,eye ,forward ,divisor ,character ,sun ,fog ,zenith ,parameters
+    (swizzle (representation camera-forward) :w)))
 
 ;;; Paper surfaces.  Lonely Mountains: Downhill reads as cut card under a
 ;;; strong soft sun: each facet one flat, slightly irregular tone; lit faces
@@ -923,21 +924,24 @@ that density along the straight ray."
     (* albedo (+ ambient direct))))
 
 (define-shader-function paper-atmospheric-surface
-    (radiance world eye forward divisor character sun fog zenith parameters)
+    (radiance world eye forward divisor character sun fog zenith parameters horizon)
   "Fade RADIANCE at WORLD into the aerial colour seen from the eye.
 
 An isometric camera's position is not a place anyone stands, so its haze is
 measured outward from the character it frames instead: the diorama around
-the figure stays clear and only its far reaches recede."
+the figure stays clear and only its far reaches recede.  HORIZON, when
+positive, pushes the outer residency fade out to the distant-terrain rim."
   (let* ((viewer (mix (swizzle character :xyz) (swizzle eye :xyz) divisor))
          (delta (- world viewer))
          (distance (sqrt (dot delta delta)))
          (direction (/ delta (max distance 0.001)))
          (haze (haze-amount viewer world (swizzle fog :w)
                             (swizzle parameters :w)))
+         (edge-start (if (> horizon 0.0) (* horizon 0.72) 180.0))
+         (edge-end (if (> horizon 0.0) horizon 310.0))
          ;; The last resident chunks must reach the sky's own ground colour
          ;; exactly, or the edge of the world draws a line on the horizon.
-         (edge (* divisor (smoothstep 180.0 310.0 distance)))
+         (edge (* divisor (smoothstep edge-start edge-end distance)))
          (amount (max haze edge))
          (air (aerial-perspective-color (swizzle fog :xyz) direction sun
                                         (swizzle zenith :w))))

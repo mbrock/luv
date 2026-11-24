@@ -848,3 +848,127 @@
                        (getf (first (luv::render-pass-descriptor-color-attachments
                                      (first passes))) :view)))))
       (render:destroy-renderer renderer))))
+
+(defclass test-analytical-world-source (luft.terrain:world-source)
+  ((elevation-fn :initarg :elevation-fn :reader test-source-elevation-fn))
+  (:default-initargs
+   :domain (luft:make-world-domain :x-bits 10 :y-bits 10)
+   :material-vocabulary (luv.domains:make-identity-vocabulary-domain
+                         :members (list (make-instance
+                                         'luft.terrain:material-placement
+                                         :name :stone
+                                         :kind (make-instance
+                                                'luft.terrain:material-kind
+                                                :name :stone
+                                                :base-tone '(0.5 0.5 0.5))))
+                         :limit #xff)))
+
+(defmethod luft.terrain:world-source-distant-terrain-p ((source test-analytical-world-source))
+  t)
+
+(defmethod luft.terrain:world-source-surface-column ((source test-analytical-world-source) x y)
+  (let ((h (funcall (test-source-elevation-fn source) x y)))
+    (when h
+      (values h 1 1))))
+
+(define-test distant-terrain-shaders-and-quad-packing
+  ;; Both vertex and fragment specifications compile cleanly to SPIR-V and MSL.
+  (let ((vs (luft.render.shaders:distant-terrain-vertex-specification))
+        (fs (luft.render.shaders:distant-terrain-fragment-specification)))
+    (true (plusp (length (luv.spir-v:assemble-shader-specification vs))))
+    (true (plusp (length (luv.spir-v:assemble-shader-specification fs))))
+    (true (plusp (length (luv.msl:msl-document-source (luv.msl:compile-msl vs)))))
+    (true (plusp (length (luv.msl:msl-document-source (luv.msl:compile-msl fs))))))
+  ;; Quad word packing preserves signed world coordinates, heights, face, stride, and AO.
+  (multiple-value-bind (w0 w1 w2 w3)
+      (render::pack-distant-quad-words -320 4096 12 48 3 8 8 42 7 210)
+    (true (= -320 (- (ldb (byte 24 0) w0) render::+distant-coord-bias+)))
+    (true (= 42 (ldb (byte 8 24) w0)))
+    (true (= 4096 (- (ldb (byte 24 0) w1) render::+distant-coord-bias+)))
+    (true (= 7 (ldb (byte 8 24) w1)))
+    (true (= 12 (- (ldb (byte 12 0) w2) render::+distant-z-bias+)))
+    (true (= 48 (- (ldb (byte 12 12) w2) render::+distant-z-bias+)))
+    (true (= 210 (ldb (byte 8 24) w2)))
+    (true (= 3 (ldb (byte 8 0) w3)))
+    (true (= 8 (ldb (byte 8 8) w3)))
+    (true (= 8 (ldb (byte 8 16) w3)))))
+
+(define-test distant-terrain-nested-rings-align-without-gaps
+  (dolist (pos '((0 0) (1056 1024) (-513 -129) (2047 63)))
+    (destructuring-bind (cx cy) pos
+      (let ((boxes (make-array render::+distant-level-count+)))
+        (dotimes (level render::+distant-level-count+)
+          (multiple-value-bind (min-x max-x min-y max-y)
+              (render::distant-ring-bounds level cx cy)
+            (setf (aref boxes level) (vector min-x max-x min-y max-y))
+            (when (plusp level)
+              (let ((inner (aref boxes (1- level))))
+                ;; Inner ring's bounds in parent-tile units lie strictly inside outer ring.
+                (true (zerop (mod (aref inner 0) 2)))
+                (true (= 1 (mod (aref inner 1) 2)))
+                (true (< min-x (ash (aref inner 0) -1)))
+                (true (> max-x (ash (aref inner 1) -1)))
+                (true (< min-y (ash (aref inner 2) -1)))
+                (true (> max-y (ash (aref inner 3) -1)))
+                ;; A parent tile at inner's center is covered; at outer edge is not.
+                (true (render::distant-tile-covered-by-inner-ring-p
+                       level (ash (aref inner 0) -1) (ash (aref inner 2) -1) inner))
+                (true (not (render::distant-tile-covered-by-inner-ring-p
+                            level min-x min-y inner)))))))
+        ;; Outer ring guarantees >= 2560 cells in every direction around (cx, cy).
+        (let* ((outer (aref boxes (1- render::+distant-level-count+)))
+               (tile-size (render::distant-level-tile-size
+                           (1- render::+distant-level-count+)))
+               (min-wx (* (aref outer 0) tile-size))
+               (max-wx (* (1+ (aref outer 1)) tile-size))
+               (min-wy (* (aref outer 2) tile-size))
+               (max-wy (* (1+ (aref outer 3)) tile-size)))
+          (true (>= (- cx min-wx) 2560))
+          (true (>= (- max-wx cx) 2560))
+          (true (>= (- cy min-wy) 2560))
+          (true (>= (- max-wy cy) 2560)))))))
+
+(define-test distant-terrain-emits-skirts-batches-draws-and-reclaims-arena
+  (let* ((source (make-instance 'test-analytical-world-source
+                                :elevation-fn (lambda (x y)
+                                                (if (< x 16) 24 10))))
+         (device (make-instance 'gpu-test-device))
+         (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
+         (frame (test-renderer-frame renderer))
+         (encoder (make-instance 'gpu-test-encoder)))
+    (unwind-protect
+         (progn
+           ;; Tile (0, 0, 0) spans x in [0, 64) at stride 2: 32x32 tops + step cliff + outer skirts.
+           (multiple-value-bind (words quad-count bounds)
+               (render::build-distant-tile-quads source 0 0 0)
+             (true (= (* quad-count 4) (length words)))
+             ;; 1024 top quads + 32 interior cliff quads + 128 outer boundary skirts = 1184.
+             (true (= 1184 quad-count))
+             (true (equalp #(0.0 0.0 7.0 64.0 64.0 25.0) bounds)))
+           ;; Incremental update respects budget and populates horizon distance.
+           (let ((built (render::update-renderer-distant-terrain renderer source 32.0 32.0 :budget 12)))
+             (true (= 12 built))
+             (true (= 2500.0f0 (render::renderer-distant-terrain-horizon renderer))))
+           ;; Scene pass emits a multi-draw-indexed-indirect batch for distant terrain.
+           (render::encode-renderer-scene renderer frame encoder nil nil)
+           (let ((indirect-batches
+                   (remove-if-not
+                    (lambda (cmd)
+                      (typep cmd 'luv::gpu-multi-draw-indexed-indirect-command))
+                    (test-gpu-commands encoder))))
+             (true (= 1 (length indirect-batches)))
+             (true (= 12 (luv::gpu-multi-draw-indexed-indirect-command-draw-count
+                          (first indirect-batches)))))
+           ;; Moving far away evicts old tiles and frees their arena slices cleanly.
+           (render::update-renderer-distant-terrain renderer source 20000.0 20000.0 :budget 4)
+           (render::reclaim-distant-terrain-arena (render::renderer-distant-terrain renderer))
+           (let ((stats (render::distant-terrain-stats renderer)))
+             (true (= 4 (getf stats :tile-count))))
+           ;; Clearing frees all slices and resets horizon to 0.0.
+           (render::clear-distant-terrain (render::renderer-distant-terrain renderer))
+           (render::reclaim-distant-terrain-arena (render::renderer-distant-terrain renderer))
+           (true (zerop (render::renderer-distant-terrain-horizon renderer)))
+           (let ((arena-stats (getf (render::distant-terrain-stats renderer) :arena)))
+             (true (zerop (getf arena-stats :used)))
+             (true (= 1 (getf arena-stats :free-span-count)))))
+      (render:destroy-renderer renderer))))
