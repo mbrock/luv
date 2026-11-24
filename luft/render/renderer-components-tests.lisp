@@ -971,4 +971,13 @@
            (let ((arena-stats (getf (render::distant-terrain-stats renderer) :arena)))
              (true (zerop (getf arena-stats :used)))
              (true (= 1 (getf arena-stats :free-span-count)))))
-      (render:destroy-renderer renderer))))
+      (render:destroy-renderer renderer))
+    ;; Packed fixnum tile keys remain distinct across negative/positive coords and levels.
+    (let ((keys (make-hash-table :test #'eql)))
+      (dotimes (lvl 4)
+        (loop for tx from -3 to 3 do
+          (loop for ty from -3 to 3 do
+            (let ((k (render::distant-tile-key lvl tx ty)))
+              (true (typep k 'fixnum))
+              (true (null (gethash k keys)))
+              (setf (gethash k keys) t))))))))

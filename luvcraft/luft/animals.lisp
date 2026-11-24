@@ -172,14 +172,26 @@
     (nreverse figures)))
 
 (defun animal-figure-list (viewer)
-  "VIEWER's world's turtles, each box with its pose in VIEWER's previous frame."
-  (let ((world (viewer-world viewer)))
+  "VIEWER's world's visible turtles, each box with its pose in VIEWER's previous frame."
+  (let* ((world (viewer-world viewer))
+         (camera (render:viewer-camera viewer))
+         (cam-pos (and camera (render:camera-position camera)))
+         (cx (and cam-pos (float (vec3:vec3-x cam-pos) 1.0)))
+         (cy (and cam-pos (float (vec3:vec3-y cam-pos) 1.0)))
+         (cz (and cam-pos (float (vec3:vec3-z cam-pos) 1.0))))
     (loop for animal in (world-animals world)
-          for figures = (animal-figures animal)
-          for previous = (gethash animal (viewer-previous-animal-figures viewer))
-          append (progn
-                   (loop for figure in figures for old in previous
-                         do (setf (second figure) (first old)
-                                  (third figure) (append (subseq (third figure) 0 2)
-                                                         (subseq (third old) 0 2))))
-                   figures))))
+          for p = (luvcraft::critter-position animal)
+          for ax = (+ 1024.0 (float (vec3:vec3-x p) 1.0))
+          for ay = (+ 1024.0 (float (vec3:vec3-z p) 1.0))
+          for az = (float (vec3:vec3-y p) 1.0)
+          when (and (> az -64.0)
+                    (or (null cx)
+                        (let ((dx (- ax cx)) (dy (- ay cy)) (dz (- az cz)))
+                          (<= (+ (* dx dx) (* dy dy) (* dz dz)) 65536.0))))
+            append (let ((figures (animal-figures animal))
+                         (previous (gethash animal (viewer-previous-animal-figures viewer))))
+                     (loop for figure in figures for old in previous
+                           do (setf (second figure) (first old)
+                                    (third figure) (append (subseq (third figure) 0 2)
+                                                           (subseq (third old) 0 2))))
+                     figures))))

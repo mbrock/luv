@@ -127,11 +127,12 @@
 (defclass creature-figure-binding (ball-figure-binding)
   ((proposal-binding :accessor proposal-binding)
    (source-buffer :initform nil :accessor creature-source-buffer)
-   (vertices :accessor creature-vertices)
-   (positions :accessor creature-positions)
-   (uniforms :accessor creature-uniforms)
-   (surface :accessor creature-surface-binding)
-   (shadow :accessor creature-shadow-binding)
+   (vertices :initform nil :accessor creature-vertices)
+   (positions :initform nil :accessor creature-positions)
+   (uniforms :initform nil :accessor creature-uniforms)
+   (surface :initform nil :accessor creature-surface-binding)
+   (shadow :initform nil :accessor creature-shadow-binding)
+   (creature-capacity :initform 0 :accessor creature-capacity)
    (count :initform 0 :accessor creature-count)))
 
 (defun make-creature-figure-drawing (device formats samples)
@@ -200,91 +201,117 @@
     ((drawing creature-figure-drawing) device camera shadow sampler)
   (make-instance 'creature-figure-binding :inputs (list device camera shadow sampler)))
 
+(defun %count-creature-figures (data)
+  (loop for base from 0 below (length data) by render::+figure-scalar-count+
+        count (= 4.0 (aref data (+ base 15)))))
+
 (defun creature-figure-vertices (data &optional previous-p)
   "Expand kind 4 through the original box emitter, including atlas UV scale.
 Lane 19 is the original tile identity, not a sampled or averaged colour."
-  (let ((vertices (make-array (* (/ (length data) render::+figure-scalar-count+) 36
-                                  luvcraft::+block-mesh-floats-per-vertex+)
-                              :element-type 'single-float :fill-pointer 0)))
-    (loop for base from 0 below (length data) by render::+figure-scalar-count+
-          when (= 4.0 (aref data (+ base 15))) do
-            (let ((animal (make-instance
-                           'luvcraft::turtle
-                           :position (let ((pose (+ base (if previous-p 4 0))))
-                                       (vec3:make-vec3 (- (aref data pose) 1024.0)
-                                                       (aref data (+ pose 2))
-                                                       (- (aref data (+ pose 1)) 1024.0)))
-                           :yaw (let ((heading (+ base (if previous-p 10 8))))
-                                  (atan (aref data heading) (aref data (1+ heading)))))))
-              (luvcraft::emit-critter-box
-               vertices animal 0.0 0.0 0.0
-               (aref data (+ base 12)) (aref data (+ base 14)) (aref data (+ base 13))
-               (luvcraft::block-atlas-tile-at-offset (round (aref data (+ base 19))))
-               (aref data (+ base 23)) 0.0)))
-    vertices))
+  (let ((box-count (%count-creature-figures data)))
+    (when (zerop box-count)
+      (return-from creature-figure-vertices
+        (make-array 0 :element-type 'single-float :fill-pointer 0)))
+    (let ((vertices (make-array (* box-count 36 luvcraft::+block-mesh-floats-per-vertex+)
+                                :element-type 'single-float :fill-pointer 0)))
+      (loop for base from 0 below (length data) by render::+figure-scalar-count+
+            when (= 4.0 (aref data (+ base 15))) do
+              (let ((animal (make-instance
+                             'luvcraft::turtle
+                             :position (let ((pose (+ base (if previous-p 4 0))))
+                                         (vec3:make-vec3 (- (aref data pose) 1024.0)
+                                                         (aref data (+ pose 2))
+                                                         (- (aref data (+ pose 1)) 1024.0)))
+                             :yaw (let ((heading (+ base (if previous-p 10 8))))
+                                    (atan (aref data heading) (aref data (1+ heading)))))))
+                (luvcraft::emit-critter-box
+                 vertices animal 0.0 0.0 0.0
+                 (aref data (+ base 12)) (aref data (+ base 14)) (aref data (+ base 13))
+                 (luvcraft::block-atlas-tile-at-offset (round (aref data (+ base 19))))
+                 (aref data (+ base 23)) 0.0)))
+      vertices)))
+
+(defun %ensure-creature-storage (drawing binding box-count)
+  (let ((needed (max 64 box-count)))
+    (when (or (null (creature-vertices binding))
+              (> needed (creature-capacity binding)))
+      (let ((capacity (max needed (* 2 (creature-capacity binding)))))
+        (destructuring-bind (device camera shadow sampler) (render::figure-binding-inputs binding)
+          (declare (ignore sampler))
+          (flet ((own (descriptor) (render::own-gpu-resource binding device descriptor)))
+            (unless (creature-uniforms binding)
+              (setf (creature-uniforms binding)
+                    (own (luv:make-buffer-descriptor :size (* 76 4) :usage '(:uniform :copy-dst)))
+                    (creature-shadow-binding binding)
+                    (render::own-gpu-object
+                     binding (render:make-program-binding
+                              (creature-shadow drawing) device :frame-state (creature-uniforms binding)))))
+            (setf (creature-vertices binding)
+                  (own (luv:make-buffer-descriptor
+                        :size (* capacity 36 56) :usage '(:vertex :copy-dst)))
+                  (creature-positions binding)
+                  (own (luv:make-buffer-descriptor
+                        :size (* capacity 36 48) :usage '(:storage :copy-dst)))
+                  (creature-surface-binding binding)
+                  (render::own-gpu-object
+                   binding
+                   (render:make-program-binding
+                    (creature-surface drawing) device
+                    :block-atlas (creature-atlas drawing) :block-normal-atlas (creature-normal-atlas drawing)
+                    :block-sampler (creature-sampler drawing) :frame-state (creature-uniforms binding)
+                    :shadow-map shadow :shadow-sampler (creature-sampler drawing)
+                    :shadow-comparison-sampler (creature-comparison drawing)
+                    :camera-state camera :creature-positions (creature-positions binding)))
+                  (creature-capacity binding) capacity)))))))
 
 (defmethod render::upload-figure-instances :after
     ((drawing creature-figure-drawing) (binding creature-figure-binding) data)
   (when (and (plusp (length data))
              (not (eq (creature-source-buffer binding) (render::figure-binding-buffer binding))))
     (destructuring-bind (device camera shadow sampler) (render::figure-binding-inputs binding)
-      (declare (ignore sampler))
-      (flet ((own (descriptor) (render::own-gpu-resource binding device descriptor)))
-        (setf (proposal-binding binding)
-              (render::own-gpu-object
-               binding (render:make-program-binding
-                        (proposal-program drawing) device :camera-state camera
-                        :figure-instances (render::figure-binding-buffer binding)
-                        :box-vertices (render::figure-box-vertices drawing)
-                        :block-atlas (creature-atlas drawing)))
-              (creature-vertices binding)
-              (own (luv:make-buffer-descriptor
-                    :size (* (render::figure-binding-capacity binding) 36 56)
-                    :usage '(:vertex :copy-dst)))
-              (creature-positions binding)
-              (own (luv:make-buffer-descriptor
-                    :size (* (render::figure-binding-capacity binding) 36 48)
-                    :usage '(:storage :copy-dst)))
-              (creature-uniforms binding)
-              (own (luv:make-buffer-descriptor :size (* 76 4) :usage '(:uniform :copy-dst)))
-              (creature-surface-binding binding)
-              (render::own-gpu-object
-               binding
-               (render:make-program-binding
-                (creature-surface drawing) device
-                :block-atlas (creature-atlas drawing) :block-normal-atlas (creature-normal-atlas drawing)
-                :block-sampler (creature-sampler drawing) :frame-state (creature-uniforms binding)
-                :shadow-map shadow :shadow-sampler (creature-sampler drawing)
-                :shadow-comparison-sampler (creature-comparison drawing)
-                :camera-state camera :creature-positions (creature-positions binding)))
-              (creature-shadow-binding binding)
-              (render::own-gpu-object
-               binding (render:make-program-binding
-                        (creature-shadow drawing) device :frame-state (creature-uniforms binding)))
-              (creature-source-buffer binding) (render::figure-binding-buffer binding)))))
-  (let* ((vertices (creature-figure-vertices data))
-         (previous (creature-figure-vertices data t))
-         (positions (make-array (* (/ (length vertices) 14) 12) :element-type 'single-float
-                                                                         :initial-element 0.0)))
-    (setf (creature-count binding) (/ (length vertices) luvcraft::+block-mesh-floats-per-vertex+))
-    (loop for vertex from 0 below (length vertices) by 14
-          for target from 0 by 12 do
-            (loop for source in (list vertices previous) for base from target by 4 do
-              (setf (aref positions base) (+ 1024.0 (aref source vertex))
-                    (aref positions (+ base 1)) (+ 1024.0 (aref source (+ vertex 2)))
-                    (aref positions (+ base 2)) (aref source (+ vertex 1))
-                    (aref positions (+ base 3)) 0.0)))
-    (loop with target = 0
-          for base from 0 below (length data) by render::+figure-scalar-count+
-          when (= 4.0 (aref data (+ base 15))) do
-            (dotimes (vertex 36)
-              (loop for channel below 3 do
-                (setf (aref positions (+ target 8 channel))
-                      (* (sqrt luft.render.shaders::*voxel-light-gain*) (aref data (+ base 20 channel)))))
-              (incf target 12)))
-    (when (plusp (length vertices))
-      (luv:write-buffer (creature-vertices binding) vertices)
-      (luv:write-buffer (creature-positions binding) positions))))
+      (declare (ignore shadow sampler))
+      (setf (proposal-binding binding)
+            (render::own-gpu-object
+             binding (render:make-program-binding
+                      (proposal-program drawing) device :camera-state camera
+                      :figure-instances (render::figure-binding-buffer binding)
+                      :box-vertices (render::figure-box-vertices drawing)
+                      :block-atlas (creature-atlas drawing)))
+            (creature-vertices binding) nil
+            (creature-positions binding) nil
+            (creature-uniforms binding) nil
+            (creature-surface-binding binding) nil
+            (creature-shadow-binding binding) nil
+            (creature-capacity binding) 0
+            (creature-source-buffer binding) (render::figure-binding-buffer binding))))
+  (let ((box-count (%count-creature-figures data)))
+    (when (zerop box-count)
+      (setf (creature-count binding) 0)
+      (return-from render::upload-figure-instances))
+    (%ensure-creature-storage drawing binding box-count)
+    (let* ((vertices (creature-figure-vertices data))
+           (previous (creature-figure-vertices data t))
+           (positions (make-array (* (/ (length vertices) 14) 12) :element-type 'single-float
+                                                                  :initial-element 0.0)))
+      (setf (creature-count binding) (/ (length vertices) luvcraft::+block-mesh-floats-per-vertex+))
+      (loop for vertex from 0 below (length vertices) by 14
+            for target from 0 by 12 do
+              (loop for source in (list vertices previous) for base from target by 4 do
+                (setf (aref positions base) (+ 1024.0 (aref source vertex))
+                      (aref positions (+ base 1)) (+ 1024.0 (aref source (+ vertex 2)))
+                      (aref positions (+ base 2)) (aref source (+ vertex 1))
+                      (aref positions (+ base 3)) 0.0)))
+      (loop with target = 0
+            for base from 0 below (length data) by render::+figure-scalar-count+
+            when (= 4.0 (aref data (+ base 15))) do
+              (dotimes (vertex 36)
+                (loop for channel below 3 do
+                  (setf (aref positions (+ target 8 channel))
+                        (* (sqrt luft.render.shaders::*voxel-light-gain*) (aref data (+ base 20 channel)))))
+                (incf target 12)))
+      (when (plusp (length vertices))
+        (luv:write-buffer (creature-vertices binding) vertices)
+        (luv:write-buffer (creature-positions binding) positions)))))
 
 (defun creature-frame-uniforms (data)
   "Translate the current Luft camera/light ABI, never recompute another sun map."

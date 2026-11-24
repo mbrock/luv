@@ -361,79 +361,82 @@
   (let* ((agent (luvcraft.agent::companion-body-agent overlay))
          (mesh (luvcraft.agent::companion-body-mesh overlay))
          (kind (luvcraft.agent::embodied-agent-save-kind agent)))
-    (when (luvcraft.agent::companion-body-visible-p agent viewer)
-      (let* ((presentation (companion-presentation viewer))
-             (device (render:viewer-device viewer))
-             (program (ensure-temporal-companion-program presentation device))
-             (pose (luvcraft.agent::companion-kinematics agent))
-             (palette (if (and pose (eq mesh (luvcraft.agent::companion-pose-mesh pose)))
-                          (luvcraft.agent::companion-pose-palette pose)
-                          (luvcraft.agent::sample-agent-palette
-                           agent mesh (luvcraft.agent::companion-body-palette overlay))))
-             (state (or (gethash overlay (presentation-temporal-bodies presentation))
-                        (setf (gethash overlay (presentation-temporal-bodies presentation))
-                              (make-temporal-companion-state
-                               :previous-palette (make-array (length palette)
-                                                             :element-type 'single-float
-                                                             :initial-element 0.0)))))
-             (frame-index (render::renderer-frame-index (render:viewer-renderer viewer)))
-             (continuous-p (= (temporal-companion-state-last-frame state) (1- frame-index)))
-             (prev-palette (if continuous-p
-                               (temporal-companion-state-previous-palette state)
-                               palette))
-             (origin (host-position viewer (luvcraft.agent::embodied-agent-position agent)))
-             (yaw (luvcraft.agent::embodied-agent-facing-yaw agent))
-             (instance (temporal-companion-state-instance state))
-             (prev-instance (temporal-companion-state-previous-instance state))
-             (camera-buffer (render::renderer-frame-state-camera-buffer renderer-frame))
-             (gpu-frame
-               (luv:canvas-frame-resource
-                (temporal-companion-state-frames state) (render:viewer-context viewer) surface
-                (lambda (key target)
-                  (declare (ignore key target))
-                  (flet ((buffer (label floats usage)
-                           (luv:create device (luv:make-buffer-descriptor
-                                               :label label :size (* 4 floats) :usage usage))))
-                    (make-temporal-companion-frame
-                     :palette (buffer "Temporal companion palette" (length palette)
-                                      '(:storage :copy-dst))
-                     :previous-palette (buffer "Temporal companion previous palette" (length palette)
-                                               '(:storage :copy-dst))
-                     :instance (buffer "Temporal companion instance" 16
-                                       '(:vertex :copy-dst))))))))
-        (unless (eq camera-buffer (temporal-companion-frame-camera-buffer gpu-frame))
-          (when (temporal-companion-frame-binding gpu-frame)
-            (luv:destroy (temporal-companion-frame-binding gpu-frame)))
-          (setf (temporal-companion-frame-binding gpu-frame)
-                (render:make-program-binding
-                 program device
-                 :camera-state camera-buffer
-                 :palette (temporal-companion-frame-palette gpu-frame)
-                 :previous-palette (temporal-companion-frame-previous-palette gpu-frame))
-                (temporal-companion-frame-camera-buffer gpu-frame) camera-buffer))
-        (setf (aref instance 0) (coerce (vec3:vec3-x origin) 'single-float)
-              (aref instance 1) (coerce (vec3:vec3-y origin) 'single-float)
-              (aref instance 2) (coerce (vec3:vec3-z origin) 'single-float)
-              (aref instance 3) (luvcraft.agent::companion-stature kind)
-              (aref instance 4) (coerce (sin yaw) 'single-float)
-              (aref instance 5) (coerce (cos yaw) 'single-float)
-              (aref instance 6) (luvcraft.agent::companion-rim-light kind)
-              (aref instance 7) 0.0)
-        (if continuous-p
-            (replace instance prev-instance :start1 8 :end1 16)
-            (replace instance instance :start1 8 :end1 16 :start2 0 :end2 8))
-        (luv:write-buffer (temporal-companion-frame-palette gpu-frame) palette)
-        (luv:write-buffer (temporal-companion-frame-previous-palette gpu-frame) prev-palette)
-        (luv:write-buffer (temporal-companion-frame-instance gpu-frame) instance)
-        (luv:set-pipeline pass (render::program-pipeline program))
-        (luv:set-vertex-buffer pass 0 (luvcraft.agent::companion-body-vertex-buffer overlay))
-        (luv:set-vertex-buffer pass 1 (temporal-companion-frame-instance gpu-frame))
-        (luv:set-bind-group pass 0 (temporal-companion-frame-binding gpu-frame))
-        (luv:draw-indexed pass (luvcraft.agent::companion-body-indices overlay) :uint32
-                          (length (luvcraft.agent::companion-mesh-indices mesh)))
-        (replace (temporal-companion-state-previous-palette state) palette)
-        (replace prev-instance instance :start2 0 :end2 8)
-        (setf (temporal-companion-state-last-frame state) frame-index)))))
+    (multiple-value-bind (visible-p depth radius)
+        (luvcraft.agent::companion-body-visible-p agent viewer)
+      (when visible-p
+        (let* ((presentation (companion-presentation viewer))
+               (device (render:viewer-device viewer))
+               (program (ensure-temporal-companion-program presentation device))
+               (pose (luvcraft.agent::companion-kinematics agent))
+               (palette (if (and pose (eq mesh (luvcraft.agent::companion-pose-mesh pose)))
+                            (luvcraft.agent::companion-pose-palette pose)
+                            (luvcraft.agent::sample-agent-palette
+                             agent mesh (luvcraft.agent::companion-body-palette overlay))))
+               (state (or (gethash overlay (presentation-temporal-bodies presentation))
+                          (setf (gethash overlay (presentation-temporal-bodies presentation))
+                                (make-temporal-companion-state
+                                 :previous-palette (make-array (length palette)
+                                                               :element-type 'single-float
+                                                               :initial-element 0.0)))))
+               (frame-index (render::renderer-frame-index (render:viewer-renderer viewer)))
+               (continuous-p (= (temporal-companion-state-last-frame state) (1- frame-index)))
+               (prev-palette (if continuous-p
+                                 (temporal-companion-state-previous-palette state)
+                                 palette))
+               (origin (host-position viewer (luvcraft.agent::embodied-agent-position agent)))
+               (yaw (luvcraft.agent::embodied-agent-facing-yaw agent))
+               (instance (temporal-companion-state-instance state))
+               (prev-instance (temporal-companion-state-previous-instance state))
+               (camera-buffer (render::renderer-frame-state-camera-buffer renderer-frame))
+               (gpu-frame
+                 (luv:canvas-frame-resource
+                  (temporal-companion-state-frames state) (render:viewer-context viewer) surface
+                  (lambda (key target)
+                    (declare (ignore key target))
+                    (flet ((buffer (label floats usage)
+                             (luv:create device (luv:make-buffer-descriptor
+                                                 :label label :size (* 4 floats) :usage usage))))
+                      (make-temporal-companion-frame
+                       :palette (buffer "Temporal companion palette" (length palette)
+                                        '(:storage :copy-dst))
+                       :previous-palette (buffer "Temporal companion previous palette" (length palette)
+                                                 '(:storage :copy-dst))
+                       :instance (buffer "Temporal companion instance" 16
+                                         '(:vertex :copy-dst))))))))
+          (unless (eq camera-buffer (temporal-companion-frame-camera-buffer gpu-frame))
+            (when (temporal-companion-frame-binding gpu-frame)
+              (luv:destroy (temporal-companion-frame-binding gpu-frame)))
+            (setf (temporal-companion-frame-binding gpu-frame)
+                  (render:make-program-binding
+                   program device
+                   :camera-state camera-buffer
+                   :palette (temporal-companion-frame-palette gpu-frame)
+                   :previous-palette (temporal-companion-frame-previous-palette gpu-frame))
+                  (temporal-companion-frame-camera-buffer gpu-frame) camera-buffer))
+          (setf (aref instance 0) (coerce (vec3:vec3-x origin) 'single-float)
+                (aref instance 1) (coerce (vec3:vec3-y origin) 'single-float)
+                (aref instance 2) (coerce (vec3:vec3-z origin) 'single-float)
+                (aref instance 3) (luvcraft.agent::companion-stature kind)
+                (aref instance 4) (coerce (sin yaw) 'single-float)
+                (aref instance 5) (coerce (cos yaw) 'single-float)
+                (aref instance 6) (luvcraft.agent::companion-rim-light kind)
+                (aref instance 7) 0.0)
+          (if continuous-p
+              (replace instance prev-instance :start1 8 :end1 16)
+              (replace instance instance :start1 8 :end1 16 :start2 0 :end2 8))
+          (luv:write-buffer (temporal-companion-frame-palette gpu-frame) palette)
+          (luv:write-buffer (temporal-companion-frame-previous-palette gpu-frame) prev-palette)
+          (luv:write-buffer (temporal-companion-frame-instance gpu-frame) instance)
+          (luv:set-pipeline pass (render::program-pipeline program))
+          (luv:set-vertex-buffer pass 0 (luvcraft.agent::companion-body-vertex-buffer overlay))
+          (luv:set-vertex-buffer pass 1 (temporal-companion-frame-instance gpu-frame))
+          (luv:set-bind-group pass 0 (temporal-companion-frame-binding gpu-frame))
+          (multiple-value-bind (index-buffer index-count)
+              (luvcraft.agent::companion-body-lod-indices overlay depth radius)
+            (luv:draw-indexed pass index-buffer :uint32 index-count))
+          (replace (temporal-companion-state-previous-palette state) palette)
+          (replace prev-instance instance :start2 0 :end2 8)
+          (setf (temporal-companion-state-last-frame state) frame-index))))))
 
 (defmethod render:encode-viewer-overlay
     ((overlay luvcraft.agent::companion-body-overlay) (viewer luvcraft-viewer) pass surface)

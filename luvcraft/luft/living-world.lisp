@@ -563,7 +563,7 @@ by asking it.  Return the host's body handle, or NIL for a request."
 ;;; world each have their own motion history for temporal rendering.
 
 (defun remember-viewer-poses (viewer)
-  "Keep the turtles' boxes and balls' centres as VIEWER last saw them."
+  "Keep the turtles' boxes and moving balls' centres as VIEWER last saw them."
   (let ((world (viewer-world viewer))
         (figures (viewer-previous-animal-figures viewer))
         (centres (viewer-previous-ball-centers viewer)))
@@ -571,8 +571,34 @@ by asking it.  Return the host's body handle, or NIL for a request."
     (dolist (animal (world-animals world))
       (setf (gethash animal figures) (animal-figures animal)))
     (clrhash centres)
-    (loop for (id centre) in (world-ball-list world)
-          do (setf (gethash id centres) centre))))
+    (if (replica-world-p world)
+        (loop for (id centre) in (world-ball-list world)
+              do (setf (gethash id centres) centre))
+        ;; On the host, sleeping and suspended bodies do not move (old == current),
+        ;; so only awake bodies need previous centres for temporal motion vectors.
+        (let ((physics (world-physics world)))
+          (when physics
+            (let* ((awake (luvcraft::physics-world-awake physics))
+                   (len (luvcraft::physics-body-columns-length awake))
+                   (handles (luvcraft::physics-body-columns-handle-lane awake))
+                   (xs (luvcraft::physics-body-columns-x-lane awake))
+                   (ys (luvcraft::physics-body-columns-y-lane awake))
+                   (zs (luvcraft::physics-body-columns-z-lane awake))
+                   (camera (render:viewer-camera viewer))
+                   (cam-pos (and camera (render:camera-position camera)))
+                   (cx (and cam-pos (float (vec3:vec3-x cam-pos) 1.0)))
+                   (cy (and cam-pos (float (vec3:vec3-y cam-pos) 1.0)))
+                   (cz (and cam-pos (float (vec3:vec3-z cam-pos) 1.0))))
+              (dotimes (row len)
+                (let ((x (aref xs row))
+                      (y (aref ys row))
+                      (z (aref zs row)))
+                  (when (or (null cx)
+                            (let ((dx (- (+ 1024.0 x) cx))
+                                  (dy (- (+ 1024.0 z) cy))
+                                  (dz (- y cz)))
+                              (<= (+ (* dx dx) (* dy dy) (* dz dz)) 65536.0)))
+                    (setf (gethash (aref handles row) centres) (list x y z)))))))))))
 
 (defun derive-viewer-particles (viewer)
   "Burst the blocks that the journal's confirmed events since VIEWER last

@@ -288,6 +288,7 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
 
 (defclass companion-body-overlay ()
   ((agent :initarg :agent :reader companion-body-agent)
+   (shared-mesh :initarg :shared-mesh :initform nil :accessor companion-body-shared-mesh)
    (pipeline :initarg :pipeline :accessor companion-body-pipeline)
    (layout :initarg :layout :accessor companion-body-layout)
    (indices :initarg :indices :accessor companion-body-indices)
@@ -298,6 +299,179 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
              :reader companion-body-instance)
    (frames :initform (luv:make-canvas-frame-resource-cache) :reader companion-body-frames))
   (:documentation "Blender-authored indexed mesh with distance-driven skeletal animation."))
+
+;;; Shared per-(device, mesh) GPU geometry, LOD index buffers, and pipeline so
+;;; dozens of companions of the same kind share one vertex/index copy in VRAM.
+(defstruct companion-gpu-mesh
+  device mesh (refcount 0)
+  vertex-buffer
+  indices-lod0 count-lod0
+  indices-lod1 count-lod1
+  indices-lod2 count-lod2
+  layout pipeline)
+
+(defparameter *companion-gpu-meshes*
+  (make-hash-table :test #'eq :weakness :key)
+  "Weak map DEVICE -> (HASH-TABLE MESH -> COMPANION-GPU-MESH).")
+
+(defun decimate-companion-mesh-indices (mesh grid-cells)
+  "Build a clustered LOD index array for MESH by quantizing rest positions to GRID-CELLS."
+  (let* ((vd (companion-mesh-vertex-data mesh))
+         (idx (companion-mesh-indices mesh))
+         (stride +companion-vertex-floats+)
+         (vcount (floor (length vd) stride)))
+    (when (zerop vcount)
+      (return-from decimate-companion-mesh-indices idx))
+    (let ((minx 1e9) (maxx -1e9) (miny 1e9) (maxy -1e9) (minz 1e9) (maxz -1e9))
+      (dotimes (i vcount)
+        (let* ((base (* i stride))
+               (x (aref vd base))
+               (y (aref vd (+ base 1)))
+               (z (aref vd (+ base 2))))
+          (when (< x minx) (setf minx x))
+          (when (> x maxx) (setf maxx x))
+          (when (< y miny) (setf miny y))
+          (when (> y maxy) (setf maxy y))
+          (when (< z minz) (setf minz z))
+          (when (> z maxz) (setf maxz z))))
+      (let* ((span (max 1e-4 (max (- maxx minx) (- maxy miny) (- maxz minz))))
+             (scale (/ (float grid-cells 1.0) span))
+             (cell-map (make-hash-table :test #'eql))
+             (remap (make-array vcount :element-type '(unsigned-byte 32))))
+        (dotimes (i vcount)
+          (let* ((base (* i stride))
+                 (gx (floor (* (- (aref vd base) minx) scale)))
+                 (gy (floor (* (- (aref vd (+ base 1)) miny) scale)))
+                 (gz (floor (* (- (aref vd (+ base 2)) minz) scale)))
+                 (key (logior (ash (logand gx #x3FF) 20)
+                              (ash (logand gy #x3FF) 10)
+                              (logand gz #x3FF)))
+                 (rep (gethash key cell-map)))
+            (unless rep
+              (setf rep i (gethash key cell-map) i))
+            (setf (aref remap i) rep)))
+        (let ((kept 0))
+          (loop for k from 0 below (length idx) by 3
+                for a = (aref remap (aref idx k))
+                for b = (aref remap (aref idx (+ k 1)))
+                for c = (aref remap (aref idx (+ k 2)))
+                when (and (/= a b) (/= b c) (/= a c))
+                  do (incf kept))
+          (if (zerop kept)
+              idx
+              (let ((out (make-array (* kept 3) :element-type '(unsigned-byte 32)))
+                    (w 0))
+                (loop for k from 0 below (length idx) by 3
+                      for a = (aref remap (aref idx k))
+                      for b = (aref remap (aref idx (+ k 1)))
+                      for c = (aref remap (aref idx (+ k 2)))
+                      when (and (/= a b) (/= b c) (/= a c))
+                        do (setf (aref out w) a
+                                 (aref out (+ w 1)) b
+                                 (aref out (+ w 2)) c)
+                           (incf w 3))
+                out)))))))
+
+(defun acquire-companion-gpu-mesh (device mesh)
+  "Return the refcounted shared GPU geometry and LOD index buffers for (DEVICE, MESH)."
+  (let* ((by-mesh (or (gethash device *companion-gpu-meshes*)
+                      (setf (gethash device *companion-gpu-meshes*)
+                            (make-hash-table :test #'eq))))
+         (existing (gethash mesh by-mesh)))
+    (when existing
+      (incf (companion-gpu-mesh-refcount existing))
+      (return-from acquire-companion-gpu-mesh existing))
+    (let* ((vertex-data (companion-mesh-vertex-data mesh))
+           (idx0 (companion-mesh-indices mesh))
+           (idx1 (decimate-companion-mesh-indices mesh 28))
+           (idx2 (decimate-companion-mesh-indices mesh 16))
+           (indices0 nil) (indices1 nil) (indices2 nil)
+           (vertices nil) (layout nil) (pipeline nil) (completed nil))
+      (unwind-protect
+           (progn
+             (flet ((make-index-buf (label data)
+                      (let ((buf (luv:create device (luv:make-buffer-descriptor
+                                                     :label label
+                                                     :size (* 4 (length data))
+                                                     :usage '(:index :copy-dst)))))
+                        (luv:write-buffer buf data)
+                        buf)))
+               (setf indices0 (make-index-buf "Companion triangles LOD0" idx0)
+                     indices1 (make-index-buf "Companion triangles LOD1" idx1)
+                     indices2 (make-index-buf "Companion triangles LOD2" idx2)
+                     vertices (luv:create device (luv:make-buffer-descriptor
+                                                  :label "Companion rest vertices"
+                                                  :size (* 4 (length vertex-data))
+                                                  :usage '(:vertex :copy-dst)))
+                     layout (luv:create device (luv:make-bind-group-layout-descriptor
+                                                :label "Companion skin bindings"
+                                                :entries '((:binding 2 :type :uniform-buffer)
+                                                           (:binding 3 :type :storage-buffer))))
+                     pipeline (luvcraft::make-live-shader-pipeline
+                               :role :companion-mesh :vertex-role :companion-mesh :label "Companion mesh"
+                               :device device :layout layout
+                               :vertex-buffers
+                               `((:array-stride ,(* 4 +companion-vertex-floats+)
+                                  :attributes ((:shader-location 0 :offset 0 :format :float32x3)
+                                               (:shader-location 1 :offset 12 :format :float32x3)
+                                               (:shader-location 2 :offset 24 :format :float32x3)
+                                               (:shader-location 3 :offset 36 :format :float32x4)
+                                               (:shader-location 4 :offset 52 :format :float32x4)))
+                                 (:array-stride 32 :step-mode :instance
+                                  :attributes ((:shader-location 5 :offset 0 :format :float32x4)
+                                               (:shader-location 6 :offset 16 :format :float32x4))))
+                               :target-format luvcraft::+luvcraft-scene-color-format+
+                               :primitive '(:topology :triangle-list :cull-mode :none)
+                               :depth-stencil '(:format :depth32-float :depth-write-enabled t
+                                                :depth-compare :greater)))
+               (luv:write-buffer vertices vertex-data)
+               (let ((shared (make-companion-gpu-mesh
+                              :device device :mesh mesh :refcount 1
+                              :vertex-buffer vertices
+                              :indices-lod0 indices0 :count-lod0 (length idx0)
+                              :indices-lod1 indices1 :count-lod1 (length idx1)
+                              :indices-lod2 indices2 :count-lod2 (length idx2)
+                              :layout layout :pipeline pipeline)))
+                 (setf (gethash mesh by-mesh) shared
+                       completed t)
+                 shared)))
+        (unless completed
+          (when pipeline (luvcraft::release-live-shader-pipeline pipeline))
+          (dolist (resource (list indices0 indices1 indices2 vertices layout))
+            (when resource (luv:destroy resource))))))))
+
+(defun release-companion-gpu-mesh (shared)
+  "Drop one reference to SHARED and destroy its GPU resources when unused."
+  (when shared
+    (decf (companion-gpu-mesh-refcount shared))
+    (when (<= (companion-gpu-mesh-refcount shared) 0)
+      (let ((by-mesh (gethash (companion-gpu-mesh-device shared) *companion-gpu-meshes*)))
+        (when by-mesh (remhash (companion-gpu-mesh-mesh shared) by-mesh)))
+      (when (companion-gpu-mesh-pipeline shared)
+        (luvcraft::release-live-shader-pipeline (companion-gpu-mesh-pipeline shared))
+        (setf (companion-gpu-mesh-pipeline shared) nil))
+      (dolist (buf (list (companion-gpu-mesh-indices-lod0 shared)
+                         (companion-gpu-mesh-indices-lod1 shared)
+                         (companion-gpu-mesh-indices-lod2 shared)
+                         (companion-gpu-mesh-vertex-buffer shared)
+                         (companion-gpu-mesh-layout shared)))
+        (when buf (luv:destroy buf))))))
+
+(defun companion-body-lod-indices (overlay depth radius)
+  "Select (VALUES INDEX-BUFFER INDEX-COUNT) for OVERLAY at view DEPTH and RADIUS."
+  (let ((shared (companion-body-shared-mesh overlay)))
+    (if shared
+        (cond ((< depth (* radius 18.0))
+               (values (companion-gpu-mesh-indices-lod0 shared)
+                       (companion-gpu-mesh-count-lod0 shared)))
+              ((< depth (* radius 48.0))
+               (values (companion-gpu-mesh-indices-lod1 shared)
+                       (companion-gpu-mesh-count-lod1 shared)))
+              (t
+               (values (companion-gpu-mesh-indices-lod2 shared)
+                       (companion-gpu-mesh-count-lod2 shared))))
+        (values (companion-body-indices overlay)
+                (length (companion-mesh-indices (companion-body-mesh overlay)))))))
 
 ;;; One drawable's palette and instance buffers, and the bind group that pairs
 ;;; the palette with the host's uniform buffer for the same drawable.
@@ -310,7 +484,7 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
     (luv:destroy (companion-body-frame-group frame))))
 
 (defun companion-body-visible-p (agent session)
-  "Whether AGENT's body sphere meets SESSION's view frustum."
+  "Return (VALUES VISIBLE-P DEPTH RADIUS) when AGENT's body sphere meets SESSION's frustum."
   (let ((camera (luvcraft:luvcraft-session-camera session)))
     (multiple-value-bind (x y z radius) (embodied-agent-body-sphere agent)
       (multiple-value-bind (right up forward) (luvcraft::camera-basis camera)
@@ -318,12 +492,15 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
                (dx (- x (vec3-x eye))) (dy (- y (vec3-y eye))) (dz (- z (vec3-z eye)))
                (extent (luv:canvas-extent (luvcraft:luvcraft-session-context session)))
                (tan-y (tan (/ (luvcraft:camera-field-of-view camera) 2)))
-               (tan-x (* tan-y (/ (first extent) (max 1 (second extent))))))
+               (tan-x (* tan-y (/ (first extent) (max 1 (second extent)))))
+               (max-depth (max 96.0 (* radius 180.0))))
           (flet ((along (axis) (+ (* dx (vec3-x axis)) (* dy (vec3-y axis)) (* dz (vec3-z axis)))))
             (let ((depth (along forward)))
-              (and (> depth (- radius))
-                   (<= (abs (along right)) (+ (* depth tan-x) (* radius (sqrt (+ 1 (* tan-x tan-x))))))
-                   (<= (abs (along up)) (+ (* depth tan-y) (* radius (sqrt (+ 1 (* tan-y tan-y))))))))))))))
+              (when (and (> depth (- radius))
+                         (<= depth max-depth)
+                         (<= (abs (along right)) (+ (* depth tan-x) (* radius (sqrt (+ 1 (* tan-x tan-x))))))
+                         (<= (abs (along up)) (+ (* depth tan-y) (* radius (sqrt (+ 1 (* tan-y tan-y)))))))
+                (values t (max 0.0 depth) radius)))))))))
 
 (defmethod luvcraft:luvcraft-focus-score ((overlay companion-body-overlay) session)
   (declare (ignore overlay session)) nil)
@@ -334,13 +511,6 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
 (defmethod luvcraft:refresh-luvcraft-overlay ((overlay companion-body-overlay) session)
   (declare (ignore session))
   (luv:refresh-live-shader-pipeline (companion-body-pipeline overlay)))
-
-(defmethod luvcraft:encode-luvcraft-overlay
-    ((overlay companion-body-overlay) session pass surface-texture)
-  (let* ((agent (companion-body-agent overlay)) (mesh (companion-body-mesh overlay))
-         (kind (embodied-agent-save-kind agent)))
-    (when (companion-body-visible-p agent session)
-      (encode-companion-body overlay agent mesh kind session pass surface-texture))))
 
 (defun companion-body-frame (overlay session surface-texture)
   "SURFACE-TEXTURE's frame-local companion buffers, bound to the host's uniforms."
@@ -374,7 +544,8 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
             (companion-body-frame-host-uniforms frame) uniforms))
     frame))
 
-(defun encode-companion-body (overlay agent mesh kind session pass surface-texture)
+(defun encode-companion-body (overlay agent mesh kind session pass surface-texture
+                              &optional (depth 0.0) (radius 1.0))
   (let* ((instance (companion-body-instance overlay))
          (yaw (embodied-agent-facing-yaw agent))
          (pose (companion-kinematics agent))
@@ -396,81 +567,65 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
     (luv:set-vertex-buffer pass 0 (companion-body-vertex-buffer overlay))
     (luv:set-vertex-buffer pass 1 (companion-body-frame-instance frame))
     (luv:set-bind-group pass 0 (companion-body-frame-group frame))
-    (luv:draw-indexed pass (companion-body-indices overlay) :uint32
-                      (length (companion-mesh-indices mesh)))))
+    (multiple-value-bind (index-buffer index-count)
+        (companion-body-lod-indices overlay depth radius)
+      (luv:draw-indexed pass index-buffer :uint32 index-count))))
+
+(defmethod luvcraft:encode-luvcraft-overlay
+    ((overlay companion-body-overlay) session pass surface-texture)
+  (let* ((agent (companion-body-agent overlay)) (mesh (companion-body-mesh overlay))
+         (kind (embodied-agent-save-kind agent)))
+    (multiple-value-bind (visible-p depth radius) (companion-body-visible-p agent session)
+      (when visible-p
+        (encode-companion-body overlay agent mesh kind session pass surface-texture depth radius)))))
 
 (defmethod luvcraft:evict-luvcraft-overlay-frame-key ((overlay companion-body-overlay) key)
   (luv:evict-canvas-frame-resource-key (companion-body-frames overlay) key #'release-companion-body-frame))
 
 (defmethod luvcraft:release-luvcraft-overlay ((overlay companion-body-overlay))
   (luv:destroy-canvas-frame-resource-cache (companion-body-frames overlay) #'release-companion-body-frame)
-  (when (companion-body-pipeline overlay)
-    (luvcraft::release-live-shader-pipeline (companion-body-pipeline overlay))
-    (setf (companion-body-pipeline overlay) nil))
-  (when (companion-body-indices overlay)
-    (luv:destroy (companion-body-indices overlay))
-    (setf (companion-body-indices overlay) nil))
-  (when (companion-body-vertex-buffer overlay)
-    (luv:destroy (companion-body-vertex-buffer overlay))
-    (setf (companion-body-vertex-buffer overlay) nil))
-  (when (companion-body-layout overlay)
-    (luv:destroy (companion-body-layout overlay))
-    (setf (companion-body-layout overlay) nil))
+  (if (companion-body-shared-mesh overlay)
+      (progn
+        (release-companion-gpu-mesh (companion-body-shared-mesh overlay))
+        (setf (companion-body-shared-mesh overlay) nil
+              (companion-body-pipeline overlay) nil
+              (companion-body-indices overlay) nil
+              (companion-body-vertex-buffer overlay) nil
+              (companion-body-layout overlay) nil))
+      (progn
+        (when (companion-body-pipeline overlay)
+          (luvcraft::release-live-shader-pipeline (companion-body-pipeline overlay))
+          (setf (companion-body-pipeline overlay) nil))
+        (when (companion-body-indices overlay)
+          (luv:destroy (companion-body-indices overlay))
+          (setf (companion-body-indices overlay) nil))
+        (when (companion-body-vertex-buffer overlay)
+          (luv:destroy (companion-body-vertex-buffer overlay))
+          (setf (companion-body-vertex-buffer overlay) nil))
+        (when (companion-body-layout overlay)
+          (luv:destroy (companion-body-layout overlay))
+          (setf (companion-body-layout overlay) nil))))
   (when (eq (gnome-body (companion-body-agent overlay)) overlay)
     (setf (gnome-body (companion-body-agent overlay)) nil)))
 
 (defun make-companion-mesh-body (agent)
-  (let* ((session (gnome-session agent)) (device (luvcraft:luvcraft-session-device session))
+  (let* ((session (gnome-session agent))
+         (device (luvcraft:luvcraft-session-device session))
          (mesh (companion-mesh (embodied-agent-save-kind agent)))
-         (vertex-data (companion-mesh-vertex-data mesh))
-         (indices nil) (vertices nil) (layout nil) (pipeline nil) (completed nil))
+         (shared (acquire-companion-gpu-mesh device mesh))
+         (completed nil))
     (unwind-protect
-         (progn
-           (setf indices
-                 (luv:create device (luv:make-buffer-descriptor
-                                     :label "Companion triangles"
-                                     :size (* 4 (length (companion-mesh-indices mesh)))
-                                     :usage '(:index :copy-dst)))
-                 vertices
-                 (luv:create device (luv:make-buffer-descriptor
-                                     :label "Companion rest vertices"
-                                     :size (* 4 (length vertex-data))
-                                     :usage '(:vertex :copy-dst)))
-                 ;; The host's scene uniforms beside this body's bone palette.
-                 layout
-                 (luv:create device (luv:make-bind-group-layout-descriptor
-                                     :label "Companion skin bindings"
-                                     :entries '((:binding 2 :type :uniform-buffer)
-                                                (:binding 3 :type :storage-buffer))))
-                 pipeline
-                 (luvcraft::make-live-shader-pipeline
-                  :role :companion-mesh :vertex-role :companion-mesh :label "Companion mesh"
-                  :device device :layout layout
-                  :vertex-buffers
-                  `((:array-stride ,(* 4 +companion-vertex-floats+)
-                     :attributes ((:shader-location 0 :offset 0 :format :float32x3)
-                                  (:shader-location 1 :offset 12 :format :float32x3)
-                                  (:shader-location 2 :offset 24 :format :float32x3)
-                                  (:shader-location 3 :offset 36 :format :float32x4)
-                                  (:shader-location 4 :offset 52 :format :float32x4)))
-                    (:array-stride 32 :step-mode :instance
-                     :attributes ((:shader-location 5 :offset 0 :format :float32x4)
-                                  (:shader-location 6 :offset 16 :format :float32x4))))
-                  :target-format luvcraft::+luvcraft-scene-color-format+
-                  :primitive '(:topology :triangle-list :cull-mode :none)
-                  :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                   :depth-compare :greater)))
-           (luv:write-buffer indices (companion-mesh-indices mesh))
-           (luv:write-buffer vertices vertex-data)
-           (let ((overlay (make-instance
-                           'companion-body-overlay :agent agent :mesh mesh :indices indices
-                           :vertex-buffer vertices :layout layout :pipeline pipeline
-                           :palette (make-array (* 12 (companion-mesh-bone-count mesh))
-                                                :element-type 'single-float))))
-             (luvcraft:add-luvcraft-overlay session overlay)
-             (setf (gnome-body agent) overlay completed t)
-             overlay))
+         (let ((overlay (make-instance
+                         'companion-body-overlay
+                         :agent agent :mesh mesh :shared-mesh shared
+                         :indices (companion-gpu-mesh-indices-lod0 shared)
+                         :vertex-buffer (companion-gpu-mesh-vertex-buffer shared)
+                         :layout (companion-gpu-mesh-layout shared)
+                         :pipeline (companion-gpu-mesh-pipeline shared)
+                         :palette (make-array (* 12 (companion-mesh-bone-count mesh))
+                                              :element-type 'single-float))))
+           (luvcraft:add-luvcraft-overlay session overlay)
+           (setf (gnome-body agent) overlay completed t)
+           overlay)
       (unless completed
-        (when pipeline (luvcraft::release-live-shader-pipeline pipeline))
-        (dolist (resource (list indices vertices layout))
-          (when resource (luv:destroy resource)))))))
+        (release-companion-gpu-mesh shared)))))

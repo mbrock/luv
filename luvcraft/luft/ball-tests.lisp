@@ -146,3 +146,36 @@
         (host::initialize-world-springs (host:viewer-world viewer))
         (is = 1 (length (host::world-springs (host:viewer-world viewer))))
         (is = 6 (luvcraft::luvcraft-spring-count (first (host::world-springs (host:viewer-world viewer)))))))))
+
+(define-test ball-culling-and-lod-bucket-visible-spheres
+  (let* ((scene (ball-test-scene))
+         (viewer (make-instance 'host:luvcraft-viewer :source scene
+                                :luvcraft-world (luvcraft:make-empty-little-block-world :seed 7)
+                                :hotbar (list (game:block-placement luvcraft::*grass-block*))))
+         (physics (host::ensure-world-physics (host:viewer-world viewer))))
+    ;; Camera at Luft (1024, 1024, 5) looking along +X (yaw 0, pitch 0).
+    (setf (render:camera-position (render:viewer-camera viewer))
+          (luv.arithmetic.lisp.vec3:make-vec3 1024.0 1024.0 5.0)
+          (render:camera-yaw (render:viewer-camera viewer)) 0.0
+          (render:camera-pitch (render:viewer-camera viewer)) 0.0)
+    ;; Close hero ball (x=4 -> Luft 1028, dist=4), medium ball (x=18, dist=18),
+    ;; compact far marble (x=30, dist=30), behind-camera distant ball (x=-80),
+    ;; and beyond-max-distance marble (x=250).
+    (luvcraft::spawn-body-of-kind physics :ball 4.0 5.0 0.0)
+    (luvcraft::spawn-body-of-kind physics :ball 18.0 5.0 0.0)
+    (luvcraft::spawn-body-of-kind physics :marble 30.0 5.0 0.0)
+    (luvcraft::spawn-body-of-kind physics :marble -80.0 5.0 0.0)
+    (luvcraft::spawn-body-of-kind physics :marble 250.0 5.0 0.0)
+    (let* ((figs (host::ball-figures viewer))
+           (kinds (mapcar (lambda (fig) (round (fourth (fourth fig)))) figs)))
+      ;; Behind-camera and beyond-range marbles are culled; remaining 3 bucketed
+      ;; in ascending LOD order (hero 2, medium 6, compact 7).
+      (is equal '(2 6 7) kinds))
+    ;; Companion mesh decimation reduces triangles while preserving valid indices.
+    (let* ((mesh (luvcraft.agent::companion-mesh :gnome))
+           (orig-tris (/ (length (luvcraft.agent::companion-mesh-indices mesh)) 3))
+           (lod1 (luvcraft.agent::decimate-companion-mesh-indices mesh 28))
+           (lod2 (luvcraft.agent::decimate-companion-mesh-indices mesh 16)))
+      (true (plusp (length lod1)))
+      (true (plusp (length lod2)))
+      (true (< (/ (length lod2) 3) (/ (length lod1) 3) orig-tris)))))

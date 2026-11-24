@@ -32,15 +32,28 @@ headings, half extents/kind (0 wizard, 1 box), and linear albedo.
 The last row is normalized RGB4 and sky, sampled at the current center by
 LIGHT-READER. Without a field reader, the stage retains its open-sky default.
 There is no population limit. FIGURE-LANES constructs the wizard kind."
-  (make-array (* +figure-scalar-count+ (length figures))
-              :element-type 'single-float
-              :initial-contents
-              (loop for figure in figures append
-                (loop for row in (append figure
-                                         (list (if light-reader
-                                                   (apply light-reader (subseq (first figure) 0 3))
-                                                   '(0.0 0.0 0.0 1.0)))) append
-                  (mapcar (lambda (x) (coerce x 'single-float)) row)))))
+  (let* ((count (length figures))
+         (out (make-array (* +figure-scalar-count+ count) :element-type 'single-float))
+         (offset 0))
+    (declare (type (simple-array single-float (*)) out)
+             (type fixnum offset))
+    (dolist (figure figures out)
+      (let ((pose (first figure)))
+        (dolist (row figure)
+          (dolist (x row)
+            (setf (aref out offset) (float x 1.0f0))
+            (incf offset)))
+        (if light-reader
+            (let ((light (funcall light-reader (first pose) (second pose) (third pose))))
+              (setf (aref out offset) (float (first light) 1.0f0)
+                    (aref out (+ offset 1)) (float (second light) 1.0f0)
+                    (aref out (+ offset 2)) (float (third light) 1.0f0)
+                    (aref out (+ offset 3)) (float (fourth light) 1.0f0)))
+            (setf (aref out offset) 0.0f0
+                  (aref out (+ offset 1)) 0.0f0
+                  (aref out (+ offset 2)) 0.0f0
+                  (aref out (+ offset 3)) 1.0f0))
+        (incf offset 4)))))
 
 (defun box-figure (center previous-center heading-x heading-y half-extents color)
   "One oriented box of a game's figure, in Z-up world coordinates."

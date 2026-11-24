@@ -25,7 +25,15 @@
 (defparameter *distant-terrain-frame-budget* 16
   "Maximum distant terrain tiles built and uploaded per interactive frame.")
 
-(declaim (inline distant-level-stride distant-level-tile-size))
+(declaim (inline distant-level-stride distant-level-tile-size distant-tile-key))
+
+(defun distant-tile-key (level tx ty)
+  "Pack (LEVEL, TX, TY) into an EQL fixnum hash key without consing."
+  (declare (type (integer 0 7) level)
+           (type fixnum tx ty))
+  (logior (ash (logand (+ tx #x100000) #x1FFFFF) 24)
+          (ash (logand (+ ty #x100000) #x1FFFFF) 3)
+          level))
 
 (defun distant-level-stride (level)
   "Cell width of one column sample at LOD LEVEL (2, 4, 8, 16)."
@@ -61,7 +69,7 @@ direction)."
 
 (defun distant-tile-covered-by-inner-ring-p (level tx ty inner-bounds)
   "Whether tile (TX, TY) at LEVEL (> 0) lies inside LEVEL-1's tile bounds."
-  (declare (type (integer 1 3) level)
+  (declare (ignore level)
            (type fixnum tx ty))
   (when inner-bounds
     (let ((min-x (ash (aref inner-bounds 0) -1))
@@ -224,7 +232,7 @@ filled with 4*QUAD-COUNT words and BOUNDS is a 6-float AABB or NIL if empty."
   ((device :initarg :device :reader distant-terrain-device)
    (source :initform nil :accessor distant-terrain-source)
    (quad-arena :initform nil :accessor distant-terrain-quad-arena)
-   (tiles :initform (make-hash-table :test #'equal) :reader distant-terrain-tiles)
+   (tiles :initform (make-hash-table :test #'eql) :reader distant-terrain-tiles)
    (ring-bounds :initform (make-array +distant-level-count+ :initial-element nil)
                 :reader distant-terrain-ring-bounds)
    (horizon-distance :initform 0.0f0 :accessor distant-terrain-horizon-distance)
@@ -373,7 +381,7 @@ material-descriptors buffer carries SOURCE's vocabulary."
                  (half (* 0.5f0 tile-size)))
             (loop for ty from (aref b 2) to (aref b 3) do
               (loop for tx from (aref b 0) to (aref b 1)
-                    for key = (list level tx ty)
+                    for key = (distant-tile-key level tx ty)
                     unless (or (gethash key tiles)
                                (if (zerop level)
                                    (distant-level0-covered-by-near-p tx ty mesh-slots)
@@ -437,7 +445,7 @@ material-descriptors buffer carries SOURCE's vocabulary."
                     unless (if (zerop level)
                                (distant-level0-covered-by-near-p tx ty mesh-slots)
                                (distant-tile-covered-by-inner-ring-p level tx ty inner))
-                      do (let ((tile (gethash (list level tx ty) tiles)))
+                      do (let ((tile (gethash (distant-tile-key level tx ty) tiles)))
                            (when (and tile (plusp (distant-tile-quad-count tile))
                                       (distant-tile-slice tile)
                                       (or (null clip)

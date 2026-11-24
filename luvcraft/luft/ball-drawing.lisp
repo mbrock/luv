@@ -82,36 +82,47 @@
     (destructuring-bind (kind first count) run
       (render:encode-program
        (ecase kind (0 (render::scene-drawing-program drawing))
-                   (1 (render::figure-box-program drawing)) (2 (ball-sphere-program drawing))
+                   (1 (render::figure-box-program drawing))
+                   ((2 6 7) (ball-sphere-program drawing))
                    (3 (particle-program drawing)))
        pass
        (ecase kind (0 (render::figure-binding-program-binding binding))
-                   (1 (render::figure-binding-box-binding binding)) (2 (ball-sphere-binding binding))
+                   (1 (render::figure-binding-box-binding binding))
+                   ((2 6 7) (ball-sphere-binding binding))
                    (3 (particle-binding binding)))
-       (luv:make-gpu-draw-command :vertex-count (ecase kind (0 6) ((1 3) 36) (2 3072))
-                                  :first-instance first :instance-count count)))))
+       (luv:make-gpu-draw-command
+        :vertex-count (ecase kind
+                        (0 6)
+                        ((1 3) 36)
+                        (2 (* 6 +ball-hero-segments+ +ball-hero-rings+))
+                        (6 (* 6 +ball-medium-segments+ +ball-medium-rings+))
+                        (7 (* 6 +ball-compact-segments+ +ball-compact-rings+)))
+        :first-instance first :instance-count count)))))
 
 (defmethod render::encode-scene-drawing-shadow
     ((drawing ball-figure-drawing) pass (binding ball-figure-binding))
   (dolist (run (render::figure-binding-runs binding))
     (destructuring-bind (kind first count) run
-      (when (= kind 2)
+      ;; Hero (2) and medium (6) balls cast compact 8x4 shadows; tiny far
+      ;; compact balls (7) are sub-texel in the sun shadow map and skip it.
+      (when (or (= kind 2) (= kind 6))
         (render:encode-program
          (ball-shadow-program drawing) pass (ball-shadow-binding binding)
-         (luv:make-gpu-draw-command :vertex-count 3072
-                                    :first-instance first :instance-count count))))))
+         (luv:make-gpu-draw-command
+          :vertex-count (* 6 +ball-shadow-segments+ +ball-shadow-rings+)
+          :first-instance first :instance-count count))))))
 
 (in-package #:luft.render.shaders)
 
-(define-shader-function ball-vertex-normal (index)
+(define-shader-function ball-vertex-normal (index segments rings)
   (let* ((triangle (floor (/ index 6.0)))
          (corner (- index (* triangle 6.0)))
-         (u (+ (- triangle (* (floor (/ triangle 32.0)) 32.0))
+         (u (+ (- triangle (* (floor (/ triangle segments)) segments))
                (if (= corner 0.0) 0.0 (if (= corner 3.0) 0.0 (if (= corner 5.0) 0.0 1.0)))))
-         (v (+ (floor (/ triangle 32.0))
+         (v (+ (floor (/ triangle segments))
                (if (= corner 0.0) 0.0 (if (= corner 1.0) 0.0 (if (= corner 3.0) 0.0 1.0)))))
-         (longitude (* u (/ 6.2831853 32.0)))
-         (latitude (- (* v (/ 3.14159265 16.0)) 1.5707963)))
+         (longitude (* u (/ 6.2831853 segments)))
+         (latitude (- (* v (/ 3.14159265 rings)) 1.5707963)))
     (vec3 (* (cos latitude) (cos longitude))
           (* (cos latitude) (sin longitude)) (sin latitude))))
 
@@ -124,7 +135,8 @@
                  (figure-instances :storage-buffer :binding 1 :element :vec4)))
   (let* ((pose (buffer-element figure-instances (* instance-index (uint 6))))
          (world (assume-quantity
-                 (+ (swizzle pose :xyz) (* (ball-vertex-normal (float vertex-index)) (swizzle pose :w)))
+                 (+ (swizzle pose :xyz)
+                    (* (ball-vertex-normal (float vertex-index) 8.0 4.0) (swizzle pose :w)))
                  :quantity quantities:world-position :unit quantities:cell)))
     (set-output clip-position
                 (light-clip-position world shadow-row-x shadow-row-y shadow-row-z shadow-row-w))))
@@ -149,7 +161,9 @@
          (spin (buffer-element figure-instances (+ base (uint 2))))
          (shape (buffer-element figure-instances (+ base (uint 3))))
          (tint (buffer-element figure-instances (+ base (uint 4))))
-         (normal (ball-vertex-normal (float vertex-index)))
+         (segments (if (> (swizzle shape :y) 1.0) (swizzle shape :y) 16.0))
+         (rings (if (> (swizzle shape :z) 1.0) (swizzle shape :z) 10.0))
+         (normal (ball-vertex-normal (float vertex-index) segments rings))
          (world (assume-quantity (+ (swizzle pose :xyz) (* normal (swizzle pose :w)))
                                  :quantity quantities:world-position :unit quantities:cell))
          (old-world (assume-quantity (+ (swizzle old :xyz) (* normal (swizzle old :w)))
