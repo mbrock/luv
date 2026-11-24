@@ -1080,3 +1080,50 @@
               (when (= wx 64)
                 (setf saw-cx32 t))))
           (true saw-cx32))))))
+
+(defmethod terrain:sample-stride-four-materials ((source flat-source) origin-x origin-y materials)
+  (declare (ignore origin-x origin-y))
+  ;; Two fine layers cover exactly half of each bottom coarse cell.
+  (dotimes (col 1024) (setf (aref materials (* 64 col)) 1)))
+
+(define-test stride-four-parent-and-native-overlay
+  (let* ((domain (luft:make-world-domain :horizontal-bits 8))
+         (source (make-instance 'flat-source :domain domain :material-vocabulary (make-palette)))
+         (children (make-array '(2 2)))
+         ;; A detached luminous block in the far quadrant, above the first 64 child layers.
+         (x0 100) (y0 76) (z0 172)
+         (index (+ (floor z0 4) (* 64 (+ (floor y0 4) (* 32 (floor x0 4))))))
+         (changes nil))
+    (dotimes (dx 4)
+      (dotimes (dy 4)
+        (dotimes (dz 4)
+          (push (list (luft:make-site domain (+ x0 dx) (+ y0 dy) (+ z0 dz)
+                                      luft:+cell-extent+ 1)
+                      nil *glow*)
+                changes))))
+    (terrain:record-world-events (terrain:world-source-journal source) changes)
+    (dotimes (dx 2)
+      (dotimes (dy 2)
+        (setf (aref children dx dy)
+              (terrain:build-world-source-coarse-tile source dx dy :cull-interior-caves-p nil))))
+    (let ((exact (terrain:reduce-stride-two-children 0 0 children))
+          (native (terrain:build-native-stride-four-tile source 0 0)))
+      (dolist (tile (list exact native))
+        (is = 2 (aref (terrain:coarse-voxel-tile-materials tile) index))
+        (true (logbitp (floor z0 4) (aref (terrain:coarse-voxel-tile-words tile) (floor index 64))))
+        (is = (terrain::material-kind-packed-light-emission (terrain:material-placement-kind *glow*))
+            (gethash index (terrain:coarse-voxel-tile-emissions tile)))
+        (is = 64 (terrain:coarse-voxel-tile-journal-head tile))))
+    ;; Thirty-two placements in air win the tie. Re-editing one site takes it below threshold.
+    (let ((journal (terrain:world-source-journal source)))
+      (terrain:record-world-events journal
+                                   (loop for (site) in (subseq changes 0 32)
+                                         collect (list site *glow* nil)))
+      (is = 2 (aref (terrain:coarse-voxel-tile-materials
+                     (terrain:build-native-stride-four-tile source 0 0)) index))
+      (terrain:record-world-events journal (list (list (first (nth 32 changes)) *glow* nil)))
+      (is = 0 (aref (terrain:coarse-voxel-tile-materials
+                     (terrain:build-native-stride-four-tile source 0 0)) index)))
+    (let ((outside (terrain:build-native-stride-four-tile source -1 0)))
+      (is = 0 (terrain:coarse-voxel-tile-authored-air-cells outside))
+      (is = -1 (terrain:coarse-voxel-tile-tx outside)))))

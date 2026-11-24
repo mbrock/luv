@@ -292,6 +292,52 @@ Extend the validated Phase 1 primitive into a full 2.5+ km 3D horizon:
 3. Add low-priority background exact refinement for the inner =stride = 2= ring
    and design compact mip-cache persistence alongside format-2 saves.
 
+The first stride-4 comparison (#QDEDGB) isolates a roof lost by the fallback.
+Next, compare the fallback's occupancy over the edited roof with the eight
+stride-2 votes that formed the exact parent, then repeat the section and
+timings before enabling a second ring in play.
+
+** DONE One stride-4 tile through the alpine ridge
+:PROPERTIES:
+:ID: QDEDGB
+:END:
+
+Tile =(6,8)= covers =x ∈ [768,896)= and =y ∈ [1024,1152)= in the campaign's
+seed-121 =:biomes= world.  A fresh source reproduces the viewpoint's height
+and homeland.  A journal transaction carves a new 84×16×8 bore, starting at
+=(780,1048,76)= and crossing the child boundary at =x = 832=.  The fixture
+owns its journal.  Run it from the checkout:
+
+#+begin_src sh
+./env sbcl --script scripts/stride-four-ridge.lisp
+#+end_src
+
+Four unculled stride-2 children supply the exact parent's 2×2×2 votes.
+The native builder samples four corner heights, the center column's strata
+and 3D cave field, then applies authored solid and air votes to the coarse
+cells they touch.  Its generated baseline currently omits landmarks.  Both
+paths produce compact 32×32×64 tiles and feed the same packed-star mesher.
+
+| M2 Pro, one tile | Exact parent | Coarse-native |
+|---+---:|---:|
+| Clear sightlines through the tile, before → after | 2/8 → 8/8 | 2/8 → 8/8 |
+| Meshed stars after carving, with caves retained | 3,882 | 4,638 |
+| Fresh tile CPU wall time, median of seven | 129.08 ms | 7.27 ms |
+
+Timings use one generation thread in a warmed SBCL process, fresh tiles on
+each call, and the edited journal.  The exact time includes all four child
+builds.  Reduction alone takes 2.54 ms once the children exist.  Meshing and
+GPU work are outside the timed interval.
+
+After carving, 882 of 1,024 column tops agree and the mean absolute
+difference is 0.58 world cells.  The worst difference matters to the eye.
+At =(812,1056)= the native roof was one coarse cell lower even before the
+carve.  The cut removes its last roof cell and exposes a natural cavity.
+The exact tile keeps a cap at =z = 88= while the fallback drops to =z = 72=.
+A clear sightline alone would have missed this loss.
+
+[[file:images/luft-stride-four-ridge.png]]
+
 * TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
 :PROPERTIES:
 :ID: 44LFVG

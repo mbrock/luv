@@ -85,6 +85,7 @@
                              (:file "streaming")
                              (:file "streaming-mesh")
                              (:file "voxel-lod")
+                             (:file "stride-four")
                              (:file "streaming-publication")
                              (:file "sequencer")
                              (:file "world-tag"))))

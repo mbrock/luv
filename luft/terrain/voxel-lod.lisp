@@ -292,24 +292,19 @@ Both generated terrain and sparse journal edits (including carved air) replay cl
          edits)))
     (values (delete-duplicates seeded-air) head authored-air-count)))
 
-(defun downsample-chunk-to-coarse-tile
-    (fibers material-grid tx ty
-     &key (threshold 4) (cull-interior-caves-p t)
-          seeded-air journal-head (authored-air-cells 0)
-          emission-grid fallback-code)
-  "Downsample one 64x64x255 fine FIBERS + MATERIAL-GRID into a 32x32x128 COARSE-VOXEL-TILE.
-
-THRESHOLD (1..8) sets how many solid subcells in each 2x2x2 block make the coarse
-cell solid (4 = symmetric majority).  Boundary-cell material voting (#NDXUW8) avoids
-underground stone drowning 1-cell grass/snow/masonry skins."
-  (declare (type luft:chunk-fibers fibers)
+(defun %reduce-coarse-grid (fwords material-grid tx ty shift threshold
+                            &key emission-grid (journal-head 0) (authored-air-cells 0))
+  "Reduce 2×2×2 cells from a 64×64 grid with 256-cell column pitch."
+  (declare (type (simple-array (unsigned-byte 64) (*)) fwords)
            (type (simple-array (unsigned-byte 8) (*)) material-grid)
            (type fixnum tx ty)
+           (type (integer 1 2) shift)
            (type (integer 1 8) threshold)
            (optimize (speed 3) (safety 1)))
-  (let* ((fwords (luft:chunk-fibers-words fibers))
-         (cwords (make-array (* 32 32 2) :element-type '(unsigned-byte 64) :initial-element 0))
-         (cmats (make-array (* 32 32 128) :element-type '(unsigned-byte 8) :initial-element 0))
+  (let* ((size-z (ash 256 (- shift)))
+         (word-count (ceiling size-z 64))
+         (cwords (make-array (* 32 32 word-count) :element-type '(unsigned-byte 64) :initial-element 0))
+         (cmats (make-array (* 32 32 size-z) :element-type '(unsigned-byte 8) :initial-element 0))
          (emissions nil))
     (dotimes (cx 32)
       (let ((lx0 (* 2 cx)))
@@ -320,10 +315,10 @@ underground stone drowning 1-cell grass/snow/masonry skins."
                  (b10 (luft:fiber-base (1+ lx0) ly0))
                  (b01 (luft:fiber-base lx0 (1+ ly0)))
                  (b11 (luft:fiber-base (1+ lx0) (1+ ly0)))
-                 (cbase (* 2 (+ cy (* 32 cx))))
-                 (col-off (ash (+ cy (ash cx 5)) 7)))
+                 (cbase (* word-count (+ cy (* 32 cx))))
+                 (col-off (* (+ cy (ash cx 5)) size-z)))
             (declare (type fixnum ly0 b00 b10 b01 b11 cbase col-off))
-            (dotimes (w 4)
+            (dotimes (w (floor size-z 32))
               (let ((w00 (aref fwords (+ b00 w)))
                     (w10 (aref fwords (+ b10 w)))
                     (w01 (aref fwords (+ b01 w)))
@@ -374,12 +369,28 @@ underground stone drowning 1-cell grass/snow/masonry skins."
                         (shift (if (oddp w) 32 0)))
                     (setf (aref cwords (+ cbase cw))
                           (logior (aref cwords (+ cbase cw)) (ash out shift)))))))))))
-    (when cull-interior-caves-p
-      (%cull-sealed-coarse-pockets cwords cmats seeded-air fallback-code))
-    (%make-coarse-voxel-tile tx ty 1 32 128 2 cwords cmats
+    (%make-coarse-voxel-tile tx ty shift 32 size-z word-count cwords cmats
                              :emissions emissions
                              :journal-head (or journal-head 0)
                              :authored-air-cells authored-air-cells)))
+
+(defun downsample-chunk-to-coarse-tile
+    (fibers material-grid tx ty
+     &key (threshold 4) (cull-interior-caves-p t)
+          seeded-air journal-head (authored-air-cells 0)
+          emission-grid fallback-code)
+  "Downsample one 64x64x255 fine FIBERS + MATERIAL-GRID into a 32x32x128 COARSE-VOXEL-TILE.
+
+THRESHOLD (1..8) sets how many solid subcells in each 2x2x2 block make the coarse
+cell solid (4 = symmetric majority).  Boundary-cell material voting (#NDXUW8) avoids
+underground stone drowning 1-cell grass/snow/masonry skins."
+  (let ((tile (%reduce-coarse-grid (luft:chunk-fibers-words fibers) material-grid tx ty 1 threshold
+                                   :emission-grid emission-grid :journal-head journal-head
+                                   :authored-air-cells authored-air-cells)))
+    (when cull-interior-caves-p
+      (%cull-sealed-coarse-pockets (coarse-voxel-tile-words tile)
+                                   (coarse-voxel-tile-materials tile) seeded-air fallback-code))
+    tile))
 
 (defun build-world-source-coarse-tile
     (source tx ty &key (threshold 4) (cull-interior-caves-p t)
@@ -429,13 +440,15 @@ underground stone drowning 1-cell grass/snow/masonry skins."
 (defun %coarse-pack-halo (tile neighbor-fn
                            &key near-xm-p near-xp-p near-ym-p near-yp-p)
   "Assemble 34x34x128 occupancy words, materials, top-z, and merged emissions
-for TILE plus its 1-cell XY border from NEIGHBOR-FN.  Missing neighbors clamp
+for TILE plus its 1-cell XY border from same-level NEIGHBOR-FN.  Missing neighbors clamp
 their edge column to TILE's own border; neighbors covered by resident near chunks
-drop by 2 coarse cells (4 world cells) to form a downward seam skirt."
+drop by 2 coarse cells to form a downward seam skirt."
   (let* ((hwords (make-array (* 34 34 2) :element-type '(unsigned-byte 64) :initial-element 0))
          (hmats (make-array (* 34 34 128) :element-type '(unsigned-byte 8) :initial-element 0))
          (top-z (make-array (* 34 34) :element-type '(signed-byte 16) :initial-element -1))
          (emissions (make-hash-table :test #'eql))
+         (size-z (coarse-voxel-tile-size-z tile))
+         (word-count (coarse-voxel-tile-word-count tile))
          (base-words (coarse-voxel-tile-words tile))
          (base-mats (coarse-voxel-tile-materials tile))
          (base-emit (coarse-voxel-tile-emissions tile)))
@@ -447,12 +460,12 @@ drop by 2 coarse cells (4 world cells) to form a downward seam skirt."
              (declare (type (simple-array (unsigned-byte 64) (*)) src-words)
                       (type (simple-array (unsigned-byte 8) (*)) src-mats)
                       (type fixnum scx scy px py shift))
-             (let* ((sbase (* 2 (+ scy (* 32 scx))))
+             (let* ((sbase (* word-count (+ scy (* 32 scx))))
                     (hbase (* 2 (+ py (* 34 px))))
-                    (soff (ash (+ scy (ash scx 5)) 7))
+                    (soff (* (+ scy (ash scx 5)) size-z))
                     (hoff (ash (+ py (* 34 px)) 7))
                     (src-w0 (aref src-words sbase))
-                    (src-w1 (aref src-words (1+ sbase)))
+                    (src-w1 (if (= word-count 2) (aref src-words (1+ sbase)) 0))
                     (carry-bits (max 0 (min 63 shift)))
                     (w0 (if (zerop shift)
                             src-w0
@@ -463,14 +476,14 @@ drop by 2 coarse cells (4 world cells) to form a downward seam skirt."
                                                      (- 64 shift))
                                                 0)))))
                     (w1 (if (zerop shift) src-w1 (ash src-w1 (- shift))))
-                    (keep (max 0 (- 128 shift))))
+                    (keep (- size-z shift)))
                (declare (type fixnum sbase hbase soff hoff carry-bits keep)
                         (type (unsigned-byte 64) src-w0 src-w1 w0 w1))
                (setf (aref hwords hbase) w0
                      (aref hwords (1+ hbase)) w1)
                (when (plusp keep)
                  (replace hmats src-mats :start1 hoff :end1 (+ hoff keep)
-                                         :start2 (+ soff shift) :end2 (+ soff 128)))
+                                         :start2 (+ soff shift) :end2 (+ soff size-z)))
                (when (< keep 128)
                  (fill hmats 0 :start (+ hoff keep) :end (+ hoff 128)))
                (setf (aref top-z (+ py (* 34 px)))
@@ -480,7 +493,7 @@ drop by 2 coarse cells (4 world cells) to form a downward seam skirt."
                (when (and src-emit (plusp (hash-table-count src-emit)))
                  (maphash (lambda (cidx emit)
                             (let ((rel (- cidx soff)))
-                              (when (<= shift rel 127)
+                              (when (<= shift rel (1- size-z))
                                 (setf (gethash (+ hoff (- rel shift)) emissions) emit))))
                           src-emit)))))
       ;; Interior 32x32 from TILE.
@@ -499,6 +512,8 @@ drop by 2 coarse cells (4 world cells) to form a downward seam skirt."
         (flet ((copy-border (nbr near-p sx sy px py fx fy)
                  (cond
                    ((and nbr (not near-p))
+                    (unless (= size-z (coarse-voxel-tile-size-z nbr))
+                      (error "A coarse tile apron needs neighbors at the same LOD."))
                     (copy-shifted-column (coarse-voxel-tile-words nbr)
                                          (coarse-voxel-tile-materials nbr)
                                          (coarse-voxel-tile-emissions nbr)
@@ -538,6 +553,8 @@ corresponding adjacent border column down 2 coarse cells as a seam skirt."
              (type (simple-array (signed-byte 16) (*)) top-z))
     (let* ((tx (coarse-voxel-tile-tx tile))
            (ty (coarse-voxel-tile-ty tile))
+           (lod-shift (coarse-voxel-tile-lod-shift tile))
+           (scale (ash 1 lod-shift))
            (tiers (and descriptors (terrain-descriptor-bevel-tiers descriptors)))
            (site-words (make-array 4096 :element-type '(unsigned-byte 32)
                                         :adjustable t :fill-pointer 0))
@@ -644,8 +661,8 @@ corresponding adjacent border column down 2 coarse cells as a seam skirt."
                    (b10 (* 2 (+ cy (* 34 (1+ cx)))))
                    (b01 (* 2 (+ (1+ cy) (* 34 cx))))
                    (b11 (* 2 (+ (1+ cy) (* 34 (1+ cx)))))
-                   (wx (+ (* (+ (* tx 32) cx) 2) +coarse-tile-bias+))
-                   (wy (+ (* (+ (* ty 32) cy) 2) +coarse-tile-bias+)))
+                   (wx (+ (* (+ (* tx 32) cx) scale) +coarse-tile-bias+))
+                   (wy (+ (* (+ (* ty 32) cy) scale) +coarse-tile-bias+)))
               (declare (type fixnum b00 b10 b01 b11 wx wy))
               (dotimes (w 2)
                 (let* ((a00 (aref hwords (+ b00 w)))
@@ -687,7 +704,7 @@ corresponding adjacent border column down 2 coarse cells as a seam skirt."
                                          (if (logbitp bit a01) #x40 0)
                                          (if (logbitp bit a11) #x80 0)))
                            (edges (compute-edge-shaping cx cy cz star))
-                           (wz (logior (* cz 2) (ash 1 16) (ash 1 19))))
+                           (wz (logior (* cz scale) (ash lod-shift 16) (ash 1 19))))
                       (declare (type fixnum bit cz star)
                                (type (unsigned-byte 32) edges wz))
                       (setf active (logand active (1- active)))

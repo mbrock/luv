@@ -226,6 +226,9 @@ this package draws; the renderer and the ateliers use it.")
            #:coarse-voxel-tile-journal-head
            #:coarse-voxel-tile-authored-air-cells
            #:downsample-chunk-to-coarse-tile
+           #:sample-stride-four-materials
+           #:build-native-stride-four-tile
+           #:reduce-stride-two-children
            #:build-world-source-coarse-tile
            #:mesh-coarse-voxel-tile
            #:movement-controller

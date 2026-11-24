@@ -726,3 +726,42 @@ POSITION the supplied RESUME stays unchanged."
 (defun make-luvcraft-streaming-scene (source &rest initargs &key &allow-other-keys)
   "A demand-streamed Luft scene over Luvcraft world SOURCE."
   (apply #'terrain:make-world-source-streaming-scene source initargs))
+
+(defmethod terrain:sample-stride-four-materials
+    ((source luvcraft-world-source) origin-x origin-y materials)
+  "Sample the stock little world's relief and cave field in 3D (#AQCYEH).
+Four footprint corners filter each roof. Use the center column for strata and caves."
+  (unless (eq (luvcraft-world-source-little-class source) 'luvcraft:little-world-source)
+    (error "Stride-four sampling requires the stock little-world generator."))
+  (let* ((little (luvcraft-little-world-source source))
+         (relief (luvcraft-world-source-relief source))
+         (height (luvcraft-world-source-height source))
+         (offset (luvcraft-world-source-offset source))
+         (vocab (terrain:world-source-material-vocabulary source))
+         (codes (make-hash-table :test #'eq)))
+    (dotimes (cx 32)
+      (dotimes (cy 32)
+        (let* ((x (- (+ origin-x (* 4 cx)) offset))
+               (y (- (+ origin-y (* 4 cy)) offset))
+               (mx (+ x 2)) (my (+ y 2))
+               (surface (round (+ (luvcraft::little-world-surface-height little x y height)
+                                  (luvcraft::little-world-surface-height little (+ x 3) y height)
+                                  (luvcraft::little-world-surface-height little x (+ y 3) height)
+                                  (luvcraft::little-world-surface-height little (+ x 3) (+ y 3) height))
+                               4))
+               (skin (luvcraft::little-world-surface-material little mx my surface height))
+               (biome (and (eq relief :biomes) (luvcraft::little-world-biome-at little mx my)))
+               (caves-p (or (eq relief :alpine)
+                            (and biome (<= (luvcraft::little-world-homeland-weight little mx my)
+                                           0.15d0))))
+               (top (floor (- surface 1) 4)))
+          (loop for cz from 0 to top
+                for z = (min surface (+ (* cz 4) 2))
+                unless (and caves-p (luvcraft::little-world-cave-p little mx z my surface))
+                  do (let* ((block (if (= cz top) skin
+                                       (luvcraft::little-world-column-material
+                                        little z surface skin biome)))
+                            (code (or (gethash block codes)
+                                      (setf (gethash block codes)
+                                            (luvcraft-block-material-code vocab block)))))
+                       (setf (aref materials (+ cz (* 64 (+ cy (* 32 cx))))) code))))))))
