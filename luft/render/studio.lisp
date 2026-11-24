@@ -605,6 +605,7 @@ before the operation boundary, or it would encode through resources which the
      :pointer (viewer-pointer-fraction viewer)
      :ink-strength (if (and inspection (viewer-inspection-ink-p viewer)) 1.0 0.0)
      :bevel-width (viewer-bevel-width viewer)
+     :material-bevels-p (viewer-material-bevels-p viewer)
      :fixed-exposure (viewer-fixed-exposure viewer)
      :first-person-p (and (typep (viewer-mode viewer) 'first-person-mode)
                           (null (viewer-modal-focus viewer)))
@@ -813,6 +814,8 @@ before the operation boundary, or it would encode through resources which the
                 :accessor viewer-bevel-width)
    (terrain-bevels-p :initarg :terrain-bevels-p :initform *terrain-bevels-p*
                      :accessor viewer-terrain-bevels-p)
+   (material-bevels-p :initarg :material-bevels-p :initform t
+                      :accessor viewer-material-bevels-p)
    (fixed-exposure :initarg :fixed-exposure :initform nil
                    :reader viewer-fixed-exposure)
    (camera :initarg :camera :initform (make-fly-camera) :reader viewer-camera)
@@ -2902,6 +2905,7 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
 
 (defclass bevel-knob (knobs:switch-knob) ())
 (defclass bevel-width-knob (knobs:scalar-knob) ())
+(defclass material-bevels-knob (knobs:switch-knob) ())
 (defclass construction-knob (knobs:switch-knob) ())
 (defclass walking-speed-knob (knobs:scalar-knob) ())
 (defclass walking-gravity-knob (knobs:scalar-knob) ())
@@ -2929,6 +2933,11 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
      ;; Star-atlas geometry morphs continuously via RENDER-PARAMETERS.X with no
      ;; mesh or shader rebuild; only reset temporal history so MetalFX snaps.
      (setf (renderer-history-valid-p (viewer-renderer session)) nil)))
+  (refresh-viewer-inspector session))
+
+(defmethod knobs:realize-knob progn ((knob material-bevels-knob) (session game-host))
+  (when (viewer-renderer session)
+    (setf (renderer-history-valid-p (viewer-renderer session)) nil))
   (refresh-viewer-inspector session))
 
 (defun construction-lines-p () (plusp *wireframe*))
@@ -2976,6 +2985,10 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
      :quantity (:quantity quantities:bevel-proportion :unit :one)
      :minimum 0.0 :maximum 0.5 :step 0.025)
   (viewer-bevel-proportion session))
+(knobs:define-knob material-bevels
+    (:group :geometry :class 'material-bevels-knob :label "material bevels"
+     :type boolean :quantity (:quantity :dimensionless :unit :one))
+  (viewer-material-bevels-p session))
 (knobs:define-knob construction-lines
     (:group :geometry :class 'construction-knob :type boolean
      :quantity (:quantity :dimensionless :unit :one))

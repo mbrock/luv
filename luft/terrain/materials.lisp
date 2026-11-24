@@ -95,7 +95,13 @@ continuous world volume, rather than a repeating face tile.")
          :reader material-kind-body
          :documentation
          "A drawn fixture which stands in the cell instead of its star surface.
-The cell stays solid for walking and light; only its drawing changes."))
+The cell stays solid for walking and light; only its drawing changes.")
+   (bevel-tier :initarg :bevel-tier :initform nil :type (member nil 0 1 2 3)
+               :reader material-kind-bevel-tier
+               :documentation
+               "Optional per-material bevel tier 0..3 (#K5MKUT): 0 sharp masonry,
+1 crafted stone/wood, 2 organic earth/terrain, 3 faceted foliage/crystal.
+NIL uses the uniform global bevel width."))
   ;; Names, relief/pattern/body codes, and attachment forms are categorical.
   (:metaclass quantity-class)
   (:documentation
@@ -208,9 +214,14 @@ accent (PACK-TERRAIN-PATTERN)."
 
 (defun pack-terrain-transmission (kind)
   "KIND's transmission, one minus its coverage, as the unorm8 low byte of
-the eighth descriptor word.  Zero, the word every opaque kind has, is opaque."
-  (dpb (round (* 255 (- 1.0 (max 0.0 (min 1.0 (material-kind-coverage kind))))))
-       #.(terrain-descriptor-byte :transmission) 0))
+the eighth descriptor word, plus its optional 3-bit bevel tier (1+tier) in bits 8..10."
+  (logior
+   (dpb (round (* 255 (- 1.0 (max 0.0 (min 1.0 (material-kind-coverage kind))))))
+        #.(terrain-descriptor-byte :transmission) 0)
+   (let ((tier (material-kind-bevel-tier kind)))
+     (if tier
+         (dpb (1+ tier) #.(terrain-descriptor-byte :bevel-tier) 0)
+         0))))
 
 (defun terrain-descriptor-translucent-codes (descriptors)
   "A bit vector by material code of the codes DESCRIPTORS draws translucent,
@@ -687,6 +698,135 @@ NIL when none is."
          (let ((chunk (gethash (luft:site-chunk-key cell) chunks)))
            (if chunk (material-chunk-at chunk cell) (values nil nil))))))))
 
+(defun terrain-descriptor-bevel-tiers (descriptors)
+  "A 256-entry u8 table mapping material offset (0..254) to bevel tier 0..3,
+or NIL when no material in DESCRIPTORS declares a bevel tier."
+  (let* ((count (floor (length descriptors) 8))
+         (any-p nil)
+         (table (make-array 256 :element-type '(unsigned-byte 8) :initial-element 1)))
+    (loop for code from 1 below (min count 256)
+          for raw = (ldb #.(terrain-descriptor-byte :bevel-tier)
+                         (aref descriptors (+ (* 8 code) 7)))
+          when (plusp raw)
+            do (setf any-p t
+                     (aref table (1- code)) (min 3 (1- raw))))
+    (and any-p table)))
+
+(defun compile-surface-mesh-corner-bevels (mesh material-cells descriptors)
+  "Pack each active star's 7 lattice-corner bevel tiers (#K5MKUT :stock rule).
+
+Each lattice corner takes the minimum tier among all solid authored cells
+touching it, so adjacent stars and chunk seams always agree bit-for-bit.
+Returns NIL when DESCRIPTORS declare no per-material bevel tiers."
+  (declare (optimize (speed 3) (safety 1)))
+  (let ((tiers (terrain-descriptor-bevel-tiers descriptors)))
+    (unless tiers
+      (return-from compile-surface-mesh-corner-bevels nil))
+    (let* ((domain (luft:surface-mesh-domain mesh))
+           (x-limit (luft:world-domain-x-limit domain))
+           (y-limit (luft:world-domain-y-limit domain))
+           (sites (luft:surface-mesh-star-site-words mesh))
+           (site-count (ash (length sites) -2))
+           (words (make-array site-count :element-type '(unsigned-byte 16)
+                                         :initial-element #x4000))
+           (store-chunks (and (typep material-cells 'material-store)
+                              (material-store-chunks material-cells)))
+           (cached-key -1)
+           (cached-chunk nil))
+      (declare (type (simple-array (unsigned-byte 8) (256)) tiers)
+               (type (simple-array (unsigned-byte 32) (*)) sites)
+               (type (simple-array (unsigned-byte 16) (*)) words)
+               (type fixnum x-limit y-limit site-count cached-key))
+      (when (zerop site-count)
+        (return-from compile-surface-mesh-corner-bevels words))
+      (let ((xmin (aref sites 0)) (ymin (aref sites 1)) (zmin (aref sites 2))
+            (xmax (aref sites 0)) (ymax (aref sites 1)) (zmax (aref sites 2)))
+        (declare (type fixnum xmin ymin zmin xmax ymax zmax))
+        (loop for off fixnum from 4 below (length sites) by 4 do
+          (let ((x (aref sites off))
+                (y (aref sites (+ off 1)))
+                (z (aref sites (+ off 2))))
+            (declare (type fixnum x y z))
+            (when (< x xmin) (setf xmin x))
+            (when (< y ymin) (setf ymin y))
+            (when (< z zmin) (setf zmin z))
+            (when (> x xmax) (setf xmax x))
+            (when (> y ymax) (setf ymax y))
+            (when (> z zmax) (setf zmax z))))
+        (let* ((width (+ 2 (- xmax xmin)))
+               (height (+ 2 (- ymax ymin)))
+               (depth (+ 2 (- zmax zmin)))
+               (volume (* width height depth))
+               (dense (when (<= volume 1048576)
+                        (make-array volume :element-type '(unsigned-byte 8)
+                                           :initial-element 255)))
+               (table (unless dense (make-hash-table :test #'eql))))
+          (declare (type fixnum width height depth volume)
+                   (type (or null (simple-array (unsigned-byte 8) (*))) dense))
+          (flet ((cell-tier (cx cy cz)
+                   (declare (type fixnum cx cy cz))
+                   (when (and (< -1 cx x-limit) (< -1 cy y-limit)
+                              (< -1 cz luft:+top-z+))
+                     (multiple-value-bind (offset present-p)
+                         (if store-chunks
+                             (let ((key (luft:chunk-key-at cx cy)))
+                               (unless (= key cached-key)
+                                 (setf cached-key key
+                                       cached-chunk (gethash key store-chunks)))
+                               (cond
+                                 ((typep cached-chunk 'chunk-materials)
+                                  (chunk-materials-at-local
+                                   cached-chunk (logand cx 63) (logand cy 63) cz))
+                                 (cached-chunk
+                                  (gethash (luft:make-site domain cx cy cz
+                                                           luft:+cell-extent+ 1)
+                                           cached-chunk))
+                                 (t (values nil nil))))
+                             (material-cell-at
+                              material-cells
+                              (luft:make-site domain cx cy cz luft:+cell-extent+ 1)))
+                       (when (and present-p offset)
+                         (aref tiers (the (unsigned-byte 8) offset)))))))
+            (flet ((corner-tier (lx ly lz)
+                     (declare (type fixnum lx ly lz))
+                     (let* ((idx (if dense
+                                     (+ (- lz zmin)
+                                        (* depth (+ (- ly ymin)
+                                                    (* height (- lx xmin)))))
+                                     (logior lz (ash ly 9) (ash lx 27))))
+                            (cached (if dense (aref dense idx) (gethash idx table 255))))
+                       (declare (type fixnum idx) (type (unsigned-byte 8) cached))
+                       (if (< cached 255)
+                           cached
+                           (let ((best 4))
+                             (declare (type fixnum best))
+                             (dotimes (sample 8)
+                               (let ((tier (cell-tier
+                                            (- lx (if (logbitp 0 sample) 0 1))
+                                            (- ly (if (logbitp 1 sample) 0 1))
+                                            (- lz (if (logbitp 2 sample) 0 1)))))
+                                 (when (and tier (< (the fixnum tier) best))
+                                   (setf best tier)
+                                   (when (zerop best) (return)))))
+                             (let ((result (if (= best 4) 1 best)))
+                               (if dense (setf (aref dense idx) result)
+                                   (setf (gethash idx table) result))
+                               result))))))
+              (loop for site-index fixnum below site-count
+                    for off fixnum from 0 by 4
+                    for x fixnum = (aref sites off)
+                    for y fixnum = (aref sites (+ off 1))
+                    for z fixnum = (aref sites (+ off 2))
+                    do (let ((packed #x4000))
+                         (declare (type (unsigned-byte 16) packed))
+                         (dotimes (point 7)
+                           (let ((tier (corner-tier (+ x (ldb (byte 1 0) point))
+                                                    (+ y (ldb (byte 1 1) point))
+                                                    (+ z (ldb (byte 1 2) point)))))
+                             (setf packed (logior packed (ash tier (* 2 point))))))
+                         (setf (aref words site-index) packed)))))))
+      words)))
+
 (defun compile-surface-mesh-appearance (mesh material-cells descriptors)
   "Compile one eight-u8 material record per active star in MESH.
 
@@ -747,7 +887,9 @@ remain byte-identical under repainting."
                      (setf (aref codes (+ appearance-offset sample))
                            (1+ offset)))))))
     (setf (luft:surface-mesh-appearance-codes mesh) codes
-          (luft:surface-mesh-appearance-descriptor-words mesh) descriptors)
+          (luft:surface-mesh-appearance-descriptor-words mesh) descriptors
+          (luft::surface-mesh-corner-bevel-words mesh)
+          (compile-surface-mesh-corner-bevels mesh material-cells descriptors))
     mesh))
 
 (defun compile-material-light-opacity-table (placement-vocabulary)

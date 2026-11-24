@@ -341,6 +341,8 @@ appearance reads authored cells directly and needs no meshed context owners."
                              (luft::surface-mesh-edge-shaping old-mesh)
                              (luft:surface-mesh-appearance-codes mesh)
                              (luft:surface-mesh-appearance-codes old-mesh)
+                             (luft::surface-mesh-corner-bevel-words mesh)
+                             (luft::surface-mesh-corner-bevel-words old-mesh)
                              (luft:surface-mesh-appearance-descriptor-words mesh)
                              descriptors)
                        (zone :luft/compile-appearance

@@ -369,7 +369,7 @@
   (let* ((vertex (shaders:terrain-visibility-vertex-specification))
          (fragment (shaders:terrain-visibility-fragment-specification))
          (material (shaders:terrain-visibility-material-vertex-specification)))
-    (true (equal '(0 1 2 9)
+    (true (equal '(0 1 2 8 9)
                  (mapcar #'luv.shader:shader-resource-binding
                          (luv.shader:shader-specification-resources vertex))))
     (true (= 2 (length (luv.shader:shader-specification-outputs fragment))))

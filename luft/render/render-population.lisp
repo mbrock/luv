@@ -287,6 +287,19 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
       (setf (aref words offset) (logior (aref words offset) (ash edge 8))))
     words))
 
+(defun pack-mesh-light-words (mesh)
+  "Pack MESH's lattice light sidecar and merge optional per-corner bevel tiers
+into the unused upper 16 bits of each site's fourth word (#K5MKUT)."
+  (let ((words (star-lattice-light-words mesh))
+        (bevels (luft::surface-mesh-corner-bevel-words mesh)))
+    (when (and bevels (plusp (length bevels)))
+      (loop for bevel across bevels
+            for offset from 3 below (length words) by 4 do
+              (setf (aref words offset)
+                    (logior (logand (aref words offset) #xffff)
+                            (ash bevel 16)))))
+    words))
+
 (defun %make-star-render-population (meshes)
   "Flatten geometry and its parallel active-star appearance independently."
   (load-time-value (ensure-terrain-quantity-contract))
@@ -315,7 +328,7 @@ for the seven points other than (1, 1, 1); its RGB4 is the low twelve bits."
      site-words (pack-terrain-appearance-codes appearance-codes)
      descriptor-words (/ (length site-words) 4)
      (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
-            (mapcar #'star-lattice-light-words meshes))
+            (mapcar #'pack-mesh-light-words meshes))
      (apply #'concatenate '(simple-array single-float (*))
             (mapcar #'luft:surface-mesh-bodies meshes)))))
 
@@ -389,7 +402,7 @@ unchanged over this mesh before sampling; otherwise repack and compare words."
              (lights
                (if (%mesh-light-unchanged-p mesh (prepared-render-mesh-mesh previous))
                    (render-population-light-words population)
-                   (star-lattice-light-words mesh)))
+                   (pack-mesh-light-words mesh)))
              (bodies (luft:surface-mesh-bodies mesh)))
         (%make-prepared-render-mesh
          mesh
@@ -412,4 +425,5 @@ unchanged over this mesh before sampling; otherwise repack and compare words."
   (list (symbol-function 'make-render-population)
         (symbol-function 'pack-terrain-appearance-codes)
         (symbol-function 'star-lattice-light-words)
+        (symbol-function 'pack-mesh-light-words)
         (symbol-function 'merge-terrain-shadow-faces)))

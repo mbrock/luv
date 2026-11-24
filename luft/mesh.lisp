@@ -27,6 +27,9 @@
   (appearance-descriptor-words
     #.(make-array 0 :element-type '(unsigned-byte 32))
     :type (simple-array (unsigned-byte 32) (*)))
+  ;; Optional packed per-lattice-corner bevel tiers (#K5MKUT): one u16 per site,
+  ;; 7 corners x 2 bits plus bit 14 present marker, merged into light-sidecar W.
+  (corner-bevel-words nil :type (or null (simple-array (unsigned-byte 16) (*))))
   ;; Renderer publication metadata.  None of these participate in geometry.
   (voxel-light nil)
   (companions nil :type list)

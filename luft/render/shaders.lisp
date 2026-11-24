@@ -1348,6 +1348,34 @@ background parallax through the glass does not smear."
 ;;; sites.  A vertex reads its own record, its site, and the site's
 ;;; appearance; nothing is recomputed per corner and no mesh stage is needed.
 
+(define-shader-function star-corner-bevel (record lights base-bevel material-bevels-p)
+  "Scale BASE-BEVEL by the per-corner material tier packed in LIGHTS.W[16..31],
+or return BASE-BEVEL unchanged when MATERIAL-BEVELS-P is off or no tiers are packed."
+  (let* ((w (swizzle lights :w)))
+    (if (and (> material-bevels-p 0.5)
+             (= (ldb (byte 2 30) w) (uint 1.0)))
+        (let* ((point (+ (if (> (swizzle record :x) (uint 11.0)) (uint 1.0) (uint 0.0))
+                         (if (> (swizzle record :y) (uint 11.0)) (uint 2.0) (uint 0.0))
+                         (if (> (swizzle record :z) (uint 11.0)) (uint 4.0) (uint 0.0))))
+               (tier (if (< point (uint 4.0))
+                         (if (< point (uint 2.0))
+                             (if (= point (uint 0.0))
+                                 (ldb (byte 2 16) w)
+                                 (ldb (byte 2 18) w))
+                             (if (= point (uint 2.0))
+                                 (ldb (byte 2 20) w)
+                                 (ldb (byte 2 22) w)))
+                         (if (< point (uint 6.0))
+                             (if (= point (uint 4.0))
+                                 (ldb (byte 2 24) w)
+                                 (ldb (byte 2 26) w))
+                             (ldb (byte 2 28) w))))
+               (scale (if (= tier (uint 0.0)) 0.35
+                          (if (= tier (uint 1.0)) 0.75
+                              (if (= tier (uint 2.0)) 1.40 2.00)))))
+          (min 0.5 (* base-bevel scale)))
+        base-bevel)))
+
 (define-shader-function star-record-world (record origin bevel)
   "The world point of one biased star-table RECORD at site ORIGIN with cell bevel BEVEL.
 Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sign {-1, 0, +1}."
@@ -1403,7 +1431,10 @@ Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sig
          (world (star-record-world
                  record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
                               (float (swizzle site :z)))
-                 (swizzle (representation render-parameters) :x)))
+                 (star-corner-bevel
+                  record (buffer-element terrain-lights instance-index)
+                  (swizzle (representation render-parameters) :x)
+                  (swizzle (representation camera-right) :w))))
          (normal (assume-quantity
                   (swizzle (buffer-element terrain-normals
                                            (ldb (byte 16 16) (swizzle record :w)))

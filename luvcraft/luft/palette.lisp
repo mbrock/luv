@@ -189,6 +189,28 @@ The kind's tone is the elements'; mortar has its own.")
 voxel light it costs.  Coverage is not light opacity: a cut gem passes its
 own glow and its neighbours' as glass, and stays solid underfoot.")
 
+(defparameter *block-bevel-tiers*
+  ;; (tier . names): 0 sharp masonry/carpentry (0.35x), 1 crafted stone/wood (0.75x),
+  ;; 2 organic earth/terrain (1.40x), 3 faceted foliage/crystal (2.00x).
+  '((0 :bricks :stone-bricks :mossy-stone-bricks :cracked-stone-bricks
+       :chiseled-stone :planks :dark-planks :birch-planks :parquet :wainscot
+       :half-timber :bookshelf :plaster :concrete :iron-plate :copper :gold
+       :verdigris :marble :marble-tiles :polished-stone :blue-tiles :mosaic
+       :checker-floor :slate :roof-tiles :slate-shingles :terracotta
+       :obsidian :lit-window :lantern :terminal :urbit :barrel :crate
+       :tape :film :fountain :lava-spring)
+    (1 :stone :cobblestone :granite :limestone :sandstone :wood :timber
+       :hay-bale :thatch :cactus :red-wool :orange-wool :yellow-wool
+       :lime-wool :light-blue-wool :blue-wool :purple-wool :pink-wool
+       :white-wool :black-wool :tapestry)
+    (2 :grass :dirt :mud :sand :clay :gravel :moss :flowers :snow :basalt)
+    (3 :leaves :crystal :orb-mote))
+  "Per-material bevel width tier (#K5MKUT): architectural materials stay crisp
+while rolling earth, foliage canopies, and cut crystals take wider chamfers.")
+
+(defun block-bevel-tier (name)
+  (or (first (find name *block-bevel-tiers* :key #'rest :test #'member)) 1))
+
 (defun block-pattern (name)
   (first (find name *block-patterns* :key #'rest :test #'member)))
 
@@ -227,7 +249,8 @@ own glow and its neighbours' as glass, and stays solid underfoot.")
    :roughness (third (block-surface (luvcraft:block-kind-name kind)))
    :edge-wear (fourth (block-surface (luvcraft:block-kind-name kind)))
    :pattern (block-pattern (luvcraft:block-kind-name kind))
-   :body (or (cdr (assoc (luvcraft:block-kind-name kind) *block-bodies*)) :none)))
+   :body (or (cdr (assoc (luvcraft:block-kind-name kind) *block-bodies*)) :none)
+   :bevel-tier (block-bevel-tier (luvcraft:block-kind-name kind))))
 
 (defclass luvcraft-palette ()
   ((vocabulary :initarg :vocabulary :reader luvcraft-palette-vocabulary)

@@ -34,6 +34,7 @@
                  (terrain-vertices :storage-buffer :binding 1 :element :uvec4)
                  (camera-state :uniform-block :binding 2
                   :members #.(scene-uniform-prefix 23))
+                 (terrain-lights :storage-buffer :binding 8 :element :uvec4)
                  (star-triangle-offsets :storage-buffer :binding 9 :element :uint)))
   (let* ((site (buffer-element sites instance-index))
          (primitive (+ (uint 1.0)
@@ -43,7 +44,10 @@
          (world (star-record-world
                  record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
                               (float (swizzle site :z)))
-                 (swizzle (representation render-parameters) :x)))
+                 (star-corner-bevel
+                  record (buffer-element terrain-lights instance-index)
+                  (swizzle (representation render-parameters) :x)
+                  (swizzle (representation camera-right) :w))))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection
                                (swizzle (representation render-parameters) :z)))
@@ -92,11 +96,15 @@ The homogeneous divisor is the same MIX as MESH-VIEW-CLIP, not a mode guess."
 
 (defun terrain-visibility-world-form (index)
   `(representation
-    (star-record-world
-     (buffer-element terrain-vertices ,index)
-     (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-           (float (swizzle site :z)))
-     (swizzle (representation render-parameters) :x))))
+    (let* ((vertex-record (buffer-element terrain-vertices ,index)))
+      (star-record-world
+       vertex-record
+       (vec3 (float (swizzle site :x)) (float (swizzle site :y))
+             (float (swizzle site :z)))
+       (star-corner-bevel
+        vertex-record site-lights
+        (swizzle (representation render-parameters) :x)
+        (swizzle (representation camera-right) :w))))))
 
 (defun terrain-visibility-light-form (index vertex-bindings)
   ;; The light packing is owned by the forward vertex shader, including its
@@ -260,6 +268,7 @@ sample only: the host retains the visibility depth and uses forward for MSAA."
                   (index-b (buffer-element terrain-indices (+ base (uint 1.0))))
                   (index-c (buffer-element terrain-indices (+ base (uint 2.0))))
                   (site (buffer-element sites instance-index))
+                  (site-lights (buffer-element terrain-lights instance-index))
                   (a ,(terrain-visibility-world-form 'index-a))
                   (b ,(terrain-visibility-world-form 'index-b))
                   (c ,(terrain-visibility-world-form 'index-c))

@@ -208,7 +208,8 @@ SITES and PRIMITIVES select the single-draw material pass and its ID targets."
                      :terrain-normals (terrain-normals drawing)
                      :visibility-sites sites :visibility-primitives primitives
                      :shadow-map shadow-map :shadow-sampler shadow-sampler)
-               (list :star-triangle-offsets (terrain-triangle-offsets drawing))))))
+               (list :star-triangle-offsets (terrain-triangle-offsets drawing)
+                     :terrain-lights (terrain-arenas-lights-buffer arenas))))))
 
 (defun encode-terrain-visibility (drawing renderer frame pass binding residents)
   "Draw all visible RESIDENTS' triangles into the visibility ID targets via one indirect batch."

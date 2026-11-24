@@ -270,7 +270,8 @@ ENCODE-RENDERER-VIEW's FIGURES, alongside any other instances."
 
 (defun camera-uniform-data
     (view previous inspection-parameters ink-strength focus
-     &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0) first-person-p shadow)
+     &optional (bevel-width luft:+mesh-bevel-width+) (exposure 1.0f0) first-person-p shadow
+       (material-bevels-p t))
   "Pack camera/light uniforms. FOCUS is a position lane for haze and tilt
 shift, not a drawing instance. Former pose rows remain reserved in the ABI."
   (flet ((lane (vector fourth)
@@ -284,7 +285,7 @@ shift, not a drawing instance. Former pose rows remain reserved in the ABI."
        (mapcar
         (lambda (value) (coerce value 'single-float))
         (append (lane (frame-view-position view) (if first-person-p 1.0 0.0))
-                (lane (frame-view-right view) 0.0)
+                (lane (frame-view-right view) (if material-bevels-p 1.0 0.0))
                 (lane (frame-view-up view) 0.0)
                 (lane (frame-view-forward view) 0.0)
                 (coerce (frame-view-projection view) 'list)

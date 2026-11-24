@@ -90,6 +90,7 @@ Missing residency retains the old creature open-sky fallback."
     (renderer context encoder surface-texture surface-view extent camera
      &key (projection *projection*) figures (pointer '(0.5 0.5))
        (ink-strength 0.0) (bevel-width luft:+mesh-bevel-width+)
+       (material-bevels-p t)
        fixed-exposure first-person-p construction-p overlay-encoder
        (effect-time
          (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
@@ -138,7 +139,7 @@ final pass."
               (coerce (/ width) 'single-float)
               (coerce (/ height) 'single-float))
       ink-strength (first (first figures)) bevel-width exposure first-person-p
-      (renderer-sun-shadow renderer))
+      (renderer-sun-shadow renderer) material-bevels-p)
      :jitter jitter :view view
      :player-p (and figures t)
      :effect-time effect-time

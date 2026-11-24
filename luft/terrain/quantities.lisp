@@ -232,7 +232,9 @@
     (:variance 20 8 quantities::tone-variance 255.0)
     (:emission 24 8 quantities::surface-emission 63.75)
     ;; Stored as what a surface lets through, so a zero word is opaque.
-    (:transmission 0 8 quantities::surface-transmission 255.0)))
+    (:transmission 0 8 quantities::surface-transmission 255.0)
+    ;; Per-material bevel tier: 0 = uniform/unset, 1..4 = tiers 0..3 (#K5MKUT).
+    (:bevel-tier 8 3 nil 1.0)))
 
 (defun terrain-descriptor-field (name)
   (or (assoc name *terrain-descriptor-fields*)
