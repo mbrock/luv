@@ -169,7 +169,24 @@ final pass."
                 :depth-load-op :load :depth-store-op :store)))))
       (funcall *renderer-scene-overlay-encoder* pass)
       (end-pass pass)))
-  (encode-renderer-occlusion renderer frame encoder)
+  (let ((translucent-residents
+          (and (renderer-temporal-p renderer)
+               (renderer-translucent-residents renderer))))
+    (when (and (renderer-temporal-p renderer) (null translucent-residents))
+      ;; Clear stale reactive mask before occlusion so occlusion's MetalFX
+      ;; fence signal covers the clear as well as scene color.
+      (let ((generation (renderer-target-generation renderer)))
+        (when (renderer-target-generation-reactive-dirty-p generation)
+          (encode encoder (make-gpu-clear-texture-command
+                           :texture (renderer-reactive-texture renderer)
+                           :color #(0.0 0.0 0.0 0.0)))
+          (setf (renderer-target-generation-reactive-dirty-p generation) nil))))
+    ;; Run SSAO on the opaque scene before blending translucent surfaces so
+    ;; background depth creases never darken glowing crystals in front of them.
+    (encode-renderer-occlusion renderer frame encoder
+                               :signal-temporal-p (null translucent-residents))
+    (when translucent-residents
+      (encode-renderer-translucent-pass renderer frame encoder translucent-residents)))
   (encode-renderer-reconstruction renderer frame encoder jitter view)
   (encode-renderer-composite renderer frame encoder)
   (encode-exposure (renderer-exposure-control renderer) encoder
@@ -334,16 +351,13 @@ final pass."
                    :depth-store-op :store
                    :depth-clear-value 0.0)))))
         (encode-renderer-scene-drawings renderer frame pass player-p construction-p
-                                        repetition-p visibility-p)
-        ;; A temporal scene also writes the reactive mask, which no opaque
-        ;; pipeline names, so its translucent sheet gets a pass of its own.
-        (when (renderer-temporal-p renderer)
-          (encode-renderer-translucent-pass renderer frame encoder))))))
+                                        repetition-p visibility-p)))))
 
-;;; The translucent sheet (#LNRIRA).  Its sites draw after every opaque
-;;; surface, blended, testing but never writing depth.  A gem's far faces are
-;;; discarded in its fragment stage, so within one resident nothing needs
-;;; sorting for a single kind; residents go back to front by their boxes.
+;;; The translucent sheet (#LNRIRA).  Its sites draw after opaque shading and
+;;; SSAO, blended, testing but never writing depth or overwriting opaque motion.
+;;; A gem's far faces are discarded in its fragment stage, so within one
+;;; resident nothing needs sorting for a single kind; residents go back to
+;;; front by their boxes.
 
 (defun renderer-translucent-residents (renderer)
   (let ((terrain (renderer-terrain renderer)))
@@ -369,9 +383,9 @@ final pass."
         (encode-terrain-translucent-batch
          (renderer-terrain renderer) renderer frame pass binding sorted)))))
 
-(defun encode-renderer-translucent-pass (renderer frame encoder)
-  (let ((residents (renderer-translucent-residents renderer))
-        (generation (renderer-target-generation renderer)))
+(defun encode-renderer-translucent-pass
+    (renderer frame encoder &optional (residents (renderer-translucent-residents renderer)))
+  (let ((generation (renderer-target-generation renderer)))
     (if (null residents)
         ;; Nothing to see through: the mask must read zero everywhere, which
         ;; it keeps doing once cleared, so an opaque world pays nothing.
@@ -380,13 +394,20 @@ final pass."
                            :texture (renderer-reactive-texture renderer)
                            :color #(0.0 0.0 0.0 0.0)))
           (setf (renderer-target-generation-reactive-dirty-p generation) nil))
-        (let ((pass
-                (progn
-                  ;; Vulkan passes share one colour load op, and the scene
-                  ;; and motion must load, so the mask is cleared beforehand.
-                  (encode encoder (make-gpu-clear-texture-command
-                                   :texture (renderer-reactive-texture renderer)
-                                   :color #(0.0 0.0 0.0 0.0)))
+        (progn
+          ;; Clear the reactive mask and barrier scene/depth/reactive before
+          ;; loading them into the translucent pass (required on Metal 4).
+          (encode encoder (make-gpu-clear-texture-command
+                           :texture (renderer-reactive-texture renderer)
+                           :color #(0.0 0.0 0.0 0.0)))
+          (prepare-texture encoder (renderer-scene-texture renderer) :texture-binding)
+          (prepare-texture encoder (renderer-motion-texture renderer) :texture-binding)
+          (prepare-texture encoder (renderer-depth-texture renderer) :texture-binding)
+          (prepare-texture encoder (renderer-reactive-texture renderer) :texture-binding)
+          ;; Write crystal depth and motion consistently with colour (after SSAO)
+          ;; plus the motion-gated reactive mask so MetalFX antialiases crystal
+          ;; edges without jitter vibration when still and without ghosting in motion.
+          (let ((pass
                   (begin-render-pass
                    encoder
                    (make-render-pass-descriptor
@@ -397,10 +418,12 @@ final pass."
                       (:view ,(renderer-reactive-view renderer) :load-op :load :store-op :store))
                     :depth-stencil-attachment
                     `(:view ,(renderer-depth-view renderer)
-                      :depth-load-op :load :depth-store-op :store))))))
-          (draw-renderer-translucent-residents renderer frame pass residents)
-          (end-pass pass)
-          (setf (renderer-target-generation-reactive-dirty-p generation) t)))))
+                      :depth-load-op :load :depth-store-op :store)))))
+            (draw-renderer-translucent-residents renderer frame pass residents)
+            (when (renderer-metalfx-temporal-p renderer)
+              (signal-temporal-scaler-inputs pass (renderer-temporal-scaler renderer)))
+            (end-pass pass)
+            (setf (renderer-target-generation-reactive-dirty-p generation) t))))))
 
 (defun encode-renderer-scene-drawings
     (renderer frame pass player-p construction-p &optional repetition-p visibility-p)
@@ -480,7 +503,7 @@ final pass."
         (draw-renderer-translucent-residents renderer frame pass residents))))
   (end-pass pass))
 
-(defun encode-renderer-occlusion (renderer frame encoder)
+(defun encode-renderer-occlusion (renderer frame encoder &key (signal-temporal-p t))
   ;; Sample depth without attaching it. Multiplicative blending shades the
   ;; existing scene color without sampling it or allocating a color copy.
   (prepare-texture encoder (renderer-depth-texture renderer) :texture-binding)
@@ -494,8 +517,8 @@ final pass."
     (encode-program (finishing-occlusion-program (renderer-finishing renderer))
                     pass (renderer-frame-occlusion-bind-group renderer frame)
                     (make-gpu-draw-command :vertex-count 3))
-    ;; This is the last writer of the scaler's color input, including overlays.
-    (when (renderer-metalfx-temporal-p renderer)
+    ;; Signal MetalFX inputs here unless a translucent sheet pass follows.
+    (when (and signal-temporal-p (renderer-metalfx-temporal-p renderer))
       (signal-temporal-scaler-inputs pass (renderer-temporal-scaler renderer)))
     (end-pass pass)))
 

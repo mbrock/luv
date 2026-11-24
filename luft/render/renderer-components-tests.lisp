@@ -981,3 +981,46 @@
               (true (typep k 'fixnum))
               (true (null (gethash k keys)))
               (setf (gethash k keys) t))))))))
+
+(define-test temporal-jitter-is-zero-mean-and-stratified
+  (let* ((period (length render::*temporal-jitter-samples*))
+         (samples (loop for i below period
+                        collect (render::temporal-jitter i 100 200))))
+    (true (= 8 period))
+    ;; Exact zero mean in both X and Y across one full cycle.
+    (true (< (abs (loop for s in samples sum (aref s 0))) 1e-6))
+    (true (< (abs (loop for s in samples sum (aref s 1))) 1e-6))
+    ;; Cycle repeats cleanly with the period and scales inversely by dimensions.
+    (true (equalp (first samples) (render::temporal-jitter period 100 200)))
+    (let ((doubled (render::temporal-jitter 0 200 400)))
+      (true (< (abs (- (* 2.0 (aref doubled 0)) (aref (first samples) 0))) 1e-6))
+      (true (< (abs (- (* 2.0 (aref doubled 1)) (aref (first samples) 1))) 1e-6)))
+    ;; Consecutive frames alternate vertical sign so subpixel horizontal slivers
+    ;; never drift into a low-frequency beat.
+    (dotimes (i period)
+      (let ((a (aref (nth i samples) 1))
+            (b (aref (nth (mod (1+ i) period) samples) 1)))
+        (true (< (* a b) 0.0))))
+    ;; Each 4-frame half-cycle visits all 4 quadrants and all 4 vertical strata.
+    (dolist (start '(0 4))
+      (let ((quadrants nil) (strata nil))
+        (loop for i from start below (+ start 4) do
+          (let* ((p (aref render::*temporal-jitter-samples* i))
+                 (x (aref p 0))
+                 (y (aref p 1)))
+            (pushnew (list (plusp x) (plusp y)) quadrants :test #'equal)
+            (pushnew (floor (* (+ y 0.5) 4.0)) strata)))
+        (true (= 4 (length quadrants)))
+        (true (= 4 (length strata)))))))
+
+(define-test translucent-crystal-shaders-compile-with-motion-gated-reactive-mask
+  (let* ((base (shaders:star-fragment-specification))
+         (translucent (shaders:star-translucent-fragment-specification base t))
+         (visibility (shaders:terrain-visibility-material-fragment-specification base))
+         (outputs (luv.shader:shader-specification-outputs translucent))
+         (msl (luv.msl:msl-document-source (luv.msl:compile-msl translucent))))
+    (true (typep visibility 'luv.shader:shader-specification))
+    (true (plusp (length (luv.msl:msl-document-source (luv.msl:compile-msl visibility)))))
+    (true (= 3 (length outputs)))
+    (true (find 2 outputs :key #'luv.shader:shader-interface-location))
+    (true (search "reactive_output" msl))))

@@ -156,13 +156,31 @@ view distances.  VIEW-DEPTH inverts both through the same affine formula."
                  fraction (/ fraction base))
         finally (return (coerce value 'single-float))))
 
+(defparameter *temporal-jitter-samples*
+  ;; Standard 8x MSAA N-Rooks positions ({±1, ±3, ±5, ±7}/16 in both X and Y,
+  ;; exact zero mean) ordered so consecutive frames alternate vertical sign and
+  ;; every four consecutive frames cover all four quadrants and vertical strata.
+  ;; Compared to 16-phase Halton(2,3) (3.75 Hz beat at 60 FPS), this halves the
+  ;; cycle to 7.5 Hz (15 Hz per vertical stratum), suppressing low-frequency
+  ;; pulsing on subpixel grazing top-face slivers under MetalFX.
+  #(#( 0.0625 -0.1875)
+    #(-0.3125  0.3125)
+    #(-0.1875 -0.3125)
+    #( 0.3125  0.0625)
+    #(-0.4375 -0.0625)
+    #( 0.1875  0.4375)
+    #( 0.4375 -0.4375)
+    #(-0.0625  0.1875))
+  "Eight-position zero-mean stratified subpixel jitter sequence in input pixels.")
+
 (defun temporal-jitter (frame-index width height)
-  "Sample the sixteen-position Halton(2,3) sequence in clip coordinates."
-  (let ((sample (1+ (mod frame-index 16))))
-    (vector (coerce (/ (* 2.0 (- (halton sample 2) 0.5))
+  "Sample the stratified eight-position subpixel sequence in clip coordinates."
+  (let ((sample (aref *temporal-jitter-samples*
+                      (mod frame-index (length *temporal-jitter-samples*)))))
+    (vector (coerce (/ (* 2.0 (aref sample 0))
                        (max width 1))
                     'single-float)
-            (coerce (/ (* 2.0 (- (halton sample 3) 0.5))
+            (coerce (/ (* 2.0 (aref sample 1))
                        (max height 1))
                     'single-float))))
 

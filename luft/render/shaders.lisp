@@ -556,17 +556,131 @@ leaves, planks, snow, gloss, cloth, straw, cactus, metal, faceted."
                                           (cloth-height point)
                                           (fiber-height code point))))))))))))
 
+(define-shader-function crystal-face-axes (normal world)
+  "Return (UV.x, UV.y, AXIS-CODE) in local [0,1]^2 face space aligned with world axes."
+  (let* ((an (abs normal)))
+    (if (> (swizzle an :z) 0.5)
+        (vec3 (fract (swizzle world :x)) (fract (swizzle world :y)) 2.0)
+        (if (> (swizzle an :x) 0.5)
+            (vec3 (fract (swizzle world :y)) (fract (swizzle world :z)) 0.0)
+            (vec3 (fract (swizzle world :x)) (fract (swizzle world :z)) 1.0)))))
+
+(define-shader-function crystal-facet-data (normal world distance fade)
+  "Return (NORMAL.xyz, CROWN-RIDGE) for a crisp emerald/octagonal cut crystal face."
+  (let* ((fa (crystal-face-axes normal world))
+         (axis (swizzle fa :z))
+         (tx (if (> axis 1.5) (vec3 1.0 0.0 0.0)
+                 (if (< axis 0.5) (vec3 0.0 1.0 0.0) (vec3 1.0 0.0 0.0))))
+         (ty (if (> axis 1.5) (vec3 0.0 1.0 0.0) (vec3 0.0 0.0 1.0)))
+         (px (- (swizzle fa :x) 0.5))
+         (py (- (swizzle fa :y) 0.5))
+         (ax (abs px))
+         (ay (abs py))
+         (sx (if (< px 0.0) -1.0 1.0))
+         (sy (if (< py 0.0) -1.0 1.0))
+         ;; Distance-scaled filter width stays >= 1.5 input pixels wide so bevel
+         ;; ridges stay Nyquist-safe and never shimmer under sub-pixel jitter.
+         (fw (clamp (* distance 0.0042) 0.015 0.12))
+         (box-d (max ax ay))
+         (oct-d (+ ax ay))
+         (crown (smoothstep (- 0.35 fw) (+ 0.365 fw) box-d))
+         (corner (smoothstep (- 0.55 fw) (+ 0.575 fw) oct-d))
+         (bevel (max crown corner))
+         ;; Crisp mitered bevels along X-edges, Y-edges, and octagonal corner cuts.
+         (diag-sel (smoothstep (- fw) fw (- ax ay)))
+         (edge-x (* sx diag-sel))
+         (edge-y (* sy (- 1.0 diag-sel)))
+         (bevel-x (mix edge-x (* sx 0.7071) corner))
+         (bevel-y (mix edge-y (* sy 0.7071) corner))
+         ;; Distinct 4-way diamond cleavage planes on the inner table, gently varied per block.
+         (cell (floor (- world (* normal 0.01))))
+         (cell-hash (paper-hash cell))
+         (diag-a (smoothstep (- fw) fw (- px py)))
+         (diag-b (smoothstep (- fw) fw (+ px py)))
+         (table-x (* (- (* 2.0 diag-a) 1.0) (+ 0.12 (* 0.05 cell-hash))))
+         (table-y (* (- (* 2.0 diag-b) 1.0) (+ 0.12 (* 0.05 (- 1.0 cell-hash)))))
+         (tilt-x (* fade (+ (* bevel-x bevel 0.54) (* table-x (- 1.0 bevel)))))
+         (tilt-y (* fade (+ (* bevel-y bevel 0.54) (* table-y (- 1.0 bevel)))))
+         (fnormal (normalize (+ normal (* tx tilt-x) (* ty tilt-y))))
+         ;; Razor-fine catchlight ridges along the octagonal table cut, diagonal creases, and rim.
+         (ridge-box (- 1.0 (smoothstep (* fw 0.5) (* fw 1.8) (abs (- box-d 0.358)))))
+         (ridge-oct (- 1.0 (smoothstep (* fw 0.5) (* fw 1.8) (abs (- oct-d 0.562)))))
+         (ridge-diag (* (- 1.0 bevel)
+                        (- 1.0 (smoothstep (* fw 0.5) (* fw 1.7)
+                                           (min (abs (- px py)) (abs (+ px py)))))))
+         (outer-rim (smoothstep (- 0.465 fw) (+ 0.49 fw) box-d))
+         (ridge (* fade (clamp (+ (* (max ridge-box (* ridge-oct (- 1.0 (* 0.4 crown)))) 0.78)
+                                  (* ridge-diag 0.28)
+                                  (* outer-rim 0.85))
+                               0.0 1.0))))
+    (vec4 fnormal ridge)))
+
+(define-shader-function crystal-interior-glow (tone normal facet-normal world view emission fade)
+  "View-dependent refracted parallax crystal heart and jewel-like internal caustics."
+  (let* ((nv (max 0.02 (dot facet-normal view)))
+         (eta 0.675)
+         (k (max 0.0 (- 1.0 (* (* eta eta) (- 1.0 (* nv nv))))))
+         (refr (normalize (+ (* (- view) eta)
+                             (* facet-normal (- (* eta nv) (sqrt k))))))
+         (cell (floor (- world (* normal 0.01))))
+         (center (+ cell (vec3 0.5 0.5 0.5)))
+         (to-center (- center world))
+         (t-near (clamp (dot to-center refr) 0.06 0.88))
+         (closest (+ world (* refr t-near)))
+         (d-core (- closest center))
+         (r2 (dot d-core d-core))
+         ;; Tight, luminous sapphire-aqua crystal heart + small crisp diamond center.
+         (halo (exp (* r2 -7.5)))
+         (star-core (exp (* r2 -22.0)))
+         ;; Two crisp angled internal cleavage veins shifting with parallax.
+         (inner (+ world (* refr 0.44)))
+         (p1 (- (fract (dot inner (vec3 1.24 0.78 1.42))) 0.5))
+         (p2 (- (fract (dot inner (vec3 -0.92 1.48 0.72))) 0.5))
+         (caustic (* fade (+ (* (exp (* (* p1 p1) -48.0)) 0.65)
+                             (* (exp (* (* p2 p2) -48.0)) 0.55))))
+         ;; Keep radiance saturated below ACES white-clipping so the gem stays vividly aqua.
+         (deep-aqua (* tone (vec3 0.35 0.88 1.15)))
+         (bright-aqua (+ (* tone 0.55) (vec3 0.10 0.52 0.78)))
+         (glow-gain (+ 0.26 (* emission 1.05))))
+    (* (+ (* deep-aqua (* halo 0.62))
+          (* (vec3 0.65 0.96 1.0) (* star-core 0.85))
+          (* bright-aqua (* caustic (+ 0.16 (* 0.52 halo)))))
+       glow-gain)))
+
+(define-shader-function crystal-sky-reflection
+    (facet-normal view sun sun-color sky ground horizon zenith visibility)
+  "Polished crystal dielectric reflection, diamond sun sparkle, and subtle prism."
+  (let* ((nv (max 0.02 (dot facet-normal view)))
+         (om (- 1.0 nv))
+         (om2 (* om om))
+         (fresnel (+ 0.06 (* 0.94 (* om2 om2 om))))
+         (refl (normalize (- (* facet-normal (* 2.0 nv)) view)))
+         (rz (clamp (swizzle refl :z) -1.0 1.0))
+         (upper (mix horizon zenith (smoothstep 0.0 0.62 (max 0.0 rz))))
+         (env (mix ground upper (smoothstep -0.22 0.14 rz)))
+         ;; Crisp pinpoint diamond sun glint on tilted facets without washing out the block.
+         (sr (max 0.0 (dot refl sun)))
+         (sr2 (* sr sr))
+         (sr4 (* sr2 sr2))
+         (sr8 (* sr4 sr4))
+         (sr16 (* sr8 sr8))
+         (sr64 (* (* sr16 sr16) (* sr16 sr16)))
+         (sun-glint (* sun-color visibility (+ (* sr64 3.4) (* sr16 0.35) (* sr8 0.08))))
+         ;; Subtle aquamarine-to-ice-violet prismatic tint at grazing bevel angles.
+         (prism (mix (vec3 0.42 0.86 1.05) (vec3 0.78 0.90 1.18) (smoothstep 0.40 0.92 om))))
+    (+ (* env prism (* fresnel 0.52))
+       (* sun-glint (+ 0.22 (* 0.78 fresnel)))
+       (* sky prism (* fresnel 0.18)))))
+
 (define-shader-function faceted-tone (tone normal world fade)
-  "Bright diagonal facets and a rim on each cell face of a crystal."
-  (let* ((uv (fract (swizzle (face-coordinates normal world) :xy)))
-         (diagonal (min (abs (- (swizzle uv :x) (swizzle uv :y)))
-                        (abs (- (+ (swizzle uv :x) (swizzle uv :y)) 1.0))))
-         (facet (- 1.0 (smoothstep 0.0625 0.09375 diagonal)))
-         (edge (min (min (swizzle uv :x) (- 1.0 (swizzle uv :x)))
-                    (min (swizzle uv :y) (- 1.0 (swizzle uv :y)))))
-         (rim (- 1.0 (smoothstep 0.03125 0.0625 edge))))
-    (+ tone (* fade (+ (* (vec3 0.0 0.26 0.16) facet)
-                       (* (vec3 0.065 0.18 0.08) rim))))))
+  "Deep jewel-tinted body tone with dark-sapphire internal rim contrast."
+  (let* ((fa (crystal-face-axes normal world))
+         (px (- (swizzle fa :x) 0.5))
+         (py (- (swizzle fa :y) 0.5))
+         (box-d (max (abs px) (abs py)))
+         (bevel-depth (smoothstep 0.28 0.44 box-d)))
+    ;; Richer deep sapphire-cerulean absorption on cut bevels for jewel contrast.
+    (* tone (mix (vec3 0.40 0.82 1.04) (vec3 0.18 0.58 0.96) (* fade bevel-depth)))))
 
 (define-shader-function cross-product (a b)
   (- (* (swizzle a :yzx) (swizzle b :zxy))
@@ -1052,8 +1166,15 @@ NIL leaves the atelier's direct light unchanged.")
                     world 24.0))
          (laid (laid-pattern (representation material-pattern) normal world))
          (height (surface-height relief (representation material-pattern) world fade nap-fade laid))
-         (bent (terrain-edge-normal (relief-normal normal world strength height)
-                                    normal world edge-shaping distance))
+         (crystal-p (> relief 12.5))
+         (crystal-data (if crystal-p
+                           (crystal-facet-data normal world distance fade)
+                           (vec4 normal 0.0)))
+         (bent (if crystal-p
+                   (swizzle crystal-data :xyz)
+                   (terrain-edge-normal (relief-normal normal world strength height)
+                                        normal world edge-shaping distance)))
+         (crystal-ridge (if crystal-p (swizzle crystal-data :w) 0.0))
          (mortar-tone (swizzle (representation material-mortar) :xyz))
          (element-tone
            (* (if (> (swizzle laid :w) 0.5)
@@ -1110,7 +1231,14 @@ NIL leaves the atelier's direct light unchanged.")
          ;; grazing view, as glass does, and only its diffuse share of the
          ;; light is thinned by coverage: a highlight or a glow from inside
          ;; is the surface's own, however clear the glass.
-         (coverage (translucent-coverage material-coverage normal view))
+         (base-coverage (translucent-coverage material-coverage bent view))
+         (coverage (if crystal-p
+                       (if (< base-coverage 0.999)
+                           ;; Keep crystal table genuinely transparent while cut
+                           ;; bevels and grazing Fresnel angles thicken gracefully.
+                           (clamp (+ (* base-coverage 0.46) (* crystal-ridge 0.24)) 0.04 0.92)
+                           base-coverage)
+                       base-coverage))
          (reflected
            (+ (paper-surface-radiance
                (* tone (- 1.0 (* metal 0.9))) bent world visibility sun sun-color
@@ -1122,15 +1250,28 @@ NIL leaves the atelier's direct light unchanged.")
               (* tone (terrain-blocklight (swizzle (representation voxel-light) :xyz)
                                          voxel-light-gain))))
          (emitted
-           (+ (* sun-color
-                 (mix (vec3 1.0 1.0 1.0) (+ (vec3 0.2 0.2 0.2) (* tone 5.0)) metal)
-                 (* visibility (material-specular bent view sun roughness)))
-              (face-pattern-glow (representation material-pattern) laid normal
-                                 (representation material-accent)
-                                 fade)
-              (if (< (swizzle (representation material-pattern) :x) 0.5)
-                  (* tone (swizzle (representation material-accent) :w))
-                  (vec3 0.0 0.0 0.0))))
+           (if crystal-p
+               (+ (crystal-interior-glow
+                   tone normal bent world view
+                   (swizzle (representation material-accent) :w) fade)
+                  (crystal-sky-reflection
+                   bent view sun sun-color sky ground
+                   (representation (swizzle horizon-color-vector :xyz))
+                   (representation (swizzle zenith-color-vector :xyz))
+                   visibility)
+                  (* (+ (* sun-color (* visibility 0.55))
+                        (* sky 0.32)
+                        (vec3 0.14 0.46 0.68))
+                     (* crystal-ridge 0.30)))
+               (+ (* sun-color
+                     (mix (vec3 1.0 1.0 1.0) (+ (vec3 0.2 0.2 0.2) (* tone 5.0)) metal)
+                     (* visibility (material-specular bent view sun roughness)))
+                  (face-pattern-glow (representation material-pattern) laid normal
+                                     (representation material-accent)
+                                     fade)
+                  (if (< (swizzle (representation material-pattern) :x) 0.5)
+                      (* tone (swizzle (representation material-accent) :w))
+                      (vec3 0.0 0.0 0.0)))))
          ;; Premultiplied at the end, so the share of the pixel this surface
          ;; claims is COVERAGE, its emitted light arrives whole, and the
          ;; atmosphere in front of it is thinned with it.
@@ -1149,6 +1290,14 @@ NIL leaves the atelier's direct light unchanged.")
     (set-output motion-output
                 (mesh-temporal-motion previous-clip current-clip))))
 
+(defparameter *translucent-reactive-floor* 0.72
+  "Reactive mask base for moving translucent pixels, 0..1.
+Gated by screen-space motion speed so still frames get full MetalFX temporal
+antialiasing (zero edge vibration) while moving frames suppress parallax ghosting.")
+
+(defparameter *translucent-reactive-gain* 0.24
+  "Additional reactive mask scaled by coverage on top of *TRANSLUCENT-REACTIVE-FLOOR*.")
+
 (defun star-translucent-fragment-specification
     (&optional (fragment (star-fragment-specification)) reactive-p)
   "FRAGMENT for the translucent sheet's blended pass (#LNRIRA).
@@ -1156,9 +1305,10 @@ NIL leaves the atelier's direct light unchanged.")
 The same material, under the same host treatments, with two additions.  A
 face turned from the eye is discarded: a gem shows the eye its near surface
 once, so its sites need no sorting among themselves and no pane is counted
-twice.  REACTIVE-P adds a third output, how far temporal reconstruction
-should trust this frame over its history here: what shows through a pane
-moves at a parallax the pane's own motion vector cannot describe."
+twice.  REACTIVE-P adds a motion-gated reactive mask at location 2 alongside
+consistent crystal depth and motion: still crystals get full MetalFX temporal
+antialiasing (zero edge vibration) while moving crystals raise reactivity so
+background parallax through the glass does not smear."
   (let* ((source (shader-object-source-form fragment))
          (options (copy-tree (third source)))
          (body (copy-tree (fourth source))))
@@ -1166,23 +1316,29 @@ moves at a parallax the pane's own motion vector cannot describe."
     (when reactive-p
       (setf (getf options :outputs)
             (append (getf options :outputs) '((reactive-output :float :location 2))))
-      (setf body (append body
-                         `((set-output reactive-output
-                                       (* ,*translucent-reactive-gain* coverage))))))
+      (setf body
+            (append body
+                    `((let* ((translucent-motion
+                               (mesh-temporal-motion previous-clip current-clip))
+                             (motion-speed
+                               (sqrt (dot translucent-motion translucent-motion)))
+                             (motion-weight (smoothstep 0.00012 0.0018 motion-speed)))
+                        (set-output reactive-output
+                                    (* motion-weight
+                                       (clamp (+ ,*translucent-reactive-floor*
+                                                 (* ,*translucent-reactive-gain* coverage))
+                                              0.0 1.0))))))))
     (let ((*translucent-surface-p* t))
-     (parse-shader-specification
-      'star-translucent-fragment options
-     `((let* ((facing-view
-                (mix (- (representation (swizzle camera-forward :xyz)))
-                     (- (swizzle (representation camera-position) :xyz)
-                        (representation world-position))
-                     (swizzle (representation render-parameters) :z))))
-         (when (< (dot (representation mesh-normal) facing-view) 0.0)
-           (discard))
-         ,body))))))
-
-(defparameter *translucent-reactive-gain* 0.8
-  "The reactive mask a fully covering translucent pixel writes, 0..1.")
+      (parse-shader-specification
+       'star-translucent-fragment options
+       `((let* ((facing-view
+                  (mix (- (representation (swizzle camera-forward :xyz)))
+                       (- (swizzle (representation camera-position) :xyz)
+                          (representation world-position))
+                       (swizzle (representation render-parameters) :z))))
+           (when (< (dot (representation mesh-normal) facing-view) 0.0)
+             (discard))
+           ,body))))))
 
 ;;; Terrain by instanced vertex pulling.  Every star has its own indexed
 ;;; patch in two shared tables: the scene's, whose vertices are shared only
@@ -1872,15 +2028,19 @@ moves at a parallax the pane's own motion vector cannot describe."
                                   :x)
                                  camera-projection divisor)
                                 #.*screen-ambient-occlusion-radius*))))
+         ;; Fade SSAO out in the far perspective distance where the inner tap
+         ;; shrinks below one texel and jittered step creases shimmer.
+         (distance-fade (- 1.0 (* divisor (smoothstep 45.0 95.0 centre))))
+         (occlusion-amount (* (min 1.0 (* occlusion 1.6)) distance-fade))
          (accessibility
            (if (> depth 0.0001)
                (- 1.0 (* #.*screen-ambient-occlusion-strength*
-                         (min 1.0 (* occlusion 1.6))))
+                         occlusion-amount))
                1.0))
          (pooling
            (if (> depth 0.0001)
                (* #.*ambient-pigment-strength*
-                  (min 1.0 (* occlusion 1.6)))
+                  occlusion-amount)
                0.0))
          ;; A common cool shadow pigment makes the depth signal read as an
          ;; illustrated wash rather than neutral post-process darkening.

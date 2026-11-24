@@ -502,8 +502,9 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
               :vertex (shaders:terrain-vertex-specification)
               :fragment (shaders:star-translucent-fragment-specification
                          fragment (rest target-formats))
-              ;; Colour blends; motion and the reactive mask are the
-              ;; nearest pane's, replacing what lay behind it.
+              ;; Colour blends; writing depth + motion alongside the motion-gated
+              ;; reactive mask lets MetalFX antialias crystal silhouette edges
+              ;; identically to opaque geometry with zero Halton-jitter vibration.
               :targets (loop for format in (if (rest target-formats)
                                                (append target-formats
                                                        (list +translucent-reactive-format+))
@@ -512,7 +513,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                              collect `(:format ,format
                                        ,@(when first '(:blend :premultiplied-alpha))))
               :sample-count sample-count
-              :depth-stencil '(:format :depth32-float :depth-write-enabled nil
+              :depth-stencil '(:format :depth32-float :depth-write-enabled t
                                :depth-compare :greater)))
             (terrain-shadow-program drawing)
             (own-gpu-object

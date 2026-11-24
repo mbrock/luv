@@ -94,7 +94,7 @@ a crystal's blue surface must not turn white wool cyan."
      :black-wool :tapestry)
     (:metal 0.15 0.28 0.9 :copper :gold :iron-plate :tape :film)
     (:grain 0.35 0.85 0.8 :verdigris)
-    (:faceted 0.1 0.3 0.0 :crystal)
+    (:faceted 0.15 0.06 0.0 :crystal)
     (:gloss 0.05 0.3 0.15 :marble :marble-tiles :polished-stone
      :blue-tiles :mosaic :checker-floor
      :lantern :lit-window :terminal :urbit :orb-mote :fountain :lava-spring))

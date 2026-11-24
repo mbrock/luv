@@ -3075,6 +3075,10 @@ compiler boundary of #58IDSR."
      (metal-encoder-command-buffer encoder)
      (metal-native-object texture)
      color)
+    ;; Metal 4 does not track render-pass hazards automatically: order any
+    ;; following pass that loads or samples this cleared texture after the clear.
+    (note-metal-consumer-barrier
+     encoder luv.metal:+stage-fragment+ luv.metal:+stage-fragment+)
     (retain-metal-resource encoder texture)
     (setf (metal-encoder-encoded-p encoder) t)
     command))
