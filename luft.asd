@@ -149,6 +149,7 @@
                              (:file "camera")
                              (:file "distant-terrain")
                              (:file "voxel-lod")
+                             (:file "stride-four-ring")
                              (:file "frame")))))
 
 (defsystem "luft/world"

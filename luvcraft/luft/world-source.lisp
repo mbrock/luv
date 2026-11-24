@@ -727,6 +727,9 @@ POSITION the supplied RESUME stays unchanged."
   "A demand-streamed Luft scene over Luvcraft world SOURCE."
   (apply #'terrain:make-world-source-streaming-scene source initargs))
 
+(defmethod terrain:world-source-stride-four-p ((source luvcraft-world-source))
+  (eq (luvcraft-world-source-little-class source) 'luvcraft:little-world-source))
+
 (defmethod terrain:sample-stride-four-materials
     ((source luvcraft-world-source) origin-x origin-y materials)
   "Sample the stock little world's relief and cave field in 3D (#AQCYEH).
@@ -765,3 +768,40 @@ Four footprint corners filter each roof. Use the center column for strata and ca
                                       (setf (gethash block codes)
                                             (luvcraft-block-material-code vocab block)))))
                        (setf (aref materials (+ cz (* 64 (+ cy (* 32 cx))))) code))))))))
+
+(defmethod terrain:refine-stride-four-roofs
+    ((source luvcraft-world-source) origin-x origin-y materials indices)
+  ;; A bore can remove the last uniformly sampled cell beneath a thin cap.
+  ;; At that edit boundary, run the two successive 4-of-8 occupancy votes.
+  (let ((little (luvcraft-little-world-source source))
+        (height (luvcraft-world-source-height source))
+        (relief (luvcraft-world-source-relief source))
+        (offset (luvcraft-world-source-offset source))
+        (vocab (terrain:world-source-material-vocabulary source)))
+    (dolist (index indices)
+      (let* ((col (floor index 64))
+             (x0 (- (+ origin-x (* 4 (floor col 32))) offset))
+             (y0 (- (+ origin-y (* 4 (mod col 32))) offset))
+             (z0 (* 4 (mod index 64)))
+             (votes (make-array 8 :element-type '(unsigned-byte 8) :initial-element 0))
+             (sample-block nil))
+        (dotimes (dx 4)
+          (dotimes (dy 4)
+            (let* ((x (+ x0 dx)) (y (+ y0 dy))
+                   (surface (luvcraft::little-world-surface-height little x y height))
+                   (caves-p (or (eq relief :alpine)
+                                (and (eq relief :biomes)
+                                     (<= (luvcraft::little-world-homeland-weight little x y) 0.15d0)))))
+              (loop for dz below 4 for z = (+ z0 dz) while (<= z surface)
+                    unless (and caves-p (luvcraft::little-world-cave-p little x z y surface))
+                      do (incf (aref votes (+ (* 4 (floor dx 2)) (* 2 (floor dy 2)) (floor dz 2))))
+                         (unless sample-block
+                           (let ((skin (luvcraft::little-world-surface-material little x y surface height)))
+                             (setf sample-block
+                                   (luvcraft::little-world-column-material
+                                    little z surface skin
+                                    (and (eq relief :biomes) (luvcraft::little-world-biome-at little x y))))))))))
+        (cond ((< (count-if (lambda (n) (>= n 4)) votes) 4)
+               (setf (aref materials index) 0))
+              ((zerop (aref materials index))
+               (setf (aref materials index) (luvcraft-block-material-code vocab sample-block))))))))

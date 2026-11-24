@@ -122,6 +122,7 @@
            #:box-figure #:pack-figure-instances #:viewer-figures #:advance-viewer-game
            #:apply-viewer-input-frame #:viewer-input-tape
            #:renderer-light-at
+           #:*stride-four-mode*
            #:*voxel-lod-p*
            #:*voxel-lod-occupancy-threshold*
            #:*voxel-lod-cull-caves-p*

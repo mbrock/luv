@@ -198,7 +198,7 @@ for this coarse LOD so deep bedrock caves do not waste 75% of distant stars (#CL
                     (incf culled))))))))
       culled)))
 
-(defun %fill-world-source-chunk-fine-grid (source tx ty grid fibers emission-grid emission-table)
+(defun %fill-world-source-chunk-fine-grid (source tx ty grid fibers emission-grid emission-table edits head)
   "Evaluate SOURCE at 64x64 chunk (TX, TY) into flat GRID, FIBERS, EMISSION-GRID,
 and return (VALUES SEEDED-AIR-COORDS JOURNAL-HEAD AUTHORED-AIR-COUNT).
 Both generated terrain and sparse journal edits (including carved air) replay cleanly."
@@ -221,8 +221,6 @@ Both generated terrain and sparse journal edits (including carved air) replay cl
          (x-end (+ x0 luft:+chunk-size+))
          (y-end (+ y0 luft:+chunk-size+))
          (key (luft:chunk-key-at x0 y0))
-         (edits (world-source-edits source))
-         (head (world-journal-head (world-source-journal source)))
          (offsets (make-hash-table :test #'eq))
          (seeded-air nil)
          (authored-air-count 0)
@@ -394,7 +392,9 @@ underground stone drowning 1-cell grass/snow/masonry skins."
 
 (defun build-world-source-coarse-tile
     (source tx ty &key (threshold 4) (cull-interior-caves-p t)
-                       grid-scratch fibers-scratch emission-scratch)
+                       grid-scratch fibers-scratch emission-scratch
+                       (edits (world-source-edits source))
+                       (head (world-journal-head (world-source-journal source))))
   "Generate chunk (TX, TY) from SOURCE and downsample it to a stride-2 COARSE-VOXEL-TILE."
   (let* ((domain (world-source-domain source))
          (vocab (world-source-material-vocabulary source))
@@ -424,7 +424,7 @@ underground stone drowning 1-cell grass/snow/masonry skins."
                      (make-array (* 64 64 256) :element-type '(unsigned-byte 16)
                                                :initial-element 0))))
     (multiple-value-bind (seeded-air head authored-air-count)
-        (%fill-world-source-chunk-fine-grid source tx ty grid fibers egrids emission-table)
+        (%fill-world-source-chunk-fine-grid source tx ty grid fibers egrids emission-table edits head)
       (downsample-chunk-to-coarse-tile
        fibers grid tx ty
        :threshold threshold

@@ -47,17 +47,27 @@ Use unculled children for an exact mip of the source occupancy."
       (setf (coarse-voxel-tile-emissions tile) emissions)
       tile)))
 
+(defgeneric world-source-stride-four-p (source)
+  (:documentation "Whether SOURCE can generate a native stride-four volume.")
+  (:method (source) (declare (ignore source)) nil))
+
 (defgeneric sample-stride-four-materials (source origin-x origin-y materials)
   (:documentation "Write the generated 32×32×64 coarse material volume at a signed
 world origin. Index Z + 64*(Y + 32*X). The caller supplies an air-filled array."))
 
-(defun replay-stride-four-edits (source tx ty materials)
+(defgeneric refine-stride-four-roofs (source origin-x origin-y materials indices)
+  (:documentation "Refine unedited coarse cells directly above authored air at INDICES.")
+  (:method (source origin-x origin-y materials indices)
+    (declare (ignore source origin-x origin-y materials indices))))
+
+(defun replay-stride-four-edits (source tx ty materials edits)
   "Replay final fine-cell journal values over the uniform coarse fallback cells.
 At least 32 solid votes keep a cell solid. Tied materials take the lower code."
   (let ((cells (make-hash-table :test #'eql))
         (vocab (world-source-material-vocabulary source))
         (counts (make-array 256 :element-type '(unsigned-byte 8)))
         (air-count 0)
+        (roof-candidates nil)
         (emissions nil))
     (maphash
      (lambda (site value)
@@ -71,13 +81,21 @@ At least 32 solid votes keep a cell solid. Tied materials take the lower code."
                             (1+ (domains:identity-vocabulary-offset vocab placement))
                             0))
                   (light (if kind (material-kind-packed-light-emission kind) 0)))
-             (unless placement (incf air-count))
+             (unless placement
+               (incf air-count)
+               (when (< (mod index 64) 63)
+                 (unless roof-candidates (setf roof-candidates (make-hash-table :test #'eql)))
+                 (setf (gethash (1+ index) roof-candidates) t)))
              (push code (gethash index cells))
              (when (plusp light)
                (unless emissions (setf emissions (make-hash-table :test #'eql)))
                (setf (gethash index emissions)
                      (luft:voxel-light-componentwise-max light (gethash index emissions 0))))))))
-     (world-source-edits source))
+     edits)
+    (when roof-candidates
+      (let ((roofs (loop for index being the hash-keys of roof-candidates
+                         unless (gethash index cells) collect index)))
+        (when roofs (refine-stride-four-roofs source (* tx 128) (* ty 128) materials roofs))))
     (maphash (lambda (index edits)
                (fill counts 0)
                (setf (aref counts (aref materials index)) (- 64 (length edits)))
@@ -92,13 +110,14 @@ At least 32 solid votes keep a cell solid. Tied materials take the lower code."
              cells)
     (values air-count emissions)))
 
-(defun build-native-stride-four-tile (source tx ty)
+(defun build-native-stride-four-tile (source tx ty &key (edits (world-source-edits source))
+                                                 (head (world-journal-head (world-source-journal source))))
   "Build a stride-four tile from the coarse-native source and its 3D edit overlay."
   (let ((materials (make-array (* 32 32 64) :element-type '(unsigned-byte 8) :initial-element 0))
         (words (make-array (* 32 32) :element-type '(unsigned-byte 64) :initial-element 0)))
     (sample-stride-four-materials source (* tx 128) (* ty 128) materials)
     (multiple-value-bind (air-count emissions)
-        (replay-stride-four-edits source tx ty materials)
+        (replay-stride-four-edits source tx ty materials edits)
       (dotimes (col (* 32 32))
         (let ((word 0))
           (declare (type (unsigned-byte 64) word))
@@ -107,5 +126,5 @@ At least 32 solid votes keep a cell solid. Tied materials take the lower code."
               (setf word (logior word (ash 1 z)))))
           (setf (aref words col) word)))
       (%make-coarse-voxel-tile tx ty 2 32 64 1 words materials
-                               :journal-head (world-journal-head (world-source-journal source))
+                               :journal-head head
                                :emissions emissions :authored-air-cells air-count))))

@@ -7,20 +7,7 @@
 
 (in-package #:cl-user)
 
-(defun ridge-source ()
-  (luvcraft.luft:make-luvcraft-world-source
-   :seed 121 :height 128 :relief :biomes
-   :homeland '(:meadow-height 16 :blend 120
-               :boxes ((-1059 644 -770 1053) (-769 210 -498 459) (-78 -791 445 218)))))
-
-(defun carve-ridge (source)
-  (let ((domain (luft.terrain:world-source-domain source))
-        (changes nil))
-    (loop for x from 780 below 864 do
-      (loop for y from 1048 below 1064 do
-        (loop for z from 76 below 84 do
-          (push (list (luft:make-site domain x y z luft:+cell-extent+ 1) nil nil) changes))))
-    (luft.terrain:record-world-events (luft.terrain:world-source-journal source) changes)))
+(load (merge-pathnames "stride-four-ridge-fixture.lisp" *load-truename*))
 
 (defun ridge-children (source)
   (let ((children (make-array '(2 2))))
@@ -78,6 +65,11 @@
       (let ((rays (clear-bore-rays (cdr entry))))
         (format t "~&~A ~A: ~D/8 clear, ~D stars~%" (car entry) suffix rays (ridge-mesh (cdr entry)))
         (assert (if carved-p (= rays 8) (< rays 8)))
+        (when carved-p
+          ;; The edited ridge retains its cap one coarse cell above the bore.
+          (assert (= 88 (* 4 (integer-length
+                              (aref (luft.terrain:coarse-voxel-tile-words (cdr entry))
+                                    (+ 8 (* 32 11))))))))
         (ridge-section (cdr entry) (format nil "~A-~A.pgm" (car entry) suffix))))
     (format t "~&~A column-top difference in world cells: mean ~,2F, max ~D, identical ~D/1024~%"
             suffix (/ (reduce #'+ delta) 1024) (reduce #'max delta) (count 0 delta))

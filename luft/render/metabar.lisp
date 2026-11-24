@@ -16,6 +16,10 @@
                                   (streaming-scene-source (viewer-source viewer))
                                   (world-source-distant-terrain-p
                                    (streaming-scene-source (viewer-source viewer)))))
+                            (stride-four-mode
+                             (and *voxel-lod-p* (typep (viewer-source viewer) 'streaming-scene)
+                                  (world-source-stride-four-p
+                                   (streaming-scene-source (viewer-source viewer)))))
                             (voxel-lod
                              (and (typep (viewer-source viewer) 'streaming-scene)
                                   (streaming-scene-source (viewer-source viewer))

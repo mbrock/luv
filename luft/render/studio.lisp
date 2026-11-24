@@ -3004,6 +3004,23 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
     (:group :geometry :class 'voxel-lod-knob :label "voxel LOD"
      :type boolean :quantity (:quantity :dimensionless :unit :one))
   *voxel-lod-p*)
+(defclass stride-four-mode-knob (knobs:scalar-knob) ())
+
+(defun stride-four-mode-index ()
+  (position *stride-four-mode* #(:heightfield :direct :exact :auto)))
+
+(defun (setf stride-four-mode-index) (index)
+  (setf *stride-four-mode* (aref #(:heightfield :direct :exact :auto) index)))
+
+(defmethod knobs:format-knob-value ((knob stride-four-mode-knob) session)
+  (declare (ignore session))
+  (string-downcase *stride-four-mode*))
+
+(knobs:define-knob stride-four-mode
+    (:group :geometry :class 'stride-four-mode-knob :label "stride 4" :type integer
+     :quantity (:quantity :dimensionless :unit :one) :minimum 0 :maximum 3 :step 1)
+  (stride-four-mode-index))
+
 (knobs:define-knob construction-lines
     (:group :geometry :class 'construction-knob :type boolean
      :quantity (:quantity :dimensionless :unit :one))

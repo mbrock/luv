@@ -292,10 +292,9 @@ Extend the validated Phase 1 primitive into a full 2.5+ km 3D horizon:
 3. Add low-priority background exact refinement for the inner =stride = 2= ring
    and design compact mip-cache persistence alongside format-2 saves.
 
-The first stride-4 comparison (#QDEDGB) isolates a roof lost by the fallback.
-Next, compare the fallback's occupancy over the edited roof with the eight
-stride-2 votes that formed the exact parent, then repeat the section and
-timings before enabling a second ring in play.
+The one-tile test (#QDEDGB) led to the live ring flight (#Q6UGN3).
+Next, break down the owner-thread streaming spikes during the 552-cell
+ridge crossing and reduce them before adding a stride-8 ring.
 
 ** DONE One stride-4 tile through the alpine ridge
 :PROPERTIES:
@@ -337,6 +336,60 @@ The exact tile keeps a cap at =z = 88= while the fallback drops to =z = 72=.
 A clear sightline alone would have missed this loss.
 
 [[file:images/luft-stride-four-ridge.png]]
+
+** DONE The stride-4 ring in flight
+:PROPERTIES:
+:ID: Q6UGN3
+:END:
+
+Enable voxel LOD and use =Geometry → stride 4= to select =heightfield=,
+=direct=, =exact=, or =auto=.  The initial setting is =heightfield=.
+Automatic mode publishes direct tiles first, then a single worker refines
+the ring once it has coverage.  It reuses available unculled stride-2
+children at the current journal head and builds missing children.  Exact
+generation covers the fine world's domain.  Signed tiles beyond it keep
+their direct volumes.  The owner installs one finished mesh at a time and
+retires the previous allocation after the GPU submission fence.  Pending
+and empty tiles have distinct coverage, and neighboring tiles refresh their
+aprons when the volume changes.
+
+A repeatable journal carve in a separate Luvcraft host reproduces #QDEDGB.
+At the same camera pose, the original direct tile visibly loses a piece of
+the crest.  Sampling the 4×4×4 fine volume immediately above authored air
+and applying the same two successive 4-of-8 votes restores the cap at
+=(812,1056)= to =z = 88=.  Both builders pass 8/8 bore sightlines.  The
+maximum column-top difference becomes four world cells, down from sixteen.
+Other cave and material differences remain visible at the handoff.
+
+[[file:images/luft-stride-four-handoff.png]]
+
+=scripts/stride-four-flight.lisp= replays two camera paths on Metal.  First
+the camera moves through a 32-cell-wide orbit with the bore in the stride-4
+ring.  The ring contains 147 tiles.  Automatic mode publishes 119 exact
+replacements and keeps 28 direct tiles beyond the fine domain.  The second
+leg flies from =x = 1312= to =760= in 241 poses, crossing both inner rings
+and passing over the crest.  The harness records arrivals, captures the
+actual replacement, and saves matched frames from all four modes.
+
+| M2 Pro / Metal 4 / MetalFX | Arrival frames | Arrival p95 ms | Settled p95 ms | Crossing p95 ms | Crossing streaming p95 ms | Crossing GPU p95 ms |
+|---+---:|---:|---:|---:|---:|---:|
+| Heightfield L1 | — | — | 10.99 | 92.74 | 82.34 | 9.27 |
+| Direct | 290 | 13.87 | 13.59 | 57.90 | 46.13 | 9.24 |
+| Exact in-domain | 290 | 13.81 | 13.49 | 46.22 | 33.15 | 9.41 |
+| Automatic | 1,169 | 12.67 | 11.49 | 39.85 | 29.61 | 9.49 |
+
+Nearest-rank percentiles.  Arrival frames include apron remeshes.  Settled
+samples are the final 120 orbit frames.  CPU wall time covers streaming,
+encoding, submission, and GPU completion at fixed 960×540 output and
+720×405 internal resolution.  GPU times come from Metal queue feedback.
+Readback is outside timing.  The four modes used that order in one process
+with shared inner-ring caches, and the separate interactive game was running.
+The crossed terrain and camera poses match, but the later passes revisit warm
+chunks.  The crossing times establish a pacing issue across modes.  They
+cannot rank their cold-flight costs.  In the automatic crossing 66/241
+frames exceeded 16.67 ms.  The next measurement should split streaming time
+among near publication, stride-2 generation and meshing, and distant tile
+uploads.  Frame samples are in =wiki/measurements/stride-four-flight/frames.csv.gz=.
 
 * TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
 :PROPERTIES:

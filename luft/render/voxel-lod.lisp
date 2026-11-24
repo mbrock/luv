@@ -37,6 +37,7 @@
 (defclass voxel-lod-state (gpu-resource-owner)
   ((renderer :initarg :renderer :reader voxel-lod-renderer)
    (source :initform nil :accessor voxel-lod-source)
+   (stride-four :initform nil :accessor voxel-lod-stride-four)
    (coarse-cache :initform (make-hash-table :test #'eql) :reader voxel-lod-coarse-cache)
    (gpu-tiles :initform (make-hash-table :test #'eql) :reader voxel-lod-gpu-tiles)
    (active-bounds :initform nil :accessor voxel-lod-active-bounds)
@@ -67,6 +68,7 @@
 (defun clear-voxel-lod-gpu-tiles (state)
   "Release every active GPU coarse-star tile while optionally keeping CPU coarse cache."
   (when state
+    (clear-stride-four-ring state)
     (let ((entries nil))
       (maphash (lambda (k tile) (push (cons k tile) entries))
                (voxel-lod-gpu-tiles state))
@@ -84,36 +86,38 @@
 
 (defmethod destroy ((state voxel-lod-state))
   (clear-voxel-lod state)
+  (stop-stride-four-worker state)
   (call-next-method))
 
 (defun %upload-coarse-star-population (renderer site-words appearance-codes light-words)
   "Sort and upload coarse star arrays directly into RENDERER's pooled TERRAIN-ARENAS."
   (declare (type (simple-array (unsigned-byte 32) (*)) site-words light-words)
            (type (simple-array (unsigned-byte 8) (*)) appearance-codes))
+  (multiple-value-call #'%upload-prepared-coarse-population renderer
+    (sort-sites-by-star site-words (pack-terrain-appearance-codes appearance-codes) light-words nil)))
+
+(defun %upload-prepared-coarse-population (renderer instances appearances runs lights translucent-runs)
   (let* ((arenas (renderer-terrain-arenas renderer))
          (resident (make-instance 'resident-population :arenas arenas))
          (completed-p nil))
     (unwind-protect
          (with-gpu-construction (resident)
-           (let ((app-words (pack-terrain-appearance-codes appearance-codes)))
-             (multiple-value-bind (instances appearances runs lights translucent-runs)
-                 (sort-sites-by-star site-words app-words light-words nil)
-               (let ((site-count (floor (length instances) 4)))
-                 (multiple-value-bind (site-slice appearance-slice light-slice)
-                     (terrain-arenas-allocate-sites arenas site-count)
-                   (setf (resident-population-site-slice resident) site-slice
-                         (resident-population-appearance-slice resident) appearance-slice
-                         (resident-population-light-slice resident) light-slice)
-                   (when (plusp site-count)
-                     (gpu-buffer-arena-write (terrain-arenas-sites-arena arenas)
-                                             site-slice instances)
-                     (gpu-buffer-arena-write (terrain-arenas-appearances-arena arenas)
-                                             appearance-slice appearances)
-                     (gpu-buffer-arena-write (terrain-arenas-lights-arena arenas)
-                                             light-slice lights)))
-                 (setf (resident-population-star-runs resident) runs
-                       (resident-population-translucent-runs resident) translucent-runs
-                       (resident-population-bounds resident) (site-bounds instances)))))
+           (let ((site-count (floor (length instances) 4)))
+             (multiple-value-bind (site-slice appearance-slice light-slice)
+                 (terrain-arenas-allocate-sites arenas site-count)
+               (setf (resident-population-site-slice resident) site-slice
+                     (resident-population-appearance-slice resident) appearance-slice
+                     (resident-population-light-slice resident) light-slice)
+               (when (plusp site-count)
+                 (gpu-buffer-arena-write (terrain-arenas-sites-arena arenas)
+                                         site-slice instances)
+                 (gpu-buffer-arena-write (terrain-arenas-appearances-arena arenas)
+                                         appearance-slice appearances)
+                 (gpu-buffer-arena-write (terrain-arenas-lights-arena arenas)
+                                         light-slice lights)))
+             (setf (resident-population-star-runs resident) runs
+                   (resident-population-translucent-runs resident) translucent-runs
+                   (resident-population-bounds resident) (site-bounds instances)))
            (setf completed-p t)
            resident)
       (unless completed-p
@@ -190,6 +194,7 @@
       (clear-voxel-lod state)
       (setf (voxel-lod-last-threshold state) *voxel-lod-occupancy-threshold*
             (voxel-lod-last-cull-caves-p state) *voxel-lod-cull-caves-p*))
+    (update-stride-four-ring renderer state source camera-x camera-y)
     (%invalidate-edited-coarse-tiles state source)
     (let* ((domain (world-source-domain source))
            (max-domain-tx (1- (floor (luft:world-domain-x-limit domain) luft:+chunk-size+)))
@@ -320,7 +325,7 @@
                               (resident (and tile (voxel-lod-gpu-tile-resident tile))))
                          (when (and resident (resident-drawn-p resident nil))
                            (push resident visible))))))
-        (nreverse visible)))))
+        (nconc (nreverse visible) (stride-four-visible-residents state))))))
 
 (defun voxel-lod-tile-present-p (renderer tx ty)
   "Whether Level-0 coarse 3D tile (TX, TY) is ready to replace heightfield L0."
@@ -338,7 +343,8 @@
                    (declare (ignore k))
                    (incf total-stars (voxel-lod-gpu-tile-star-count tile)))
                  (voxel-lod-gpu-tiles state))
-        (list :enabled *voxel-lod-p*
+        (list :stride-four (stride-four-ring-stats state)
+              :enabled *voxel-lod-p*
               :threshold *voxel-lod-occupancy-threshold*
               :cull-caves-p *voxel-lod-cull-caves-p*
               :gpu-tile-count (hash-table-count (voxel-lod-gpu-tiles state))

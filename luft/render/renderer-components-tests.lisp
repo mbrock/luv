@@ -1105,3 +1105,43 @@
     (true (= -14.0 (aref bounds 3)))
     (true (= 46.0 (aref bounds 4)))
     (true (= 18.0 (aref bounds 5)))))
+
+(define-test stride-four-ring-demand-and-stale-completions
+  (let* ((source (make-instance 'test-analytical-world-source :elevation-fn (constantly 12)))
+         (state (make-instance 'render::voxel-lod-state :renderer nil))
+         (ring (render::make-stride-four-ring))
+         (slots (render::stride-four-ring-slots ring))
+         (render:*stride-four-mode* :auto))
+    (setf (render::voxel-lod-stride-four state) ring)
+    (render::retarget-stride-four-ring ring state 0 0)
+    (render::snapshot-stride-four-edits ring source)
+    (true (= 147 (hash-table-count slots)))
+    (true (not (gethash (render::distant-tile-key 1 0 0) slots)))
+    (true (gethash (render::distant-tile-key 1 -4 0) slots))
+    (let* ((slot (gethash (render::distant-tile-key 1 4 0) slots))
+           (key (render::distant-tile-key 1 4 0))
+           (site (luft:make-site (terrain:world-source-domain source) 520 2 4 luft:+cell-extent+ 1))
+           (request (make-instance 'render::stride-four-request :key key :slot slot :kind :direct))
+           (result (make-instance 'luv.production:production-result :request request
+                                  :condition (make-condition 'simple-error) :elapsed-seconds 0d0))
+           (first-edits (render::stride-four-ring-edits ring)))
+      ;; All other slots already have direct data and a current apron.
+      (loop for other being the hash-values of slots do
+        (setf (render::stride-four-slot-provenance other) :direct
+              (render::stride-four-slot-dirty other) nil
+              (render::stride-four-slot-remesh other) nil))
+      (true (eq :exact (nth-value 1 (render::next-stride-four-job ring source 576 64))))
+      (setf (render::stride-four-ring-pending ring) request)
+      (terrain:record-world-events (terrain:world-source-journal source) (list (list site nil nil)))
+      (render::snapshot-stride-four-edits ring source)
+      (true (not (nth-value 1 (gethash site first-edits))))
+      (true (nth-value 1 (gethash site (render::stride-four-ring-edits ring))))
+      (true (render::stride-four-slot-dirty slot))
+      (true (eq :direct (nth-value 1 (render::next-stride-four-job ring source 576 64))))
+      (render::publish-stride-four-result result ring state nil)
+      (true (zerop (render::stride-four-ring-publications ring)))
+      (setf (render::stride-four-ring-pending ring) request)
+      (render::retarget-stride-four-ring ring state 1536 1536)
+      (render::publish-stride-four-result result ring state nil)
+      (true (not (gethash key slots)))
+      (true (= 147 (hash-table-count slots))))))
