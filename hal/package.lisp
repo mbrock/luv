@@ -539,6 +539,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:gpu-buffer-arena-capacity
            #:gpu-buffer-arena-used-count
            #:gpu-buffer-arena-generation
+           #:gpu-buffer-arena-destroyed-p
            #:gpu-buffer-arena-reclaim
            #:gpu-buffer-arena-allocate
            #:gpu-buffer-arena-free

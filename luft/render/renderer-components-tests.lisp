@@ -251,10 +251,11 @@
              (equal *failing-upload-label* (luv::gpu-descriptor-label (test-gpu-descriptor buffer))))
     (error "Injected upload failure.")))
 
-(define-test failed-resident-upload-releases-its-buffer-before-publication
+(define-test failed-resident-upload-releases-its-slices-before-publication
   (let* ((device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
          (old (render::renderer-publication renderer))
+         (arenas (render::renderer-terrain-arenas renderer))
          (before (test-gpu-resources device))
          (builder (render::make-world-scene-builder)))
     (unwind-protect
@@ -262,16 +263,20 @@
            (render::scene-builder-cell builder 10 10 2)
            (multiple-value-bind (mesh generation)
                (render::make-render-mesh (render::finish-scene-builder builder))
-             (let ((*failing-upload-label* "luft resident site instances"))
+             (let ((*failing-upload-label* "luft terrain material descriptors"))
                (fail (render::renderer-update-meshes renderer (list (cons 0 mesh)) nil
                                                      :scene-generation generation))))
            (true (eq old (render::renderer-publication renderer)))
+           (render::reclaim-terrain-arenas arenas)
+           (true (zerop (getf (luv:gpu-buffer-arena-stats
+                               (render::terrain-arenas-sites-arena arenas))
+                              :used)))
            (true (> (length (test-gpu-resources device)) (length before)))
            (loop for resource in (test-gpu-resources device) until (member resource before) do
              (true (= 1 (test-gpu-release-attempts resource)))))
       (render:destroy-renderer renderer))))
 
-(define-test failed-resident-release-is-retried-without-double-releasing-its-other-buffers
+(define-test failed-arena-release-is-retried-without-double-releasing-sibling-buffers
   (let* ((device (make-instance 'gpu-test-device))
          (renderer (render:make-renderer device :bgra8-unorm '(640 480)))
          (builder (render::make-world-scene-builder)))
@@ -279,13 +284,71 @@
     (multiple-value-bind (mesh generation)
         (render::make-render-mesh (render::finish-scene-builder builder))
       (render::renderer-update-meshes renderer (list (cons 0 mesh)) nil :scene-generation generation))
-    (let ((failed (render::resident-population-instance-buffer
-                   (render::mesh-slot-resident (gethash 0 (render::renderer-mesh-slots renderer))))))
+    (let ((failed (render::terrain-arenas-sites-buffer
+                   (render::renderer-terrain-arenas renderer))))
       (setf (test-gpu-fail-release-p failed) t)
       (fail (render:destroy-renderer renderer))
       (render:destroy-renderer renderer)
       (dolist (resource (test-gpu-resources device))
         (true (= (if (eq resource failed) 2 1) (test-gpu-release-attempts resource)))))))
+
+(define-test pooled-terrain-arenas-share-one-material-draw-and-recycle-slices
+  (let* ((render::*terrain-visibility-p* t)
+         (render::*temporal-upscaling-p* t)
+         (device (make-instance 'gpu-test-device))
+         (renderer (render:make-renderer device :bgra8-unorm '(640 480)
+                                         :sky-factory nil :figure-factory nil
+                                         :torch-factory nil :lattice-factory nil))
+         (frame (test-renderer-frame renderer))
+         (encoder (make-instance 'gpu-test-encoder))
+         (arenas (render::renderer-terrain-arenas renderer)))
+    (unwind-protect
+         (let ((meshes
+                 (loop for index below 4
+                       for builder = (render::make-world-scene-builder)
+                       do (render::scene-builder-cell builder (+ 10 (* index 16)) 10 2)
+                       collect (cons index
+                                     (nth-value 0 (render::make-render-mesh
+                                                   (render::finish-scene-builder builder)))))))
+           (render:renderer-set-meshes renderer meshes)
+           ;; All four resident chunks share lockstep offsets in the same global arenas.
+           (let ((offsets
+                   (loop for index below 4
+                         for resident = (render::mesh-slot-resident
+                                         (gethash index (render::renderer-mesh-slots renderer)))
+                         do (true (= (luv:gpu-buffer-slice-offset
+                                      (render::resident-population-site-slice resident))
+                                     (luv:gpu-buffer-slice-offset
+                                      (render::resident-population-appearance-slice resident))
+                                     (luv:gpu-buffer-slice-offset
+                                      (render::resident-population-light-slice resident))))
+                         collect (render::resident-population-site-offset resident))))
+             (true (= 4 (length (remove-duplicates offsets)))))
+           ;; Encoding four visible chunks emits exactly ONE fullscreen material draw (3 vertices).
+           (render::encode-renderer-scene renderer frame encoder nil nil)
+           (let ((material-draws
+                   (remove-if-not
+                    (lambda (cmd)
+                      (and (typep cmd 'luv::gpu-draw-command)
+                           (= 3 (luv::gpu-draw-command-vertex-count cmd))))
+                    (test-gpu-commands encoder)))
+                 (visibility-draws
+                   (remove-if-not
+                    (lambda (cmd) (typep cmd 'luv::gpu-draw-indexed-command))
+                    (test-gpu-commands encoder))))
+             (true (= 1 (length material-draws)))
+             (true (plusp (length visibility-draws)))
+             (true (every (lambda (cmd)
+                            (zerop (luv::gpu-draw-indexed-command-base-vertex cmd)))
+                          visibility-draws)))
+           ;; Removing all chunks frees and coalesces every arena back to one span.
+           (render:renderer-clear-meshes renderer)
+           (render::reclaim-terrain-arenas arenas)
+           (let ((stats (luv:gpu-buffer-arena-stats
+                         (render::terrain-arenas-sites-arena arenas))))
+             (true (zerop (getf stats :used)))
+             (true (= 1 (getf stats :free-span-count)))))
+      (render:destroy-renderer renderer))))
 
 (defclass gpu-test-scaler (gpu-test-resource luv:gpu-temporal-scaler) ())
 

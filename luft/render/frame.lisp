@@ -238,6 +238,7 @@ final pass."
                       (renderer-frame-state-flame-effect-buffer frame) effect-time))
 
 (defun encode-renderer-shadows (renderer frame encoder)
+  (flush-terrain-arenas (renderer-terrain-arenas renderer) encoder)
   (let ((shadow-pass
           (begin-render-pass
            encoder
@@ -247,17 +248,18 @@ final pass."
             :depth-stencil-attachment
             `(:view ,(renderer-shadow-view renderer)
               :depth-load-op :clear :depth-store-op :store
-              :depth-clear-value 1.0)))))
-    (dolist (key (and (member *benchmark-terrain-p* '(t :shadow))
-                      (renderer-slot-order renderer)))
-      (let ((resident
-              (mesh-slot-resident
-               (gethash key (renderer-mesh-slots renderer)))))
-        (when (resident-drawn-p resident t)
+              :depth-clear-value 1.0))))
+        (visible (loop for key in (and (member *benchmark-terrain-p* '(t :shadow))
+                                       (renderer-slot-order renderer))
+                       for resident = (mesh-slot-resident
+                                       (gethash key (renderer-mesh-slots renderer)))
+                       when (resident-drawn-p resident t)
+                         collect resident)))
+    (when visible
+      (let ((binding (renderer-frame-terrain-bind-group renderer frame t)))
+        (dolist (resident visible)
           (draw-resident-opaque-population
-           (renderer-terrain renderer) shadow-pass resident
-           (renderer-frame-resident-bind-group
-            renderer frame resident t) :shadow-p t)
+           (renderer-terrain renderer) shadow-pass resident binding :shadow-p t)
           (draw-resident-fixture-bodies renderer frame shadow-pass resident
                                         :shadow-p t))))
     (when (plusp (renderer-flame-instance-count renderer))
@@ -274,14 +276,17 @@ final pass."
 
 (defun renderer-terrain-visibility-p (renderer)
   (and *terrain-visibility-p*
-       (terrain-visibility-program (renderer-terrain renderer))
-       ;; Extremely large publications retain the forward path rather than
-       ;; wrapping the frame-local identity carried in signed baseVertex.
-       (<= (length (renderer-slot-order renderer)) shaders::+terrain-visibility-resident-limit+)))
+       (terrain-visibility-program (renderer-terrain renderer))))
 
 (defun encode-renderer-terrain-visibility (renderer frame encoder)
   (let* ((views (list (renderer-visibility-sites-view renderer)
                       (renderer-visibility-primitives-view renderer)))
+         (visible (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
+                                        (renderer-slot-order renderer))
+                        for resident = (mesh-slot-resident
+                                        (gethash key (renderer-mesh-slots renderer)))
+                        when (resident-drawn-p resident nil)
+                          collect resident))
          (pass (begin-render-pass
                 encoder
                 (make-render-pass-descriptor
@@ -293,14 +298,11 @@ final pass."
                  :depth-stencil-attachment
                  `(:view ,(renderer-depth-view renderer)
                    :depth-load-op :clear :depth-store-op :store :depth-clear-value 1.0)))))
-    (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
-                          (renderer-slot-order renderer))
-          for id from 1
-          for resident = (mesh-slot-resident (gethash key (renderer-mesh-slots renderer)))
-          when (resident-drawn-p resident nil)
-            do (encode-terrain-visibility
-                (renderer-terrain renderer) pass
-                (renderer-frame-visibility-binding renderer frame resident nil) resident id))
+    (when visible
+      (encode-terrain-visibility
+       (renderer-terrain renderer) pass
+       (renderer-frame-visibility-binding renderer frame nil)
+       visible))
     (end-pass pass)
     (let ((generation (renderer-target-generation renderer)))
       (prepare-texture encoder (renderer-target-generation-visibility-sites-texture generation) :texture-binding)
@@ -308,6 +310,7 @@ final pass."
 
 (defun encode-renderer-scene
     (renderer frame encoder player-p construction-p &key repetition-p)
+  (flush-terrain-arenas (renderer-terrain-arenas renderer) encoder)
   (let ((visibility-p (renderer-terrain-visibility-p renderer)))
     (when visibility-p (encode-renderer-terrain-visibility renderer frame encoder))
     (flet ((target (multisampled single clear)
@@ -370,11 +373,10 @@ final pass."
                      sum (expt (- (* 0.5 (+ (aref bounds axis) (aref bounds (+ axis 3))))
                                   (nth axis eye))
                                2)))))
-      (dolist (resident (sort (copy-list residents) #'> :key #'distance))
-        (encode-terrain-translucent
-         (renderer-terrain renderer) pass
-         (renderer-frame-resident-bind-group renderer frame resident :translucent)
-         resident)))))
+      (let ((binding (renderer-frame-terrain-bind-group renderer frame :translucent)))
+        (dolist (resident (sort (copy-list residents) #'> :key #'distance))
+          (encode-terrain-translucent
+           (renderer-terrain renderer) pass binding resident))))))
 
 (defun encode-renderer-translucent-pass (renderer frame encoder)
   (let ((residents (renderer-translucent-residents renderer))
@@ -417,26 +419,28 @@ final pass."
   (encode-scene-drawing
    (renderer-sky renderer) pass
    (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
-  (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
-                        (renderer-slot-order renderer))
-        for id from 1
-        for resident = (mesh-slot-resident (gethash key (renderer-mesh-slots renderer)))
-        when (resident-drawn-p resident nil)
-          do (if visibility-p
-                 (encode-terrain-material
-                  (renderer-terrain renderer) pass
-                  (renderer-frame-visibility-binding renderer frame resident t) id)
-                 (draw-resident-opaque-population
-                  (renderer-terrain renderer) pass resident
-                  (renderer-frame-resident-bind-group renderer frame resident nil)))
-             (unless visibility-p (draw-resident-fixture-bodies renderer frame pass resident)))
-  ;; Every terrain material draw must precede fixtures: it writes color
-  ;; without depth testing and must not paint over an earlier resident's crate.
-  (when visibility-p
-    (dolist (key (and (member *benchmark-terrain-p* '(t :scene)) (renderer-slot-order renderer)))
-      (let ((resident (mesh-slot-resident (gethash key (renderer-mesh-slots renderer)))))
-        (when (resident-drawn-p resident nil)
-          (draw-resident-fixture-bodies renderer frame pass resident)))))
+  (let ((visible (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
+                                       (renderer-slot-order renderer))
+                       for resident = (mesh-slot-resident
+                                       (gethash key (renderer-mesh-slots renderer)))
+                       when (resident-drawn-p resident nil)
+                         collect resident)))
+    (if visibility-p
+        (when visible
+          ;; One fullscreen draw shades every visible chunk through the global
+          ;; arenas; every terrain material draw precedes fixtures because it
+          ;; writes color without depth testing.
+          (encode-terrain-material
+           (renderer-terrain renderer) pass
+           (renderer-frame-visibility-binding renderer frame t))
+          (dolist (resident visible)
+            (draw-resident-fixture-bodies renderer frame pass resident)))
+        (when visible
+          (let ((binding (renderer-frame-terrain-bind-group renderer frame nil)))
+            (dolist (resident visible)
+              (draw-resident-opaque-population
+               (renderer-terrain renderer) pass resident binding)
+              (draw-resident-fixture-bodies renderer frame pass resident))))))
   (when (plusp (renderer-flame-instance-count renderer))
     (encode-torch-bodies
      (renderer-torches renderer) pass

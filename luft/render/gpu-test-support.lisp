@@ -3,10 +3,29 @@
 ;;; Exercise the real component through the HAL with recorded allocations,
 ;;; submissions, completion, and failure. No native GPU is needed here.
 
+(defclass gpu-test-queue (luv:gpu-queue)
+  ((submitted :initform 0 :accessor test-gpu-submitted)
+   (completed :initform 0 :accessor test-gpu-completed)))
+
 (defclass gpu-test-device (luv:gpu-device)
-  ((resources :initform nil :accessor test-gpu-resources)
+  ((queue :initform (make-instance 'gpu-test-queue) :reader luv:device-queue)
+   (resources :initform nil :accessor test-gpu-resources)
    (attempts :initform 0 :accessor test-gpu-attempts)
    (fail-at :initarg :fail-at :initform nil :reader test-gpu-fail-at)))
+
+(defmethod luv:queue-progress-reader ((queue gpu-test-queue))
+  (lambda ()
+    (values (test-gpu-submitted queue) (test-gpu-completed queue))))
+
+(defmethod luv:submit ((queue gpu-test-queue) command-buffers)
+  (declare (ignore command-buffers))
+  (incf (test-gpu-submitted queue))
+  (setf (test-gpu-completed queue) (test-gpu-submitted queue))
+  (values))
+
+(defmethod luv:submitted-work-done ((queue gpu-test-queue))
+  (setf (test-gpu-completed queue) (test-gpu-submitted queue))
+  (values))
 
 (defclass gpu-test-resource ()
   ((descriptor :initarg :descriptor :reader test-gpu-descriptor)
@@ -37,6 +56,17 @@
 
 (defclass gpu-test-encoder ()
   ((commands :initform nil :accessor test-gpu-commands)))
+
+(defmethod luv:create ((device gpu-test-device) (descriptor luv::command-encoder-descriptor))
+  (declare (ignore descriptor))
+  (make-instance 'gpu-test-encoder))
+
+(defmethod luv:finish ((encoder gpu-test-encoder))
+  encoder)
+
+(defmethod luv:destroy ((encoder gpu-test-encoder))
+  (declare (ignore encoder))
+  (values))
 
 (defmethod luv:encode ((encoder gpu-test-encoder) command)
   (push command (test-gpu-commands encoder)))

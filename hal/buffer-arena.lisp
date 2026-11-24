@@ -139,29 +139,34 @@
         (setf (gpu-buffer-arena-ephemeral-buffers arena)
               (nreverse remaining))))))
 
-(defun gpu-buffer-arena-reclaim (arena)
-  "Return GPU-completed quarantined slices to ARENA's coalesced free list."
+(defun gpu-buffer-arena-reclaim (arena &key (completed nil completed-p))
+  "Return GPU-completed quarantined slices to ARENA's coalesced free list.
+
+When COMPLETED is supplied, uses that completion frontier instead of polling
+the queue again, so parallel arenas can reclaim in exact lockstep."
   (%ensure-live-arena arena :reclaim)
   (let ((quarantine (gpu-buffer-arena-quarantine arena))
         (ephemeral (gpu-buffer-arena-ephemeral-buffers arena))
         (reclaimed 0))
     (when (or quarantine ephemeral)
       (let* ((reader (gpu-buffer-arena-progress-reader arena))
-             (completed (if reader (nth-value 1 (funcall reader)) nil)))
-        (unless reader
+             (frontier (cond (completed-p completed)
+                             (reader (nth-value 1 (funcall reader)))
+                             (t nil))))
+        (unless (or completed-p reader)
           ;; Backend without non-blocking progress query: fence once cleanly.
           (submitted-work-done (device-queue (gpu-buffer-arena-device arena))))
         (when quarantine
           (let ((remaining nil))
             (dolist (entry quarantine)
               (destructuring-bind (ready-after offset count) entry
-                (if (or (null reader) (<= ready-after completed))
+                (if (or (null frontier) (<= ready-after frontier))
                     (progn
                       (%arena-insert-free-span arena offset count)
                       (incf reclaimed count))
                     (push entry remaining))))
             (setf (gpu-buffer-arena-quarantine arena) (nreverse remaining))))
-        (%arena-reap-ephemeral-buffers arena reader completed)))
+        (%arena-reap-ephemeral-buffers arena (and frontier t) (or frontier 0))))
     reclaimed))
 
 (defun %arena-find-and-take-span (arena count)
@@ -209,7 +214,7 @@
     (%arena-insert-free-span arena old-capacity (- new-capacity old-capacity))
     arena))
 
-(defun gpu-buffer-arena-allocate (arena count)
+(defun gpu-buffer-arena-allocate (arena count &key (reclaim-p t))
   "Allocate an immutable GPU-BUFFER-SLICE of COUNT elements from ARENA."
   (%ensure-live-arena arena :allocate)
   (unless (and (integerp count) (not (minusp count)))
@@ -218,7 +223,8 @@
            :reason :invalid-slice-count :details count))
   (when (zerop count)
     (return-from gpu-buffer-arena-allocate (%make-gpu-buffer-slice arena 0 0)))
-  (gpu-buffer-arena-reclaim arena)
+  (when reclaim-p
+    (gpu-buffer-arena-reclaim arena))
   (let ((offset (or (%arena-find-and-take-span arena count)
                     (progn
                       (%arena-grow arena count)
@@ -227,7 +233,7 @@
       (error "Arena ~S failed to allocate ~D elements after growth." arena count))
     (%make-gpu-buffer-slice arena offset count)))
 
-(defun gpu-buffer-arena-free (arena slice)
+(defun gpu-buffer-arena-free (arena slice &key (ready-after nil ready-after-p))
   "Quarantine SLICE for reuse once in-flight GPU work finishes."
   (%ensure-live-arena arena :free)
   (unless (and (typep slice 'gpu-buffer-slice)
@@ -244,10 +250,12 @@
     (when (plusp count)
       (decf (gpu-buffer-arena-used-count arena) count)
       (let* ((reader (gpu-buffer-arena-progress-reader arena))
-             (submitted (if reader (nth-value 0 (funcall reader)) 0)))
+             (frontier (cond (ready-after-p ready-after)
+                             (reader (nth-value 0 (funcall reader)))
+                             (t 0))))
         (setf (gpu-buffer-arena-quarantine arena)
               (nconc (gpu-buffer-arena-quarantine arena)
-                     (list (list submitted
+                     (list (list frontier
                                  (gpu-buffer-slice-offset slice)
                                  count)))))))
   (values))
@@ -419,22 +427,36 @@ releases transient buffers immediately after submission."
           :memory (gpu-buffer-arena-memory arena))))
 
 (defmethod destroy ((arena gpu-buffer-arena))
-  (unless (gpu-buffer-arena-destroyed-p arena)
-    (setf (gpu-buffer-arena-destroyed-p arena) t
-          (gpu-buffer-arena-pending-copies arena) nil
-          (gpu-buffer-arena-pending-writes arena) nil
-          (gpu-buffer-arena-free-spans arena) nil
-          (gpu-buffer-arena-quarantine arena) nil)
-    (let ((retired (gpu-buffer-arena-retired-buffers arena))
-          (ephemeral (gpu-buffer-arena-ephemeral-buffers arena))
-          (buffer (gpu-buffer-arena-buffer arena)))
-      (setf (gpu-buffer-arena-retired-buffers arena) nil
-            (gpu-buffer-arena-ephemeral-buffers arena) nil
-            (gpu-buffer-arena-buffer arena) nil)
-      (dolist (old retired)
-        (when old (destroy old)))
-      (dolist (entry ephemeral)
-        (when (cdr entry) (destroy (cdr entry))))
+  (setf (gpu-buffer-arena-destroyed-p arena) t
+        (gpu-buffer-arena-pending-copies arena) nil
+        (gpu-buffer-arena-pending-writes arena) nil
+        (gpu-buffer-arena-free-spans arena) nil
+        (gpu-buffer-arena-quarantine arena) nil)
+  ;; Retain any buffer whose destruction failed so a later DESTROY retries
+  ;; only the failed handle without double-destroying siblings.
+  (with-release-report
+    (let ((retained-retired nil))
+      (dolist (old (gpu-buffer-arena-retired-buffers arena))
+        (when old
+          (let ((released-p nil))
+            (releasing :arena-retired-buffer
+              (destroy old)
+              (setf released-p t))
+            (unless released-p (push old retained-retired)))))
+      (setf (gpu-buffer-arena-retired-buffers arena) (nreverse retained-retired)))
+    (let ((retained-ephemeral nil))
+      (dolist (entry (gpu-buffer-arena-ephemeral-buffers arena))
+        (if (cdr entry)
+            (let ((released-p nil))
+              (releasing :arena-ephemeral-buffer
+                (destroy (cdr entry))
+                (setf released-p t))
+              (unless released-p (push entry retained-ephemeral)))
+            nil))
+      (setf (gpu-buffer-arena-ephemeral-buffers arena) (nreverse retained-ephemeral)))
+    (let ((buffer (gpu-buffer-arena-buffer arena)))
       (when buffer
-        (destroy buffer))))
+        (releasing :arena-backing-buffer
+          (destroy buffer)
+          (setf (gpu-buffer-arena-buffer arena) nil)))))
   (values))

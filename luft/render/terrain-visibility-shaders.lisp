@@ -1,13 +1,11 @@
 (in-package #:luft.render.shaders)
 
-;;; Visibility is an exact address into the existing resident/site/atlas
-;;; representation, not another mesh. Zero is reserved only in the primitive
-;;; attachment: site zero is a perfectly ordinary resident-local site.
+;;; Visibility is an exact address into the global pooled site/appearance/light
+;;; arenas and shared star atlas, not another mesh.  Zero is reserved only in
+;;; the primitive attachment (no terrain hit); primitive N >= 1 names atlas
+;;; triangle N - 1, and site-output holds the global arena site index directly.
 
 (defconstant +terrain-visibility-triangles-per-resident+ 65536)
-(defconstant +terrain-visibility-resident-stride+ 65536)
-;; Indexed draws carry the resident in signed baseVertex's high sixteen bits.
-(defconstant +terrain-visibility-resident-limit+ 32767)
 
 (define-shader-function terrain-visibility-encode (identifier)
   (/ (vec4 (float (ldb (byte 8 0) identifier))
@@ -38,9 +36,10 @@
                   :members #.(scene-uniform-prefix 23))
                  (star-triangle-offsets :storage-buffer :binding 9 :element :uint)))
   (let* ((site (buffer-element sites instance-index))
-         (primitive (+ (* (ldb (byte 16 16) vertex-index) (uint 65536.0))
-                       (buffer-element star-triangle-offsets (ldb (byte 8 0) (swizzle site :w)))))
-         (record (buffer-element terrain-vertices (ldb (byte 16 0) vertex-index)))
+         (primitive (+ (uint 1.0)
+                       (buffer-element star-triangle-offsets
+                                       (ldb (byte 8 0) (swizzle site :w)))))
+         (record (buffer-element terrain-vertices vertex-index))
          (world (star-record-world
                  record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
                               (float (swizzle site :z)))))
@@ -70,15 +69,12 @@
 
 (define-live-shader terrain-visibility-material-vertex-specification
     (:stage :vertex
-     :inputs ((vertex-index :uint :built-in :vertex-index)
-              (instance-index :uint :built-in :instance-index))
-     :outputs ((clip-position :vec4 :built-in :position)
-               (resident-identifier :uint :location 0 :interpolation :flat)))
+     :inputs ((vertex-index :uint :built-in :vertex-index))
+     :outputs ((clip-position :vec4 :built-in :position)))
   (let* ((index (float vertex-index))
          (x (if (< index 0.5) -1.0 (if (< index 1.5) 3.0 -1.0)))
          (y (if (< index 1.5) -1.0 3.0)))
-    (set-output clip-position (vec4 x y 0.0 1.0))
-    (set-output resident-identifier instance-index)))
+    (set-output clip-position (vec4 x y 0.0 1.0))))
 
 (define-shader-function terrain-visibility-plane-point
     (pixel inverse-size jitter a plane eye right up forward projection divisor)
@@ -224,8 +220,7 @@ sample only: the host retains the visibility depth and uses forward for MSAA."
           (second (assoc 'height fragment-bindings))
           'height-here
           (getf options :inputs)
-          '((pixel :vec4 :built-in :frag-coord)
-            (resident-identifier :uint :location 0 :interpolation :flat))
+          '((pixel :vec4 :built-in :frag-coord))
           (getf options :resources)
           (append (remove 'camera-state (getf vertex-options :resources) :key #'first)
                   (getf options :resources)
@@ -253,13 +248,12 @@ sample only: the host retains the visibility depth and uses forward for MSAA."
        `((let* ((coordinate (uvec2 (uint (swizzle pixel :x)) (uint (swizzle pixel :y))))
                 (primitive (terrain-visibility-decode
                             (texel-load visibility-primitives coordinate))))
-           ;; Do not read any resident-local buffer until ownership is known.
-           (when (or (= primitive (uint 0.0))
-                     (/= (ldb (byte 16 16) primitive) resident-identifier))
+           ;; Discard sky/empty pixels before touching any storage buffer.
+           (when (= primitive (uint 0.0))
              (discard))
            (let* ((instance-index (terrain-visibility-decode
                                    (texel-load visibility-sites coordinate)))
-                  (base (* (ldb (byte 16 0) primitive) (uint 3.0)))
+                  (base (* (- primitive (uint 1.0)) (uint 3.0)))
                   (index-a (buffer-element terrain-indices base))
                   (index-b (buffer-element terrain-indices (+ base (uint 1.0))))
                   (index-c (buffer-element terrain-indices (+ base (uint 2.0))))

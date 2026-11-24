@@ -57,11 +57,12 @@
 
 (defmethod encode-terrain ((drawing terrain-drawing) pass binding resident &key shadow-p)
   (when (and shadow-p (terrain-merged-shadows-p drawing))
-    (let ((count (resident-population-shadow-rectangle-count resident)))
+    (let ((count (resident-population-shadow-rectangle-count resident))
+          (base (resident-population-shadow-rectangle-offset resident)))
       (when (plusp count)
         (set-pipeline pass (program-pipeline (terrain-shadow-program drawing)))
         (set-bind-group pass 0 binding)
-        (draw-indexed pass (terrain-shadow-indices drawing) :uint32 6 count)))
+        (draw-indexed pass (terrain-shadow-indices drawing) :uint32 6 count 0 0 base)))
     (return-from encode-terrain))
   (let ((program (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing)))
         (runs (resident-population-star-runs resident))
@@ -69,7 +70,8 @@
         (indices (if shadow-p
                      (terrain-shadow-indices drawing)
                      (terrain-scene-indices drawing)))
-        (offset (if shadow-p 2 0)))
+        (offset (if shadow-p 2 0))
+        (site-base (resident-population-site-offset resident)))
     (when runs
       (set-pipeline pass (program-pipeline program))
       (set-bind-group pass 0 binding)
@@ -78,12 +80,13 @@
             for index-count = (aref range (1+ offset))
             when (plusp index-count)
               do (draw-indexed pass indices :uint32 index-count count
-                               (aref range offset) 0 first)))))
+                               (aref range offset) 0 (+ site-base first))))))
 
 (defun encode-terrain-translucent (drawing pass binding resident)
   "Draw RESIDENT's translucent sheet, blended over what the pass holds."
   (let ((runs (resident-population-translucent-runs resident))
-        (ranges (terrain-star-ranges drawing)))
+        (ranges (terrain-star-ranges drawing))
+        (site-base (resident-population-site-offset resident)))
     (when runs
       (set-pipeline pass (program-pipeline (terrain-translucent-program drawing)))
       (set-bind-group pass 0 binding)
@@ -91,47 +94,49 @@
             for range = (aref ranges star)
             when (plusp (aref range 1))
               do (draw-indexed pass (terrain-scene-indices drawing) :uint32
-                               (aref range 1) count (aref range 0) 0 first)))))
+                               (aref range 1) count (aref range 0) 0 (+ site-base first))))))
 
 (defun make-terrain-visibility-binding
-    (drawing device resident camera &key sites primitives shadow-map shadow-sampler)
-  "Borrow the original resident streams; no expanded mesh or mutable ID map.
-SITES and PRIMITIVES select the material pass and its current ID targets."
+    (drawing device arenas camera &key sites primitives shadow-map shadow-sampler)
+  "Bind the global pooled terrain arenas for the visibility or material pass.
+SITES and PRIMITIVES select the single-draw material pass and its ID targets."
   (let ((program (if sites (terrain-material-program drawing)
                      (terrain-visibility-program drawing))))
     (apply #'make-program-binding program device
-           :sites (resident-population-instance-buffer resident)
+           :sites (terrain-arenas-sites-buffer arenas)
            :camera-state camera
            :terrain-vertices (terrain-scene-vertices drawing)
            (if sites
-             (list :terrain-indices (terrain-scene-indices drawing)
-                   :terrain-appearances (resident-population-appearance-buffer resident)
-                   :terrain-lights (resident-population-light-buffer resident)
-                   :material-descriptors (resident-population-descriptor-buffer resident)
-                   :terrain-normals (terrain-normals drawing)
-                   :visibility-sites sites :visibility-primitives primitives
-                   :shadow-map shadow-map :shadow-sampler shadow-sampler)
-             (list :star-triangle-offsets (terrain-triangle-offsets drawing))))))
+               (list :terrain-indices (terrain-scene-indices drawing)
+                     :terrain-appearances (terrain-arenas-appearances-buffer arenas)
+                     :terrain-lights (terrain-arenas-lights-buffer arenas)
+                     :material-descriptors (terrain-arenas-descriptor-buffer arenas)
+                     :terrain-normals (terrain-normals drawing)
+                     :visibility-sites sites :visibility-primitives primitives
+                     :shadow-map shadow-map :shadow-sampler shadow-sampler)
+               (list :star-triangle-offsets (terrain-triangle-offsets drawing))))))
 
-(defun encode-terrain-visibility (drawing pass binding resident resident-id)
-  "Draw the unchanged triangles with a frame-local resident/atlas identity.
-The hardware indexes the shared vertices; the fragment primitive index selects
-the original atlas triangle. Site/appearance/light publication is unchanged."
-  (set-pipeline pass (program-pipeline (terrain-visibility-program drawing)))
-  (set-bind-group pass 0 binding)
-  (loop for (star first count) in (resident-population-star-runs resident)
-        for range = (aref (terrain-star-ranges drawing) star)
-        when (plusp (aref range 1))
-          do (draw-indexed pass (terrain-scene-indices drawing) :uint32
-                           (aref range 1) count (aref range 0)
-                           (* resident-id shaders::+terrain-visibility-resident-stride+)
-                           first)))
+(defun encode-terrain-visibility (drawing pass binding residents)
+  "Draw all visible RESIDENTS' triangles into the visibility ID targets using one binding."
+  (when residents
+    (set-pipeline pass (program-pipeline (terrain-visibility-program drawing)))
+    (set-bind-group pass 0 binding)
+    (let ((ranges (terrain-star-ranges drawing))
+          (indices (terrain-scene-indices drawing)))
+      (dolist (resident residents)
+        (let ((site-base (resident-population-site-offset resident)))
+          (loop for (star first count) in (resident-population-star-runs resident)
+                for range = (aref ranges star)
+                when (plusp (aref range 1))
+                  do (draw-indexed pass indices :uint32
+                                   (aref range 1) count (aref range 0)
+                                   0 (+ site-base first))))))))
 
-(defun encode-terrain-material (drawing pass binding resident-id)
-  ;; The shader rejects other residents before touching these local streams.
+(defun encode-terrain-material (drawing pass binding)
+  "Shade every visible terrain pixel across all chunks in one fullscreen draw."
   (set-pipeline pass (program-pipeline (terrain-material-program drawing)))
   (set-bind-group pass 0 binding)
-  (draw pass 3 1 0 resident-id))
+  (draw pass 3 1 0 0))
 
 ;;; Star-table coordinates are mesh ticks in [-8, 8], biased to keep the
 ;;; GPU records unsigned.
@@ -329,7 +334,6 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                             shadow-indices ranges)
           (star-patch-tables *terrain-bevels-p*)
         (assert (<= (/ (length scene-indices) 3) shaders::+terrain-visibility-triangles-per-resident+))
-        (assert (<= (/ (length scene-words) 4) shaders::+terrain-visibility-resident-stride+))
         (flet ((upload (label words usage)
                  (let ((buffer (own-gpu-resource
                                 drawing device

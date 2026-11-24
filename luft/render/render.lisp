@@ -10,6 +10,7 @@
   ((device :initarg :device :reader renderer-device)
    (component-options :initarg :component-options :reader %renderer-component-options)
    (terrain :initform nil :accessor renderer-terrain)
+   (terrain-arenas :initform nil :accessor renderer-terrain-arenas)
    (sun-shadow :initform nil :accessor renderer-sun-shadow)
    (lattice :initform nil :accessor renderer-lattice)
    (sky :initform nil :accessor renderer-sky)
@@ -93,6 +94,12 @@ choices. Resident geometry and resized targets are published independently."
                  (samples (renderer-scene-sample-count renderer)))
              (setf (renderer-terrain renderer)
                    (component terrain-factory 'terrain-drawing device formats samples)
+                   (renderer-terrain-arenas renderer)
+                   (own-gpu-object
+                    renderer
+                    (make-terrain-arenas
+                     device
+                     :merged-shadows-p (terrain-merged-shadows-p (renderer-terrain renderer))))
                    (renderer-lattice renderer)
                    (component lattice-factory 'drawing-program device formats samples)
                    (renderer-sky renderer)

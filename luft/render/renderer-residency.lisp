@@ -157,20 +157,202 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   (renderer-update-meshes renderer nil (copy-list (renderer-slot-order renderer)))
   (values))
 
-;;; Staging populations (render-population.lisp) into GPU buffers.
+;;; Pooled GPU arenas for resident terrain populations.
+;;;
+;;; Sites, appearances, and lights are allocated in lockstep so one chunk's
+;;; parallel streams always share the same global element index OFFSET.  Every
+;;; terrain pass therefore binds one global set of buffers for the whole world
+;;; and addresses each chunk via FIRST-INSTANCE (and global site IDs in the
+;;; visibility pass).
+
+(defconstant +terrain-sites-arena-initial-capacity+ 16384)
+(defconstant +terrain-shadow-rectangles-arena-initial-capacity+ 8192)
+
+(defclass terrain-arenas (gpu-resource-owner)
+  ((device :initarg :device :reader terrain-arenas-device)
+   (sites-arena :initform nil :accessor terrain-arenas-sites-arena)
+   (appearances-arena :initform nil :accessor terrain-arenas-appearances-arena)
+   (lights-arena :initform nil :accessor terrain-arenas-lights-arena)
+   (shadow-rectangles-arena :initform nil :accessor terrain-arenas-shadow-rectangles-arena)
+   (descriptor-words :initform (make-array 0 :element-type '(unsigned-byte 32))
+                     :accessor terrain-arenas-descriptor-words)
+   (descriptor-buffer :initform nil :accessor terrain-arenas-descriptor-buffer)))
+
+(defun make-terrain-arenas (device &key merged-shadows-p)
+  "Create the renderer's pooled :DEVICE-LOCAL terrain arenas and shared descriptors."
+  (let ((arenas (make-instance 'terrain-arenas :device device)))
+    (with-gpu-construction (arenas)
+      (setf (terrain-arenas-sites-arena arenas)
+            (own-gpu-object
+             arenas
+             (make-gpu-buffer-arena
+              device :label "luft terrain sites arena"
+                     :element-size 16
+                     :initial-capacity +terrain-sites-arena-initial-capacity+
+                     :usage '(:storage) :memory :device-local))
+            (terrain-arenas-appearances-arena arenas)
+            (own-gpu-object
+             arenas
+             (make-gpu-buffer-arena
+              device :label "luft terrain appearances arena"
+                     :element-size 8
+                     :initial-capacity +terrain-sites-arena-initial-capacity+
+                     :usage '(:storage) :memory :device-local))
+            (terrain-arenas-lights-arena arenas)
+            (own-gpu-object
+             arenas
+             (make-gpu-buffer-arena
+              device :label "luft terrain lights arena"
+                     :element-size 16
+                     :initial-capacity +terrain-sites-arena-initial-capacity+
+                     :usage '(:storage) :memory :device-local)))
+      (when merged-shadows-p
+        (setf (terrain-arenas-shadow-rectangles-arena arenas)
+              (own-gpu-object
+               arenas
+               (make-gpu-buffer-arena
+                device :label "luft terrain shadow rectangles arena"
+                       :element-size 32
+                       :initial-capacity +terrain-shadow-rectangles-arena-initial-capacity+
+                       :usage '(:storage) :memory :device-local))))
+      (setf (terrain-arenas-descriptor-buffer arenas)
+            (own-gpu-resource
+             arenas device
+             (make-buffer-descriptor
+              :label "luft terrain material descriptors"
+              :size 16 :usage '(:storage :copy-dst)))))))
+
+(defun terrain-arenas-sites-buffer (arenas)
+  (gpu-buffer-arena-buffer (terrain-arenas-sites-arena arenas)))
+
+(defun terrain-arenas-appearances-buffer (arenas)
+  (gpu-buffer-arena-buffer (terrain-arenas-appearances-arena arenas)))
+
+(defun terrain-arenas-lights-buffer (arenas)
+  (gpu-buffer-arena-buffer (terrain-arenas-lights-arena arenas)))
+
+(defun terrain-arenas-shadow-rectangles-buffer (arenas)
+  (let ((arena (terrain-arenas-shadow-rectangles-arena arenas)))
+    (and arena (gpu-buffer-arena-buffer arena))))
+
+(defun %terrain-arenas-progress (arenas)
+  (let ((reader (queue-progress-reader (device-queue (terrain-arenas-device arenas)))))
+    (if reader
+        (funcall reader)
+        (values 0 nil))))
+
+(defun reclaim-terrain-arenas (arenas)
+  "Reclaim GPU-completed quarantined slices across all terrain arenas in lockstep."
+  (when arenas
+    (multiple-value-bind (submitted completed) (%terrain-arenas-progress arenas)
+      (declare (ignore submitted))
+      (dolist (arena (list (terrain-arenas-sites-arena arenas)
+                           (terrain-arenas-appearances-arena arenas)
+                           (terrain-arenas-lights-arena arenas)
+                           (terrain-arenas-shadow-rectangles-arena arenas)))
+        (when (and arena (not (gpu-buffer-arena-destroyed-p arena)))
+          (if completed
+              (gpu-buffer-arena-reclaim arena :completed completed)
+              (gpu-buffer-arena-reclaim arena))))))
+  arenas)
+
+(defun flush-terrain-arenas (arenas &optional encoder)
+  "Flush pending growth copies and staged uploads across all terrain arenas."
+  (when arenas
+    (dolist (arena (list (terrain-arenas-sites-arena arenas)
+                         (terrain-arenas-appearances-arena arenas)
+                         (terrain-arenas-lights-arena arenas)
+                         (terrain-arenas-shadow-rectangles-arena arenas)))
+      (when (and arena (not (gpu-buffer-arena-destroyed-p arena)))
+        (gpu-buffer-arena-flush arena encoder))))
+  arenas)
+
+(defun terrain-arenas-allocate-sites (arenas count)
+  "Allocate lockstep (SITES APPEARANCES LIGHTS) slices sharing one element offset."
+  (when (plusp count)
+    (reclaim-terrain-arenas arenas))
+  (let ((sites-arena (terrain-arenas-sites-arena arenas))
+        (appearances-arena (terrain-arenas-appearances-arena arenas))
+        (lights-arena (terrain-arenas-lights-arena arenas))
+        (site-slice nil)
+        (appearance-slice nil)
+        (light-slice nil)
+        (completed-p nil))
+    (unwind-protect
+         (progn
+           (setf site-slice (gpu-buffer-arena-allocate sites-arena count :reclaim-p nil)
+                 appearance-slice (gpu-buffer-arena-allocate appearances-arena count :reclaim-p nil)
+                 light-slice (gpu-buffer-arena-allocate lights-arena count :reclaim-p nil))
+           (unless (and (= (gpu-buffer-slice-offset site-slice)
+                           (gpu-buffer-slice-offset appearance-slice))
+                        (= (gpu-buffer-slice-offset site-slice)
+                           (gpu-buffer-slice-offset light-slice)))
+             (error "Terrain site arenas diverged: offsets (~D ~D ~D)."
+                    (gpu-buffer-slice-offset site-slice)
+                    (gpu-buffer-slice-offset appearance-slice)
+                    (gpu-buffer-slice-offset light-slice)))
+           (setf completed-p t)
+           (values site-slice appearance-slice light-slice))
+      (unless completed-p
+        (when light-slice (gpu-buffer-arena-free lights-arena light-slice :ready-after 0))
+        (when appearance-slice
+          (gpu-buffer-arena-free appearances-arena appearance-slice :ready-after 0))
+        (when site-slice (gpu-buffer-arena-free sites-arena site-slice :ready-after 0))))))
+
+(defun terrain-arenas-ensure-descriptors (arenas descriptor-words)
+  "Publish DESCRIPTOR-WORDS into ARENAS' shared material-descriptors buffer when changed."
+  (when (and (plusp (length descriptor-words))
+             (not (equalp descriptor-words (terrain-arenas-descriptor-words arenas))))
+    (let* ((device (terrain-arenas-device arenas))
+           (copy (make-array (length descriptor-words) :element-type '(unsigned-byte 32)
+                                                        :initial-contents descriptor-words))
+           (old (terrain-arenas-descriptor-buffer arenas))
+           (buffer (create device
+                           (make-buffer-descriptor
+                            :label "luft terrain material descriptors"
+                            :size (max 16 (* 4 (length copy)))
+                            :usage '(:storage :copy-dst))))
+           (completed-p nil))
+      (unwind-protect
+           (progn
+             (write-buffer buffer copy)
+             (own-gpu-object arenas buffer)
+             (setf (terrain-arenas-descriptor-buffer arenas) buffer
+                   (terrain-arenas-descriptor-words arenas) copy
+                   completed-p t)
+             (when old
+               (with-release-warnings
+                 (releasing :superseded-terrain-descriptors
+                   (release-owned-gpu-object arenas old)))))
+        (unless completed-p
+          (with-release-warnings
+            (releasing :failed-terrain-descriptors (destroy buffer)))))))
+  (terrain-arenas-descriptor-buffer arenas))
+
+(defun terrain-arenas-stats (arenas)
+  "Return an inspectable plist of stats for ARENAS."
+  (list :sites (gpu-buffer-arena-stats (terrain-arenas-sites-arena arenas))
+        :appearances (gpu-buffer-arena-stats (terrain-arenas-appearances-arena arenas))
+        :lights (gpu-buffer-arena-stats (terrain-arenas-lights-arena arenas))
+        :shadow-rectangles (when (terrain-arenas-shadow-rectangles-arena arenas)
+                             (gpu-buffer-arena-stats
+                              (terrain-arenas-shadow-rectangles-arena arenas)))))
+
+;;; Staging populations (render-population.lisp) into pooled GPU arenas.
 
 (defclass resident-population (gpu-resource-owner)
   ((population :initarg :population :reader resident-population-population)
-   (instance-buffer :accessor resident-population-instance-buffer)
-   (appearance-buffer :accessor resident-population-appearance-buffer)
-   (light-buffer :accessor resident-population-light-buffer)
-   (descriptor-buffer :accessor resident-population-descriptor-buffer)
+   (arenas :initarg :arenas :initform nil :reader resident-population-arenas)
+   (site-slice :initform nil :accessor resident-population-site-slice)
+   (appearance-slice :initform nil :accessor resident-population-appearance-slice)
+   (light-slice :initform nil :accessor resident-population-light-slice)
+   (shadow-rectangle-slice :initform nil :accessor resident-population-shadow-rectangle-slice)
+   (slices-released-p :initform nil :accessor resident-population-slices-released-p)
    ;; (STAR FIRST COUNT) for each star present, over the star-sorted sites.
    (star-runs :initform nil :accessor resident-population-star-runs)
    ;; The same, for the translucent sheet's sites, which follow every opaque
    ;; one in the buffers.  Only the blended pass draws them (#LNRIRA).
    (translucent-runs :initform nil :accessor resident-population-translucent-runs)
-   (shadow-rectangle-buffer :initform nil :accessor resident-population-shadow-rectangle-buffer)
    (shadow-rectangle-count :initform 0 :accessor resident-population-shadow-rectangle-count)
    ;; World-cell box (MIN-X MIN-Y MIN-Z MAX-X MAX-Y MAX-Z) around the drawn
    ;; geometry, or NIL when the population draws nothing.
@@ -178,6 +360,47 @@ cohort untouched. No frame can interleave with the owner-thread publication."
    ;; Fixture bodies, sorted by code, and their (CODE FIRST COUNT) runs.
    (body-buffer :initform nil :accessor resident-population-body-buffer)
    (body-runs :initform nil :accessor resident-population-body-runs)))
+
+(defun resident-population-site-offset (resident)
+  (let ((slice (resident-population-site-slice resident)))
+    (if slice (gpu-buffer-slice-offset slice) 0)))
+
+(defun resident-population-shadow-rectangle-offset (resident)
+  (let ((slice (resident-population-shadow-rectangle-slice resident)))
+    (if slice (gpu-buffer-slice-offset slice) 0)))
+
+(defun %free-resident-slices (resident &key immediate-p)
+  (unless (resident-population-slices-released-p resident)
+    (setf (resident-population-slices-released-p resident) t)
+    (let ((arenas (resident-population-arenas resident)))
+      (when arenas
+        (let* ((sites-arena (terrain-arenas-sites-arena arenas))
+               (appearances-arena (terrain-arenas-appearances-arena arenas))
+               (lights-arena (terrain-arenas-lights-arena arenas))
+               (shadow-arena (terrain-arenas-shadow-rectangles-arena arenas))
+               (frontier (if immediate-p 0 (nth-value 0 (%terrain-arenas-progress arenas)))))
+          (when (and (resident-population-site-slice resident)
+                     sites-arena (not (gpu-buffer-arena-destroyed-p sites-arena)))
+            (gpu-buffer-arena-free sites-arena (resident-population-site-slice resident)
+                                   :ready-after frontier))
+          (when (and (resident-population-appearance-slice resident)
+                     appearances-arena (not (gpu-buffer-arena-destroyed-p appearances-arena)))
+            (gpu-buffer-arena-free appearances-arena (resident-population-appearance-slice resident)
+                                   :ready-after frontier))
+          (when (and (resident-population-light-slice resident)
+                     lights-arena (not (gpu-buffer-arena-destroyed-p lights-arena)))
+            (gpu-buffer-arena-free lights-arena (resident-population-light-slice resident)
+                                   :ready-after frontier))
+          (when (and (resident-population-shadow-rectangle-slice resident)
+                     shadow-arena (not (gpu-buffer-arena-destroyed-p shadow-arena)))
+            (gpu-buffer-arena-free shadow-arena (resident-population-shadow-rectangle-slice resident)
+                                   :ready-after frontier))))))
+  (values))
+
+(defmethod destroy ((resident resident-population))
+  (unwind-protect
+       (call-next-method)
+    (%free-resident-slices resident)))
 
 (defstruct (renderer-slot-provenance
              (:constructor %make-renderer-slot-provenance
@@ -376,48 +599,62 @@ Sites TRANSLUCENT-SITES marks sort after every other, into runs of their own."
                 translucent-runs)))))
 
 (zdefun (%upload-render-population :zone :luft/upload-slot) (renderer population)
-  "Own each buffer before uploading, so even a failed write rolls back."
+  "Suballocate slices from RENDERER's terrain arenas and stage POPULATION's data."
   (ensure-population-quantity-declarations population)
-  (let ((resident (make-instance 'resident-population :population population)))
-    (with-gpu-construction (resident)
-      (flet ((upload (label words)
+  (let* ((arenas (renderer-terrain-arenas renderer))
+         (resident (make-instance 'resident-population :population population :arenas arenas))
+         (completed-p nil))
+    (unwind-protect
+         (with-gpu-construction (resident)
+           ;; One indexed draw per star covers a contiguous run of sites.
+           (multiple-value-bind (instances appearances runs lights translucent-runs)
+               (sort-sites-by-star (render-population-instance-words population)
+                                   (render-population-appearance-words population)
+                                   (render-population-light-words population)
+                                   (render-population-translucent-sites population))
+             (let ((site-count (floor (length instances) 4)))
+               (multiple-value-bind (site-slice appearance-slice light-slice)
+                   (terrain-arenas-allocate-sites arenas site-count)
+                 (setf (resident-population-site-slice resident) site-slice
+                       (resident-population-appearance-slice resident) appearance-slice
+                       (resident-population-light-slice resident) light-slice)
+                 (when (plusp site-count)
+                   (gpu-buffer-arena-write (terrain-arenas-sites-arena arenas)
+                                           site-slice instances)
+                   (gpu-buffer-arena-write (terrain-arenas-appearances-arena arenas)
+                                           appearance-slice appearances)
+                   (gpu-buffer-arena-write (terrain-arenas-lights-arena arenas)
+                                           light-slice lights))))
+             (terrain-arenas-ensure-descriptors
+              arenas (render-population-descriptor-words population))
+             (setf (resident-population-star-runs resident) runs
+                   (resident-population-translucent-runs resident) translucent-runs
+                   (resident-population-bounds resident) (site-bounds instances)))
+           (when (terrain-merged-shadows-p (renderer-terrain renderer))
+             (let* ((rectangles (render-population-shadow-rectangles population))
+                    (rect-count (/ (length rectangles) 8))
+                    (shadow-arena (terrain-arenas-shadow-rectangles-arena arenas))
+                    (slice (gpu-buffer-arena-allocate shadow-arena rect-count)))
+               (setf (resident-population-shadow-rectangle-slice resident) slice
+                     (resident-population-shadow-rectangle-count resident) rect-count)
+               (when (plusp rect-count)
+                 (gpu-buffer-arena-write shadow-arena slice rectangles))))
+           (let ((bodies (render-population-body-data population)))
+             (when (plusp (length bodies))
                (let ((buffer (own-gpu-resource
                               resident (renderer-device renderer)
-                              (make-buffer-descriptor :label label :size (max 16 (* 4 (length words)))
-                                                      :usage '(:storage :copy-dst)))))
-                 (when (plusp (length words)) (write-buffer buffer words))
-                 buffer)))
-        ;; One indexed draw per star covers a contiguous run of sites.
-        (multiple-value-bind (instances appearances runs lights translucent-runs)
-            (sort-sites-by-star (render-population-instance-words population)
-                                (render-population-appearance-words population)
-                                (render-population-light-words population)
-                                (render-population-translucent-sites population))
-          (setf (resident-population-instance-buffer resident)
-                (upload "luft resident site instances" instances)
-                (resident-population-appearance-buffer resident)
-                (upload "luft active-star appearance sidecars" appearances)
-                (resident-population-light-buffer resident)
-                (upload "luft active-star lattice light" lights)
-                (resident-population-descriptor-buffer resident)
-                (upload "luft terrain material descriptors"
-                        (render-population-descriptor-words population))
-                (resident-population-star-runs resident) runs
-                (resident-population-translucent-runs resident) translucent-runs
-                (resident-population-bounds resident) (site-bounds instances)))
-        (when (terrain-merged-shadows-p (renderer-terrain renderer))
-          (let ((rectangles (render-population-shadow-rectangles population)))
-            (setf (resident-population-shadow-rectangle-buffer resident)
-                  (upload "luft merged shadow rectangles" rectangles)
-                  (resident-population-shadow-rectangle-count resident)
-                  (/ (length rectangles) 8))))
-        (let ((bodies (render-population-body-data population)))
-          (when (plusp (length bodies))
-            (setf (resident-population-body-buffer resident)
-                  (upload "luft resident fixture bodies" bodies)
-                  (resident-population-body-runs resident) (fixture-body-runs bodies)
-                  (resident-population-bounds resident)
-                  (fixture-body-bounds bodies (resident-population-bounds resident)))))))))
+                              (make-buffer-descriptor
+                               :label "luft resident fixture bodies"
+                               :size (max 16 (* 4 (length bodies)))
+                               :usage '(:storage :copy-dst)))))
+                 (write-buffer buffer bodies)
+                 (setf (resident-population-body-buffer resident) buffer
+                       (resident-population-body-runs resident) (fixture-body-runs bodies)
+                       (resident-population-bounds resident)
+                       (fixture-body-bounds bodies (resident-population-bounds resident))))))
+           (setf completed-p t))
+      (unless completed-p
+        (%free-resident-slices resident :immediate-p t)))))
 
 (defun prospective-renderer-slot-entries (renderer candidates removed-keys)
   "Return the sorted slot population after applying one candidate cohort."

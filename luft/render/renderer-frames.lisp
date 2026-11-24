@@ -61,36 +61,51 @@ releases for retry, but those retired bindings must never be served again. #RBNW
      (declare (ignore key surface))
      (make-renderer-frame-state renderer))))
 
-(defun renderer-frame-resident-bind-group (renderer frame resident shadow-p)
-  "Bind one immutable resident population to FRAME's camera upload.
+(defun renderer-frame-terrain-bind-group (renderer frame shadow-p)
+  "Bind RENDERER's global pooled terrain arenas to FRAME's camera upload.
 SHADOW-P is true for the sun's pass, or :TRANSLUCENT for the blended sheet."
-  (renderer-frame-component-binding
-   frame (list :resident resident shadow-p (renderer-shadow-view renderer))
-   (lambda ()
-     (apply #'make-terrain-binding
-            (renderer-terrain renderer) (renderer-device renderer)
-            (resident-population-instance-buffer resident) (renderer-frame-state-camera-buffer frame)
-            :appearances (resident-population-appearance-buffer resident)
-            :lights (resident-population-light-buffer resident)
-            :descriptors (resident-population-descriptor-buffer resident)
-            :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer)
-            :shadow-rectangles (resident-population-shadow-rectangle-buffer resident)
-            :shadow-p (eq shadow-p t)
-            (when (eq shadow-p :translucent) '(:translucent-p t))))))
-
-(defun renderer-frame-visibility-binding (renderer frame resident material-p)
-  "Join immutable resident data to this generation's visibility images.
-Publication and resize invalidate these bindings with all other frame joins."
-  (let ((sites (and material-p (renderer-visibility-sites-view renderer)))
-        (primitives (and material-p (renderer-visibility-primitives-view renderer))))
+  (let* ((arenas (renderer-terrain-arenas renderer))
+         (sites (terrain-arenas-sites-buffer arenas))
+         (appearances (terrain-arenas-appearances-buffer arenas))
+         (lights (terrain-arenas-lights-buffer arenas))
+         (descriptors (terrain-arenas-descriptor-buffer arenas))
+         (shadow-rectangles (terrain-arenas-shadow-rectangles-buffer arenas)))
     (renderer-frame-component-binding
-     frame (list :terrain-visibility resident sites primitives (renderer-shadow-view renderer))
+     frame (list :terrain shadow-p sites appearances lights descriptors
+                 shadow-rectangles (renderer-shadow-view renderer))
+     (lambda ()
+       (apply #'make-terrain-binding
+              (renderer-terrain renderer) (renderer-device renderer)
+              sites (renderer-frame-state-camera-buffer frame)
+              :appearances appearances
+              :lights lights
+              :descriptors descriptors
+              :shadow-map (renderer-shadow-view renderer)
+              :shadow-sampler (renderer-shadow-sampler renderer)
+              :shadow-rectangles shadow-rectangles
+              :shadow-p (eq shadow-p t)
+              (when (eq shadow-p :translucent) '(:translucent-p t)))))))
+
+(defun renderer-frame-visibility-binding (renderer frame material-p)
+  "Join RENDERER's global pooled terrain arenas to this generation's visibility images."
+  (let* ((arenas (renderer-terrain-arenas renderer))
+         (sites-buffer (terrain-arenas-sites-buffer arenas))
+         (appearances-buffer (and material-p (terrain-arenas-appearances-buffer arenas)))
+         (lights-buffer (and material-p (terrain-arenas-lights-buffer arenas)))
+         (descriptors-buffer (and material-p (terrain-arenas-descriptor-buffer arenas)))
+         (sites (and material-p (renderer-visibility-sites-view renderer)))
+         (primitives (and material-p (renderer-visibility-primitives-view renderer))))
+    (renderer-frame-component-binding
+     frame (list :terrain-visibility material-p sites-buffer appearances-buffer
+                 lights-buffer descriptors-buffer sites primitives
+                 (renderer-shadow-view renderer))
      (lambda ()
        (make-terrain-visibility-binding
-        (renderer-terrain renderer) (renderer-device renderer) resident
+        (renderer-terrain renderer) (renderer-device renderer) arenas
         (renderer-frame-state-camera-buffer frame)
         :sites sites :primitives primitives
-        :shadow-map (renderer-shadow-view renderer) :shadow-sampler (renderer-shadow-sampler renderer))))))
+        :shadow-map (renderer-shadow-view renderer)
+        :shadow-sampler (renderer-shadow-sampler renderer))))))
 
 (defun renderer-frame-component-binding (frame key make-binding)
   "Cache even a component's NIL binding; the presentation slot owns the result."
