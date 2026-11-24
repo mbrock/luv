@@ -1556,8 +1556,7 @@ logged-in display, for one, has no displays to add."
                             :clear-value #(1.0 0.0 0.0 1.0)))))))
              (set-pipeline pass pipeline)
              (set-vertex-buffer pass 0 vb)
-             (draw-indexed-indirect pass ib :uint16 ind 0)
-             (draw-indexed-indirect pass ib :uint16 ind 20)
+             (multi-draw-indexed-indirect pass ib :uint16 ind 2 0)
              (end-pass pass))
            (encode encoder (make-gpu-copy-texture-to-buffer-command
                             :source target :destination readback))

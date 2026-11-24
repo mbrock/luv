@@ -413,6 +413,15 @@ destroy it before destroying INSTANCE."
           (cffi:foreign-slot-value
            features '(:struct physical-device-features) 'shader-int64)))))
 
+(defun physical-device-multi-draw-indirect-p (physical-device)
+  "Whether PHYSICAL-DEVICE exposes Vulkan's core multiDrawIndirect feature."
+  (cffi:with-foreign-object (features '(:struct physical-device-features))
+    (clear-foreign-object features '(:struct physical-device-features))
+    (vk:get-physical-device-features physical-device features)
+    (not (zerop
+          (cffi:foreign-slot-value
+           features '(:struct physical-device-features) 'multi-draw-indirect)))))
+
 (defun physical-device-mesh-shader-p (physical-device)
   "Whether PHYSICAL-DEVICE offers VK_EXT_mesh_shader's task and mesh stages."
   (and (member +mesh-shader-extension-name+
@@ -510,7 +519,9 @@ advertised is never placed in the query chain and is returned as NIL."
                 ;; and only modules computing in 64-bit integers need it.
                 (with-vk (supported physical-device-features)
                   (vk:get-physical-device-features physical-device supported)
-                  (dolist (feature '(geometry-shader shader-int64))
+                  (dolist (feature '(geometry-shader shader-int64
+                                     multi-draw-indirect
+                                     draw-indirect-first-instance))
                     (setf (cffi:foreign-slot-value
                            features '(:struct physical-device-features) feature)
                           (cffi:foreign-slot-value

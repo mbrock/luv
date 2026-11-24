@@ -96,6 +96,90 @@
               do (draw-indexed pass (terrain-scene-indices drawing) :uint32
                                (aref range 1) count (aref range 0) 0 (+ site-base first))))))
 
+(declaim (inline %push-indirect-draw))
+(defun %push-indirect-draw (scratch index-count instance-count first-index first-instance)
+  "Append one 5-u32 portable indirect indexed draw record to SCRATCH."
+  (vector-push-extend index-count scratch)
+  (vector-push-extend instance-count scratch)
+  (vector-push-extend first-index scratch)
+  (vector-push-extend 0 scratch)
+  (vector-push-extend first-instance scratch))
+
+(defun encode-terrain-batch (drawing renderer frame pass binding residents &key shadow-p)
+  "Draw all visible RESIDENTS using one batched indirect draw command."
+  (unless residents
+    (return-from encode-terrain-batch))
+  (unless (terrain-star-ranges drawing)
+    ;; Subclasses without the built-in star atlas (such as test replacements)
+    ;; keep their direct ENCODE-TERRAIN hook.
+    (dolist (resident residents)
+      (encode-terrain drawing pass binding resident :shadow-p shadow-p))
+    (return-from encode-terrain-batch))
+  (let ((scratch (renderer-frame-state-indirect-draw-scratch frame)))
+    (setf (fill-pointer scratch) 0)
+    (cond
+      ((and shadow-p (terrain-merged-shadows-p drawing))
+       (dolist (resident residents)
+         (let ((count (resident-population-shadow-rectangle-count resident)))
+           (when (plusp count)
+             (%push-indirect-draw scratch 6 count 0
+                                  (resident-population-shadow-rectangle-offset resident)))))
+       (multiple-value-bind (indirect draw-count byte-offset)
+           (stage-frame-indirect-draws renderer frame scratch)
+         (when (plusp draw-count)
+           (set-pipeline pass (program-pipeline (terrain-shadow-program drawing)))
+           (set-bind-group pass 0 binding)
+           (multi-draw-indexed-indirect
+            pass (terrain-shadow-indices drawing) :uint32
+            indirect draw-count byte-offset))))
+      (t
+       (let ((program (if shadow-p (terrain-shadow-program drawing) (terrain-scene-program drawing)))
+             (ranges (terrain-star-ranges drawing))
+             (indices (if shadow-p
+                          (terrain-shadow-indices drawing)
+                          (terrain-scene-indices drawing)))
+             (offset (if shadow-p 2 0)))
+         (dolist (resident residents)
+           (let ((site-base (resident-population-site-offset resident)))
+             (loop for (star first count) in (resident-population-star-runs resident)
+                   for range = (aref ranges star)
+                   for index-count = (aref range (1+ offset))
+                   when (plusp index-count)
+                     do (%push-indirect-draw
+                         scratch index-count count (aref range offset)
+                         (+ site-base first)))))
+         (multiple-value-bind (indirect draw-count byte-offset)
+             (stage-frame-indirect-draws renderer frame scratch)
+           (when (plusp draw-count)
+             (set-pipeline pass (program-pipeline program))
+             (set-bind-group pass 0 binding)
+             (multi-draw-indexed-indirect
+              pass indices :uint32 indirect draw-count byte-offset))))))))
+
+(defun encode-terrain-translucent-batch (drawing renderer frame pass binding residents)
+  "Draw RESIDENTS' translucent sheets in back-to-front order via one indirect batch."
+  (when residents
+    (let ((scratch (renderer-frame-state-indirect-draw-scratch frame))
+          (ranges (terrain-star-ranges drawing)))
+      (setf (fill-pointer scratch) 0)
+      (dolist (resident residents)
+        (let ((site-base (resident-population-site-offset resident)))
+          (loop for (star first count) in (resident-population-translucent-runs resident)
+                for range = (aref ranges star)
+                for index-count = (aref range 1)
+                when (plusp index-count)
+                  do (%push-indirect-draw
+                      scratch index-count count (aref range 0)
+                      (+ site-base first)))))
+      (multiple-value-bind (indirect draw-count byte-offset)
+          (stage-frame-indirect-draws renderer frame scratch)
+        (when (plusp draw-count)
+          (set-pipeline pass (program-pipeline (terrain-translucent-program drawing)))
+          (set-bind-group pass 0 binding)
+          (multi-draw-indexed-indirect
+           pass (terrain-scene-indices drawing) :uint32
+           indirect draw-count byte-offset))))))
+
 (defun make-terrain-visibility-binding
     (drawing device arenas camera &key sites primitives shadow-map shadow-sampler)
   "Bind the global pooled terrain arenas for the visibility or material pass.
@@ -116,21 +200,29 @@ SITES and PRIMITIVES select the single-draw material pass and its ID targets."
                      :shadow-map shadow-map :shadow-sampler shadow-sampler)
                (list :star-triangle-offsets (terrain-triangle-offsets drawing))))))
 
-(defun encode-terrain-visibility (drawing pass binding residents)
-  "Draw all visible RESIDENTS' triangles into the visibility ID targets using one binding."
+(defun encode-terrain-visibility (drawing renderer frame pass binding residents)
+  "Draw all visible RESIDENTS' triangles into the visibility ID targets via one indirect batch."
   (when residents
-    (set-pipeline pass (program-pipeline (terrain-visibility-program drawing)))
-    (set-bind-group pass 0 binding)
-    (let ((ranges (terrain-star-ranges drawing))
-          (indices (terrain-scene-indices drawing)))
+    (let ((scratch (renderer-frame-state-indirect-draw-scratch frame))
+          (ranges (terrain-star-ranges drawing)))
+      (setf (fill-pointer scratch) 0)
       (dolist (resident residents)
         (let ((site-base (resident-population-site-offset resident)))
           (loop for (star first count) in (resident-population-star-runs resident)
                 for range = (aref ranges star)
-                when (plusp (aref range 1))
-                  do (draw-indexed pass indices :uint32
-                                   (aref range 1) count (aref range 0)
-                                   0 (+ site-base first))))))))
+                for index-count = (aref range 1)
+                when (plusp index-count)
+                  do (%push-indirect-draw
+                      scratch index-count count (aref range 0)
+                      (+ site-base first)))))
+      (multiple-value-bind (indirect draw-count byte-offset)
+          (stage-frame-indirect-draws renderer frame scratch)
+        (when (plusp draw-count)
+          (set-pipeline pass (program-pipeline (terrain-visibility-program drawing)))
+          (set-bind-group pass 0 binding)
+          (multi-draw-indexed-indirect
+           pass (terrain-scene-indices drawing) :uint32
+           indirect draw-count byte-offset))))))
 
 (defun encode-terrain-material (drawing pass binding)
   "Shade every visible terrain pixel across all chunks in one fullscreen draw."

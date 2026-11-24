@@ -324,7 +324,9 @@
                                       (render::resident-population-light-slice resident))))
                          collect (render::resident-population-site-offset resident))))
              (true (= 4 (length (remove-duplicates offsets)))))
-           ;; Encoding four visible chunks emits exactly ONE fullscreen material draw (3 vertices).
+           ;; Encoding four visible chunks emits ONE batched indirect visibility draw
+           ;; and ONE fullscreen material draw (3 vertices).
+           (render::encode-renderer-shadows renderer frame encoder)
            (render::encode-renderer-scene renderer frame encoder nil nil)
            (let ((material-draws
                    (remove-if-not
@@ -332,15 +334,17 @@
                       (and (typep cmd 'luv::gpu-draw-command)
                            (= 3 (luv::gpu-draw-command-vertex-count cmd))))
                     (test-gpu-commands encoder)))
-                 (visibility-draws
+                 (indirect-batches
                    (remove-if-not
-                    (lambda (cmd) (typep cmd 'luv::gpu-draw-indexed-command))
+                    (lambda (cmd)
+                      (typep cmd 'luv::gpu-multi-draw-indexed-indirect-command))
                     (test-gpu-commands encoder))))
              (true (= 1 (length material-draws)))
-             (true (plusp (length visibility-draws)))
+             ;; One indirect batch for the shadow pass, one for the visibility pass.
+             (true (= 2 (length indirect-batches)))
              (true (every (lambda (cmd)
-                            (zerop (luv::gpu-draw-indexed-command-base-vertex cmd)))
-                          visibility-draws)))
+                            (plusp (luv::gpu-multi-draw-indexed-indirect-command-draw-count cmd)))
+                          indirect-batches)))
            ;; Removing all chunks frees and coalesces every arena back to one span.
            (render:renderer-clear-meshes renderer)
            (render::reclaim-terrain-arenas arenas)

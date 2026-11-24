@@ -2887,6 +2887,108 @@ compiler boundary of #58IDSR."
           indirect-offset))
       command)))
 
+(defmethod encode
+    ((pass metal-render-pass-encoder)
+     (command gpu-multi-draw-indexed-indirect-command))
+  (ensure-metal-render-pass-state pass :multi-draw-indexed-indirect)
+  (let ((pipeline (metal-render-pass-pipeline pass))
+        (index-buffer
+          (gpu-multi-draw-indexed-indirect-command-index-buffer command))
+        (indirect-buffer
+          (gpu-multi-draw-indexed-indirect-command-indirect-buffer command))
+        (draw-count
+          (gpu-multi-draw-indexed-indirect-command-draw-count command))
+        (indirect-offset
+          (gpu-multi-draw-indexed-indirect-command-indirect-offset command))
+        (stride
+          (gpu-multi-draw-indexed-indirect-command-stride command)))
+    (unless pipeline
+      (error 'gpu-invalid-state-error
+             :object pass :operation :multi-draw-indexed-indirect
+             :state :no-pipeline :expected-state :pipeline-bound))
+    (when (typep pipeline 'metal-gpu-mesh-render-pipeline)
+      (reject-metal-gpu-request command :indexed-draw-with-mesh-pipeline))
+    (when (and (metal-render-pipeline-layout pipeline)
+               (null (metal-render-pass-bind-group pass)))
+      (error 'gpu-invalid-state-error
+             :object pass :operation :multi-draw-indexed-indirect
+             :state :bind-group-missing
+             :expected-state :pipeline-bind-group-and-vertex-buffers-bound))
+    (dolist (layout (metal-render-pipeline-vertex-buffers pipeline))
+      (unless (gethash (getf layout :binding)
+                       (metal-render-pass-vertex-bindings pass))
+        (error 'gpu-invalid-state-error
+               :object pass :operation :multi-draw-indexed-indirect
+               :state :vertex-buffer-missing
+               :expected-state :all-vertex-buffers-bound)))
+    (unless (typep index-buffer 'metal-gpu-buffer)
+      (reject-metal-gpu-request command :incompatible-index-buffer index-buffer))
+    (unless (typep indirect-buffer 'metal-gpu-buffer)
+      (reject-metal-gpu-request command :incompatible-indirect-buffer
+                                indirect-buffer))
+    (ensure-live-metal-object index-buffer :multi-draw-indexed-indirect)
+    (ensure-live-metal-object indirect-buffer :multi-draw-indexed-indirect)
+    (ensure-metal-object-device
+     index-buffer (metal-buffer-device index-buffer)
+     (metal-render-pipeline-device pipeline) :multi-draw-indexed-indirect)
+    (ensure-metal-object-device
+     indirect-buffer (metal-buffer-device indirect-buffer)
+     (metal-render-pipeline-device pipeline) :multi-draw-indexed-indirect)
+    (unless (member :index (gpu-buffer-usage index-buffer))
+      (error 'gpu-usage-error
+             :object index-buffer :operation :multi-draw-indexed-indirect
+             :required-usage :index
+             :actual-usage (gpu-buffer-usage index-buffer)))
+    (unless (member :indirect (gpu-buffer-usage indirect-buffer))
+      (error 'gpu-usage-error
+             :object indirect-buffer :operation :multi-draw-indexed-indirect
+             :required-usage :indirect
+             :actual-usage (gpu-buffer-usage indirect-buffer)))
+    (unless (and (typep draw-count '(unsigned-byte 32))
+                 (typep indirect-offset '(unsigned-byte 64))
+                 (zerop (mod indirect-offset 4))
+                 (typep stride '(integer 20 *))
+                 (zerop (mod stride 4))
+                 (or (zerop draw-count)
+                     (<= (+ indirect-offset
+                            (* (1- draw-count) stride)
+                            +draw-indexed-indirect-byte-size+)
+                         (gpu-buffer-size indirect-buffer))))
+      (reject-metal-gpu-request
+       command :invalid-indirect-draw-range
+       (list :draw-count draw-count :indirect-offset indirect-offset
+             :stride stride)))
+    (when (plusp draw-count)
+      (multiple-value-bind (native-format index-size)
+          (metal-index-format
+           (gpu-multi-draw-indexed-indirect-command-index-format command))
+        (declare (ignore index-size))
+        (let ((native-encoder (metal-render-pass-native-encoder pass))
+              (primitive-type (metal-primitive-type pipeline))
+              (index-address (luv.metal:metal-buffer-gpu-address
+                              (metal-native-object index-buffer)))
+              (index-length (gpu-buffer-size index-buffer))
+              (indirect-address (+ (luv.metal:metal-buffer-gpu-address
+                                    (metal-native-object indirect-buffer))
+                                   indirect-offset)))
+          (when (metal-render-pass-argument-table pass)
+            (luv.metal:set-metal-render-argument-table
+             native-encoder
+             (metal-render-pass-argument-table pass)
+             (logior luv.metal:+render-stage-vertex+
+                     (if (metal-render-pipeline-fragment-p pipeline)
+                         luv.metal:+render-stage-fragment+
+                         0))))
+          (retain-metal-resource (metal-render-pass-owner pass) index-buffer)
+          (retain-metal-resource (metal-render-pass-owner pass) indirect-buffer)
+          (loop for index below draw-count
+                for address of-type (unsigned-byte 64) = indirect-address
+                  then (+ address stride)
+                do (luv.metal:draw-metal-indexed-primitives-indirect
+                    native-encoder primitive-type native-format
+                    index-address index-length address)))))
+    command))
+
 (defun metal-size-value (size)
   (destructuring-bind (width height depth) size
     (list 'luv.metal::width width

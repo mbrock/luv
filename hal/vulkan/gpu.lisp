@@ -215,6 +215,9 @@ the finalizer thread — against submission and device destruction."
    (video-queue-family
     :initarg :video-queue-family :initform nil
     :reader vulkan-device-video-queue-family)
+   (multi-draw-indirect-p
+    :initarg :multi-draw-indirect-p :initform nil
+    :reader vulkan-device-multi-draw-indirect-p)
    (queue
     :initform nil
     :accessor vulkan-device-queue)
@@ -731,7 +734,9 @@ therefore be abandoned without replaying native calls which already returned."
                   :device-extension-names enabled-extension-names
                   :physical-device physical-device
                   :queue-family queue-family
-                  :video-queue-family video-queue-family))
+                  :video-queue-family video-queue-family
+                  :multi-draw-indirect-p
+                  (lvk:physical-device-multi-draw-indirect-p physical-device)))
                (queue
                  (progn
                    (setf timeline
@@ -3194,6 +3199,86 @@ lowering later without changing this queue-level operation."
          cmd (vulkan-handle indirect-buffer)
          :offset indirect-offset :draw-count 1
          :stride +draw-indexed-indirect-byte-size+))))
+  pass)
+
+(defmethod encode
+    ((pass vulkan-gpu-render-pass-encoder)
+     (command gpu-multi-draw-indexed-indirect-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :multi-draw-indexed-indirect)
+    (unless (and (vulkan-render-pass-pipeline pass)
+                 (vulkan-render-pass-bind-group pass)
+                 (every (lambda (description)
+                          (gethash (getf description :binding)
+                                   (vulkan-render-pass-vertex-buffers pass)))
+                        (vulkan-render-pipeline-vertex-buffers
+                         (vulkan-render-pass-pipeline pass))))
+      (error 'gpu-invalid-state-error
+             :object pass :operation :multi-draw-indexed-indirect
+             :state :incomplete-bindings
+             :expected-state :pipeline-bind-group-and-vertex-buffers-bound))
+    (let* ((encoder (vulkan-render-pass-command-encoder pass))
+           (device (vulkan-command-encoder-device encoder))
+           (index-buffer
+             (gpu-multi-draw-indexed-indirect-command-index-buffer command))
+           (index-format
+             (gpu-multi-draw-indexed-indirect-command-index-format command))
+           (indirect-buffer
+             (gpu-multi-draw-indexed-indirect-command-indirect-buffer command))
+           (draw-count
+             (gpu-multi-draw-indexed-indirect-command-draw-count command))
+           (indirect-offset
+             (gpu-multi-draw-indexed-indirect-command-indirect-offset command))
+           (stride
+             (gpu-multi-draw-indexed-indirect-command-stride command)))
+      (unless (and (typep index-buffer 'vulkan-gpu-buffer)
+                   (typep indirect-buffer 'vulkan-gpu-buffer)
+                   (member index-format '(:uint16 :uint32))
+                   (typep draw-count '(unsigned-byte 32))
+                   (typep indirect-offset '(unsigned-byte 64))
+                   (zerop (mod indirect-offset 4))
+                   (typep stride '(integer 20 *))
+                   (zerop (mod stride 4))
+                   (or (zerop draw-count)
+                       (<= (+ indirect-offset
+                              (* (1- draw-count) stride)
+                              +draw-indexed-indirect-byte-size+)
+                           (gpu-buffer-size indirect-buffer))))
+        (reject-gpu-request command :invalid-indirect-draw-arguments))
+      (ensure-live-vulkan-object index-buffer :multi-draw-indexed-indirect)
+      (ensure-live-vulkan-object indirect-buffer :multi-draw-indexed-indirect)
+      (ensure-vulkan-object-device
+       index-buffer (vulkan-buffer-device index-buffer) device
+       :multi-draw-indexed-indirect)
+      (ensure-vulkan-object-device
+       indirect-buffer (vulkan-buffer-device indirect-buffer) device
+       :multi-draw-indexed-indirect)
+      (unless (member :index (gpu-buffer-usage index-buffer))
+        (error 'gpu-usage-error
+               :object index-buffer :operation :multi-draw-indexed-indirect
+               :required-usage :index
+               :actual-usage (gpu-buffer-usage index-buffer)))
+      (unless (member :indirect (gpu-buffer-usage indirect-buffer))
+        (error 'gpu-usage-error
+               :object indirect-buffer :operation :multi-draw-indexed-indirect
+               :required-usage :indirect
+               :actual-usage (gpu-buffer-usage indirect-buffer)))
+      (when (plusp draw-count)
+        (let ((cmd (vulkan-command-encoder-command-buffer encoder))
+              (indirect-handle (vulkan-handle indirect-buffer)))
+          (lvk:cmd-bind-index-buffer cmd (vulkan-handle index-buffer) 0 index-format)
+          (retain-vulkan-resource encoder index-buffer)
+          (retain-vulkan-resource encoder indirect-buffer)
+          (if (or (= draw-count 1) (vulkan-device-multi-draw-indirect-p device))
+              (lvk:cmd-draw-indexed-indirect
+               cmd indirect-handle
+               :offset indirect-offset :draw-count draw-count :stride stride)
+              (loop for index below draw-count
+                    for offset = indirect-offset then (+ offset stride)
+                    do (lvk:cmd-draw-indexed-indirect
+                        cmd indirect-handle
+                        :offset offset :draw-count 1
+                        :stride +draw-indexed-indirect-byte-size+)))))))
   pass)
 
 (defmethod encode

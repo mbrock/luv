@@ -93,6 +93,7 @@ Missing residency retains the old creature open-sky fallback."
        (effect-time
          (or *flame-time* (/ (renderer-frame-index renderer) 60.0))))
   (ensure-renderer-extent renderer extent)
+  (reset-renderer-frame-indirect-draws frame)
   (upload-renderer-frame renderer frame camera-uniform-data effect-time)
   (let ((*frame-uniform-data* camera-uniform-data))
     (encode-renderer-passes renderer frame encoder surface-texture jitter view
@@ -257,9 +258,10 @@ final pass."
                          collect resident)))
     (when visible
       (let ((binding (renderer-frame-terrain-bind-group renderer frame t)))
+        (encode-terrain-batch
+         (renderer-terrain renderer) renderer frame shadow-pass binding visible
+         :shadow-p t)
         (dolist (resident visible)
-          (draw-resident-opaque-population
-           (renderer-terrain renderer) shadow-pass resident binding :shadow-p t)
           (draw-resident-fixture-bodies renderer frame shadow-pass resident
                                         :shadow-p t))))
     (when (plusp (renderer-flame-instance-count renderer))
@@ -300,7 +302,7 @@ final pass."
                    :depth-load-op :clear :depth-store-op :store :depth-clear-value 1.0)))))
     (when visible
       (encode-terrain-visibility
-       (renderer-terrain renderer) pass
+       (renderer-terrain renderer) renderer frame pass
        (renderer-frame-visibility-binding renderer frame nil)
        visible))
     (end-pass pass)
@@ -373,10 +375,10 @@ final pass."
                      sum (expt (- (* 0.5 (+ (aref bounds axis) (aref bounds (+ axis 3))))
                                   (nth axis eye))
                                2)))))
-      (let ((binding (renderer-frame-terrain-bind-group renderer frame :translucent)))
-        (dolist (resident (sort (copy-list residents) #'> :key #'distance))
-          (encode-terrain-translucent
-           (renderer-terrain renderer) pass binding resident))))))
+      (let ((binding (renderer-frame-terrain-bind-group renderer frame :translucent))
+            (sorted (sort (copy-list residents) #'> :key #'distance)))
+        (encode-terrain-translucent-batch
+         (renderer-terrain renderer) renderer frame pass binding sorted)))))
 
 (defun encode-renderer-translucent-pass (renderer frame encoder)
   (let ((residents (renderer-translucent-residents renderer))
@@ -437,9 +439,9 @@ final pass."
             (draw-resident-fixture-bodies renderer frame pass resident)))
         (when visible
           (let ((binding (renderer-frame-terrain-bind-group renderer frame nil)))
+            (encode-terrain-batch
+             (renderer-terrain renderer) renderer frame pass binding visible)
             (dolist (resident visible)
-              (draw-resident-opaque-population
-               (renderer-terrain renderer) pass resident binding)
               (draw-resident-fixture-bodies renderer frame pass resident))))))
   (when (plusp (renderer-flame-instance-count renderer))
     (encode-torch-bodies

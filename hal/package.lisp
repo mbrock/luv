@@ -73,6 +73,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:queue-family-count
            #:physical-device-queue-families
            #:physical-device-shader-int64-p
+           #:physical-device-multi-draw-indirect-p
            #:physical-device-mesh-shader-p
            #:physical-device-presentation-features
            #:physical-memory-type
@@ -419,6 +420,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:gpu-draw-command
            #:gpu-draw-indexed-command
            #:gpu-draw-indexed-indirect-command
+           #:gpu-multi-draw-indexed-indirect-command
            #:gpu-draw-mesh-command
            #:gpu-set-pipeline-command
            #:gpu-set-bind-group-command
@@ -473,6 +475,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:draw
            #:draw-indexed
            #:draw-indexed-indirect
+           #:multi-draw-indexed-indirect
            #:+draw-indexed-indirect-byte-size+
            #:draw-mesh-workgroups
            #:copy-buffer-to-buffer
@@ -524,6 +527,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:make-gpu-draw-command
            #:make-gpu-draw-indexed-command
            #:make-gpu-draw-indexed-indirect-command
+           #:make-gpu-multi-draw-indexed-indirect-command
            #:make-gpu-draw-mesh-command
            ;; Portable GPU buffer arena suballocator.
            #:gpu-buffer-arena

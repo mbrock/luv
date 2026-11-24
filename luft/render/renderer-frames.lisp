@@ -3,9 +3,22 @@
 ;;; Presentation-slot uploads and bindings: reuse only after the canvas fence.
 ;;; Each binding borrows current component, residency, and target inputs.
 
+(defconstant +frame-indirect-draw-initial-capacity+ 4096)
+
 (defclass renderer-frame-state (gpu-resource-owner)
   ((camera-buffer :initform nil :accessor renderer-frame-state-camera-buffer)
    (flame-effect-buffer :initform nil :accessor renderer-frame-state-flame-effect-buffer)
+   (indirect-draw-buffer :initform nil :accessor renderer-frame-state-indirect-draw-buffer)
+   (indirect-draw-capacity :initform +frame-indirect-draw-initial-capacity+
+                           :accessor renderer-frame-state-indirect-draw-capacity)
+   (indirect-draw-cursor :initform 0 :accessor renderer-frame-state-indirect-draw-cursor)
+   (indirect-draw-scratch
+    :initform (make-array (* +frame-indirect-draw-initial-capacity+ 5)
+                          :element-type '(unsigned-byte 32)
+                          :adjustable t :fill-pointer 0)
+    :reader renderer-frame-state-indirect-draw-scratch)
+   (retired-indirect-buffers :initform nil
+                             :accessor renderer-frame-state-retired-indirect-buffers)
    (bind-groups :initform (make-hash-table :test #'equal) :reader renderer-frame-state-bind-groups))
   (:documentation "Uploads and bindings local to one presentation slot.
 The cache serves only current bindings. The custody ledger also retains failed
@@ -24,11 +37,64 @@ releases for retry, but those retired bindings must never be served again. #RBNW
               :size (shaders::scene-uniform-byte-size)
               :usage '(:uniform :copy-dst)))
             (renderer-frame-state-flame-effect-buffer state)
-            (own-gpu-object state (make-torch-frame-buffer (renderer-torches renderer) device))))))
+            (own-gpu-object state (make-torch-frame-buffer (renderer-torches renderer) device))
+            (renderer-frame-state-indirect-draw-buffer state)
+            (own-gpu-resource
+             state device
+             (make-buffer-descriptor
+              :label "luft presentation-slot indirect draws"
+              :size (* +frame-indirect-draw-initial-capacity+
+                       +draw-indexed-indirect-byte-size+)
+              :usage '(:indirect :copy-dst)
+              :memory :shared))))))
+
+(defun reset-renderer-frame-indirect-draws (frame)
+  "Reset FRAME's indirect draw cursor for a new frame after the presentation fence."
+  (setf (renderer-frame-state-indirect-draw-cursor frame) 0)
+  (let ((retired (shiftf (renderer-frame-state-retired-indirect-buffers frame) nil)))
+    (when retired
+      (with-release-warnings
+        (dolist (buffer retired)
+          (releasing :retired-indirect-draw-buffer
+            (release-owned-gpu-object frame buffer))))))
+  frame)
+
+(defun stage-frame-indirect-draws (renderer frame scratch)
+  "Upload packed 5-u32 indirect records from SCRATCH into FRAME's indirect buffer.
+
+Returns (VALUES BUFFER DRAW-COUNT BYTE-OFFSET)."
+  (let* ((word-count (length scratch))
+         (draw-count (floor word-count 5)))
+    (when (zerop draw-count)
+      (return-from stage-frame-indirect-draws (values nil 0 0)))
+    (let* ((cursor (renderer-frame-state-indirect-draw-cursor frame))
+           (needed (+ cursor draw-count)))
+      (when (> needed (renderer-frame-state-indirect-draw-capacity frame))
+        (let* ((new-capacity (max (* 2 (renderer-frame-state-indirect-draw-capacity frame))
+                                  needed))
+               (old-buffer (renderer-frame-state-indirect-draw-buffer frame))
+               (new-buffer (own-gpu-resource
+                            frame (renderer-device renderer)
+                            (make-buffer-descriptor
+                             :label "luft presentation-slot indirect draws"
+                             :size (* new-capacity +draw-indexed-indirect-byte-size+)
+                             :usage '(:indirect :copy-dst)
+                             :memory :shared))))
+          (when old-buffer
+            (push old-buffer (renderer-frame-state-retired-indirect-buffers frame)))
+          (setf (renderer-frame-state-indirect-draw-buffer frame) new-buffer
+                (renderer-frame-state-indirect-draw-capacity frame) new-capacity
+                cursor 0)))
+      (let ((buffer (renderer-frame-state-indirect-draw-buffer frame))
+            (byte-offset (* cursor +draw-indexed-indirect-byte-size+)))
+        (write-buffer buffer scratch :offset byte-offset)
+        (setf (renderer-frame-state-indirect-draw-cursor frame) (+ cursor draw-count))
+        (values buffer draw-count byte-offset)))))
 
 (defun destroy-renderer-frame-state (state)
   "Retain failed releases in STATE so its presentation cache can retry them."
   (clrhash (renderer-frame-state-bind-groups state))
+  (setf (renderer-frame-state-retired-indirect-buffers state) nil)
   ;; Bindings were acquired after uploads and therefore retire first.
   (release-owned-gpu-resources state))
 

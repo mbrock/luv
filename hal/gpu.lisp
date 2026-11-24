@@ -1143,6 +1143,15 @@ itself is discarded after resolve.  Depth resolves select sample zero."
   indirect-buffer
   (indirect-offset 0))
 
+(defstruct (gpu-multi-draw-indexed-indirect-command
+            (:include gpu-render-pass-command))
+  index-buffer
+  (index-format :uint32)
+  indirect-buffer
+  (draw-count 0)
+  (indirect-offset 0)
+  (stride +draw-indexed-indirect-byte-size+))
+
 (defstruct (gpu-draw-mesh-command (:include gpu-render-pass-command))
   x
   (y 1)
@@ -1306,6 +1315,19 @@ index-count, instance-count, first-index, base-vertex, and first-instance."
            :index-buffer index-buffer :index-format index-format
            :indirect-buffer indirect-buffer
            :indirect-offset indirect-offset)))
+
+(defun multi-draw-indexed-indirect
+    (pass-encoder index-buffer index-format indirect-buffer draw-count
+     &optional (indirect-offset 0) (stride +draw-indexed-indirect-byte-size+))
+  "Draw DRAW-COUNT consecutive 20-byte indirect records from INDIRECT-BUFFER.
+
+Records start at INDIRECT-OFFSET and advance by STRIDE bytes (>= 20, 4-byte aligned)."
+  (when (plusp draw-count)
+    (encode pass-encoder
+            (make-gpu-multi-draw-indexed-indirect-command
+             :index-buffer index-buffer :index-format index-format
+             :indirect-buffer indirect-buffer :draw-count draw-count
+             :indirect-offset indirect-offset :stride stride))))
 
 (defun copy-buffer-to-buffer
     (encoder source destination size
