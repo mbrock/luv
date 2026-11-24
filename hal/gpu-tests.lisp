@@ -104,18 +104,23 @@
 
 (define-test portable-buffer-descriptors-reach-devices-in-one-canonical-shape
   (let* ((device (make-instance 'descriptor-probe-device))
-         (usage (vector :vertex :index :copy-dst :vertex))
+         (usage (vector :vertex :index :indirect :copy-src :copy-dst :vertex))
          (source
            (luv:make-buffer-descriptor
-            :label "probe buffer" :size 64 :usage usage))
+            :label "probe buffer" :size 64 :usage usage :memory :device-local))
          (canonical (luv:create device source)))
     (true (not (eq source canonical)))
     (true (eq :create-buffer (descriptor-probe-operation device)))
     (true (= 64 (luv::buffer-descriptor-size canonical)))
-    (true (equal '(:vertex :index :copy-dst)
+    (true (equal '(:vertex :index :indirect :copy-src :copy-dst)
                  (luv::buffer-descriptor-usage canonical)))
+    (true (eq :device-local (luv::buffer-descriptor-memory canonical)))
     (true (eq usage (luv::buffer-descriptor-usage source)))
-    (true (string= "probe buffer" (luv::gpu-descriptor-label canonical)))))
+    (true (string= "probe buffer" (luv::gpu-descriptor-label canonical))))
+  (let* ((device (make-instance 'descriptor-probe-device))
+         (canonical (luv:create device (luv:make-buffer-descriptor
+                                        :size 16 :usage :storage))))
+    (true (eq :shared (luv::buffer-descriptor-memory canonical)))))
 
 (define-test portable-texture-descriptors-canonicalize-create-and-adoption
   (dolist (size '((32 16) (32 16 1) #(32 16) #(32 16 1)))
@@ -189,7 +194,7 @@
                    (luv:create
                     device (luv:make-buffer-descriptor
                             :size size :usage :vertex)))))))
-    (dolist (usage '(nil :indirect (:vertex :indirect)
+    (dolist (usage '(nil :map-read (:vertex :map-read)
                      #(:copy-dst :map-read)))
       (true (eq :invalid-buffer-usage
                 (gpu-request-reason
@@ -197,6 +202,13 @@
                    (luv:create
                     device (luv:make-buffer-descriptor
                             :size 4 :usage usage)))))))
+    (dolist (memory '(nil :private :host 0))
+      (true (eq :invalid-buffer-memory
+                (gpu-request-reason
+                 (lambda ()
+                   (luv:create
+                    device (luv:make-buffer-descriptor
+                            :size 4 :usage :storage :memory memory)))))))
     (dolist (size '(nil (16) (16 8 2) (16 0) #(16 -1)))
       (true (eq :invalid-texture-size
                 (gpu-request-reason

@@ -1813,6 +1813,36 @@ transfer, such as acquiring a dmabuf from +QUEUE-FAMILY-FOREIGN+."
            :base-array-layer 0
            :layer-count 1))
 
+(defun cmd-buffer-barrier
+    (command-buffer buffer src-stage dst-stage src-access dst-access
+     &key (offset 0) (size #xffffffffffffffff))
+  "Record one buffer memory barrier on COMMAND-BUFFER."
+  (with-vk (barrier buffer-memory-barrier
+            :src-access-mask src-access
+            :dst-access-mask dst-access
+            :src-queue-family-index +queue-family-ignored+
+            :dst-queue-family-index +queue-family-ignored+
+            :buffer buffer
+            :offset offset
+            :size size)
+    (vk:cmd-pipeline-barrier
+     command-buffer src-stage dst-stage nil
+     0 (cffi:null-pointer)
+     1 barrier
+     0 (cffi:null-pointer)))
+  (values))
+
+(defun cmd-copy-buffer
+    (command-buffer source destination size
+     &key (source-offset 0) (destination-offset 0))
+  "Copy SIZE bytes from SOURCE at SOURCE-OFFSET to DESTINATION at DESTINATION-OFFSET."
+  (with-vk (region buffer-copy
+            :src-offset source-offset
+            :dst-offset destination-offset
+            :size size)
+    (vk:cmd-copy-buffer command-buffer source destination 1 region))
+  (values))
+
 (defun cmd-copy-image
     (command-buffer source source-layout destination destination-layout
      width height &optional (depth 1))
@@ -2036,6 +2066,11 @@ transfer, such as acquiring a dmabuf from +QUEUE-FAMILY-FOREIGN+."
                                        (first-instance 0))
   (vk:cmd-draw-indexed command-buffer index-count instance-count
                        first-index vertex-offset first-instance)
+  (values))
+
+(defun cmd-draw-indexed-indirect
+    (command-buffer buffer &key (offset 0) (draw-count 1) (stride 20))
+  (vk:cmd-draw-indexed-indirect command-buffer buffer offset draw-count stride)
   (values))
 
 (defun fill-semaphore-submit-infos (pointer entries)

@@ -74,6 +74,7 @@
   (:command-buffer-allocate-info 40)
   (:command-buffer-begin-info 42)
   (:render-pass-begin-info 43)
+  (:buffer-memory-barrier 44)
   (:image-memory-barrier 45)
   (:attachment-description-2 1000109000)
   (:attachment-reference-2 1000109001)
@@ -370,7 +371,8 @@
   (:uniform #x10)
   (:storage #x20)
   (:index #x40)
-  (:vertex #x80))
+  (:vertex #x80)
+  (:indirect #x100))
 
 (cffi:defbitfield (shader-stage-flags :uint32)
   (:vertex #x1)
@@ -420,6 +422,10 @@
   (:memory-plane-3-ext #x400))
 
 (cffi:defbitfield (access-flags :uint32)
+  (:indirect-command-read #x1)
+  (:index-read #x2)
+  (:vertex-attribute-read #x4)
+  (:uniform-read #x8)
   (:depth-stencil-attachment-read #x200)
   (:depth-stencil-attachment-write #x400)
   (:color-attachment-read #x80)
@@ -431,6 +437,8 @@
 
 (cffi:defbitfield (pipeline-stage-flags :uint32)
   (:top-of-pipe #x1)
+  (:draw-indirect #x2)
+  (:vertex-input #x4)
   (:vertex-shader #x8)
   (:early-fragment-tests #x100)
   (:late-fragment-tests #x200)
@@ -1018,6 +1026,20 @@ other drivers and processes.")
 (defvkstruct viewport ()
   (x :float) (y :float) (width :float) (height :float)
   (min-depth :float) (max-depth :float))
+
+(defvkstruct buffer-memory-barrier (:s-type :buffer-memory-barrier)
+  (src-access-mask access-flags)
+  (dst-access-mask access-flags)
+  (src-queue-family-index :uint32)
+  (dst-queue-family-index :uint32)
+  (buffer :pointer)
+  (offset :uint64)
+  (size :uint64))
+
+(defvkstruct buffer-copy ()
+  (src-offset :uint64)
+  (dst-offset :uint64)
+  (size :uint64))
 
 (defvkstruct image-memory-barrier (:s-type :image-memory-barrier)
   (src-access-mask access-flags)
@@ -1612,6 +1634,14 @@ other drivers and processes.")
   (range-count :uint32)
   (ranges :pointer))
 
+(defvkfun "vkCmdCopyBuffer"
+    :void
+  (command-buffer :pointer)
+  (source-buffer :pointer)
+  (destination-buffer :pointer)
+  (region-count :uint32)
+  (regions :pointer))
+
 (defvkfun "vkCmdCopyImage"
     :void
   (command-buffer :pointer)
@@ -1709,6 +1739,12 @@ other drivers and processes.")
   (command-buffer :pointer) (index-count :uint32)
   (instance-count :uint32) (first-index :uint32)
   (vertex-offset :int32) (first-instance :uint32))
+
+(defvkfun "vkCmdDrawIndexedIndirect"
+    :void
+  (command-buffer :pointer) (buffer :pointer)
+  (offset :uint64) (draw-count :uint32)
+  (stride :uint32))
 
 (defvkfun "vkQueueSubmit2"
     checked-result

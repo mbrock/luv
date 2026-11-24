@@ -313,8 +313,8 @@ and scheduled texture layouts across the canvas and REPL threads.")))
   ((device
     :initarg :device
     :reader vulkan-buffer-device)
-   (memory
-    :initarg :memory
+   (device-memory
+    :initarg :device-memory
     :reader vulkan-buffer-memory)
    (mapped
     :initarg :mapped
@@ -885,6 +885,8 @@ therefore be abandoned without replaying native calls which already returned."
               (:storage :storage)
               (:vertex :vertex)
               (:index :index)
+              (:indirect :indirect)
+              (:copy-src :transfer-src)
               (:copy-dst :transfer-dst)))
           usages))
 
@@ -911,6 +913,37 @@ therefore be abandoned without replaying native calls which already returned."
                 return index)
         (error 'vulkan-gpu-error
                :operation :create-texture
+               :reason :no-compatible-memory
+               :details memory-requirements))))
+
+(defun find-vulkan-device-local-buffer-memory-type
+    (device memory-requirements &optional (operation :create-buffer))
+  "Select DEVICE_LOCAL memory for a GPU-private buffer, preferring unmappable VRAM."
+  (let ((memory-types
+          (lvk:physical-device-memory-types
+           (vulkan-device-physical-device device)))
+        (memory-type-bits
+          (lvk:buffer-memory-requirements-memory-type-bits
+           memory-requirements)))
+    (or (loop for memory-type in memory-types
+              for index from 0
+              for flags = (lvk:physical-memory-type-flags memory-type)
+              when (and (compatible-vulkan-memory-type-p memory-type-bits index)
+                        (member :device-local flags)
+                        (not (member :host-visible flags)))
+                return index)
+        (loop for memory-type in memory-types
+              for index from 0
+              for flags = (lvk:physical-memory-type-flags memory-type)
+              when (and (compatible-vulkan-memory-type-p memory-type-bits index)
+                        (member :device-local flags))
+                return index)
+        (loop for memory-type in memory-types
+              for index from 0
+              when (compatible-vulkan-memory-type-p memory-type-bits index)
+                return index)
+        (error 'vulkan-gpu-error
+               :operation operation
                :reason :no-compatible-memory
                :details memory-requirements))))
 
@@ -1027,11 +1060,12 @@ therefore be abandoned without replaying native calls which already returned."
 
 (defmethod create
     ((device vulkan-gpu-device) (descriptor buffer-descriptor))
-  "Create one persistently mapped, host-coherent uploadable buffer."
+  "Create one Vulkan buffer (:SHARED persistently mapped, or :DEVICE-LOCAL VRAM)."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object device :create-buffer)
     (let* ((size (buffer-descriptor-size descriptor))
-           (usage (buffer-descriptor-usage descriptor)))
+           (usage (buffer-descriptor-usage descriptor))
+           (memory-kind (buffer-descriptor-memory descriptor)))
       (let ((native-device (vulkan-handle device))
             (buffer nil)
             (memory nil)
@@ -1046,27 +1080,41 @@ therefore be abandoned without replaying native calls which already returned."
                         (lvk:get-buffer-memory-requirements
                          native-device buffer))
                       (memory-type
-                        (find-vulkan-upload-memory-type
-                         device requirements :create-buffer)))
+                        (ecase memory-kind
+                          (:shared
+                           (find-vulkan-upload-memory-type
+                            device requirements :create-buffer))
+                          (:device-local
+                           (find-vulkan-device-local-buffer-memory-type
+                            device requirements :create-buffer)))))
                  (setf memory
                        (lvk:allocate-memory
                         native-device
                         (lvk:buffer-memory-requirements-size requirements)
                         memory-type))
                  (lvk:bind-buffer-memory native-device buffer memory)
-                 (setf mapped (lvk:map-memory native-device memory size)))
+                 (when (eq memory-kind :shared)
+                   (setf mapped (lvk:map-memory native-device memory size))))
                (let ((object
                        (make-instance
                         'vulkan-gpu-buffer
                         :label (gpu-descriptor-label descriptor)
-                        :size size :usage usage :handle buffer
-                        :device device :memory memory :mapped mapped)))
+                        :size size :usage usage :memory memory-kind
+                        :handle buffer
+                        :device device :device-memory memory :mapped mapped)))
                  (setf completed-p t)
                  object))
           (unless completed-p
             (when mapped (lvk:unmap-memory native-device memory))
             (when buffer (lvk:destroy-buffer native-device buffer))
             (when memory (lvk:free-memory native-device memory))))))))
+
+(defun ensure-vulkan-buffer-cpu-visible (buffer operation)
+  (unless (vulkan-buffer-mapped buffer)
+    (error 'gpu-request-error
+           :operation operation :descriptor buffer
+           :reason :buffer-not-cpu-visible
+           :details (gpu-buffer-memory buffer))))
 
 (defmethod write-buffer
     ((buffer vulkan-gpu-buffer) data &key (offset 0))
@@ -1077,6 +1125,7 @@ aligned to the element size.  A storage buffer of packed sites arrives here
 as its own element type rather than as reinterpreted floats."
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object buffer :write-buffer)
+    (ensure-vulkan-buffer-cpu-visible buffer :write-buffer)
     (multiple-value-bind (foreign-type element-size)
         (buffer-data-foreign-type data)
       (unless foreign-type
@@ -1104,6 +1153,7 @@ as its own element type rather than as reinterpreted floats."
     ((buffer vulkan-gpu-buffer) &key (offset 0) size)
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object buffer :read-buffer)
+    (ensure-vulkan-buffer-cpu-visible buffer :read-buffer)
     (let ((size (or size (- (gpu-buffer-size buffer) offset))))
       (unless (and (typep offset '(unsigned-byte 64))
                    (typep size '(unsigned-byte 64))
@@ -1127,6 +1177,7 @@ as its own element type rather than as reinterpreted floats."
     ((buffer vulkan-gpu-buffer) &key (offset 0) size)
   (with-vulkan-gpu-driver-environment
     (ensure-live-vulkan-object buffer :read-buffer-if-ready)
+    (ensure-vulkan-buffer-cpu-visible buffer :read-buffer-if-ready)
     (let* ((size (or size (- (gpu-buffer-size buffer) offset)))
            (queue (device-queue (vulkan-buffer-device buffer))))
       (unless (and (typep offset '(unsigned-byte 64))
@@ -2267,6 +2318,69 @@ ownership and cancel this finalizer."
 
 (defmethod encode
     ((encoder vulkan-gpu-command-encoder)
+     (command gpu-copy-buffer-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-command-encoder-state encoder :copy-buffer)
+    (ensure-no-active-vulkan-pass encoder :copy-buffer)
+    (let ((source (gpu-copy-buffer-command-source command))
+          (source-offset (gpu-copy-buffer-command-source-offset command))
+          (destination (gpu-copy-buffer-command-destination command))
+          (destination-offset (gpu-copy-buffer-command-destination-offset command))
+          (size (gpu-copy-buffer-command-size command))
+          (device (vulkan-command-encoder-device encoder)))
+      (unless (and (typep source 'vulkan-gpu-buffer)
+                   (typep destination 'vulkan-gpu-buffer))
+        (reject-gpu-request command :incompatible-buffer-copy
+                            (list source destination)))
+      (ensure-live-vulkan-object source :copy-buffer)
+      (ensure-live-vulkan-object destination :copy-buffer)
+      (ensure-vulkan-object-device
+       source (vulkan-buffer-device source) device :copy-buffer)
+      (ensure-vulkan-object-device
+       destination (vulkan-buffer-device destination) device :copy-buffer)
+      (unless (member :copy-src (gpu-buffer-usage source))
+        (error 'gpu-usage-error
+               :object source :operation :copy-buffer
+               :required-usage :copy-src
+               :actual-usage (gpu-buffer-usage source)))
+      (unless (member :copy-dst (gpu-buffer-usage destination))
+        (error 'gpu-usage-error
+               :object destination :operation :copy-buffer
+               :required-usage :copy-dst
+               :actual-usage (gpu-buffer-usage destination)))
+      (unless (and (typep source-offset '(unsigned-byte 64))
+                   (typep destination-offset '(unsigned-byte 64))
+                   (typep size '(integer 1 *))
+                   (<= (+ source-offset size) (gpu-buffer-size source))
+                   (<= (+ destination-offset size) (gpu-buffer-size destination))
+                   (or (not (eq source destination))
+                       (<= (+ source-offset size) destination-offset)
+                       (<= (+ destination-offset size) source-offset)))
+        (reject-gpu-request
+         command :invalid-buffer-copy-range
+         (list :source-offset source-offset
+               :destination-offset destination-offset :size size)))
+      (let ((cmd (vulkan-command-encoder-command-buffer encoder)))
+        (lvk:cmd-copy-buffer
+         cmd (vulkan-handle source) (vulkan-handle destination) size
+         :source-offset source-offset
+         :destination-offset destination-offset)
+        (lvk:cmd-buffer-barrier
+         cmd (vulkan-handle destination)
+         '(:transfer)
+         '(:draw-indirect :vertex-input :vertex-shader :fragment-shader
+           :compute-shader :transfer)
+         '(:transfer-write)
+         '(:indirect-command-read :index-read :vertex-attribute-read
+           :uniform-read :shader-read :transfer-read :transfer-write)
+         :offset destination-offset
+         :size size))
+      (retain-vulkan-resource encoder source)
+      (retain-vulkan-resource encoder destination)))
+  encoder)
+
+(defmethod encode
+    ((encoder vulkan-gpu-command-encoder)
      (command gpu-copy-texture-to-buffer-command))
   (with-vulkan-gpu-driver-environment
     (ensure-vulkan-command-encoder-state encoder :encode)
@@ -3018,6 +3132,68 @@ lowering later without changing this queue-level operation."
         (lvk:cmd-draw-indexed
          (vulkan-command-encoder-command-buffer encoder)
          index-count instance-count 0 base-vertex first-instance))))
+  pass)
+
+(defmethod encode
+    ((pass vulkan-gpu-render-pass-encoder)
+     (command gpu-draw-indexed-indirect-command))
+  (with-vulkan-gpu-driver-environment
+    (ensure-vulkan-render-pass-state pass :draw-indexed-indirect)
+    (unless (and (vulkan-render-pass-pipeline pass)
+                 (vulkan-render-pass-bind-group pass)
+                 (every (lambda (description)
+                          (gethash (getf description :binding)
+                                   (vulkan-render-pass-vertex-buffers pass)))
+                        (vulkan-render-pipeline-vertex-buffers
+                         (vulkan-render-pass-pipeline pass))))
+      (error 'gpu-invalid-state-error
+             :object pass :operation :draw-indexed-indirect
+             :state :incomplete-bindings
+             :expected-state :pipeline-bind-group-and-vertex-buffers-bound))
+    (let* ((encoder (vulkan-render-pass-command-encoder pass))
+           (device (vulkan-command-encoder-device encoder))
+           (index-buffer
+             (gpu-draw-indexed-indirect-command-index-buffer command))
+           (index-format
+             (gpu-draw-indexed-indirect-command-index-format command))
+           (indirect-buffer
+             (gpu-draw-indexed-indirect-command-indirect-buffer command))
+           (indirect-offset
+             (gpu-draw-indexed-indirect-command-indirect-offset command)))
+      (unless (and (typep index-buffer 'vulkan-gpu-buffer)
+                   (typep indirect-buffer 'vulkan-gpu-buffer)
+                   (member index-format '(:uint16 :uint32))
+                   (typep indirect-offset '(unsigned-byte 64))
+                   (zerop (mod indirect-offset 4))
+                   (<= (+ indirect-offset +draw-indexed-indirect-byte-size+)
+                       (gpu-buffer-size indirect-buffer)))
+        (reject-gpu-request command :invalid-indirect-draw-arguments))
+      (ensure-live-vulkan-object index-buffer :draw-indexed-indirect)
+      (ensure-live-vulkan-object indirect-buffer :draw-indexed-indirect)
+      (ensure-vulkan-object-device
+       index-buffer (vulkan-buffer-device index-buffer) device
+       :draw-indexed-indirect)
+      (ensure-vulkan-object-device
+       indirect-buffer (vulkan-buffer-device indirect-buffer) device
+       :draw-indexed-indirect)
+      (unless (member :index (gpu-buffer-usage index-buffer))
+        (error 'gpu-usage-error
+               :object index-buffer :operation :draw-indexed-indirect
+               :required-usage :index
+               :actual-usage (gpu-buffer-usage index-buffer)))
+      (unless (member :indirect (gpu-buffer-usage indirect-buffer))
+        (error 'gpu-usage-error
+               :object indirect-buffer :operation :draw-indexed-indirect
+               :required-usage :indirect
+               :actual-usage (gpu-buffer-usage indirect-buffer)))
+      (let ((cmd (vulkan-command-encoder-command-buffer encoder)))
+        (lvk:cmd-bind-index-buffer cmd (vulkan-handle index-buffer) 0 index-format)
+        (retain-vulkan-resource encoder index-buffer)
+        (retain-vulkan-resource encoder indirect-buffer)
+        (lvk:cmd-draw-indexed-indirect
+         cmd (vulkan-handle indirect-buffer)
+         :offset indirect-offset :draw-count 1
+         :stride +draw-indexed-indirect-byte-size+))))
   pass)
 
 (defmethod encode
@@ -3929,8 +4105,9 @@ NATIVE-TEARDOWN runs only while the device is alive, under the queue
 (define-vulkan-resource-destroy (vulkan-gpu-buffer buffer)
     (vulkan-buffer-device buffer)
     ((handle (vulkan-handle buffer))
-     (memory (vulkan-buffer-memory buffer)))
-  (lvk:unmap-memory device memory)
+     (memory (vulkan-buffer-memory buffer))
+     (mapped (vulkan-buffer-mapped buffer)))
+  (when mapped (lvk:unmap-memory device memory))
   (lvk:destroy-buffer device handle)
   (lvk:free-memory device memory))
 

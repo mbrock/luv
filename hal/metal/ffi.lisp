@@ -37,7 +37,11 @@
   (height :uint64))
 
 ;; MTLStages and MTL4VisibilityOptions used by explicit Metal 4 barriers.
+(defconstant +stage-vertex+ (ash 1 0))
 (defconstant +stage-fragment+ (ash 1 1))
+(defconstant +stage-object+ (ash 1 3))
+(defconstant +stage-mesh+ (ash 1 4))
+(defconstant +stage-dispatch+ (ash 1 27))
 (defconstant +stage-blit+ (ash 1 28))
 (defconstant +visibility-device+ (ash 1 0))
 
@@ -69,6 +73,8 @@
 (defconstant +texture-usage-render-target+ (ash 1 2))
 (defconstant +storage-mode-shared+ 0)
 (defconstant +storage-mode-private+ 2)
+(defconstant +resource-storage-mode-shared+ (ash +storage-mode-shared+ 4))
+(defconstant +resource-storage-mode-private+ (ash +storage-mode-private+ 4))
 (defconstant +load-action-load+ 1)
 (defconstant +load-action-clear+ 2)
 (defconstant +store-action-dont-care+ 0)
@@ -1213,12 +1219,29 @@ entry per color attachment, as for COMPILE-METAL-4-RENDER-PIPELINE."
   (base-vertex :int64)
   (base-instance :uint64))
 
+(objc:define-objective-c-message draw-metal-indexed-primitives-indirect
+    ("drawIndexedPrimitives:indexType:indexBuffer:indexBufferLength:indirectBuffer:"
+     :void)
+  (primitive-type :uint64)
+  (index-type :uint64)
+  (index-buffer :uint64)
+  (index-buffer-length :uint64)
+  (indirect-buffer :uint64))
+
 (objc:define-objective-c-message draw-metal-mesh-threadgroups
     ("drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:"
      :void)
   (threadgroups-per-grid (:struct mtl-size))
   (threads-per-object-threadgroup (:struct mtl-size))
   (threads-per-mesh-threadgroup (:struct mtl-size)))
+
+(objc:define-objective-c-message copy-metal-buffer
+    ("copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:" :void)
+  (source :object)
+  (source-offset :uint64)
+  (destination :object)
+  (destination-offset :uint64)
+  (size :uint64))
 
 (objc:define-objective-c-message copy-metal-texture
     ("copyFromTexture:toTexture:" :void)

@@ -1365,3 +1365,327 @@ logged-in display, for one, has no displays to add."
       (destroy device)
       (when twin (metal:release-iosurface twin))
       (metal:release-iosurface surface))))
+
+(define-test metal-device-local-buffer-copy-and-batched-residency
+  (let ((copy-msg
+          (objc:objective-c-message-description 'metal:copy-metal-buffer))
+        (indirect-msg
+          (objc:objective-c-message-description
+           'metal:draw-metal-indexed-primitives-indirect)))
+    (true (equal (getf copy-msg :selector)
+                 "copyFromBuffer:sourceOffset:toBuffer:destinationOffset:size:"))
+    (true (equal (getf indirect-msg :selector)
+                 "drawIndexedPrimitives:indexType:indexBuffer:indexBufferLength:indirectBuffer:")))
+  (let* ((device (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (source nil)
+         (private nil)
+         (readback nil)
+         (encoder nil)
+         (commands nil))
+    (unwind-protect
+         (progn
+           (setf source
+                 (create device (make-buffer-descriptor
+                                 :label "copy source" :size 64
+                                 :usage '(:copy-src) :memory :shared))
+                 private
+                 (create device (make-buffer-descriptor
+                                 :label "copy private" :size 64
+                                 :usage '(:storage :copy-src :copy-dst)
+                                 :memory :device-local))
+                 readback
+                 (create device (make-buffer-descriptor
+                                 :label "copy readback" :size 64
+                                 :usage '(:copy-dst) :memory :shared)))
+           (true (eq :shared (gpu-buffer-memory source)))
+           (true (eq :device-local (gpu-buffer-memory private)))
+           ;; Resource creation batches residency commits until submission.
+           (true (luv::metal-device-residency-dirty-p device))
+           ;; Device-local buffers reject direct host reads and writes.
+           (flet ((request-reason (thunk)
+                    (handler-case (progn (funcall thunk) :ok)
+                      (gpu-request-error (c) (gpu-request-error-reason c)))))
+             (true (eq :buffer-not-cpu-visible
+                       (request-reason
+                        (lambda ()
+                          (write-buffer
+                           private (make-array 4 :element-type '(unsigned-byte 32)
+                                                 :initial-element 1))))))
+             (true (eq :buffer-not-cpu-visible
+                       (request-reason (lambda () (read-buffer private)))))
+             (true (eq :buffer-not-cpu-visible
+                       (request-reason (lambda () (read-buffer-if-ready private))))))
+           (write-buffer source
+                         (make-array 16 :element-type '(unsigned-byte 32)
+                                        :initial-contents
+                                        '(0 1 #x11223344 #x55667788
+                                          #x99aabbcc #xddeeff00 6 7
+                                          8 9 10 11 12 13 14 15)))
+           (setf encoder (create device (make-command-encoder-descriptor)))
+           ;; Reject missing usages and overlapping self-copy.
+           (fail (copy-buffer-to-buffer encoder readback private 16)
+                 'gpu-usage-error)
+           (fail (copy-buffer-to-buffer encoder source source 16)
+                 'gpu-usage-error)
+           (fail (copy-buffer-to-buffer encoder private private 16
+                                        :source-offset 0 :destination-offset 8)
+                 'gpu-request-error)
+           ;; Chained buffer copy with non-zero offsets: source[8..24) -> private[16..32) -> readback[4..20).
+           (copy-buffer-to-buffer encoder source private 16
+                                  :source-offset 8 :destination-offset 16)
+           (copy-buffer-to-buffer encoder private readback 16
+                                  :source-offset 16 :destination-offset 4)
+           (setf commands (finish encoder))
+           (submit queue commands)
+           (false (luv::metal-device-residency-dirty-p device))
+           (let* ((bytes (read-buffer readback))
+                  (words (loop for off from 4 below 20 by 4
+                               collect (loop for b below 4
+                                             sum (ash (aref bytes (+ off b)) (* 8 b))))))
+             (true (equal '(#x11223344 #x55667788 #x99aabbcc #xddeeff00) words))))
+      (when commands (destroy commands))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when private (destroy private))
+      (when source (destroy source))
+      (destroy device))))
+
+(define-test metal-draw-indexed-indirect-renders-from-device-local-buffers
+  (let* ((device (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (vertex-module nil)
+         (fragment-module nil)
+         (pipeline nil)
+         (target nil)
+         (staging-vb nil) (vb nil)
+         (staging-ib nil) (ib nil)
+         (staging-ind nil) (ind nil)
+         (readback nil)
+         (encoder nil)
+         (commands nil))
+    (unwind-protect
+         (progn
+           (setf vertex-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "indirect probe vertex"
+                   :language :mathematical
+                   :code (shader:parse-shader-specification
+                          'metal-indirect-probe-vertex
+                          '(:stage :vertex
+                            :inputs ((position :vec3 :location 0))
+                            :outputs ((clip-position :vec4 :built-in :position)))
+                          '((shader:set-output clip-position (shader:vec4 position 1.0))))))
+                 fragment-module
+                 (create
+                  device
+                  (make-shader-module-descriptor
+                   :label "indirect probe fragment"
+                   :language :mathematical
+                   :code (shader:parse-shader-specification
+                          'metal-indirect-probe-fragment
+                          '(:stage :fragment
+                            :outputs ((color :vec4 :location 0)))
+                          '((shader:set-output color (shader:vec4 0.0 1.0 0.5 1.0))))))
+                 pipeline
+                 (create
+                  device
+                  (make-render-pipeline-descriptor
+                   :label "indirect probe pipeline"
+                   :layout nil
+                   :vertex
+                   `(:module ,vertex-module
+                     :buffers ((:array-stride 12
+                                :attributes ((:shader-location 0 :offset 0
+                                              :format :float32x3)))))
+                   :fragment
+                   `(:module ,fragment-module
+                     :targets ((:format :rgba8-unorm)))
+                   :primitive '(:topology :triangle-list)))
+                 target
+                 (create device (make-texture-descriptor
+                                 :label "indirect target"
+                                 :size '(8 8) :dimensions :2d
+                                 :format :rgba8-unorm
+                                 :usage '(:render-attachment :copy-src)))
+                 staging-vb (create device (make-buffer-descriptor
+                                            :size 48 :usage '(:copy-src) :memory :shared))
+                 vb (create device (make-buffer-descriptor
+                                    :size 48 :usage '(:vertex :copy-dst)
+                                    :memory :device-local))
+                 staging-ib (create device (make-buffer-descriptor
+                                            :size 16 :usage '(:copy-src) :memory :shared))
+                 ib (create device (make-buffer-descriptor
+                                    :size 16 :usage '(:index :copy-dst)
+                                    :memory :device-local))
+                 staging-ind (create device (make-buffer-descriptor
+                                             :size 40 :usage '(:copy-src) :memory :shared))
+                 ind (create device (make-buffer-descriptor
+                                     :size 40 :usage '(:indirect :copy-dst)
+                                     :memory :device-local))
+                 readback (create device (make-buffer-descriptor
+                                          :size (* 8 8 4) :usage '(:copy-dst)
+                                          :memory :shared)))
+           ;; Fullscreen quad covering [-1, 1]^2.
+           (write-buffer staging-vb
+                         (make-array 12 :element-type 'single-float
+                                        :initial-contents
+                                        '(-1.0 -1.0 0.0   1.0 -1.0 0.0
+                                           1.0  1.0 0.0  -1.0  1.0 0.0)))
+           (write-buffer staging-ib
+                         (make-array 6 :element-type '(unsigned-byte 16)
+                                       :initial-contents '(0 1 2 0 2 3)))
+           ;; Slot 0 (offset 0): zero-instance no-op; Slot 1 (offset 20): 6 indices, 1 instance.
+           (write-buffer staging-ind
+                         (make-array 10 :element-type '(unsigned-byte 32)
+                                        :initial-contents
+                                        '(0 0 0 0 0
+                                          6 1 0 0 0)))
+           (setf encoder (create device (make-command-encoder-descriptor)))
+           ;; Upload into device-local buffers and consume them in the same command buffer.
+           (copy-buffer-to-buffer encoder staging-vb vb 48)
+           (copy-buffer-to-buffer encoder staging-ib ib 16)
+           (copy-buffer-to-buffer encoder staging-ind ind 40)
+           (let ((pass (begin-render-pass
+                        encoder
+                        (make-render-pass-descriptor
+                         :color-attachments
+                         `((:view ,target :load-op :clear :store-op :store
+                            :clear-value #(1.0 0.0 0.0 1.0)))))))
+             (set-pipeline pass pipeline)
+             (set-vertex-buffer pass 0 vb)
+             (draw-indexed-indirect pass ib :uint16 ind 0)
+             (draw-indexed-indirect pass ib :uint16 ind 20)
+             (end-pass pass))
+           (encode encoder (make-gpu-copy-texture-to-buffer-command
+                            :source target :destination readback))
+           (setf commands (finish encoder))
+           (submit queue commands)
+           (let ((pixels (read-buffer readback)))
+             (true (= (* 8 8 4) (length pixels)))
+             (true (loop for i below (length pixels) by 4
+                         always (and (zerop (aref pixels i))
+                                     (= 255 (aref pixels (+ i 1)))
+                                     (<= 127 (aref pixels (+ i 2)) 128)
+                                     (= 255 (aref pixels (+ i 3))))))))
+      (when commands (destroy commands))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when ind (destroy ind))
+      (when staging-ind (destroy staging-ind))
+      (when ib (destroy ib))
+      (when staging-ib (destroy staging-ib))
+      (when vb (destroy vb))
+      (when staging-vb (destroy staging-vb))
+      (when target (destroy target))
+      (when pipeline (destroy pipeline))
+      (when fragment-module (destroy fragment-module))
+      (when vertex-module (destroy vertex-module))
+      (destroy device))))
+
+(define-test metal-gpu-buffer-arena-allocates-coalesces-and-grows-preserving-data
+  (let* ((device (request-gpu-device (make-instance 'metal-gpu-provider)))
+         (queue (device-queue device))
+         (arena nil)
+         (shared-arena nil)
+         (readback nil)
+         (encoder nil)
+         (commands nil))
+    (unwind-protect
+         (progn
+           (setf arena (make-gpu-buffer-arena
+                        device :label "test device arena"
+                               :element-size 16 :initial-capacity 4
+                               :usage '(:storage) :memory :device-local))
+           (let ((empty (gpu-buffer-arena-allocate arena 0))
+                 (a (gpu-buffer-arena-allocate arena 2))
+                 (b (gpu-buffer-arena-allocate arena 2)))
+             (true (zerop (gpu-buffer-slice-count empty)))
+             (true (= 0 (gpu-buffer-slice-offset a)))
+             (true (= 2 (gpu-buffer-slice-offset b)))
+             (true (= 0 (gpu-buffer-arena-generation arena)))
+             (gpu-buffer-arena-write
+              arena a (make-array 8 :element-type '(unsigned-byte 32)
+                                    :initial-contents '(10 11 12 13 14 15 16 17)))
+             (gpu-buffer-arena-write
+              arena b (make-array 8 :element-type '(unsigned-byte 32)
+                                    :initial-contents '(20 21 22 23 24 25 26 27)))
+             (true (gpu-buffer-arena-flush arena))
+             ;; Allocating 3 elements forces geometric growth (4 -> 8) and preserves A and B.
+             (let ((c (gpu-buffer-arena-allocate arena 3)))
+               (true (= 1 (gpu-buffer-arena-generation arena)))
+               (true (= 8 (gpu-buffer-arena-capacity arena)))
+               (true (= 4 (gpu-buffer-slice-offset c)))
+               (gpu-buffer-arena-write
+                arena c (make-array 12 :element-type '(unsigned-byte 32)
+                                       :initial-contents
+                                       '(30 31 32 33 34 35 36 37 38 39 40 41)))
+               ;; Flush directly onto a caller command encoder, then copy full arena to readback.
+               (setf readback (create device (make-buffer-descriptor
+                                              :size (* 8 16) :usage '(:copy-dst)
+                                              :memory :shared))
+                     encoder (create device (make-command-encoder-descriptor)))
+               (true (gpu-buffer-arena-flush arena encoder))
+               (copy-buffer-to-buffer encoder (gpu-buffer-arena-buffer arena)
+                                      readback (* 8 16))
+               (setf commands (finish encoder))
+               (submit queue commands)
+               (let* ((bytes (read-buffer readback))
+                      (words (loop for off below (* 7 16) by 4
+                                   collect (loop for byte below 4
+                                                 sum (ash (aref bytes (+ off byte))
+                                                          (* 8 byte))))))
+                 (true (equal '(10 11 12 13 14 15 16 17
+                                20 21 22 23 24 25 26 27
+                                30 31 32 33 34 35 36 37 38 39 40 41)
+                              words)))
+               ;; Freeing A and B quarantines them, then reclaim coalesces [0,2)+[2,4)->[0,4).
+               (gpu-buffer-arena-free arena a)
+               (gpu-buffer-arena-free arena b)
+               (fail (gpu-buffer-arena-free arena a) 'gpu-invalid-state-error)
+               (submitted-work-done queue)
+               (true (= 4 (gpu-buffer-arena-reclaim arena)))
+               (let ((stats (gpu-buffer-arena-stats arena)))
+                 (true (= 3 (getf stats :used)))
+                 (true (= 5 (getf stats :free)))
+                 (true (= 2 (getf stats :free-span-count)))
+                 (true (= 0 (getf stats :quarantined))))
+               ;; Releasing C coalesces the entire arena back to 1 span [0, 8).
+               (gpu-buffer-arena-free arena c)
+               (gpu-buffer-arena-free arena empty)
+               (submitted-work-done queue)
+               (gpu-buffer-arena-reclaim arena)
+               (let ((stats (gpu-buffer-arena-stats arena)))
+                 (true (= 0 (getf stats :used)))
+                 (true (= 8 (getf stats :free)))
+                 (true (= 1 (getf stats :free-span-count))))))
+           ;; Shared arena writes directly when steady, and preserves data across growth.
+           (setf shared-arena (make-gpu-buffer-arena
+                               device :label "test shared arena"
+                                      :element-size 16 :initial-capacity 2
+                                      :usage '(:storage) :memory :shared))
+           (let ((s1 (gpu-buffer-arena-allocate shared-arena 2)))
+             (gpu-buffer-arena-write
+              shared-arena s1 (make-array 8 :element-type '(unsigned-byte 32)
+                                            :initial-contents '(1 2 3 4 5 6 7 8)))
+             (false (gpu-buffer-arena-flush shared-arena))
+             (let ((s2 (gpu-buffer-arena-allocate shared-arena 2)))
+               (gpu-buffer-arena-write
+                shared-arena s2 (make-array 8 :element-type '(unsigned-byte 32)
+                                              :initial-contents '(9 10 11 12 13 14 15 16)))
+               (true (gpu-buffer-arena-flush shared-arena))
+               (submitted-work-done queue)
+               (let* ((bytes (read-buffer (gpu-buffer-arena-buffer shared-arena)))
+                      (words (loop for off below 64 by 4
+                                   collect (loop for byte below 4
+                                                 sum (ash (aref bytes (+ off byte))
+                                                          (* 8 byte))))))
+                 (true (equal '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16) words))))))
+      (when commands (destroy commands))
+      (when encoder (destroy encoder))
+      (when readback (destroy readback))
+      (when shared-arena (destroy shared-arena))
+      (when arena (destroy arena))
+      (destroy device))))

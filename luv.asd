@@ -449,6 +449,7 @@ offsets and of headers."
      (:file "tracy")
      (:file "trace")
      (:file "gpu")
+     (:file "buffer-arena")
      (:file "canvas")
      (:file "application-lifecycle")
      (:file "frame-resources")

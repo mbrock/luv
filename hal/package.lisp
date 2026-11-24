@@ -141,8 +141,10 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:cmd-transition-image
            #:cmd-clear-color-image
            #:cmd-copy-image
+           #:cmd-copy-buffer
            #:cmd-copy-buffer-to-image
            #:cmd-copy-image-to-buffer
+           #:cmd-buffer-barrier
            #:cmd-bind-compute-pipeline
            #:cmd-bind-graphics-pipeline
            #:cmd-bind-compute-descriptor-set
@@ -157,6 +159,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:cmd-end-render-pass
            #:cmd-draw
            #:cmd-draw-indexed
+           #:cmd-draw-indexed-indirect
            #:submit-command-buffers
            #:submit-command-buffer
            #:queue-wait-idle
@@ -379,6 +382,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:gpu-buffer
            #:gpu-buffer-size
            #:gpu-buffer-usage
+           #:gpu-buffer-memory
            #:gpu-texture
            #:gpu-texture-size
            #:gpu-texture-usage
@@ -414,12 +418,14 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:gpu-compute-pass-command
            #:gpu-draw-command
            #:gpu-draw-indexed-command
+           #:gpu-draw-indexed-indirect-command
            #:gpu-draw-mesh-command
            #:gpu-set-pipeline-command
            #:gpu-set-bind-group-command
            #:gpu-set-vertex-buffer-command
            #:gpu-dispatch-workgroups-command
            #:gpu-clear-texture-command
+           #:gpu-copy-buffer-command
            #:gpu-copy-texture-command
            #:gpu-copy-texture-to-buffer-command
            #:gpu-write-texture-command
@@ -466,7 +472,10 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:dispatch-workgroups
            #:draw
            #:draw-indexed
+           #:draw-indexed-indirect
+           #:+draw-indexed-indirect-byte-size+
            #:draw-mesh-workgroups
+           #:copy-buffer-to-buffer
            #:make-device-descriptor
            #:make-buffer-descriptor
            #:make-texture-descriptor
@@ -496,6 +505,7 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:make-command-encoder-descriptor
            #:make-temporal-scaler-descriptor
            #:make-gpu-clear-texture-command
+           #:make-gpu-copy-buffer-command
            #:make-gpu-copy-texture-command
            #:make-gpu-copy-texture-to-buffer-command
            #:make-gpu-write-texture-command
@@ -513,7 +523,28 @@ entry point.  DEFVKFUN interns and exports here; nothing else does."))))
            #:make-gpu-dispatch-workgroups-command
            #:make-gpu-draw-command
            #:make-gpu-draw-indexed-command
+           #:make-gpu-draw-indexed-indirect-command
            #:make-gpu-draw-mesh-command
+           ;; Portable GPU buffer arena suballocator.
+           #:gpu-buffer-arena
+           #:gpu-buffer-slice
+           #:gpu-buffer-slice-arena
+           #:gpu-buffer-slice-offset
+           #:gpu-buffer-slice-count
+           #:gpu-buffer-slice-byte-offset
+           #:gpu-buffer-slice-byte-size
+           #:make-gpu-buffer-arena
+           #:gpu-buffer-arena-buffer
+           #:gpu-buffer-arena-element-size
+           #:gpu-buffer-arena-capacity
+           #:gpu-buffer-arena-used-count
+           #:gpu-buffer-arena-generation
+           #:gpu-buffer-arena-reclaim
+           #:gpu-buffer-arena-allocate
+           #:gpu-buffer-arena-free
+           #:gpu-buffer-arena-write
+           #:gpu-buffer-arena-flush
+           #:gpu-buffer-arena-stats
            ;; Application-owned derivatives of live source.
            #:application-live-artifacts
            #:live-artifact-label

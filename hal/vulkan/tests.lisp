@@ -1332,3 +1332,48 @@
         (true (equal (lvk:vulkan-call-event-foreign-name event)
                      "vkEnumerateInstanceExtensionProperties"))
         (true (eq (lvk:vulkan-call-event-status event) :returned))))))
+
+(define-test vulkan-buffer-copy-and-indirect-abi-are-explicit
+  (let ((copy-description
+          (lvk:vulkan-function-description 'vk:cmd-copy-buffer))
+        (indirect-description
+          (lvk:vulkan-function-description 'vk:cmd-draw-indexed-indirect)))
+    (true (equal (getf copy-description :foreign-name) "vkCmdCopyBuffer"))
+    (true (getf copy-description :command-p))
+    (true (equal (getf indirect-description :foreign-name)
+                 "vkCmdDrawIndexedIndirect"))
+    (true (getf indirect-description :command-p)))
+  (true (= 24 (cffi:foreign-type-size '(:struct lvk::buffer-copy))))
+  (true (= 44 (cffi:foreign-enum-value 'lvk::structure-type
+                                       :buffer-memory-barrier)))
+  (true (= #x100 (cffi:foreign-bitfield-value 'lvk::buffer-usage-flags
+                                              '(:indirect))))
+  (true (= #x1 (cffi:foreign-bitfield-value 'lvk::access-flags
+                                            '(:indirect-command-read))))
+  (true (= #x2 (cffi:foreign-bitfield-value 'lvk::pipeline-stage-flags
+                                            '(:draw-indirect))))
+  (let* ((device
+           (make-instance
+            'luv::vulkan-gpu-device
+            :handle :fake-device :instance :fake-instance
+            :physical-device :fake-physical-device :queue-family 0))
+         (buffer
+           (make-instance
+            'luv::vulkan-gpu-buffer
+            :label "device-local probe"
+            :size 64 :usage '(:storage :copy-dst) :memory :device-local
+            :handle :fake-buffer :device-memory :fake-memory :mapped nil
+            :device device)))
+    #+sbcl (sb-ext:cancel-finalization buffer)
+    (true (eq :device-local (luv:gpu-buffer-memory buffer)))
+    (true (eq :buffer-not-cpu-visible
+              (gpu-request-reason
+               (lambda ()
+                 (luv:write-buffer
+                  buffer (make-array 4 :element-type '(unsigned-byte 32)
+                                       :initial-element 1))))))
+    (true (eq :buffer-not-cpu-visible
+              (gpu-request-reason (lambda () (luv:read-buffer buffer)))))
+    (true (eq :buffer-not-cpu-visible
+              (gpu-request-reason
+               (lambda () (luv:read-buffer-if-ready buffer)))))))

@@ -609,7 +609,11 @@ factories for requesting GPU-DEVICE instances."))
     :reader gpu-buffer-size)
    (usage
     :initarg :usage
-    :reader gpu-buffer-usage)))
+    :reader gpu-buffer-usage)
+   (memory
+    :initarg :memory
+    :initform :shared
+    :reader gpu-buffer-memory)))
 (defclass gpu-texture (gpu-object)
   ((size
     :initarg :size
@@ -854,13 +858,16 @@ has completed."))
   required-features required-limits)
 
 (defstruct (buffer-descriptor (:include gpu-descriptor))
-  size usage)
+  size usage (memory :shared))
 
 (defstruct (texture-descriptor (:include gpu-descriptor))
   size usage dimensions format (sample-count 1))
 
 (defparameter +portable-buffer-usages+
-  '(:uniform :storage :vertex :index :copy-dst))
+  '(:uniform :storage :vertex :index :indirect :copy-src :copy-dst))
+
+(defparameter +portable-buffer-memories+
+  '(:shared :device-local))
 
 (defparameter +portable-texture-usages+
   '(:copy-src :copy-dst :storage-binding :texture-binding
@@ -916,16 +923,21 @@ has completed."))
 (defun canonical-buffer-descriptor
     (descriptor &optional (operation :create))
   "Copy DESCRIPTOR into the one structural shape every backend receives."
-  (let ((size (buffer-descriptor-size descriptor)))
+  (let ((size (buffer-descriptor-size descriptor))
+        (memory (buffer-descriptor-memory descriptor)))
     (unless (and (typep size '(unsigned-byte 64)) (plusp size))
       (reject-portable-gpu-descriptor
        operation descriptor :invalid-buffer-size size))
+    (unless (member memory +portable-buffer-memories+)
+      (reject-portable-gpu-descriptor
+       operation descriptor :invalid-buffer-memory memory))
     (let ((canonical (copy-buffer-descriptor descriptor)))
       (setf (buffer-descriptor-usage canonical)
             (canonical-gpu-usage-list
              (buffer-descriptor-usage descriptor)
              +portable-buffer-usages+ descriptor :invalid-buffer-usage
-             operation))
+             operation)
+            (buffer-descriptor-memory canonical) memory)
       canonical)))
 
 (defun canonical-texture-descriptor
@@ -1111,6 +1123,10 @@ itself is discarded after resolve.  Depth resolves select sample zero."
   (first-vertex 0)
   (first-instance 0))
 
+(defconstant +draw-indexed-indirect-byte-size+ 20
+  "Size of one portable indirect indexed draw record: five u32 words
+(index-count, instance-count, first-index, base-vertex, first-instance).")
+
 (defstruct (gpu-draw-indexed-command (:include gpu-render-pass-command))
   index-buffer
   (index-format :uint16)
@@ -1119,6 +1135,13 @@ itself is discarded after resolve.  Depth resolves select sample zero."
   (first-index 0)
   (base-vertex 0)
   (first-instance 0))
+
+(defstruct (gpu-draw-indexed-indirect-command
+            (:include gpu-render-pass-command))
+  index-buffer
+  (index-format :uint32)
+  indirect-buffer
+  (indirect-offset 0))
 
 (defstruct (gpu-draw-mesh-command (:include gpu-render-pass-command))
   x
@@ -1158,6 +1181,14 @@ itself is discarded after resolve.  Depth resolves select sample zero."
             (:include gpu-command-encoder-command))
   texture
   color)
+
+(defstruct (gpu-copy-buffer-command
+            (:include gpu-command-encoder-command))
+  source
+  (source-offset 0)
+  destination
+  (destination-offset 0)
+  size)
 
 (defstruct (gpu-copy-texture-command
             (:include gpu-command-encoder-command))
@@ -1262,6 +1293,29 @@ recorded work owns the complete indexed-draw dependency at one boundary."
            :index-count index-count :instance-count instance-count
            :first-index first-index :base-vertex base-vertex
            :first-instance first-instance)))
+
+(defun draw-indexed-indirect
+    (pass-encoder index-buffer index-format indirect-buffer
+     &optional (indirect-offset 0))
+  "Draw indexed instances from INDEX-BUFFER using a 20-byte indirect record.
+
+INDIRECT-BUFFER holds five u32 words starting at 4-byte-aligned INDIRECT-OFFSET:
+index-count, instance-count, first-index, base-vertex, and first-instance."
+  (encode pass-encoder
+          (make-gpu-draw-indexed-indirect-command
+           :index-buffer index-buffer :index-format index-format
+           :indirect-buffer indirect-buffer
+           :indirect-offset indirect-offset)))
+
+(defun copy-buffer-to-buffer
+    (encoder source destination size
+     &key (source-offset 0) (destination-offset 0))
+  "Copy SIZE bytes from SOURCE at SOURCE-OFFSET to DESTINATION at DESTINATION-OFFSET."
+  (encode encoder
+          (make-gpu-copy-buffer-command
+           :source source :source-offset source-offset
+           :destination destination :destination-offset destination-offset
+           :size size)))
 
 (defun draw-mesh-workgroups (pass-encoder x &optional (y 1) (z 1))
   (encode pass-encoder

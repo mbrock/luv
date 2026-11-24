@@ -122,14 +122,22 @@
            #:set-metal-scissor-rect
            #:draw-metal-primitives
            #:draw-metal-indexed-primitives
+           #:draw-metal-indexed-primitives-indirect
            #:draw-metal-mesh-threadgroups
+           #:copy-metal-buffer
            #:copy-metal-texture
            #:copy-metal-texture-to-buffer
            #:end-encoding
            #:barrier-after-queue-stages
+           #:+stage-vertex+
            #:+stage-fragment+
+           #:+stage-object+
+           #:+stage-mesh+
+           #:+stage-dispatch+
            #:+stage-blit+
            #:+visibility-device+
+           #:+resource-storage-mode-shared+
+           #:+resource-storage-mode-private+
            #:wait-for-drawable
            #:commit-command-buffer
            #:commit-command-buffers

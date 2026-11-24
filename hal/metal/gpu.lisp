@@ -35,6 +35,10 @@
    (compiler :initarg :compiler :reader metal-device-compiler)
    (residency-set :initarg :residency-set
                   :reader metal-device-residency-set)
+   (residency-dirty-p :initform nil :accessor metal-device-residency-dirty-p)
+   (residency-lock
+    :initform (sb-thread:make-mutex :name "luv metal residency")
+    :reader metal-device-residency-lock)
    (retiring-p :initform nil :accessor metal-device-retiring-p)
    (residency-retired-p
     :initform nil :accessor metal-device-residency-retired-p)
@@ -668,6 +672,30 @@ the submission's value, or NIL when nothing had been recorded."
       (values (metal-queue-submitted-value queue)
               (luv.metal:metal-shared-event-signaled-value event)))))
 
+(defun metal-residency-add (device native)
+  "Register NATIVE in DEVICE's residency set; commit lazily before submit."
+  (sb-thread:with-mutex ((metal-device-residency-lock device))
+    (unless (metal-device-residency-retired-p device)
+      (luv.metal:add-metal-residency-allocation
+       (metal-device-residency-set device) native)
+      (setf (metal-device-residency-dirty-p device) t))))
+
+(defun metal-residency-remove (device native)
+  "Remove NATIVE from DEVICE's residency set; commit lazily before submit."
+  (sb-thread:with-mutex ((metal-device-residency-lock device))
+    (unless (metal-device-residency-retired-p device)
+      (luv.metal:remove-metal-residency-allocation
+       (metal-device-residency-set device) native)
+      (setf (metal-device-residency-dirty-p device) t))))
+
+(defun flush-metal-residency-set (device)
+  "Commit accumulated residency set changes once before submitting GPU work."
+  (sb-thread:with-mutex ((metal-device-residency-lock device))
+    (when (and (metal-device-residency-dirty-p device)
+               (not (metal-device-residency-retired-p device)))
+      (luv.metal:commit-metal-residency-set (metal-device-residency-set device))
+      (setf (metal-device-residency-dirty-p device) nil))))
+
 (defun submit-metal-command-buffers
     (queue command-buffers &key after-commit)
   "Commit finished Metal work and retain its dependencies to QUEUE's frontier.
@@ -691,6 +719,7 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
     (let* ((resources (collect-metal-submission-resources command-buffers))
            (native-command-buffers
              (map 'vector #'metal-native-object command-buffers)))
+      (flush-metal-residency-set (metal-queue-device queue))
       (let ((options (luv.metal:metal-timed-commit-options
                       (metal-queue-timing-ring queue)
                       (1+ (metal-queue-submitted-value queue)))))
@@ -876,42 +905,50 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
 
 (defmethod create
     ((device metal-gpu-device) (descriptor buffer-descriptor))
-  "Create one shared Metal buffer and add its allocation to device residency."
+  "Create one Metal buffer (:SHARED or :DEVICE-LOCAL) and add it to residency."
   (ensure-live-metal-object device :create-buffer)
-  (let ((size (buffer-descriptor-size descriptor))
-        (usage (buffer-descriptor-usage descriptor)))
+  (let* ((size (buffer-descriptor-size descriptor))
+         (usage (buffer-descriptor-usage descriptor))
+         (memory (buffer-descriptor-memory descriptor))
+         (options (ecase memory
+                    (:shared luv.metal:+resource-storage-mode-shared+)
+                    (:device-local luv.metal:+resource-storage-mode-private+))))
     (let ((native-buffer
-            (luv.metal:new-metal-buffer (metal-native-object device) size 0)))
+            (luv.metal:new-metal-buffer (metal-native-object device) size options)))
       (unless native-buffer
         (error 'metal-gpu-error :operation :create-buffer
                :reason :buffer-creation-failed :details size))
       (let ((resident-p nil)
             (completed-p nil))
         (unwind-protect
-             (let ((mapped (luv.metal:metal-buffer-contents native-buffer)))
-               (when (cffi:null-pointer-p mapped)
-                 (error 'metal-gpu-error :operation :create-buffer
-                        :reason :buffer-not-cpu-visible))
-               (luv.metal:add-metal-residency-allocation
-                (metal-device-residency-set device) native-buffer)
+             (let ((mapped
+                     (when (eq memory :shared)
+                       (let ((pointer (luv.metal:metal-buffer-contents native-buffer)))
+                         (when (cffi:null-pointer-p pointer)
+                           (error 'metal-gpu-error :operation :create-buffer
+                                  :reason :buffer-not-cpu-visible))
+                         pointer))))
+               (metal-residency-add device native-buffer)
                (setf resident-p t)
-               (luv.metal:commit-metal-residency-set
-                (metal-device-residency-set device))
                (let ((buffer
                        (make-instance
                         'metal-gpu-buffer
                         :label (gpu-descriptor-label descriptor)
-                        :size size :usage usage :device device
+                        :size size :usage usage :memory memory :device device
                         :native-object native-buffer :mapped mapped)))
                  (setf completed-p t)
                  buffer))
           (unless completed-p
             (when resident-p
-              (luv.metal:remove-metal-residency-allocation
-               (metal-device-residency-set device) native-buffer)
-              (luv.metal:commit-metal-residency-set
-               (metal-device-residency-set device)))
+              (metal-residency-remove device native-buffer))
             (luv.objective-c:release-objective-c-object native-buffer)))))))
+
+(defun ensure-metal-buffer-cpu-visible (buffer operation)
+  (unless (metal-buffer-mapped buffer)
+    (error 'gpu-request-error
+           :operation operation :descriptor buffer
+           :reason :buffer-not-cpu-visible
+           :details (gpu-buffer-memory buffer))))
 
 (defmethod write-buffer
     ((buffer metal-gpu-buffer) data &key (offset 0))
@@ -920,6 +957,7 @@ backend-local extension; ordinary callers use SUBMIT.  #T9K4RC"
 DATA holds single-floats or unsigned 8-, 16-, 32-, or 64-bit integers; OFFSET is
 aligned to the element size."
   (ensure-live-metal-object buffer :write-buffer)
+  (ensure-metal-buffer-cpu-visible buffer :write-buffer)
   (multiple-value-bind (foreign-type element-size)
       (buffer-data-foreign-type data)
     (unless foreign-type
@@ -946,6 +984,7 @@ aligned to the element size."
 (defmethod read-buffer
     ((buffer metal-gpu-buffer) &key (offset 0) size)
   (ensure-live-metal-object buffer :read-buffer)
+  (ensure-metal-buffer-cpu-visible buffer :read-buffer)
   (let ((size (or size (- (gpu-buffer-size buffer) offset))))
     (unless (and (typep offset '(unsigned-byte 64))
                  (typep size '(unsigned-byte 64))
@@ -963,6 +1002,7 @@ aligned to the element size."
 (defmethod read-buffer-if-ready
     ((buffer metal-gpu-buffer) &key (offset 0) size)
   (ensure-live-metal-object buffer :read-buffer-if-ready)
+  (ensure-metal-buffer-cpu-visible buffer :read-buffer-if-ready)
   (let* ((size (or size (- (gpu-buffer-size buffer) offset)))
          (queue (device-queue (metal-buffer-device buffer))))
     (unless (and (typep offset '(unsigned-byte 64))
@@ -983,15 +1023,10 @@ aligned to the element size."
 
 (defmethod metal-native-teardown-closure ((buffer metal-gpu-buffer))
   (let* ((device (metal-buffer-device buffer))
-         (residency-set (metal-device-residency-set device))
          (native (metal-native-object buffer)))
     (make-gpu-retirement-sequence
      (lambda ()
-       (unless (metal-device-residency-retired-p device)
-         (luv.metal:remove-metal-residency-allocation residency-set native)))
-     (lambda ()
-       (unless (metal-device-residency-retired-p device)
-         (luv.metal:commit-metal-residency-set residency-set)))
+       (metal-residency-remove device native))
      (lambda ()
        (luv.objective-c:release-objective-c-object native)))))
 
@@ -1057,11 +1092,8 @@ aligned to the element size."
     (let ((resident-p nil) (completed-p nil))
       (unwind-protect
            (progn
-             (luv.metal:add-metal-residency-allocation
-              (metal-device-residency-set device) native)
+             (metal-residency-add device native)
              (setf resident-p t)
-             (luv.metal:commit-metal-residency-set
-              (metal-device-residency-set device))
              (let ((texture
                      (make-instance
                       'metal-gpu-texture
@@ -1075,10 +1107,7 @@ aligned to the element size."
                texture))
         (unless completed-p
           (when resident-p
-            (luv.metal:remove-metal-residency-allocation
-             (metal-device-residency-set device) native)
-            (luv.metal:commit-metal-residency-set
-             (metal-device-residency-set device)))
+            (metal-residency-remove device native))
           (luv.objective-c:release-objective-c-object native))))))
 
 (defun portable-metal-texture-usage (native descriptor role)
@@ -1217,11 +1246,8 @@ construct its temporal surface cohort.  #NL5J0J"
              ;; merely because an argument table points at it.  CVMetalTexture
              ;; planes therefore need the same explicit residency membership as
              ;; textures allocated by this device.
-             (luv.metal:add-metal-residency-allocation
-              (metal-device-residency-set device) native)
+             (metal-residency-add device native)
              (setf resident-p t)
-             (luv.metal:commit-metal-residency-set
-              (metal-device-residency-set device))
              (let ((texture
                      (make-instance
                       'metal-gpu-texture
@@ -1235,10 +1261,7 @@ construct its temporal surface cohort.  #NL5J0J"
                (setf completed-p t)
                texture))
         (when (and resident-p (not completed-p))
-          (luv.metal:remove-metal-residency-allocation
-           (metal-device-residency-set device) native)
-          (luv.metal:commit-metal-residency-set
-           (metal-device-residency-set device)))))))
+          (metal-residency-remove device native))))))
 
 (defmethod create
     ((device metal-gpu-device) (descriptor texture-view-descriptor))
@@ -1465,7 +1488,6 @@ contiguous block -- starting at the beginning, with no padding between rows."
 
 (defmethod metal-native-teardown-closure ((texture metal-gpu-texture))
   (let* ((device (metal-texture-device texture))
-         (residency-set (metal-device-residency-set device))
          (native (metal-native-object texture))
          (resident-p (metal-texture-resident-p texture))
          (owned-p (metal-texture-owned-p texture))
@@ -1476,12 +1498,7 @@ contiguous block -- starting at the beginning, with no padding between rows."
       (when resident-p
         (list
          (lambda ()
-           (unless (metal-device-residency-retired-p device)
-             (luv.metal:remove-metal-residency-allocation
-              residency-set native)))
-         (lambda ()
-           (unless (metal-device-residency-retired-p device)
-             (luv.metal:commit-metal-residency-set residency-set)))))
+           (metal-residency-remove device native))))
       (when owned-p
         (list
          (lambda ()
@@ -2312,6 +2329,17 @@ compiler boundary of #58IDSR."
             (setf (metal-encoder-active-pass encoder) pass)
             pass))))))
 
+(defun note-metal-consumer-barrier
+    (encoder after-stages before-stages &optional (visibility luv.metal:+visibility-device+))
+  "Accumulate a Metal 4 producer-to-consumer stage barrier onto ENCODER's next pass."
+  (let ((existing (metal-encoder-pending-consumer-barrier encoder)))
+    (setf (metal-encoder-pending-consumer-barrier encoder)
+          (if existing
+              (list (logior (first existing) after-stages)
+                    (logior (second existing) before-stages)
+                    (logior (third existing) visibility))
+              (list after-stages before-stages visibility)))))
+
 (defmethod encode
     ((encoder metal-gpu-command-encoder)
      (command gpu-prepare-texture-command))
@@ -2333,11 +2361,8 @@ compiler boundary of #58IDSR."
     ;; Coalesce every texture produced by the preceding pass into the one
     ;; producer-to-fragment barrier installed on the following encoder.  The
     ;; command encoder retains each concrete resource independently below.
-    (unless (metal-encoder-pending-consumer-barrier encoder)
-      (setf (metal-encoder-pending-consumer-barrier encoder)
-            (list luv.metal:+stage-fragment+
-                  luv.metal:+stage-fragment+
-                  luv.metal:+visibility-device+)))
+    (note-metal-consumer-barrier
+     encoder luv.metal:+stage-fragment+ luv.metal:+stage-fragment+)
     (retain-metal-resource encoder texture))
   encoder)
 
@@ -2783,6 +2808,85 @@ compiler boundary of #58IDSR."
            base-vertex first-instance)
           command)))))
 
+(defmethod encode
+    ((pass metal-render-pass-encoder)
+     (command gpu-draw-indexed-indirect-command))
+  (ensure-metal-render-pass-state pass :draw-indexed-indirect)
+  (let ((pipeline (metal-render-pass-pipeline pass))
+        (index-buffer (gpu-draw-indexed-indirect-command-index-buffer command))
+        (indirect-buffer
+          (gpu-draw-indexed-indirect-command-indirect-buffer command))
+        (indirect-offset
+          (gpu-draw-indexed-indirect-command-indirect-offset command)))
+    (unless pipeline
+      (error 'gpu-invalid-state-error :object pass :operation :draw-indexed-indirect
+             :state :no-pipeline :expected-state :pipeline-bound))
+    (when (typep pipeline 'metal-gpu-mesh-render-pipeline)
+      (reject-metal-gpu-request command :indexed-draw-with-mesh-pipeline))
+    (when (and (metal-render-pipeline-layout pipeline)
+               (null (metal-render-pass-bind-group pass)))
+      (error 'gpu-invalid-state-error :object pass :operation :draw-indexed-indirect
+             :state :bind-group-missing
+             :expected-state :pipeline-bind-group-and-vertex-buffers-bound))
+    (dolist (layout (metal-render-pipeline-vertex-buffers pipeline))
+      (unless (gethash (getf layout :binding)
+                       (metal-render-pass-vertex-bindings pass))
+        (error 'gpu-invalid-state-error :object pass :operation :draw-indexed-indirect
+               :state :vertex-buffer-missing
+               :expected-state :all-vertex-buffers-bound)))
+    (unless (typep index-buffer 'metal-gpu-buffer)
+      (reject-metal-gpu-request command :incompatible-index-buffer index-buffer))
+    (unless (typep indirect-buffer 'metal-gpu-buffer)
+      (reject-metal-gpu-request command :incompatible-indirect-buffer
+                                indirect-buffer))
+    (ensure-live-metal-object index-buffer :draw-indexed-indirect)
+    (ensure-live-metal-object indirect-buffer :draw-indexed-indirect)
+    (ensure-metal-object-device
+     index-buffer (metal-buffer-device index-buffer)
+     (metal-render-pipeline-device pipeline) :draw-indexed-indirect)
+    (ensure-metal-object-device
+     indirect-buffer (metal-buffer-device indirect-buffer)
+     (metal-render-pipeline-device pipeline) :draw-indexed-indirect)
+    (unless (member :index (gpu-buffer-usage index-buffer))
+      (error 'gpu-usage-error
+             :object index-buffer :operation :draw-indexed-indirect
+             :required-usage :index
+             :actual-usage (gpu-buffer-usage index-buffer)))
+    (unless (member :indirect (gpu-buffer-usage indirect-buffer))
+      (error 'gpu-usage-error
+             :object indirect-buffer :operation :draw-indexed-indirect
+             :required-usage :indirect
+             :actual-usage (gpu-buffer-usage indirect-buffer)))
+    (unless (and (typep indirect-offset '(unsigned-byte 64))
+                 (zerop (mod indirect-offset 4))
+                 (<= (+ indirect-offset +draw-indexed-indirect-byte-size+)
+                     (gpu-buffer-size indirect-buffer)))
+      (reject-metal-gpu-request command :invalid-indirect-draw-offset
+                                indirect-offset))
+    (multiple-value-bind (native-format index-size)
+        (metal-index-format
+         (gpu-draw-indexed-indirect-command-index-format command))
+      (declare (ignore index-size))
+      (when (metal-render-pass-argument-table pass)
+        (luv.metal:set-metal-render-argument-table
+         (metal-render-pass-native-encoder pass)
+         (metal-render-pass-argument-table pass)
+         (logior luv.metal:+render-stage-vertex+
+                 (if (metal-render-pipeline-fragment-p pipeline)
+                     luv.metal:+render-stage-fragment+
+                     0))))
+      (retain-metal-resource (metal-render-pass-owner pass) index-buffer)
+      (retain-metal-resource (metal-render-pass-owner pass) indirect-buffer)
+      (luv.metal:draw-metal-indexed-primitives-indirect
+       (metal-render-pass-native-encoder pass)
+       (metal-primitive-type pipeline) native-format
+       (luv.metal:metal-buffer-gpu-address (metal-native-object index-buffer))
+       (gpu-buffer-size index-buffer)
+       (+ (luv.metal:metal-buffer-gpu-address
+           (metal-native-object indirect-buffer))
+          indirect-offset))
+      command)))
+
 (defun metal-size-value (size)
   (destructuring-bind (width height depth) size
     (list 'luv.metal::width width
@@ -2891,6 +2995,77 @@ the GPU everything recorded so far.")
   (:method (destination encoder)
     (declare (ignore destination encoder))
     t))
+
+(defconstant +metal-blit-consumer-stages+
+  (logior luv.metal:+stage-vertex+
+          luv.metal:+stage-fragment+
+          luv.metal:+stage-object+
+          luv.metal:+stage-mesh+
+          luv.metal:+stage-dispatch+)
+  "Metal stages that may read a buffer produced by an earlier blit copy.")
+
+(defmethod encode
+    ((encoder metal-gpu-command-encoder)
+     (command gpu-copy-buffer-command))
+  (ensure-metal-command-encoder-state encoder :copy-buffer)
+  (ensure-no-active-metal-pass encoder :copy-buffer)
+  (let ((source (gpu-copy-buffer-command-source command))
+        (source-offset (gpu-copy-buffer-command-source-offset command))
+        (destination (gpu-copy-buffer-command-destination command))
+        (destination-offset (gpu-copy-buffer-command-destination-offset command))
+        (size (gpu-copy-buffer-command-size command)))
+    (unless (and (typep source 'metal-gpu-buffer)
+                 (typep destination 'metal-gpu-buffer))
+      (reject-metal-gpu-request command :incompatible-buffer-copy
+                                (list source destination)))
+    (ensure-live-metal-object source :copy-buffer)
+    (ensure-live-metal-object destination :copy-buffer)
+    (let ((device (metal-command-encoder-device encoder)))
+      (ensure-metal-object-device
+       source (metal-buffer-device source) device :copy-buffer)
+      (ensure-metal-object-device
+       destination (metal-buffer-device destination) device :copy-buffer))
+    (unless (member :copy-src (gpu-buffer-usage source))
+      (error 'gpu-usage-error
+             :object source :operation :copy-buffer
+             :required-usage :copy-src
+             :actual-usage (gpu-buffer-usage source)))
+    (unless (member :copy-dst (gpu-buffer-usage destination))
+      (error 'gpu-usage-error
+             :object destination :operation :copy-buffer
+             :required-usage :copy-dst
+             :actual-usage (gpu-buffer-usage destination)))
+    (unless (and (typep source-offset '(unsigned-byte 64))
+                 (typep destination-offset '(unsigned-byte 64))
+                 (typep size '(integer 1 *))
+                 (<= (+ source-offset size) (gpu-buffer-size source))
+                 (<= (+ destination-offset size) (gpu-buffer-size destination))
+                 (or (not (eq source destination))
+                     (<= (+ source-offset size) destination-offset)
+                     (<= (+ destination-offset size) source-offset)))
+      (reject-metal-gpu-request
+       command :invalid-buffer-copy-range
+       (list :source-offset source-offset
+             :destination-offset destination-offset :size size)))
+    (let ((native-encoder
+            (luv.metal:compute-command-encoder
+             (metal-encoder-command-buffer encoder))))
+      (unless native-encoder
+        (error 'metal-gpu-error :operation :copy-buffer
+               :reason :compute-encoder-creation-failed))
+      (encode-metal-blit-read-barrier native-encoder)
+      (luv.metal:copy-metal-buffer
+       native-encoder
+       (metal-native-object source) source-offset
+       (metal-native-object destination) destination-offset
+       size)
+      (luv.metal:end-encoding native-encoder))
+    (note-metal-consumer-barrier
+     encoder luv.metal:+stage-blit+ +metal-blit-consumer-stages+)
+    (retain-metal-resource encoder source)
+    (retain-metal-resource encoder destination)
+    (setf (metal-encoder-encoded-p encoder) t)
+    command))
 
 (defmethod encode
     ((encoder metal-gpu-command-encoder)
