@@ -15,6 +15,16 @@ vocabulary table and columns of offsets into it (#Y3S82T).  Every older
 format is still read.")
 (defconstant +little-world-source-version+ 1)
 
+(defun default-luvcraft-world-pathname ()
+  "Return the pathname of the ordinary persistent luvcraft world."
+  (merge-pathnames
+   #P"luvcraft/worlds/default.sexp"
+   (let ((data-home (or (uiop:getenv "XDG_DATA_HOME")
+                        #+win32 (uiop:getenv "LOCALAPPDATA"))))
+     (if data-home
+         (uiop:ensure-directory-pathname (pathname data-home))
+         (merge-pathnames #P".local/share/" (user-homedir-pathname))))))
+
 (define-condition invalid-luvcraft-save (error)
   ((reason :initarg :reason :reader invalid-luvcraft-save-reason))
   (:report (lambda (condition stream)

@@ -116,3 +116,71 @@
       (error "Frame uniform packing emitted ~D of ~D lanes."
              index (length data)))
     data))
+
+(defun make-face-marker-vertices (corners eye right up forward focal width height)
+  "Project a planar face boundary into the shared feathered target rim.
+The caller supplies its world-space camera basis, independent of up axis."
+  (let ((vertices (make-array 0 :element-type 'single-float
+                               :adjustable t :fill-pointer 0)))
+    (when corners
+      (let ((count (length corners)))
+        (labels ((project (point)
+                   (let* ((delta (make-vec3 (- (vec3-x point) (vec3-x eye))
+                                            (- (vec3-y point) (vec3-y eye))
+                                            (- (vec3-z point) (vec3-z eye))))
+                          (z (vec3-dot delta forward)))
+                     (when (> z +luvcraft-camera-near-distance+)
+                       (list (* (/ height 2d0) focal (/ (vec3-dot delta right) z))
+                             (* (- (/ height 2d0)) focal (/ (vec3-dot delta up) z))))))
+                 (normal (a b)
+                   (let* ((dx (- (first b) (first a)))
+                          (dy (- (second b) (second a)))
+                          (length (max 0.001d0 (sqrt (+ (* dx dx) (* dy dy))))))
+                     (list (/ (- dy) length) (/ dx length))))
+                 (vertex (point miter band)
+                   (destructuring-bind (offset . ink) band
+                     (dolist (value
+                              (append
+                               (list (/ (* 2d0 (+ (first point)
+                                                  (* offset (first miter)))) width)
+                                     (/ (* 2d0 (+ (second point)
+                                                  (* offset (second miter)))) height)
+                                     0d0)
+                               ink))
+                       (vector-push-extend (coerce value 'single-float) vertices)))))
+          (let ((points (mapcar #'project corners)))
+            (when (every #'identity points)
+              (let* ((normals
+                       (loop for a in points
+                             for b in (append (rest points) (list (first points)))
+                             collect (normal a b)))
+                     (miters
+                       (loop for current in normals
+                             for previous in (cons (car (last normals)) normals)
+                             ;; Limit acute joins when the face is almost edge-on.
+                             for denominator =
+                               (max 0.25d0 (+ 1d0 (* (first previous) (first current))
+                                               (* (second previous) (second current))))
+                             collect (mapcar (lambda (a b) (/ (+ a b) denominator))
+                                             previous current)))
+                     ;; Zero-alpha endpoints and shared corner miters avoid
+                     ;; hard triangle edges, overlapping strips, and corner gaps.
+                     (bands '((-2.5 0.0 0.0 0.0 0.0)
+                              (-1.5 0.018 0.022 0.028 1.0)
+                              (-0.55 0.85 0.73 0.48 1.0)
+                              (0.55 0.85 0.73 0.48 1.0)
+                              (1.5 0.018 0.022 0.028 1.0)
+                              (2.5 0.0 0.0 0.0 0.0))))
+                (dotimes (edge count)
+                  (let ((a (nth edge points))
+                        (b (nth (mod (1+ edge) count) points))
+                        (ma (nth edge miters))
+                        (mb (nth (mod (1+ edge) count) miters)))
+                    (loop for (inner outer) on bands while outer
+                          do (vertex a ma inner)
+                             (vertex b mb inner)
+                             (vertex b mb outer)
+                             (vertex a ma inner)
+                             (vertex b mb outer)
+                             (vertex a ma outer))))))))))
+    vertices))

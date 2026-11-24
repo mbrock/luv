@@ -8,6 +8,9 @@
 
 (in-package #:luvcraft)
 
+(defvar *session* nil
+  "The live legacy Luvcraft session in this Lisp, or NIL.")
+
 (luv.arithmetic:define-quantity-constant
     +luvcraft-target-reach+ 8d0
   :type double-float
