@@ -133,7 +133,7 @@ There is no population limit. FIGURE-LANES constructs the wizard kind."
                                  for first = t then nil
                                  collect `(:format ,format
                                            ,@(when first '(:blend :premultiplied-alpha))))
-                  :sample-count sample-count :depth-compare :less :vertex-count 6)))
+                  :sample-count sample-count :depth-compare :greater :vertex-count 6)))
     (with-gpu-construction (drawing)
       (let ((vertices (figure-box-vertex-data)))
         (setf (figure-box-vertices drawing)
@@ -151,7 +151,7 @@ There is no population limit. FIGURE-LANES constructs the wizard kind."
                              :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
                              :sample-count sample-count
                              :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                              :depth-compare :less)))))))
+                                              :depth-compare :greater)))))))
 
 (defmethod make-scene-drawing-binding
     ((drawing figure-drawing) device camera-buffer shadow-view shadow-sampler)

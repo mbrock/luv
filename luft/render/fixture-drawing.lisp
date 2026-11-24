@@ -34,7 +34,7 @@
               :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
               :sample-count sample-count
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                               :depth-compare :less)))
+                               :depth-compare :greater)))
             (fixture-drawing-shadow-program drawing)
             (own-gpu-object
              drawing

@@ -1099,7 +1099,9 @@ itself is discarded after resolve.  Depth resolves select sample zero."
   (output-format :rgba16-float)
   ;; NIL, or the format of a per-pixel mask telling the scaler how far to
   ;; favour the current frame over its history.
-  (reactive-format nil))
+  (reactive-format nil)
+  ;; True when scene depth is reversed-Z (near = 1.0, far = 0.0).
+  (depth-reversed-p nil))
 
 (defstruct (shader-module-descriptor (:include gpu-descriptor))
   code

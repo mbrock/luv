@@ -27,7 +27,7 @@
               :targets (mapcar (lambda (format) `(:format ,format)) formats)
               :sample-count samples
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                               :depth-compare :less)))
+                               :depth-compare :greater)))
             (particle-program drawing)
             (render::own-gpu-object
              drawing
@@ -38,7 +38,7 @@
               :targets (mapcar (lambda (format) `(:format ,format)) formats)
               :sample-count samples
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                               :depth-compare :less)))
+                               :depth-compare :greater)))
             (ball-shadow-program drawing)
             (render::own-gpu-object
              drawing

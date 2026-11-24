@@ -318,7 +318,8 @@ starts over."
           (setf scaler (own (make-temporal-scaler-descriptor
                              :label "luft MetalFX temporal scaler"
                              :input-size render-extent :output-size extent
-                             :reactive-format +translucent-reactive-format+))
+                             :reactive-format +translucent-reactive-format+
+                             :depth-reversed-p t))
                 (slot-value generation 'temporal-scaler) scaler))
         (image :depth :depth32-float render-extent
                (usage '(:render-attachment :texture-binding)

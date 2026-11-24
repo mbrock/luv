@@ -661,6 +661,53 @@
         (true (not (outside-p (box 10 10 0 20 20 30) sun)))
         (true (outside-p (box 60 0 0 70 10 30) sun))))))
 
+(define-test reversed-z-projection-maps-near-to-one-far-to-zero-and-inverts-cleanly
+  (let ((render::*projection* :perspective))
+    (multiple-value-bind (px py pz pw divisor)
+        (render::projection-lane 1280 720 1.2
+                                 render::+perspective-near+
+                                 render::*perspective-far*)
+      (declare (ignore px py))
+      (true (= 1.0 divisor))
+      (flet ((ndc-z (view-z)
+               (coerce (/ (+ (* view-z pz) pw) view-z) 'single-float))
+             (invert (depth)
+               (/ pw (- depth pz))))
+        (true (< (abs (- (ndc-z render::+perspective-near+) 1.0)) 1e-5))
+        (true (< (abs (ndc-z render::*perspective-far*)) 1e-5))
+        ;; Reversed-Z stays strictly monotonic and separates 1 cm at 1 km in f32.
+        (true (> (ndc-z 1000.0) (ndc-z 1000.01)))
+        (dolist (distance (list render::+perspective-near+ 1.0 50.0 500.0 2000.0
+                                render::*perspective-far*))
+          (let ((recovered (invert (ndc-z distance))))
+            (true (< (/ (abs (- recovered distance)) (max 1.0 distance)) 1e-4))))
+        ;; Frustum culling accepts distant boxes inside the extended far plane
+        ;; and rejects boxes beyond it.
+        (let ((data (make-array 128 :element-type 'single-float :initial-element 0.0)))
+          (setf (aref data 5) -1.0 (aref data 10) 1.0 (aref data 12) 1.0
+                (aref data 16) 1.0 (aref data 17) 1.0
+                (aref data 18) pz (aref data 19) pw (aref data 22) 1.0)
+          (let ((camera (render::camera-clip-function data)))
+            (flet ((box (&rest corners)
+                     (make-array 6 :element-type 'single-float
+                                   :initial-contents (mapcar #'float corners))))
+              (true (not (render::box-outside-clip-p (box 1500 -1 -1 1501 1 1) camera)))
+              (true (render::box-outside-clip-p (box 9000 -1 -1 9001 1 1) camera))
+              (true (render::box-outside-clip-p (box -6 -1 -1 -5 1 1) camera))))))))
+  (let ((render::*projection* :isometric))
+    (multiple-value-bind (px py pz pw divisor)
+        (render::projection-lane 1280 720 1.2
+                                 render::+orthographic-near+
+                                 render::+orthographic-far+)
+      (declare (ignore px py))
+      (true (= 0.0 divisor))
+      (flet ((ndc-z (view-z) (+ (* view-z pz) pw))
+             (invert (depth) (/ (- depth pw) pz)))
+        (true (< (abs (- (ndc-z render::+orthographic-near+) 1.0)) 1e-5))
+        (true (< (abs (ndc-z render::+orthographic-far+)) 1e-5))
+        (dolist (distance '(-4000.0 0.0 123.5 4000.0))
+          (true (< (abs (- (invert (ndc-z distance)) distance)) 1e-2)))))))
+
 (define-test bevelled-terrain-casts-shrunk-plain-faces
   (let ((cube (make-hash-table :test #'equal))
         (shadow-points nil)

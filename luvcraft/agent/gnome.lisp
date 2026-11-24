@@ -1393,7 +1393,7 @@ SDF-AGENT-SCENE-BIND-GROUP, for bodies that bind it beside resources of their ow
                       :depth-stencil
                       '(:format :depth32-float
                         :depth-write-enabled nil
-                        :depth-compare :less)))
+                        :depth-compare :greater)))
            (luv:write-buffer vertex-buffer vertex-data)
            (let ((overlay (make-instance class
                                          :agent agent :pipeline pipeline

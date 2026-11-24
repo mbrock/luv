@@ -31,7 +31,7 @@
                  ;; front of their wall; none of them occludes the world.
                  :depth-stencil '(:format :depth32-float
                                   :depth-write-enabled nil
-                                  :depth-compare :less)))))
+                                  :depth-compare :greater)))))
         (setf (world-text-panel-program drawing)
               (program "luft world panels"
                        (shaders:world-panel-vertex-specification)

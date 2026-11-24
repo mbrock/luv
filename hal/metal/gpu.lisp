@@ -116,7 +116,9 @@
    (output-format :initarg :output-format
                   :reader metal-temporal-scaler-output-format)
    (reactive-format :initarg :reactive-format :initform nil
-                    :reader metal-temporal-scaler-reactive-format))
+                    :reader metal-temporal-scaler-reactive-format)
+   (depth-reversed-p :initarg :depth-reversed-p :initform nil
+                     :reader metal-temporal-scaler-depth-reversed-p))
   (:documentation
    "A Metal4FX temporal scaler, its fence, and neutral exposure texture."))
 
@@ -1210,6 +1212,9 @@ construct its temporal surface cohort.  #NL5J0J"
                       :color-format color-format :depth-format depth-format
                       :motion-format motion-format :output-format output-format
                       :reactive-format reactive-format
+                      :depth-reversed-p (and (temporal-scaler-descriptor-depth-reversed-p
+                                              descriptor)
+                                             t)
                       :color-usage color-usage :depth-usage depth-usage
                       :motion-usage motion-usage :output-usage output-usage
                       :reactive-usage reactive-usage)
@@ -2478,7 +2483,8 @@ compiler boundary of #58IDSR."
        (first (gpu-temporal-scaler-input-size scaler))
        (second (gpu-temporal-scaler-input-size scaler))
        (elt jitter 0) (elt jitter 1) reset-p
-       (and reactive (metal-native-object reactive)))
+       (and reactive (metal-native-object reactive))
+       (metal-temporal-scaler-depth-reversed-p scaler))
       (luv.metal:encode-metal-temporal-scaler
        (metal-native-object scaler)
        (metal-encoder-command-buffer encoder))

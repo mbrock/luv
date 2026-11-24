@@ -467,7 +467,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
               :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
               :sample-count sample-count
               :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                               :depth-compare :less)))
+                               :depth-compare :greater)))
             (terrain-translucent-program drawing)
             (own-gpu-object
              drawing
@@ -487,7 +487,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                                        ,@(when first '(:blend :premultiplied-alpha))))
               :sample-count sample-count
               :depth-stencil '(:format :depth32-float :depth-write-enabled nil
-                               :depth-compare :less)))
+                               :depth-compare :greater)))
             (terrain-shadow-program drawing)
             (own-gpu-object
              drawing
@@ -510,7 +510,7 @@ meet.  The shadow table indexes STAR-SHADOW-TRIANGLES."
                 :vertex (shaders:terrain-visibility-vertex-specification)
                 :fragment (shaders:terrain-visibility-fragment-specification)
                 :targets '((:format :rgba8-unorm) (:format :rgba8-unorm))
-                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :less)))
+                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :greater)))
               (terrain-material-program drawing)
               (own-gpu-object
                drawing

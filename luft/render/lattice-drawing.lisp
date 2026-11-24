@@ -13,7 +13,7 @@
                   for first = t then nil
                   collect `(:format ,format ,@(when first '(:blend :premultiplied-alpha))))
    :sample-count sample-count
-   :depth-stencil '(:format :depth32-float :depth-write-enabled nil :depth-compare :less)))
+   :depth-stencil '(:format :depth32-float :depth-write-enabled nil :depth-compare :greater)))
 
 (zdefun (mesh-lattice-point-words :zone :luft/prepare-overlay) (mesh)
   "Unique active sites and triangle vertices of the current star mesh.

@@ -600,7 +600,7 @@ brightest beside it and dims toward the frame."
                     (+ depth-uv
                        (vec2 (- (swizzle half-texel :x))
                              (swizzle half-texel :y)))) :x))
-         (scene-depth (min (min depth-a depth-b) (min depth-c depth-d)))
+         (scene-depth (max (max depth-a depth-b) (max depth-c depth-d)))
          (opaque-view-depth
            (assume-quantity
             (view-depth scene-depth camera-projection

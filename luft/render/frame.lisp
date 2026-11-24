@@ -201,7 +201,7 @@ final pass."
                :load-op :clear :store-op :store :clear-value #(0.0 0.0 0.0 0.0)))
             :depth-stencil-attachment
             `(:view ,(renderer-panel-depth-view renderer)
-              :depth-load-op :clear :depth-store-op :store :depth-clear-value 1.0)))))
+              :depth-load-op :clear :depth-store-op :store :depth-clear-value 0.0)))))
     (when *renderer-world-panel-encoder* (funcall *renderer-world-panel-encoder* pass))
     (end-pass pass))
   (prepare-texture encoder (renderer-panel-color-texture renderer) :texture-binding)
@@ -299,7 +299,7 @@ final pass."
                              :clear-value #(0.0 0.0 0.0 0.0))) views)
                  :depth-stencil-attachment
                  `(:view ,(renderer-depth-view renderer)
-                   :depth-load-op :clear :depth-store-op :store :depth-clear-value 1.0)))))
+                   :depth-load-op :clear :depth-store-op :store :depth-clear-value 0.0)))))
     (when visible
       (encode-terrain-visibility
        (renderer-terrain renderer) renderer frame pass
@@ -343,7 +343,7 @@ final pass."
                        `(:resolve-view ,(renderer-depth-view renderer)))
                    :depth-load-op ,(if visibility-p :load :clear)
                    :depth-store-op :store
-                   :depth-clear-value 1.0)))))
+                   :depth-clear-value 0.0)))))
         (encode-renderer-scene-drawings renderer frame pass player-p construction-p
                                         repetition-p visibility-p)
         ;; A temporal scene also writes the reactive mask, which no opaque

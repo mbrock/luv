@@ -1604,8 +1604,8 @@ moves at a parallax the pane's own motion vector cannot describe."
   (vec3 (swizzle motion :x) (swizzle motion :y) (swizzle depth :x)))
 
 (define-shader-function nearer-motion-tap (a b)
-  "Keep whichever tap is nearer the camera; depth grows away from it."
-  (mix a b (step (swizzle b :z) (swizzle a :z))))
+  "Keep whichever tap is nearer the camera; reversed-Z depth shrinks away from it."
+  (mix a b (step (swizzle a :z) (swizzle b :z))))
 
 (define-shader-abstraction nearest-motion (motion depth centre size)
   ;; At a silhouette the centre may be background while its neighbour is the
@@ -1869,12 +1869,12 @@ moves at a parallax the pane's own motion vector cannot describe."
                                  camera-projection divisor)
                                 #.*screen-ambient-occlusion-radius*))))
          (accessibility
-           (if (< depth 0.9999)
+           (if (> depth 0.0001)
                (- 1.0 (* #.*screen-ambient-occlusion-strength*
                          (min 1.0 (* occlusion 1.6))))
                1.0))
          (pooling
-           (if (< depth 0.9999)
+           (if (> depth 0.0001)
                (* #.*ambient-pigment-strength*
                   (min 1.0 (* occlusion 1.6)))
                0.0))
@@ -1895,16 +1895,17 @@ moves at a parallax the pane's own motion vector cannot describe."
   (let* ((size (/ (vec2 1.0 1.0) texel))
          (pixel (floor (* depth-uv size)))
          (centre (swizzle (texel-load scene-depth (scene-texel pixel 0.0 0.0 size)) :x))
-         (bit (if (< panel-z centre) (uint 1.0) (uint 0.0)))
+         (bit (if (> panel-z centre) (uint 1.0) (uint 0.0)))
          ;; The nearest surface carries the occlusion edge under camera motion.
+         ;; Reversed-Z maps near = 1.0 and far = 0.0, so NEAR is the maximum.
          (depths (vec4 (swizzle (texel-load scene-depth (scene-texel pixel -1.0 -1.0 size)) :x)
                        (swizzle (texel-load scene-depth (scene-texel pixel 1.0 -1.0 size)) :x)
                        (swizzle (texel-load scene-depth (scene-texel pixel -1.0 1.0 size)) :x)
                        (swizzle (texel-load scene-depth (scene-texel pixel 1.0 1.0 size)) :x)))
-         (near (min centre (min (min (swizzle depths :x) (swizzle depths :y))
-                                (min (swizzle depths :z) (swizzle depths :w)))))
-         (far (max centre (max (max (swizzle depths :x) (swizzle depths :y))
-                               (max (swizzle depths :z) (swizzle depths :w)))))
+         (near (max centre (max (max (swizzle depths :x) (swizzle depths :y))
+                                (max (swizzle depths :z) (swizzle depths :w)))))
+         (far (min centre (min (min (swizzle depths :x) (swizzle depths :y))
+                               (min (swizzle depths :z) (swizzle depths :w)))))
          (z (view-depth near projection divisor))
          (ndc (- (* uv 2.0) (vec2 1.0 1.0)))
          (xy (* (/ ndc (swizzle projection :xy)) (mix 1.0 z divisor)))
@@ -1933,7 +1934,7 @@ moves at a parallax the pane's own motion vector cannot describe."
              (> (swizzle old-clip :w) 0.0)
              (>= (swizzle old-uv :x) 0.0) (< (swizzle old-uv :x) 1.0)
              (>= (swizzle old-uv :y) 0.0) (< (swizzle old-uv :y) 1.0)
-             (> old-count (uint 0.0)) (>= panel-z near) (< panel-z far))
+             (> old-count (uint 0.0)) (<= panel-z near) (> panel-z far))
         updated
         (uvec2 (* bit (uint 65535.0)) (+ (uint 1.0) (* bit (uint 16.0)))))))
 
@@ -1950,7 +1951,7 @@ moves at a parallax the pane's own motion vector cannot describe."
             previous-camera-position previous-camera-right previous-camera-up
             previous-camera-forward previous-camera-projection)
            (uvec2 (uint 0.0) (uint 0.0)))
-      `(uvec2 (uint 0.0) (if (< ,panel-z ,scene-z) (uint 17.0) (uint 1.0)))))
+      `(uvec2 (uint 0.0) (if (> ,panel-z ,scene-z) (uint 17.0) (uint 1.0)))))
 
 (define-live-shader present-fragment-specification
     (:stage :fragment
@@ -2016,7 +2017,7 @@ moves at a parallax the pane's own motion vector cannot describe."
          ;; the same exposure and grade as geometry; only tilt-shift stays
          ;; out of background pixels.
          (radiance
-           (if (< depth 0.9999) glowing
+           (if (> depth 0.0001) glowing
                (assume-quantity
                 (swizzle value :xyz)
                 :quantity quantities:scene-radiance :unit :one)))

@@ -175,7 +175,7 @@
                 :fragment (luft.render.shaders::proposal-surface-specification)
                 :targets (mapcar (lambda (format) `(:format ,format)) formats)
                 :sample-count samples
-                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :less)))
+                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :greater)))
               (creature-surface drawing)
               (render::own-gpu-object
                drawing
@@ -186,7 +186,7 @@
                 :vertex-buffers buffers
                 :targets (mapcar (lambda (format) `(:format ,format)) formats)
                 :sample-count samples
-                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :less)))
+                :depth-stencil '(:format :depth32-float :depth-write-enabled t :depth-compare :greater)))
               (creature-shadow drawing)
               (render::own-gpu-object
                drawing

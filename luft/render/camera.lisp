@@ -19,6 +19,9 @@ projection to judge a shape rule in.")
 
 (defconstant +orthographic-near+ -4096.0)
 (defconstant +orthographic-far+ 4096.0)
+(defconstant +perspective-near+ 0.1)
+(defparameter *perspective-far* 8192.0
+  "Far clip plane in cells for perspective reversed-Z projection.")
 (defconstant +camera-yaw-response-rate+ 8.0)
 
 (defstruct camera-pose
@@ -120,25 +123,24 @@ remain cuts; camera behaviors use targets when motion should be visible."
     (make-vec3 x y z)))
 
 (defun projection-lane (width height field-of-view near far)
-  "The four projection coefficients and the homogeneous-divisor selector.
+  "The four reversed-Z projection coefficients and homogeneous-divisor selector.
 
-Both projections use the same three rows: clip X and Y are the view
-coordinates scaled, and clip Z is an affine function of view depth.  The
-perspective divisor is the view depth and the isometric divisor is one, so
-the selector is the whole of the difference."
+Both projections map NEAR to clip depth 1.0 and FAR to clip depth 0.0 so
+32-bit floating-point depth precision stays uniform across kilometer-scale
+view distances.  VIEW-DEPTH inverts both through the same affine formula."
   (let ((aspect (/ (coerce width 'single-float) height)))
     (ecase *projection*
       (:perspective
        (let ((focal (/ (tan (/ field-of-view 2.0)))))
          (values (/ focal aspect) focal
-                 (/ far (- far near))
-                 (/ (- (* far near)) (- far near))
+                 (/ (- near) (- far near))
+                 (/ (* far near) (- far near))
                  1.0)))
       (:isometric
        (let ((half (/ *isometric-height* 2.0)))
          (values (/ 1.0 (* half aspect)) (/ 1.0 half)
-                 (/ 1.0 (- far near))
-                 (/ (- near) (- far near))
+                 (/ -1.0 (- far near))
+                 (/ far (- far near))
                  0.0))))))
 
 (defstruct (frame-view (:constructor %make-frame-view))
@@ -167,9 +169,9 @@ the selector is the whole of the difference."
 (defun capture-frame-view (camera width height jitter)
   (multiple-value-bind (right up forward) (camera-basis camera)
     (let ((near (if (eq *projection* :isometric)
-                    +orthographic-near+ 0.1))
+                    +orthographic-near+ +perspective-near+))
           (far (if (eq *projection* :isometric)
-                   +orthographic-far+ 600.0)))
+                   +orthographic-far+ *perspective-far*)))
       (multiple-value-bind (px py pz pw divisor)
           (projection-lane width height (camera-field-of-view camera)
                            near far)

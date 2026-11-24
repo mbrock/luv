@@ -459,7 +459,7 @@ PALETTE and OUTPUT are caller-owned scratch arrays; no per-vertex allocation."
                   :target-format luvcraft::+luvcraft-scene-color-format+
                   :primitive '(:topology :triangle-list :cull-mode :none)
                   :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                   :depth-compare :less)))
+                                   :depth-compare :greater)))
            (luv:write-buffer indices (companion-mesh-indices mesh))
            (luv:write-buffer vertices vertex-data)
            (let ((overlay (make-instance

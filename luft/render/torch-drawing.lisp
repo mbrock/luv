@@ -145,7 +145,7 @@
                        :targets (mapcar (lambda (format) `(:format ,format)) target-formats)
                        :sample-count sample-count
                        :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                                        :depth-compare :less))
+                                        :depth-compare :greater))
               (torch-drawing-shadow-program drawing)
               (program :label "luft framed torch-body shadows"
                        :vertex (shaders:torch-body-shadow-vertex-specification)

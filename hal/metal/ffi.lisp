@@ -704,7 +704,7 @@ its reactive mask's when REACTIVE-P."
 
 (defun configure-metal-temporal-scaler
     (scaler color depth motion exposure output width height jitter-x jitter-y
-     reset-p &optional reactive)
+     reset-p &optional reactive depth-reversed-p)
   "Bind one native frame to SCALER before encoding it."
   (when reactive
     (%set-temporal-reactive-mask-texture scaler reactive))
@@ -722,7 +722,7 @@ its reactive mask's when REACTIVE-P."
   ;; pixels after applying these once-per-frame extent scales.
   (%set-temporal-motion-scale-x scaler (coerce width 'single-float))
   (%set-temporal-motion-scale-y scaler (coerce height 'single-float))
-  (%set-temporal-depth-reversed scaler 0)
+  (%set-temporal-depth-reversed scaler (if depth-reversed-p 1 0))
   (%set-temporal-reset scaler (if reset-p 1 0))
   scaler)
 

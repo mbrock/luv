@@ -123,10 +123,12 @@
   (:metaclass luv.arithmetic.records:quantity-class))
 
 (defmethod luvcraft:camera-uniform-data :around ((camera presentation-camera) width height)
-  (let ((data (call-next-method)))
-    ;; Every retained primitive must use the terrain's depth projection.
-    (setf (aref data 18) (/ 600.0 (- 600.0 0.1))
-          (aref data 19) (/ (* -600.0 0.1) (- 600.0 0.1)))
+  (let ((data (call-next-method))
+        (near render::+perspective-near+)
+        (far render::*perspective-far*))
+    ;; Every retained primitive must use the terrain's reversed-Z depth projection.
+    (setf (aref data 18) (/ (- near) (- far near))
+          (aref data 19) (/ (* far near) (- far near)))
     data))
 
 (defclass companion-presentation ()
@@ -179,7 +181,7 @@
                             (list :format :rg16-float))
              :sample-count 1
              :depth-stencil '(:format :depth32-float :depth-write-enabled t
-                              :depth-compare :less)))))
+                              :depth-compare :greater)))))
 
 (defun release-companion-frame (frame)
   (dolist (resource frame) (luv:destroy resource)))
