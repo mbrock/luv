@@ -1167,6 +1167,8 @@ input frame per tick."
             (renderer (viewer-renderer viewer)))
         (when (and renderer world-source (world-source-distant-terrain-p world-source))
           (let ((position (viewer-streaming-focus-position viewer)))
+            (update-renderer-voxel-lod
+             renderer world-source (vec3-x position) (vec3-y position))
             (update-renderer-distant-terrain
              renderer world-source (vec3-x position) (vec3-y position))))))))
 
@@ -1210,6 +1212,9 @@ nothing else is drawing with it yet."
                 (renderer (viewer-renderer viewer)))
             (when (and renderer world-source (world-source-distant-terrain-p world-source))
               (let ((position (viewer-streaming-focus-position viewer)))
+                (update-renderer-voxel-lod
+                 renderer world-source (vec3-x position) (vec3-y position)
+                 :budget 600)
                 (update-renderer-distant-terrain
                  renderer world-source (vec3-x position) (vec3-y position)
                  :budget 600))))
@@ -2906,6 +2911,7 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
 (defclass bevel-knob (knobs:switch-knob) ())
 (defclass bevel-width-knob (knobs:scalar-knob) ())
 (defclass material-bevels-knob (knobs:switch-knob) ())
+(defclass voxel-lod-knob (knobs:switch-knob) ())
 (defclass construction-knob (knobs:switch-knob) ())
 (defclass walking-speed-knob (knobs:scalar-knob) ())
 (defclass walking-gravity-knob (knobs:scalar-knob) ())
@@ -2936,6 +2942,11 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
   (refresh-viewer-inspector session))
 
 (defmethod knobs:realize-knob progn ((knob material-bevels-knob) (session game-host))
+  (when (viewer-renderer session)
+    (setf (renderer-history-valid-p (viewer-renderer session)) nil))
+  (refresh-viewer-inspector session))
+
+(defmethod knobs:realize-knob progn ((knob voxel-lod-knob) (session game-host))
   (when (viewer-renderer session)
     (setf (renderer-history-valid-p (viewer-renderer session)) nil))
   (refresh-viewer-inspector session))
@@ -2989,6 +3000,10 @@ Native canvas-thread handlers use REQUEST-VIEWER-QUIT instead: a synchronous
     (:group :geometry :class 'material-bevels-knob :label "material bevels"
      :type boolean :quantity (:quantity :dimensionless :unit :one))
   (viewer-material-bevels-p session))
+(knobs:define-knob voxel-lod
+    (:group :geometry :class 'voxel-lod-knob :label "voxel LOD"
+     :type boolean :quantity (:quantity :dimensionless :unit :one))
+  *voxel-lod-p*)
 (knobs:define-knob construction-lines
     (:group :geometry :class 'construction-knob :type boolean
      :quantity (:quantity :dimensionless :unit :one))

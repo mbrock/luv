@@ -998,3 +998,85 @@
                (terrain:%make-resident-cell-chunk
                 key 1 (terrain:resident-cell-chunk-fibers resident) table
                 (terrain:resident-cell-chunk-attachments resident)))))))))
+
+(define-test coarse-voxel-downsampling-and-meshing
+  (let* ((domain (luft:make-world-domain :horizontal-bits 6))
+         (fibers (luft:make-chunk-fibers domain 0))
+         (grid (make-array (* 64 64 256) :element-type '(unsigned-byte 8) :initial-element 0))
+         (stone-kind (make-instance 'terrain:material-kind :name :coarse-stone
+                                    :base-tone '(0.4 0.4 0.4) :bevel-tier 0))
+         (grass-kind (make-instance 'terrain:material-kind :name :coarse-grass
+                                    :base-tone '(0.2 0.5 0.15) :bevel-tier 2))
+         (stone (make-instance 'terrain:material-placement :name :coarse-stone :kind stone-kind))
+         (grass (make-instance 'terrain:material-placement :name :coarse-grass :kind grass-kind))
+         (vocab (domains:make-identity-vocabulary-domain :members (list stone grass) :limit #xff))
+         (descriptors (terrain:compile-terrain-material-descriptors vocab)))
+    ;; Build a solid plateau z = 0..31 with a 1-cell grass cap on z = 31 (so cz=15 sees
+    ;; z=30 stone x4 and z=31 grass x4; boundary voting must preserve grass = code 2).
+    ;; Carve a sealed underground pocket at x=20..23, y=20..23, z=6..9 AND an open tunnel
+    ;; punching from x=0..63 through y=36..39, z=14..17 (two ends open at x=0 and x=63).
+    (dotimes (x 64)
+      (dotimes (y 64)
+        (dotimes (z 32)
+          (let ((sealed-p (and (<= 20 x 23) (<= 20 y 23) (<= 6 z 9)))
+                (tunnel-p (and (<= 36 y 39) (<= 14 z 17)))
+                (west-cliff-open-p (< x 4))
+                (east-cliff-open-p (>= x 60)))
+            (unless (or sealed-p tunnel-p west-cliff-open-p east-cliff-open-p)
+              (setf (luft:fibers-cell-bit fibers x y z) 1
+                    (aref grid (+ z (ash (+ x (ash y 6)) 8))) (if (= z 31) 2 1)))))))
+    ;; Unculled keeps both the tunnel and the sealed pocket.
+    (let ((unculled (terrain:downsample-chunk-to-coarse-tile
+                     fibers grid 0 0 :threshold 4 :cull-interior-caves-p nil))
+          (culled (terrain:downsample-chunk-to-coarse-tile
+                   fibers grid 0 0 :threshold 4 :cull-interior-caves-p t :fallback-code 1)))
+      ;; Top of plateau cz = 15 has grass (code 2), NOT underground stone (code 1)!
+      (let* ((mats (terrain:coarse-voxel-tile-materials culled))
+             (top-idx (+ 15 (ash (+ 18 (ash 16 5)) 7))))
+        (is = 2 (aref mats top-idx)))
+      ;; Sealed pocket at cx=10, cy=10, cz=3..4 was air unculled and culled solid.
+      (let ((pocket-idx (+ 3 (ash (+ 10 (ash 10 5)) 7))))
+        (is = 0 (aref (terrain:coarse-voxel-tile-materials unculled) pocket-idx))
+        (is = 1 (aref (terrain:coarse-voxel-tile-materials culled) pocket-idx)))
+      ;; Through-tunnel at cx=16, cy=18, cz=7..8 connects to exterior air, so it stays OPEN!
+      (let ((tunnel-idx (+ 7 (ash (+ 18 (ash 16 5)) 7))))
+        (is = 0 (aref (terrain:coarse-voxel-tile-materials culled) tunnel-idx)))
+      ;; Meshing sets lod-shift=1, biased-p=1, valid bevel-tier header, zero buried z=0
+      ;; underside stars, smooth open-sky lighting, and darkened tunnel AO.
+      (multiple-value-bind (sites apps lights count)
+          (terrain:mesh-coarse-voxel-tile culled (lambda (dx dy) (declare (ignore dx dy)) nil) descriptors)
+        (declare (ignore apps))
+        (true (plusp count))
+        (let ((z-word (aref sites 2))
+              (w3 (aref lights 3))
+              (z0-solid-ground-stars 0)
+              (saw-tunnel-dark nil)
+              (saw-sky-15 nil))
+          (is = 1 (ldb (byte 3 16) z-word))
+          (is = 1 (ldb (byte 1 19) z-word))
+          (is = 1 (ldb (byte 2 30) w3))
+          (dotimes (i count)
+            (let* ((wx (- (aref sites (* i 4)) terrain:+coarse-tile-bias+))
+                   (wy (- (aref sites (+ (* i 4) 1)) terrain:+coarse-tile-bias+))
+                   (wz (aref sites (+ (* i 4) 2)))
+                   (z (ldb (byte 16 0) wz))
+                   (sky (ldb (byte 4 12) (aref lights (* i 4)))))
+              (when (and (zerop z) (<= 8 wx 54) (<= 8 wy 54))
+                (incf z0-solid-ground-stars))
+              (when (<= 14 z 18) (when (<= sky 8) (setf saw-tunnel-dark t)))
+              (when (>= z 30) (when (= sky 15) (setf saw-sky-15 t)))))
+          (is = 0 z0-solid-ground-stars)
+          (true saw-tunnel-dark)
+          (true saw-sky-15)))
+      ;; Near-seam skirt emits cx=32 stars along +X when NEAR-XP-P is true.
+      (multiple-value-bind (sites apps lights skirt-count)
+          (terrain:mesh-coarse-voxel-tile
+           culled (lambda (dx dy) (declare (ignore dx dy)) nil) descriptors
+           :near-xp-p t)
+        (declare (ignore apps lights))
+        (let ((saw-cx32 nil))
+          (dotimes (i skirt-count)
+            (let ((wx (- (aref sites (* i 4)) terrain:+coarse-tile-bias+)))
+              (when (= wx 64)
+                (setf saw-cx32 t))))
+          (true saw-cx32))))))

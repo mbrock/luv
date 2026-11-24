@@ -211,6 +211,23 @@ this package draws; the renderer and the ateliers use it.")
            #:material-store-with-cell
            #:materialize-world-source-chunk
            #:mesh-streaming-chunk
+           ;; Coarse 3D voxel LOD tiles (#INDOL7).
+           #:+coarse-tile-bias+
+           #:coarse-voxel-tile
+           #:coarse-voxel-tile-p
+           #:coarse-voxel-tile-tx
+           #:coarse-voxel-tile-ty
+           #:coarse-voxel-tile-lod-shift
+           #:coarse-voxel-tile-size-xy
+           #:coarse-voxel-tile-size-z
+           #:coarse-voxel-tile-words
+           #:coarse-voxel-tile-materials
+           #:coarse-voxel-tile-emissions
+           #:coarse-voxel-tile-journal-head
+           #:coarse-voxel-tile-authored-air-cells
+           #:downsample-chunk-to-coarse-tile
+           #:build-world-source-coarse-tile
+           #:mesh-coarse-voxel-tile
            #:movement-controller
            #:movement-intent
            #:pack-terrain-pattern

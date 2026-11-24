@@ -1088,3 +1088,20 @@
                 (setf grass-tier (ldb (byte 2 0) b)))))
           (true (eql 0 shared-tier))
           (true (eql 2 grass-tier)))))))
+
+(define-test coarse-site-bounds-decodes-scale-and-bias
+  (let* ((bias terrain:+coarse-tile-bias+)
+         ;; Two coarse stride-2 sites at world (-20, 40, 12) and (-16, 44, 16)
+         (words (make-array 8 :element-type '(unsigned-byte 32)
+                              :initial-contents
+                              (list (+ -20 bias) (+ 40 bias)
+                                    (logior 12 (ash 1 16) (ash 1 19)) #x0f
+                                    (+ -16 bias) (+ 44 bias)
+                                    (logior 16 (ash 1 16) (ash 1 19)) #x0f)))
+         (bounds (render::site-bounds words)))
+    (true (= -22.0 (aref bounds 0)))
+    (true (= 38.0 (aref bounds 1)))
+    (true (= 10.0 (aref bounds 2)))
+    (true (= -14.0 (aref bounds 3)))
+    (true (= 46.0 (aref bounds 4)))
+    (true (= 18.0 (aref bounds 5)))))

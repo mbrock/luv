@@ -289,12 +289,15 @@ final pass."
 (defun encode-renderer-terrain-visibility (renderer frame encoder)
   (let* ((views (list (renderer-visibility-sites-view renderer)
                       (renderer-visibility-primitives-view renderer)))
-         (visible (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
-                                        (renderer-slot-order renderer))
-                        for resident = (mesh-slot-resident
-                                        (gethash key (renderer-mesh-slots renderer)))
-                        when (resident-drawn-p resident nil)
-                          collect resident))
+         (visible (append
+                   (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
+                                         (renderer-slot-order renderer))
+                         for resident = (mesh-slot-resident
+                                         (gethash key (renderer-mesh-slots renderer)))
+                         when (resident-drawn-p resident nil)
+                           collect resident)
+                   (when (member *benchmark-terrain-p* '(t :scene))
+                     (renderer-voxel-lod-visible-residents renderer))))
          (pass (begin-render-pass
                 encoder
                 (make-render-pass-descriptor
@@ -434,27 +437,32 @@ final pass."
   (encode-scene-drawing
    (renderer-sky renderer) pass
    (renderer-frame-drawing-binding renderer frame (renderer-sky renderer)))
-  (let ((visible (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
-                                       (renderer-slot-order renderer))
-                       for resident = (mesh-slot-resident
-                                       (gethash key (renderer-mesh-slots renderer)))
-                       when (resident-drawn-p resident nil)
-                         collect resident)))
+  (let* ((near-visible (loop for key in (and (member *benchmark-terrain-p* '(t :scene))
+                                             (renderer-slot-order renderer))
+                             for resident = (mesh-slot-resident
+                                             (gethash key (renderer-mesh-slots renderer)))
+                             when (resident-drawn-p resident nil)
+                               collect resident))
+         (coarse-visible (when (member *benchmark-terrain-p* '(t :scene))
+                           (renderer-voxel-lod-visible-residents renderer)))
+         (all-visible (if coarse-visible
+                          (append near-visible coarse-visible)
+                          near-visible)))
     (if visibility-p
-        (when visible
+        (when all-visible
           ;; One fullscreen draw shades every visible chunk through the global
           ;; arenas; every terrain material draw precedes fixtures because it
           ;; writes color without depth testing.
           (encode-terrain-material
            (renderer-terrain renderer) pass
            (renderer-frame-visibility-binding renderer frame t))
-          (dolist (resident visible)
+          (dolist (resident near-visible)
             (draw-resident-fixture-bodies renderer frame pass resident)))
-        (when visible
+        (when all-visible
           (let ((binding (renderer-frame-terrain-bind-group renderer frame nil)))
             (encode-terrain-batch
-             (renderer-terrain renderer) renderer frame pass binding visible)
-            (dolist (resident visible)
+             (renderer-terrain renderer) renderer frame pass binding all-visible)
+            (dolist (resident near-visible)
               (draw-resident-fixture-bodies renderer frame pass resident))))))
   ;; Distant terraced voxel columns fill beyond resident near chunks, early-Z
   ;; rejected wherever near terrain has already claimed depth.

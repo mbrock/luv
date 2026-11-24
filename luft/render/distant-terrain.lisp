@@ -443,7 +443,8 @@ material-descriptors buffer carries SOURCE's vocabulary."
             (loop for ty from (aref b 2) to (aref b 3) do
               (loop for tx from (aref b 0) to (aref b 1)
                     unless (if (zerop level)
-                               (distant-level0-covered-by-near-p tx ty mesh-slots)
+                               (or (distant-level0-covered-by-near-p tx ty mesh-slots)
+                                   (voxel-lod-tile-present-p renderer tx ty))
                                (distant-tile-covered-by-inner-ring-p level tx ty inner))
                       do (let ((tile (gethash (distant-tile-key level tx ty) tiles)))
                            (when (and tile (plusp (distant-tile-quad-count tile))

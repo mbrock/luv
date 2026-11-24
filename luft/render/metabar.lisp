@@ -16,6 +16,11 @@
                                   (streaming-scene-source (viewer-source viewer))
                                   (world-source-distant-terrain-p
                                    (streaming-scene-source (viewer-source viewer)))))
+                            (voxel-lod
+                             (and (typep (viewer-source viewer) 'streaming-scene)
+                                  (streaming-scene-source (viewer-source viewer))
+                                  (world-source-distant-terrain-p
+                                   (streaming-scene-source (viewer-source viewer)))))
                             (t t)))))
                  luv.knobs:*knobs*))
 

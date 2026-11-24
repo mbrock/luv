@@ -240,7 +240,7 @@ Traps identified before implementation so we do not rediscover them later:
   cliffside window at dusk, and (4) native Metal GPU frame timings following
   [[file:../.agents/metal-profiling.md][the Metal profiling runbook]].
 
-* NEXT Phase 1: scale-covariant star shader and live stride-2 spike
+* DONE Phase 1: scale-covariant star shader and live stride-2 spike
 :PROPERTIES:
 :ID: 4R3Y36
 :END:
@@ -259,12 +259,23 @@ Build the smallest live proof before committing to the full pyramid:
    across =x ∈ [832, 896)= in front of the current alpine camera, plus a carved
    test tunnel through the ridge.
 
-Done when: live screenshots and motion checks show whether isotropic beveled
-=stride = 2= resolves the luminance/bevel/silhouette discontinuity, settle the
-=3/8= vs. =4/8= occupancy question on real trees and tunnels, and report M5 GPU
-frame impact.
+*Observed Phase 1 results (M5, =2200×1600=, camera at =(1088.99, 1081.32, 39.06)=):*
+- *Star budget across 132 active L0 tiles (=t = 4=):* treating =z = -1= as solid
+  bedrock eliminates ~133K buried =z = 0= stars (~1,008/tile: =647,945= →
+  =514,939= unculled).  Exterior-air cave culling cuts =514,939= → =425,367=
+  stars (-17.4%), all at =60 fps= vs. =58 fps= in the heightfield control.
+- *=3/8= vs. =4/8= threshold:* =t = 4= (=425,367= stars) holds exact 50% majority
+  volume and natural conifer crowns; =t = 3= (=402,672= stars) fills 1-cell
+  noise pockmarks on sheer cliffs at the cost of slightly fuller trees.  Default
+  remains =t = 4= with live threshold switching intact.
+- *Seam & tunnel proof:* dropping coarse borders touching resident near chunks by
+  2 coarse cells closes the =x = 896= sky slit completely; smoothing open-sky AO
+  (=15= / =12= / =8= / =4=) eliminates harsh cliff banding; stepping across
+  =x = 1088= streams =tx = 13= seamlessly without TAA resets; and punching a
+  temporary =10,752=-cell through-tunnel opens a visible beveled arch straight
+  through the central rock peak via standard journal invalidation.
 
-* TODO Phase 2: unified 3D coarse pyramid across L0..L3
+* NEXT Phase 2: unified 3D coarse pyramid across L0..L3
 :PROPERTIES:
 :ID: AQCYEH
 :END:

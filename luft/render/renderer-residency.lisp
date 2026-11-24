@@ -526,19 +526,33 @@ cohort untouched. No frame can interleave with the owner-thread publication."
   "The world-cell box holding every star drawn at INSTANCE-WORDS' sites.
 
 A site sits at a lattice vertex and its star's geometry stays within one
-cell of it on every axis, so the box is the sites' extent grown by one."
+scaled cell of it on every axis, so the box is the sites' extent grown by SCALE."
   (declare (type (simple-array (unsigned-byte 32) (*)) instance-words))
   (when (plusp (length instance-words))
-    (let ((low (make-list 3 :initial-element most-positive-fixnum))
-          (high (make-list 3 :initial-element most-negative-fixnum)))
-      (loop for site from 0 below (length instance-words) by 4
-            do (dotimes (axis 3)
-                 (let ((value (aref instance-words (+ site axis))))
-                   (setf (nth axis low) (min (nth axis low) value)
-                         (nth axis high) (max (nth axis high) value)))))
-      (map '(simple-array single-float (6))
-           (lambda (value) (coerce value 'single-float))
-           (append (mapcar #'1- low) (mapcar #'1+ high))))))
+    (let ((min-x most-positive-fixnum) (min-y most-positive-fixnum) (min-z most-positive-fixnum)
+          (max-x most-negative-fixnum) (max-y most-negative-fixnum) (max-z most-negative-fixnum))
+      (declare (type fixnum min-x min-y min-z max-x max-y max-z))
+      (loop for site fixnum from 0 below (length instance-words) by 4 do
+        (let* ((z-word (aref instance-words (+ site 2)))
+               (bias (if (logbitp 19 z-word) 1048576 0))
+               (scale (ash 1 (ldb (byte 3 16) z-word)))
+               (wx (- (aref instance-words site) bias))
+               (wy (- (aref instance-words (+ site 1)) bias))
+               (wz (ldb (byte 16 0) z-word)))
+          (declare (type fixnum z-word bias scale wx wy wz))
+          (setf min-x (min min-x (- wx scale))
+                min-y (min min-y (- wy scale))
+                min-z (min min-z (- wz scale))
+                max-x (max max-x (+ wx scale))
+                max-y (max max-y (+ wy scale))
+                max-z (max max-z (+ wz scale)))))
+      (make-array 6 :element-type 'single-float
+                  :initial-contents (list (coerce min-x 'single-float)
+                                          (coerce min-y 'single-float)
+                                          (coerce min-z 'single-float)
+                                          (coerce max-x 'single-float)
+                                          (coerce max-y 'single-float)
+                                          (coerce max-z 'single-float))))))
 
 (defun sort-sites-by-star
     (instance-words appearance-words

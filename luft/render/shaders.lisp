@@ -1012,9 +1012,9 @@ that density along the straight ray."
 ;;; distance dissolving into air.  The two functions below are those terms,
 ;;; shared by terrain and torch bodies so both sit in the same light.
 
-(define-shader-function paper-surface-radiance
-    (tone normal world visibility sun sun-color sky ground)
-  "Scene radiance of a flat paper facet of TONE under the sun and sky."
+(define-shader-function paper-surface-radiance-at-scale
+    (tone normal world visibility sun sun-color sky ground cell-scale)
+  "Scene radiance of a flat paper facet of TONE under the sun and sky at CELL-SCALE."
   (let* ((upness (swizzle normal :z))
          ;; Plain Lambert.  Wrapping it past the terminator would let the
          ;; shadow map's meaningless back-face samples show as stripes.
@@ -1024,7 +1024,7 @@ that density along the straight ray."
          ;; One fixed hash per cell and orientation gives each facet its own
          ;; slightly different cut of the same paper; a broad fibre noise
          ;; keeps large faces from reading as flat vector fills.
-         (cell (floor (- world (* normal 0.25))))
+         (cell (floor (- (/ world cell-scale) (* normal 0.25))))
          (facet (- (paper-hash (+ cell (* normal 7.0))) 0.5))
          (fibre (- (paper-noise (* world 1.7)) 0.5))
          ;; Broad painted patches, a few dozen cells across, drift the tone
@@ -1036,6 +1036,12 @@ that density along the straight ray."
          (albedo (* (* tone patch-tint)
                     (+ 1.0 (* 0.06 facet) (* 0.08 fibre)))))
     (* albedo (+ ambient direct))))
+
+(define-shader-function paper-surface-radiance
+    (tone normal world visibility sun sun-color sky ground)
+  "Scene radiance of a flat paper facet of TONE under the sun and sky."
+  (paper-surface-radiance-at-scale
+   tone normal world visibility sun sun-color sky ground 1.0))
 
 (define-shader-function paper-atmospheric-surface
     (radiance world eye forward divisor character sun fog zenith parameters horizon)
@@ -1119,6 +1125,7 @@ NIL leaves the atelier's direct light unchanged.")
               (edge-shaping :vec4 :location 11 :interpolation :flat)
               (material-coverage :float :location 12 :interpolation :flat
                                  :quantity quantities::surface-coverage :unit :one)
+              (site-scale :float :location 13 :interpolation :flat)
               (voxel-light :vec4 :location 10
                            :components #.(luft.terrain::terrain-varying-components :light)))
      :outputs ((color-output :vec4 :location 0)
@@ -1129,19 +1136,25 @@ NIL leaves the atelier's direct light unchanged.")
                  (shadow-sampler :sampler :binding 5)))
   (let* ((normal (normalize (representation mesh-normal)))
          (world (representation world-position))
+         (coarse-p (> site-scale 1.5))
          ;; Response curves below intentionally operate on represented lanes;
          ;; their heterogeneous inputs have been checked at the stage seam.
          (sun (representation (swizzle sun-vector :xyz)))
          (sun-color (representation (swizzle sun-color-vector :xyz)))
          (visibility
-           (* (soft-shadow-visibility
-               shadow-map shadow-sampler shadow-sample normal sun
-               (representation shadow-control)
-               shadow-row-x shadow-row-y shadow-row-z)
-              (terrain-cloud-visibility
-               world sun (swizzle atmosphere-parameters :x)
-               (swizzle (representation horizon-color-vector) :w)
-               (swizzle (representation sun-color-vector) :w))))
+           (if coarse-p
+               (terrain-cloud-visibility
+                world sun (swizzle atmosphere-parameters :x)
+                (swizzle (representation horizon-color-vector) :w)
+                (swizzle (representation sun-color-vector) :w))
+               (* (soft-shadow-visibility
+                   shadow-map shadow-sampler shadow-sample normal sun
+                   (representation shadow-control)
+                   shadow-row-x shadow-row-y shadow-row-z)
+                  (terrain-cloud-visibility
+                   world sun (swizzle atmosphere-parameters :x)
+                   (swizzle (representation horizon-color-vector) :w)
+                   (swizzle (representation sun-color-vector) :w)))))
          (relief (swizzle (representation material-surface) :x))
          (strength (swizzle (representation material-surface) :y))
          (roughness (swizzle (representation material-surface) :z))
@@ -1153,28 +1166,38 @@ NIL leaves the atelier's direct light unchanged.")
          ;; pixels; an orthographic view keeps it.
          (to-eye (- (swizzle eye :xyz) world))
          (distance (mix 20.0 (sqrt (dot to-eye to-eye)) divisor))
-         (fade (filtered-material-detail
-                (- 1.0 (smoothstep 40.0 120.0
-                                  (* distance
-                                     (/ (pattern-fineness (representation material-pattern)) 4.0))))
-                world (pattern-fineness (representation material-pattern))))
+         (fade (if coarse-p
+                   0.0
+                   (filtered-material-detail
+                    (- 1.0 (smoothstep 40.0 120.0
+                                      (* distance
+                                         (/ (pattern-fineness (representation material-pattern)) 4.0))))
+                    world (pattern-fineness (representation material-pattern)))))
          ;; Fine nap filters independently: a tapestry's large figure and a
          ;; bale's bindings must survive after individual fibers disappear.
-         (nap-fade (filtered-material-detail
-                    (- 1.0 (smoothstep 12.0 40.0
-                                      (/ distance (max 0.2 (abs (dot normal (normalize to-eye)))))))
-                    world 24.0))
-         (laid (laid-pattern (representation material-pattern) normal world))
-         (height (surface-height relief (representation material-pattern) world fade nap-fade laid))
+         (nap-fade (if coarse-p
+                       0.0
+                       (filtered-material-detail
+                        (- 1.0 (smoothstep 12.0 40.0
+                                          (/ distance (max 0.2 (abs (dot normal (normalize to-eye)))))))
+                        world 24.0)))
+         (laid (if coarse-p
+                   (vec4 0.0 0.0 0.0 0.0)
+                   (laid-pattern (representation material-pattern) normal world)))
+         (height (if coarse-p
+                     0.5
+                     (surface-height relief (representation material-pattern) world fade nap-fade laid)))
          (crystal-p (> relief 12.5))
-         (crystal-data (if crystal-p
+         (crystal-data (if (and crystal-p (not coarse-p))
                            (crystal-facet-data normal world distance fade)
                            (vec4 normal 0.0)))
-         (bent (if crystal-p
-                   (swizzle crystal-data :xyz)
-                   (terrain-edge-normal (relief-normal normal world strength height)
-                                        normal world edge-shaping distance)))
-         (crystal-ridge (if crystal-p (swizzle crystal-data :w) 0.0))
+         (bent (if coarse-p
+                   normal
+                   (if crystal-p
+                       (swizzle crystal-data :xyz)
+                       (terrain-edge-normal (relief-normal normal world strength height)
+                                            normal world edge-shaping distance))))
+         (crystal-ridge (if (and crystal-p (not coarse-p)) (swizzle crystal-data :w) 0.0))
          (mortar-tone (swizzle (representation material-mortar) :xyz))
          (element-tone
            (* (if (> (swizzle laid :w) 0.5)
@@ -1193,7 +1216,7 @@ NIL leaves the atelier's direct light unchanged.")
          (face-tone (face-pattern-tone (representation material-pattern) laid normal
                                        material-tone (representation material-mortar)
                                        (representation material-accent)))
-         (base-tone (if (< (swizzle (representation material-pattern) :x) 0.5)
+         (base-tone (if (or coarse-p (< (swizzle (representation material-pattern) :x) 0.5))
                         material-tone
                         (if (> (swizzle (representation material-pattern) :x) 4.5)
                             (mix material-tone face-tone fade)
@@ -1204,11 +1227,11 @@ NIL leaves the atelier's direct light unchanged.")
          ;; worn lighter and concave ones gather darker (#HYBFRT).
          (fringe (if (< (abs (- relief 1.0)) 0.5)
                      (* (smoothstep 0.78 0.94
-                                    (+ (fract (- (swizzle world :z) 0.001))
+                                    (+ (fract (- (/ (swizzle world :z) site-scale) 0.001))
                                        (* 0.08 (- height 0.5))))
                         (- 1.0 (abs (swizzle normal :z))))
                      0.0))
-         (surface-tone (if (> relief 12.5)
+         (surface-tone (if (and (not coarse-p) (> relief 12.5))
                            (faceted-tone base-tone normal world fade)
                            base-tone))
          (tone (terrain-material-character
@@ -1240,9 +1263,9 @@ NIL leaves the atelier's direct light unchanged.")
                            base-coverage)
                        base-coverage))
          (reflected
-           (+ (paper-surface-radiance
+           (+ (paper-surface-radiance-at-scale
                (* tone (- 1.0 (* metal 0.9))) bent world visibility sun sun-color
-               sky ground)
+               sky ground site-scale)
               (* metal tone (* 1.8 environment))
               ;; Terrain voxel light (#BQMYNU): torches, lanterns, crystals,
               ;; and lava, warm by night and lost in the sun by day.  The
@@ -1376,8 +1399,25 @@ or return BASE-BEVEL unchanged when MATERIAL-BEVELS-P is off or no tiers are pac
           (min 0.5 (* base-bevel scale)))
         base-bevel)))
 
-(define-shader-function star-record-world (record origin bevel)
-  "The world point of one biased star-table RECORD at site ORIGIN with cell bevel BEVEL.
+(define-shader-function star-site-origin (site)
+  "Decode world-cell origin from SITE.
+Bit 19 of SITE.Z signals a +2^20 (1048576) bias on X and Y for signed coarse coordinates."
+  (let* ((z-word (swizzle site :z))
+         (bias (if (> (ldb (byte 1 19) z-word) (uint 0.0)) 1048576.0 0.0)))
+    (vec3 (- (float (swizzle site :x)) bias)
+          (- (float (swizzle site :y)) bias)
+          (float (ldb (byte 16 0) z-word)))))
+
+(define-shader-function star-site-scale (site)
+  "Decode isotropic cell scale 2^lod-shift from bits 16..18 of SITE.Z."
+  (let* ((shift (ldb (byte 3 16) (swizzle site :z))))
+    (if (= shift (uint 0.0)) 1.0
+        (if (= shift (uint 1.0)) 2.0
+            (if (= shift (uint 2.0)) 4.0
+                (if (= shift (uint 3.0)) 8.0 16.0))))))
+
+(define-shader-function star-record-world (record origin bevel scale)
+  "The world point of one biased star-table RECORD at site ORIGIN with cell bevel BEVEL and SCALE.
 Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sign {-1, 0, +1}."
   (let* ((ticks (- (vec3 (float (swizzle record :x))
                          (float (swizzle record :y))
@@ -1386,7 +1426,7 @@ Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sig
          (anchor (step (vec3 4.0 4.0 4.0) ticks))
          (offset (- ticks (* anchor 8.0))))
     (assume-quantity
-     (+ origin (+ anchor (* offset bevel)))
+     (+ origin (* scale (+ anchor (* offset bevel))))
      :quantity quantities:world-position :unit quantities:cell)))
 
 (define-live-shader terrain-vertex-specification
@@ -1416,6 +1456,7 @@ Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sig
                (edge-shaping-output :vec4 :location 11 :interpolation :flat)
                (material-coverage-output :float :location 12 :interpolation :flat
                                          :quantity quantities::surface-coverage :unit :one)
+               (site-scale-output :float :location 13 :interpolation :flat)
                (voxel-light-output :vec4 :location 10
                                    :components #.(luft.terrain::terrain-varying-components :light)))
      :resources ((sites :storage-buffer :binding 0 :element :uvec4)
@@ -1428,13 +1469,14 @@ Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sig
                   :members #.(scene-uniform-prefix 23))))
   (let* ((site (buffer-element sites instance-index))
          (record (buffer-element terrain-vertices vertex-index))
+         (resolved-site-scale (star-site-scale site))
          (world (star-record-world
-                 record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-                              (float (swizzle site :z)))
+                 record (star-site-origin site)
                  (star-corner-bevel
                   record (buffer-element terrain-lights instance-index)
                   (swizzle (representation render-parameters) :x)
-                  (swizzle (representation camera-right) :w))))
+                  (swizzle (representation camera-right) :w))
+                 resolved-site-scale))
          (normal (assume-quantity
                   (swizzle (buffer-element terrain-normals
                                            (ldb (byte 16 16) (swizzle record :w)))
@@ -1592,6 +1634,7 @@ Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sig
                                        (swizzle pattern-row :w)))
                            #.(luft.terrain::terrain-descriptor-divisor :transmission)))
                  :quantity quantities::surface-coverage :unit :one))
+    (set-output site-scale-output resolved-site-scale)
     (set-output voxel-light-output voxel-light)))
 
 (define-live-shader terrain-shadow-vertex-specification
@@ -1606,9 +1649,9 @@ Atlas ticks {-1, 0, 1, 7, 8} decompose into lattice anchor {0, 1} plus bevel sig
   (let* ((site (buffer-element sites instance-index))
          (world (star-record-world
                  (buffer-element terrain-vertices vertex-index)
-                 (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-                       (float (swizzle site :z)))
-                 (swizzle (representation render-parameters) :x))))
+                 (star-site-origin site)
+                 (swizzle (representation render-parameters) :x)
+                 (star-site-scale site))))
     (set-output clip-position
                 (light-clip-position world shadow-row-x shadow-row-y
                                      shadow-row-z shadow-row-w))))

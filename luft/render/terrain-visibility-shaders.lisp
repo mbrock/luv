@@ -42,12 +42,12 @@
                                        (ldb (byte 8 0) (swizzle site :w)))))
          (record (buffer-element terrain-vertices vertex-index))
          (world (star-record-world
-                 record (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-                              (float (swizzle site :z)))
+                 record (star-site-origin site)
                  (star-corner-bevel
                   record (buffer-element terrain-lights instance-index)
                   (swizzle (representation render-parameters) :x)
-                  (swizzle (representation camera-right) :w))))
+                  (swizzle (representation camera-right) :w))
+                 (star-site-scale site)))
          (clip (mesh-view-clip world camera-position camera-right camera-up
                                camera-forward camera-projection
                                (swizzle (representation render-parameters) :z)))
@@ -99,12 +99,12 @@ The homogeneous divisor is the same MIX as MESH-VIEW-CLIP, not a mode guess."
     (let* ((vertex-record (buffer-element terrain-vertices ,index)))
       (star-record-world
        vertex-record
-       (vec3 (float (swizzle site :x)) (float (swizzle site :y))
-             (float (swizzle site :z)))
+       (star-site-origin site)
        (star-corner-bevel
         vertex-record site-lights
         (swizzle (representation render-parameters) :x)
-        (swizzle (representation camera-right) :w))))))
+        (swizzle (representation camera-right) :w))
+       (star-site-scale site)))))
 
 (defun terrain-visibility-light-form (index vertex-bindings)
   ;; The light packing is owned by the forward vertex shader, including its
@@ -301,15 +301,21 @@ sample only: the host retains the visibility depth and uses forward for MSAA."
                           for assignment = (find (first output) assignments :key #'second)
                           do (assert assignment)
                           collect (list (first input) (third assignment)))
-               (let* ((height-here ,(height-at 'hit-world dx dy))
+               (let* ((height-here (if (> site-scale 1.5)
+                                       0.5
+                                       ,(height-at 'hit-world dx dy)))
                       (height-horizontal
-                        ,(height-at '(if bottom-row (if right-column point-01 point-11)
-                                         (if right-column point-00 point-10))
-                                    dx '(if right-column dy-left dy-right)))
+                        (if (> site-scale 1.5)
+                            0.5
+                            ,(height-at '(if bottom-row (if right-column point-01 point-11)
+                                             (if right-column point-00 point-10))
+                                        dx '(if right-column dy-left dy-right))))
                       (height-vertical
-                        ,(height-at '(if bottom-row (if right-column point-10 point-00)
-                                         (if right-column point-11 point-01))
-                                    '(if bottom-row dx-top dx-bottom) dy))
+                        (if (> site-scale 1.5)
+                            0.5
+                            ,(height-at '(if bottom-row (if right-column point-10 point-00)
+                                             (if right-column point-11 point-01))
+                                        '(if bottom-row dx-top dx-bottom) dy)))
                       (,hx (if right-column (- height-here height-horizontal)
                                (- height-horizontal height-here)))
                       (,hy (if bottom-row (- height-here height-vertical)

@@ -84,6 +84,7 @@
                              (:file "streamed-light")
                              (:file "streaming")
                              (:file "streaming-mesh")
+                             (:file "voxel-lod")
                              (:file "streaming-publication")
                              (:file "sequencer")
                              (:file "world-tag"))))
@@ -146,6 +147,7 @@
                              (:file "world-text")
                              (:file "camera")
                              (:file "distant-terrain")
+                             (:file "voxel-lod")
                              (:file "frame")))))
 
 (defsystem "luft/world"

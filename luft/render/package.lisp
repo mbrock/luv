@@ -122,6 +122,11 @@
            #:box-figure #:pack-figure-instances #:viewer-figures #:advance-viewer-game
            #:apply-viewer-input-frame #:viewer-input-tape
            #:renderer-light-at
+           #:*voxel-lod-p*
+           #:*voxel-lod-occupancy-threshold*
+           #:*voxel-lod-cull-caves-p*
+           #:update-renderer-voxel-lod
+           #:voxel-lod-stats
            #:make-scene-drawing-binding #:encode-scene-drawing
            #:release-scene-drawing
            #:torch-drawing #:make-framed-torch-drawing
