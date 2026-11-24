@@ -647,3 +647,65 @@ Unlike SXHASH this freezes a portable, independently captured baseline."
         (false (lantern-solid-p))
         (edit 1 nil)
         (is = 0 (length (terrain:scene-attachments scene)))))))
+
+(define-test biomes-relief-generates-diverse-biomes-and-distant-columns
+  (let* ((source (game:make-luvcraft-world-source :seed 121 :relief :biomes :height 128))
+         (little (luvcraft.luft::luvcraft-little-world-source source))
+         (seen (make-hash-table :test #'eq)))
+    (loop for z from -1200 to 1200 by 96 do
+      (loop for x from -1200 to 1200 by 96
+            do (setf (gethash (luvcraft::little-world-biome-at little x z) seen) t)))
+    (true (>= (hash-table-count seen) 6))
+    (true (gethash :meadow seen))
+    (true (gethash :desert seen))
+    (true (gethash :mesa seen))
+    (true (gethash :alpine seen))
+    ;; Analytical surface grid fills heights and non-zero material codes.
+    (let* ((count 32)
+           (grid-len (* (+ count 2) (+ count 2)))
+           (heights (make-array grid-len :element-type '(signed-byte 32) :initial-element -1))
+           (tops (make-array grid-len :element-type '(unsigned-byte 8) :initial-element 0))
+           (sides (make-array grid-len :element-type '(unsigned-byte 8) :initial-element 0)))
+      (terrain:sample-world-source-surface-grid source 1024 1024 4 count heights tops sides)
+      (true (every (lambda (h) (>= h 2)) heights))
+      (true (plusp (aref tops (+ 34 1))))
+      (true (plusp (aref sides (+ 34 1)))))))
+
+(define-test rebasing-meadow-save-to-biomes-preserves-homeland-and-round-trips
+  (uiop:with-temporary-file (:pathname source-path :suffix ".sexp")
+    (uiop:with-temporary-file (:pathname rebased-path :suffix ".sexp")
+      (let* ((world (luvcraft:make-empty-little-block-world
+                     :seed 121 :relief :meadow :chunk-height 16))
+             (little (luvcraft:block-world-source world))
+             (h0 (luvcraft::little-world-surface-height little 10 20 16)))
+        (luvcraft::record-block-edit (luvcraft:little-world-source-edits little)
+                                     luvcraft::*stone-block* 10 (1+ h0) 20)
+        (luvcraft::record-block-edit (luvcraft:little-world-source-edits little)
+                                     luvcraft::*terracotta-block* 10 (+ h0 15) 20)
+        (luvcraft::write-luvcraft-save-description
+         (luvcraft::make-luvcraft-format-2-save-description world)
+         source-path)
+        (multiple-value-bind (dest homeland verified)
+            (luvcraft::rebase-luvcraft-save-to-biomes source-path rebased-path
+                                                      :chunk-height 128)
+          (is equal dest rebased-path)
+          (is = 2 verified)
+          (true (plusp (length (getf homeland :boxes)))))
+        ;; Round-trip reload restores :BIOMES, height 128, homeland, and edits.
+        (multiple-value-bind (reloaded dropped)
+            (game:luvcraft-save-world-source rebased-path)
+          (is = 0 dropped)
+          (is eq :biomes (game:luvcraft-world-source-relief reloaded))
+          (is = 128 (game:luvcraft-world-source-height reloaded))
+          (let ((new-little (luvcraft.luft::luvcraft-little-world-source reloaded)))
+            (is = h0 (luvcraft::little-world-surface-height new-little 10 20 128))
+            ;; Distant landmark projection lifts the authored tower column above ground.
+            (let* ((count 32)
+                   (grid-len (* (+ count 2) (+ count 2)))
+                   (heights (make-array grid-len :element-type '(signed-byte 32) :initial-element -1))
+                   (tops (make-array grid-len :element-type '(unsigned-byte 8) :initial-element 0))
+                   (sides (make-array grid-len :element-type '(unsigned-byte 8) :initial-element 0)))
+              (terrain:sample-world-source-surface-grid reloaded 1024 1024 2 count heights tops sides)
+              (let ((col (1+ (floor 10 2)))
+                    (row (1+ (floor 20 2))))
+                (is = (+ h0 15) (aref heights (+ (* row 34) col)))))))))))

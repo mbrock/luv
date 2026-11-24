@@ -221,12 +221,14 @@ as its alias (*MATERIAL-ALIASES*), so a world is never refused for a name."
    "Restore a world source named by keyword KIND from DESCRIPTION."))
 
 (defmethod world-source-save-description ((source little-world-source))
-  (list :little-world
-        :source-version +little-world-source-version+
-        :seed (little-world-source-seed source)
-        :relief (little-world-source-relief source)
-        :edits (block-edit-overlay-save-descriptions
-                (little-world-source-edits source))))
+  (let ((homeland (little-world-source-homeland source)))
+    (append (list :little-world
+                  :source-version +little-world-source-version+
+                  :seed (little-world-source-seed source)
+                  :relief (little-world-source-relief source))
+            (when homeland (list :homeland homeland))
+            (list :edits (block-edit-overlay-save-descriptions
+                          (little-world-source-edits source))))))
 
 (defmethod restore-world-source-save-description
     ((kind (eql :little-world)) description)
@@ -238,6 +240,8 @@ as its alias (*MATERIAL-ALIASES*), so a world is never refused for a name."
         ;; anything else would move the ground under their edits.
         (relief (description-value description :relief "little-world source"
                                    :optional t :default :meadow))
+        (homeland (description-value description :homeland "little-world source"
+                                     :optional t :default nil))
         (edits (description-value description :edits "little-world source")))
     (unless (eql version +little-world-source-version+)
       (invalid-luvcraft-save
@@ -246,12 +250,13 @@ as its alias (*MATERIAL-ALIASES*), so a world is never refused for a name."
     (unless (integerp seed)
       (invalid-luvcraft-save "A little-world seed must be an integer, not ~S."
                              seed))
-    (unless (member relief '(:meadow :alpine))
+    (unless (member relief '(:meadow :alpine :biomes))
       (invalid-luvcraft-save
-       "A little-world relief must be :MEADOW or :ALPINE, not ~S." relief))
+       "A little-world relief must be :MEADOW, :ALPINE, or :BIOMES, not ~S." relief))
     (make-instance 'little-world-source
                    :seed seed
                    :relief relief
+                   :homeland homeland
                    :edits (restore-block-edit-overlay edits))))
 
 (defmethod restore-world-source-save-description ((kind t) description)
@@ -1053,6 +1058,110 @@ bag that name the same video get the same object back.")
         :upload-date (film-upload-date film)
         :pathname (and (film-pathname film)
                        (namestring (film-pathname film)))))
+
+(defun cluster-homeland-boxes (points &key (padding 48) (merge-gap 140))
+  "Group 2D (X Z) authored POINTS into padded non-overlapping (X0 Z0 X1 Z1) boxes.
+
+Boxes within MERGE-GAP cells of each other are merged so neighboring buildings
+and gardens share one continuous flat meadow clearing."
+  (let ((boxes (loop for (x z) in points
+                     collect (list (- x padding) (- z padding)
+                                   (+ x padding) (+ z padding)))))
+    ;; Merge intersecting or nearby boxes until fixed point.
+    (loop with changed = t
+          while changed
+          do (setf changed nil)
+             (let ((merged nil))
+               (dolist (box boxes)
+                 (destructuring-bind (x0 z0 x1 z1) box
+                   (let ((hit (find-if
+                               (lambda (other)
+                                 (destructuring-bind (ox0 oz0 ox1 oz1) other
+                                   (and (<= (- x0 merge-gap) ox1)
+                                        (<= (- ox0 merge-gap) x1)
+                                        (<= (- z0 merge-gap) oz1)
+                                        (<= (- oz0 merge-gap) z1))))
+                               merged)))
+                     (if hit
+                         (progn
+                           (setf (first hit) (min (first hit) x0)
+                                 (second hit) (min (second hit) z0)
+                                 (third hit) (max (third hit) x1)
+                                 (fourth hit) (max (fourth hit) z1)
+                                 changed t))
+                         (push (copy-list box) merged)))))
+               (setf boxes (nreverse merged))))
+    boxes))
+
+(defun rebase-luvcraft-save-to-biomes
+    (source-pathname destination-pathname
+     &key (chunk-height 128) (padding 48) (blend 120) (merge-gap 140)
+          (domain-limit 1024))
+  "Create a :BIOMES copy of the :MEADOW save at SOURCE-PATHNAME, written to
+DESTINATION-PATHNAME, preserving every authored edit and inhabitant inside a
+bit-identical meadow homeland while surrounding biomes rise beyond it.
+
+Returns (VALUES DESTINATION-PATHNAME HOMELAND VERIFIED-EDIT-COUNT)."
+  (multiple-value-bind (old-world resume inhabitants journal)
+      (read-luvcraft-save source-pathname)
+    (let* ((old-source (block-world-source old-world))
+           (old-shape (voxel-space-chunk-shape (block-world-space old-world)))
+           (old-height (chunk-shape-height old-shape))
+           (edits (block-edit-overlay-entries (little-world-source-edits old-source)))
+           (points nil))
+      ;; Collect authored edit coordinates (within domain) and inhabitant cells.
+      (maphash (lambda (coord block)
+                 (declare (ignore block))
+                 (destructuring-bind (x y z) coord
+                   (declare (ignore y))
+                   (when (and (<= (- domain-limit) x (1- domain-limit))
+                              (<= (- domain-limit) z (1- domain-limit)))
+                     (push (list x z) points))))
+               edits)
+      (dolist (inhabitant inhabitants)
+        (let ((cell (and (consp inhabitant) (getf (rest inhabitant) :cell))))
+          (when (and (listp cell) (= 3 (length cell)))
+            (push (list (first cell) (third cell)) points))))
+      (let* ((boxes (cluster-homeland-boxes points :padding padding :merge-gap merge-gap))
+             (homeland (list :meadow-height old-height :blend blend :boxes boxes))
+             (new-source (make-instance 'little-world-source
+                                        :seed (little-world-source-seed old-source)
+                                        :relief :biomes
+                                        :homeland homeland
+                                        :edits (little-world-source-edits old-source)))
+             (new-world (make-block-world
+                         :id (list :little-world (little-world-source-seed old-source))
+                         :chunk-width (chunk-shape-width old-shape)
+                         :chunk-height chunk-height
+                         :chunk-depth (chunk-shape-depth old-shape)
+                         :source new-source))
+             (verified 0))
+        ;; Verify bit-identical ground height under every in-domain authored edit!
+        (maphash (lambda (coord block)
+                   (declare (ignore block))
+                   (destructuring-bind (x y z) coord
+                     (declare (ignore y))
+                     (when (and (<= (- domain-limit) x (1- domain-limit))
+                                (<= (- domain-limit) z (1- domain-limit)))
+                       (let ((h-old (little-world-surface-height old-source x z old-height))
+                             (h-new (little-world-surface-height new-source x z chunk-height)))
+                         (unless (= h-old h-new)
+                           (error "Rebase height mismatch at (~D, ~D): old ~D, new ~D."
+                                  x z h-old h-new))
+                         (incf verified)))))
+                 edits)
+        (let ((description
+                (make-luvcraft-format-2-save-description
+                 new-world
+                 :overlay (little-world-source-edits old-source)
+                 :resume resume
+                 :inhabitants inhabitants
+                 :watermark (or (getf journal :watermark) 0)
+                 :journal (getf journal :journal)
+                 :provenance (getf journal :provenance)
+                 :players (getf journal :players))))
+          (write-luvcraft-save-description description destination-pathname)
+          (values destination-pathname homeland verified))))))
 
 (defmethod restore-block-save-description ((kind (eql :film)) description)
   (let ((video-id (description-value description :video-id "film value")))

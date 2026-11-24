@@ -23,19 +23,26 @@ short of the sky.")
 (defclass little-world-source ()
   ((seed :initarg :seed :initform 121 :reader little-world-source-seed)
    (relief :initarg :relief :initform :alpine
-           :type (member :meadow :alpine)
+           :type (member :meadow :alpine :biomes)
            :reader little-world-source-relief
            :documentation
            "Which terrain family the seed is read through: the original
-gentle :MEADOW, or the :ALPINE mountains and caves.")
+gentle :MEADOW, the :ALPINE mountains and caves, or the multi-biome :BIOMES
+world (meadows, mossy forests, deserts, terracotta mesas, basalt crags,
+tundra, and alpine peaks).")
+   (homeland :initarg :homeland :initform nil :reader little-world-source-homeland
+             :documentation
+             "Optional meadow homeland preservation spec for rebased worlds:
+(:MEADOW-HEIGHT H :BLEND R :BOXES ((X0 Z0 X1 Z1) ...)).  Inside each box the
+ground stays bit-identical to :MEADOW; outside it blends smoothly into :BIOMES.")
    (edits :initarg :edits :initform (make-block-edit-overlay)
           :reader little-world-source-edits)))
 
 (defmethod shared-initialize :after
     ((source little-world-source) slot-names &key)
   (declare (ignore slot-names))
-  (unless (member (little-world-source-relief source) '(:meadow :alpine))
-    (error "A little-world relief must be :MEADOW or :ALPINE, not ~S."
+  (unless (member (little-world-source-relief source) '(:meadow :alpine :biomes))
+    (error "A little-world relief must be :MEADOW, :ALPINE, or :BIOMES, not ~S."
            (little-world-source-relief source))))
 
 ;;; The noise is the world, so its arithmetic is pinned (#QTXNY0): integer
@@ -406,13 +413,234 @@ the plains.  The bottom two layers are never carved."
             do (return y)
           finally (return 1))))
 
+;;; Multi-biome relief: climate-driven meadows, mossy forests, golden deserts,
+;;; stratified terracotta mesas, dark basalt crags, snowy tundra, and alpine peaks.
+
+(declaim (inline little-world-biomes-climate little-world-homeland-weight))
+
+(defun little-world-homeland-weight (source x z)
+  "1.0 inside SOURCE's preserved meadow homeland boxes, smoothly easing to 0.0."
+  (let ((homeland (little-world-source-homeland source)))
+    (unless homeland
+      (return-from little-world-homeland-weight 0.0d0))
+    (let ((blend (float (or (getf homeland :blend) 120) 1.0d0))
+          (min-dist2 most-positive-double-float))
+      (declare (type double-float blend min-dist2))
+      (dolist (box (getf homeland :boxes))
+        (destructuring-bind (x0 z0 x1 z1) box
+          (let* ((dx (cond ((< x x0) (float (- x0 x) 1.0d0))
+                           ((> x x1) (float (- x x1) 1.0d0))
+                           (t 0.0d0)))
+                 (dz (cond ((< z z0) (float (- z0 z) 1.0d0))
+                           ((> z z1) (float (- z z1) 1.0d0))
+                           (t 0.0d0)))
+                 (d2 (+ (* dx dx) (* dz dz))))
+            (declare (type double-float dx dz d2))
+            (when (< d2 min-dist2)
+              (setf min-dist2 d2)))))
+      (cond ((<= min-dist2 0.0d0) 1.0d0)
+            (t
+             ;; Softly warp the outer ramp distance so the homeland valley rim
+             ;; curves organically while keeping every point inside BOXES at 1.0.
+             (let* ((seed (little-world-seed-bits source))
+                    (warp (* 24.0d0 (%little-world-value-noise seed x z 90.0d0 69)))
+                    (dist (max 0.0d0 (+ (sqrt min-dist2) warp))))
+               (if (>= dist blend)
+                   0.0d0
+                   (- 1.0d0 (little-world-smoothstep 0.0d0 blend dist)))))))))
+
+(defun little-world-biomes-climate (seed x z)
+  "Return (VALUES TEMPERATURE MOISTURE CONTINENTALNESS) at integer (X, Z)."
+  (declare (type little-world-hash-value seed) (type fixnum x z))
+  (let* ((wx (+ x (the fixnum (round (* 65.0d0 (%little-world-value-noise seed x z 220.0d0 59))))))
+         (wz (+ z (the fixnum (round (* 65.0d0 (%little-world-value-noise seed x z 220.0d0 60))))))
+         (temp (+ (* 0.78d0 (%little-world-value-noise seed wx wz 620.0d0 61))
+                  (* 0.22d0 (%little-world-value-noise seed wx wz 200.0d0 62))))
+         (moisture (+ (* 0.78d0 (%little-world-value-noise seed wx wz 560.0d0 63))
+                      (* 0.22d0 (%little-world-value-noise seed wx wz 180.0d0 64))))
+         (cont (+ 0.5d0
+                  (* 0.42d0 (%little-world-value-noise seed wx wz 520.0d0 65))
+                  (* 0.16d0 (%little-world-value-noise seed wx wz 170.0d0 66)))))
+    (values temp moisture (max 0.0d0 (min 1.0d0 cont)))))
+
+(defun little-world-biome-at (source x z)
+  "Classify the dominant biome keyword at (X, Z) in SOURCE."
+  (when (>= (little-world-homeland-weight source x z) 0.5d0)
+    (return-from little-world-biome-at :meadow))
+  (let ((seed (little-world-seed-bits source)))
+    (multiple-value-bind (temp moisture cont)
+        (little-world-biomes-climate seed x z)
+      ;; Feather biome borders with fine value noise so snow/sand/grass edges
+      ;; dapple organically instead of drawing a straight contour line.
+      (let ((dt (* 0.055d0 (%little-world-value-noise seed x z 22.0d0 67)))
+            (dm (* 0.055d0 (%little-world-value-noise seed x z 22.0d0 68))))
+        (incf temp dt)
+        (incf moisture dm)
+        (cond
+          ((and (> temp 0.16d0) (< moisture 0.10d0))
+           (if (> cont 0.48d0) :mesa :desert))
+          ((< temp -0.22d0)
+           (if (> cont 0.52d0) :glacier :tundra))
+          ((> cont 0.56d0)
+           (if (< moisture -0.15d0) :basalt-crags :alpine))
+          ((> moisture 0.20d0) :forest)
+          (t :meadow))))))
+
+(defun little-world-biomes-relief (source x z)
+  "Continuous biome-blended elevation fraction in [0, 1] at (X, Z)."
+  (let ((seed (little-world-seed-bits source)))
+    (multiple-value-bind (temp moisture cont)
+        (little-world-biomes-climate seed x z)
+      (flet ((noise (period salt)
+               (%little-world-value-noise seed x z period salt)))
+        (declare (inline noise))
+        (let* ((lowland (+ 0.13d0
+                           (* 0.032d0 (noise 96.0d0 0))
+                           (* 0.018d0 (noise 28.0d0 1))
+                           (* 0.008d0 (noise 11.0d0 2))))
+               (warm-w (little-world-smoothstep 0.06d0 0.26d0 temp))
+               (dry-w (- 1.0d0 (little-world-smoothstep -0.05d0 0.18d0 moisture)))
+               (arid-w (* warm-w dry-w))
+               (desert-w (* arid-w (- 1.0d0 (little-world-smoothstep 0.38d0 0.56d0 cont))))
+               (mesa-w (* arid-w (little-world-smoothstep 0.40d0 0.58d0 cont)))
+               (mountain-w (* (- 1.0d0 (min 1.0d0 (* 1.35d0 arid-w)))
+                              (little-world-smoothstep 0.46d0 0.68d0 cont)))
+               (hill-w (* (little-world-smoothstep 0.28d0 0.54d0 cont)
+                          (- 1.0d0 mountain-w) (- 1.0d0 mesa-w)))
+               (hills (* hill-w (+ 0.055d0 (* 0.055d0 (+ 0.5d0 (* 0.5d0 (noise 48.0d0 9)))))))
+               ;; Wind-sculpted desert dunes.
+               (dune-ridge (- 1.0d0 (abs (noise 52.0d0 10))))
+               (dunes (* desert-w (+ (* 0.045d0 dune-ridge dune-ridge)
+                                     (* 0.014d0 (noise 18.0d0 11)))))
+               ;; Stepped terracotta mesa plateaus (3 flat-topped geological shelves).
+               (mesa-raw (max 0.0d0 (min 1.0d0 (+ (* (- cont 0.42d0) 2.4d0)
+                                                  (* 0.10d0 (noise 64.0d0 12))))))
+               (mesa-s (* mesa-raw 3.0d0))
+               (mesa-i (float (little-world-floor mesa-s) 1.0d0))
+               (mesa-f (- mesa-s mesa-i))
+               (mesa-terraced (/ (+ mesa-i (little-world-smoothstep 0.08d0 0.28d0 mesa-f))
+                                 3.0d0))
+               (mesa (* mesa-w (+ 0.10d0 (* 0.36d0 mesa-terraced))))
+               ;; Sharp ridged alpine, glacial, and volcanic peaks.
+               (ridge (- 1.0d0 (abs (noise 52.0d0 4))))
+               (crag (- 1.0d0 (abs (noise 20.0d0 5))))
+               (mountain (* mountain-w (+ 0.10d0
+                                          (* 0.48d0 ridge ridge)
+                                          (* 0.14d0 crag)
+                                          (* 0.03d0 (noise 8.0d0 8)))))
+               (ravine (* (- 1.0d0 mesa-w) 0.09d0
+                          (little-world-smoothstep
+                           0.93d0 0.985d0 (- 1.0d0 (abs (noise 96.0d0 7)))))))
+          (- (+ lowland hills dunes mesa mountain) ravine))))))
+
+(defun little-world-biomes-surface-height (source x z height)
+  (declare (type fixnum height))
+  (let ((w (little-world-homeland-weight source x z)))
+    (declare (type double-float w))
+    (when (>= w 0.999d0)
+      (let ((mh (or (getf (little-world-source-homeland source) :meadow-height) 16)))
+        (return-from little-world-biomes-surface-height
+          (little-world-meadow-surface-height source x z mh))))
+    (let ((h-biomes (max 2 (min (- height 3)
+                                (round (* (float height 1.0d0)
+                                          (the double-float
+                                               (little-world-biomes-relief source x z))))))))
+      (if (<= w 0.001d0)
+          h-biomes
+          (let* ((mh (or (getf (little-world-source-homeland source) :meadow-height) 16))
+                 (h-meadow (little-world-meadow-surface-height source x z mh)))
+            (max 2 (min (- height 3)
+                        (round (+ (* w (float h-meadow 1.0d0))
+                                  (* (- 1.0d0 w) (float h-biomes 1.0d0)))))))))))
+
+(defun little-world-mesa-strata-block (y)
+  "Horizontal canyon rock strata for terracotta mesas."
+  (declare (type fixnum y))
+  (case (mod y 9)
+    ((0 1) *terracotta-block*)
+    ((2 3) *sandstone-block*)
+    ((4) *granite-block*)
+    ((5 6) *terracotta-block*)
+    ((7) *limestone-block*)
+    (otherwise *sandstone-block*)))
+
+(defun little-world-biomes-surface-material
+    (source x z surface height
+     &optional (slope (little-world-surface-slope source x z surface height)))
+  (let ((w (little-world-homeland-weight source x z)))
+    (when (>= w 0.999d0)
+      (let ((mh (or (getf (little-world-source-homeland source) :meadow-height) 16)))
+        (return-from little-world-biomes-surface-material
+          (little-world-meadow-surface-material source x z surface mh slope)))))
+  (let* ((seed (little-world-seed-bits source))
+         (level (/ (float surface 1.0d0) (float height 1.0d0)))
+         (biome (little-world-biome-at source x z))
+         (detail (%little-world-value-noise seed x z 28.0d0 17)))
+    (ecase biome
+      (:desert
+       (cond ((>= slope 3) *sandstone-block*)
+             ((and (>= slope 2) (> detail 0.25d0)) *sandstone-block*)
+             (t *sand-block*)))
+      (:mesa
+       (cond ((>= slope 2) (little-world-mesa-strata-block surface))
+             ((> level 0.42d0) *terracotta-block*)
+             ((> detail 0.30d0) *granite-block*)
+             ((< detail -0.35d0) *sand-block*)
+             (t *terracotta-block*)))
+      (:tundra
+       (cond ((>= slope 3) *slate-block*)
+             ((>= slope 2) *stone-block*)
+             ((< detail -0.55d0) *gravel-block*)
+             (t *snow-block*)))
+      (:glacier
+       (cond ((>= slope 4) *slate-block*)
+             ((>= slope 3) *stone-block*)
+             (t *snow-block*)))
+      (:basalt-crags
+       (cond ((and (>= level 0.58d0) (<= slope 2)) *snow-block*)
+             ((>= slope 4) *basalt-block*)
+             ((and (>= level 0.36d0) (> detail 0.48d0)) *obsidian-block*)
+             ((>= level 0.30d0) *basalt-block*)
+             ((>= slope 2) *slate-block*)
+             ((< detail -0.30d0) *gravel-block*)
+             (t *granite-block*)))
+      (:alpine
+       (cond ((>= slope 4) *slate-block*)
+             ((and (>= level 0.56d0) (<= slope 2)) *snow-block*)
+             ((>= level 0.38d0) *stone-block*)
+             ((>= slope 2) *stone-block*)
+             ((> detail 0.45d0) *moss-block*)
+             (t *grass-block*)))
+      (:forest
+       (cond ((>= slope 3) *stone-block*)
+             ((<= level 0.11d0) (if (> detail 0.0d0) *mud-block* *clay-block*))
+             ((> detail 0.15d0) *moss-block*)
+             (t *grass-block*)))
+      (:meadow
+       (cond ((>= slope 3) *stone-block*)
+             ((<= level 0.10d0) *sand-block*)
+             ((>= slope 2) *stone-block*)
+             ((> detail 0.62d0) *flowers-block*)
+             ((< detail -0.62d0) *sand-block*)
+             (t *grass-block*))))))
+
+(defun little-world-biomes-ground-height (source x z height)
+  (let ((surface (little-world-biomes-surface-height source x z height)))
+    (if (> (little-world-homeland-weight source x z) 0.15d0)
+        surface
+        (loop for y from surface downto 2
+              unless (little-world-cave-p source x y z surface)
+                do (return y)
+              finally (return 1)))))
+
 ;;; Reading a relief.
 
 (defun little-world-surface-height (source x z height)
   "The generated surface Y at X,Z before caves, in a world HEIGHT cells tall."
   (ecase (little-world-source-relief source)
     (:meadow (little-world-meadow-surface-height source x z height))
-    (:alpine (little-world-alpine-surface-height source x z height))))
+    (:alpine (little-world-alpine-surface-height source x z height))
+    (:biomes (little-world-biomes-surface-height source x z height))))
 
 (defun little-world-surface-slope (source x z surface height)
   "The largest height difference between SURFACE and its four neighbors."
@@ -430,13 +658,16 @@ the plains.  The bottom two layers are never carved."
     (:meadow (little-world-meadow-surface-material
               source x z surface height slope))
     (:alpine (little-world-alpine-surface-material
+              source x z surface height slope))
+    (:biomes (little-world-biomes-surface-material
               source x z surface height slope))))
 
 (defun little-world-ground-height (source x z height)
   "The highest solid Y at X,Z once caves are carved: where a walker stands."
   (ecase (little-world-source-relief source)
     (:meadow (little-world-meadow-surface-height source x z height))
-    (:alpine (little-world-alpine-ground-height source x z height))))
+    (:alpine (little-world-alpine-ground-height source x z height))
+    (:biomes (little-world-biomes-ground-height source x z height))))
 
 (defparameter *spawn-view-distance* 88
   "How far from a spawn a summit may stand and still count as in view;
@@ -533,19 +764,34 @@ is not read from a little-world source."
     (source world chunk-x chunk-y chunk-z))
 (defgeneric edit-block-world-source (source world block x y z))
 
-(defun little-world-column-material (source y surface surface-material)
+(defun little-world-column-material (source y surface surface-material &optional biome)
   "The block at depth Y in a column whose top is SURFACE-MATERIAL at SURFACE.
 
 Stone underlies everything; the meadow's top three cells are dirt or sand.
-Alpine columns whose surface is already rock or snow stay rock all the way
-up, so cliffs and peaks are not capped with dirt."
+Alpine and biome columns preserve rock, mesa strata, sandstone, and basalt."
   (cond ((= y surface) surface-material)
+        ((eq biome :mesa)
+         (if (or (zerop y) (< y (- surface 14)))
+             *stone-block*
+             (little-world-mesa-strata-block y)))
+        ((eq biome :desert)
+         (cond ((or (zerop y) (< y (- surface 4))) *stone-block*)
+               ((>= y (- surface 2)) *sand-block*)
+               (t *sandstone-block*)))
+        ((eq biome :basalt-crags)
+         (if (or (zerop y) (< y (- surface 8))) *stone-block* *basalt-block*))
         ((or (zerop y) (< y (- surface 2))) *stone-block*)
         ((eq surface-material *sand-block*) *sand-block*)
-        ((and (eq (little-world-source-relief source) :alpine)
+        ((and (member (little-world-source-relief source) '(:alpine :biomes))
               (or (eq surface-material *stone-block*)
                   (eq surface-material *snow-block*)
-                  (eq surface-material *slate-block*)))
+                  (eq surface-material *slate-block*)
+                  (eq surface-material *granite-block*)
+                  (eq surface-material *basalt-block*)
+                  (eq surface-material *limestone-block*)
+                  (eq surface-material *terracotta-block*)
+                  (eq surface-material *sandstone-block*)
+                  (eq surface-material *obsidian-block*)))
          *stone-block*)
         (t *dirt-block*)))
 
@@ -567,7 +813,9 @@ a chunk is raised without a resident chunk noticing every cell."
   (let* ((indices (make-array (* width height depth)
                               :element-type '(unsigned-byte 16)
                               :initial-element 0))
-         (caves-p (eq (little-world-source-relief source) :alpine))
+         (relief (little-world-source-relief source))
+         (biomes-p (eq relief :biomes))
+         (caves-p (member relief '(:alpine :biomes)))
          (seed (little-world-seed-bits source))
          (surfaces (make-array (list (+ depth 2) (+ width 2))
                                :element-type 'fixnum))
@@ -610,6 +858,7 @@ a chunk is raised without a resident chunk noticing every cell."
                                  (abs (- surface (aref surfaces (1+ local-z) (+ local-x 2))))
                                  (abs (- surface (aref surfaces local-z (1+ local-x))))
                                  (abs (- surface (aref surfaces (+ local-z 2) (1+ local-x))))))
+                     (biome (and biomes-p (little-world-biome-at source x z)))
                      (surface-material
                        (little-world-surface-material
                         source x z surface height slope)))
@@ -621,8 +870,10 @@ a chunk is raised without a resident chunk noticing every cell."
                   (dotimes (y (1+ surface))
                     (setf (aref indices (offset y))
                           (index (little-world-column-material
-                                  source y surface surface-material))))
-                  (when caves-p
+                                  source y surface surface-material biome))))
+                  (when (and caves-p
+                             (or (not biomes-p)
+                                 (<= (little-world-homeland-weight source x z) 0.15d0)))
                     (fill-little-world-volume-column
                      a seed x z surface tunnel tunnel-vertical 40)
                     (fill-little-world-volume-column
@@ -854,14 +1105,15 @@ terrain, populate landmarks, then replay sparse edits."
                                      (chunk-height *little-world-height*)
                                      (chunk-depth 16)
                                      (seed 121)
-                                     (relief :alpine))
+                                     (relief :alpine)
+                                     homeland)
   "Make a deterministic square of resident terrain chunks and landmarks."
   (check-type chunk-radius (integer 0))
   (check-type chunk-width (integer 8))
   (check-type chunk-height (integer 8))
   (check-type chunk-depth (integer 8))
   (let* ((source (make-instance 'little-world-source
-                                :seed seed :relief relief))
+                                :seed seed :relief relief :homeland homeland))
          (world (make-block-world :id (list :little-world seed)
                                   :chunk-width chunk-width
                                  :chunk-height chunk-height
@@ -874,12 +1126,14 @@ terrain, populate landmarks, then replay sparse edits."
                                            (chunk-height *little-world-height*)
                                            (chunk-depth 16)
                                            (seed 121)
-                                           (relief :alpine))
+                                           (relief :alpine)
+                                           homeland)
   "Make a sourced block world whose resident set is initially empty."
   (make-block-world
    :id (list :little-world seed)
    :chunk-width chunk-width :chunk-height chunk-height :chunk-depth chunk-depth
-   :source (make-instance 'little-world-source :seed seed :relief relief)))
+   :source (make-instance 'little-world-source
+                          :seed seed :relief relief :homeland homeland)))
 
 (defun little-world-landmarks-for-chunk (source world key)
   "Capture deterministic landmarks whose owned sites lie inside KEY.
@@ -915,38 +1169,63 @@ chunk and do not require neighboring live mutation."
                    (rock-z (+ origin-z 2 (mod (ash hash -8) (- depth 4))))
                    (rock-y (1+ (little-world-surface-height
                                 source rock-x rock-z height))))
-              (emit *stone-block* rock-x rock-y rock-z)
-              (when (zerop (mod hash 2))
-                (emit *stone-block* (1+ rock-x) rock-y rock-z))
-              (when (and (< (mod (ash hash -16) 5) 4)
-                         (> (little-world-value-noise
-                             source rock-x rock-z 48 29)
-                            -0.35d0))
-                (let* ((tree-x (+ origin-x 3
-                                  (mod (ash hash -3) (- width 6))))
-                       (tree-z (+ origin-z 3
-                                  (mod (ash hash -11) (- depth 6))))
-                       (surface (little-world-surface-height
-                                 source tree-x tree-z height))
-                       (surface-material
-                         (little-world-surface-material
-                          source tree-x tree-z surface height))
-                       (trunk-height (+ 3 (mod (ash hash -23) 2)))
-                       (crown (+ surface trunk-height)))
-                  (when (and (eq surface-material *grass-block*)
-                             (< (+ crown 2) height))
-                    (loop for y from (1+ surface) to crown
-                          do (emit *wood-block* tree-x y tree-z))
-                    (loop for x from (- tree-x 2) to (+ tree-x 2) do
-                      (loop for z from (- tree-z 2) to (+ tree-z 2)
-                            when (<= (+ (abs (- x tree-x))
-                                        (abs (- z tree-z)))
-                                     3)
-                              do (emit *leaf-block* x crown z)))
-                    (loop for x from (1- tree-x) to (1+ tree-x) do
-                      (loop for z from (1- tree-z) to (1+ tree-z)
-                            do (emit *leaf-block* x (1+ crown) z)))
-                    (emit *leaf-block* tree-x (+ crown 2) tree-z))))))))
+               (let* ((biomes-p (eq (little-world-source-relief source) :biomes))
+                      (biome (and biomes-p (little-world-biome-at source rock-x rock-z)))
+                      (rock-block (case biome
+                                    (:desert *sandstone-block*)
+                                    (:mesa *terracotta-block*)
+                                    (:basalt-crags *basalt-block*)
+                                    (otherwise *stone-block*))))
+                 (emit rock-block rock-x rock-y rock-z)
+                 (when (zerop (mod hash 2))
+                   (emit rock-block (1+ rock-x) rock-y rock-z)))
+               (let* ((biomes-p (eq (little-world-source-relief source) :biomes))
+                      (tree-x (+ origin-x 3
+                                 (mod (ash hash -3) (- width 6))))
+                      (tree-z (+ origin-z 3
+                                 (mod (ash hash -11) (- depth 6))))
+                      (surface (little-world-surface-height
+                                source tree-x tree-z height))
+                      (surface-material
+                        (little-world-surface-material
+                         source tree-x tree-z surface height))
+                      (biome (and biomes-p (little-world-biome-at source tree-x tree-z))))
+                 (cond
+                   ;; Desert & mesa cacti.
+                   ((and biomes-p (member biome '(:desert :mesa))
+                         (member surface-material (list *sand-block* *terracotta-block*))
+                         (zerop (mod (ash hash -16) (if (eq biome :desert) 3 6))))
+                    (let ((cactus-height (+ 2 (mod (ash hash -23) 3))))
+                      (when (< (+ surface cactus-height 1) height)
+                        (loop for y from (1+ surface) to (+ surface cactus-height)
+                              do (emit *cactus-block* tree-x y tree-z)))))
+                   ;; Trees in meadows, forests, alpine foothills, and snowy tundra.
+                   ((and (or (and biomes-p (eq biome :forest))
+                             (and (< (mod (ash hash -16) 5) 4)
+                                  (> (little-world-value-noise
+                                      source rock-x rock-z 48 29)
+                                     -0.35d0)))
+                         (member surface-material
+                                 (if biomes-p
+                                     (list *grass-block* *moss-block* *flowers-block*
+                                           (when (eq biome :tundra) *snow-block*))
+                                     (list *grass-block*))))
+                    (let* ((trunk-height (+ (if (eq biome :forest) 4 3)
+                                            (mod (ash hash -23) 2)))
+                           (crown (+ surface trunk-height)))
+                      (when (< (+ crown 2) height)
+                        (loop for y from (1+ surface) to crown
+                              do (emit *wood-block* tree-x y tree-z))
+                        (loop for x from (- tree-x 2) to (+ tree-x 2) do
+                          (loop for z from (- tree-z 2) to (+ tree-z 2)
+                                when (<= (+ (abs (- x tree-x))
+                                            (abs (- z tree-z)))
+                                         3)
+                                  do (emit *leaf-block* x crown z)))
+                        (loop for x from (1- tree-x) to (1+ tree-x) do
+                          (loop for z from (1- tree-z) to (1+ tree-z)
+                                do (emit *leaf-block* x (1+ crown) z)))
+                        (emit *leaf-block* tree-x (+ crown 2) tree-z))))))))))
       (nreverse landmarks))))
 
 (defclass block-chunk-load-payload ()
@@ -968,6 +1247,8 @@ chunk and do not require neighboring live mutation."
   ((seed :initarg :seed :reader little-world-load-request-seed)
    (relief :initarg :relief :initform :alpine
            :reader little-world-load-request-relief)
+   (homeland :initarg :homeland :initform nil
+             :reader little-world-load-request-homeland)
    (width :initarg :width :reader little-world-load-request-width)
    (height :initarg :height :reader little-world-load-request-height)
    (depth :initarg :depth :reader little-world-load-request-depth)
@@ -997,6 +1278,7 @@ chunk and do not require neighboring live mutation."
      :priority priority
      :seed (little-world-source-seed source)
      :relief (little-world-source-relief source)
+     :homeland (little-world-source-homeland source)
      :demand-token demand-token
      :width width :height height :depth depth
      :landmarks (little-world-landmarks-for-chunk source world key)
@@ -1010,7 +1292,8 @@ chunk and do not require neighboring live mutation."
     (let* ((source (make-instance
                     'little-world-source
                     :seed (little-world-load-request-seed request)
-                    :relief (little-world-load-request-relief request)))
+                    :relief (little-world-load-request-relief request)
+                    :homeland (little-world-load-request-homeland request)))
            (width (little-world-load-request-width request))
            (depth (little-world-load-request-depth request))
            (world (make-block-world

@@ -3,7 +3,8 @@
 (defun parse-relief-option (string option)
   (cond ((string-equal string "alpine") :alpine)
         ((string-equal string "meadow") :meadow)
-        (t (command-line-error "~A must be alpine or meadow, got ~S."
+        ((string-equal string "biomes") :biomes)
+        (t (command-line-error "~A must be alpine, meadow, or biomes, got ~S."
                                option string))))
 
 (defun parse-natural-option (string option)

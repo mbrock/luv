@@ -11,8 +11,13 @@
 (defclass luvcraft-world-source (terrain:world-source)
   ((seed :initarg :seed :initform 121 :reader luvcraft-world-source-seed)
    (relief :initarg :relief :initform :alpine
-           :type (member :meadow :alpine)
+           :type (member :meadow :alpine :biomes)
            :reader luvcraft-world-source-relief)
+   (homeland :initarg :homeland :initform nil
+             :reader luvcraft-world-source-homeland
+             :documentation "Optional meadow homeland preservation spec for rebased :BIOMES worlds.")
+   (distant-edit-cache :initform nil :accessor luvcraft-world-source-distant-edit-cache
+                       :documentation "Cached (journal-head . sector-hash) of authored column tops for distant landmarks.")
    (little-class :initarg :little-class :initform 'luvcraft:little-world-source
                  :reader luvcraft-world-source-little-class
                  :documentation "The class of Luvcraft source that generates it.")
@@ -55,10 +60,16 @@
           (- (luft:site-y site) offset))))
 
 (defun luvcraft-little-world-source (source)
-  "A fresh, edit-free Luvcraft source of SOURCE's class, seed, and relief."
-  (make-instance (luvcraft-world-source-little-class source)
-                 :seed (luvcraft-world-source-seed source)
-                 :relief (luvcraft-world-source-relief source)))
+  "A fresh, edit-free Luvcraft source of SOURCE's class, seed, relief, and homeland."
+  (let ((homeland (luvcraft-world-source-homeland source)))
+    (if homeland
+        (make-instance (luvcraft-world-source-little-class source)
+                       :seed (luvcraft-world-source-seed source)
+                       :relief (luvcraft-world-source-relief source)
+                       :homeland homeland)
+        (make-instance (luvcraft-world-source-little-class source)
+                       :seed (luvcraft-world-source-seed source)
+                       :relief (luvcraft-world-source-relief source)))))
 
 (defun luvcraft-private-world (source little)
   (luvcraft::make-block-world
@@ -203,6 +214,43 @@ WORLD is only read, for its chunk shape, so threads may share it."
             (luvcraft-block-material-code vocab surface-material)
             (luvcraft-block-material-code vocab below-material))))
 
+(defun luvcraft-distant-edit-sectors (source)
+  "Return a hash table mapping 64-cell sector (SX . SY) to lists of (LX LY Z CODE)
+for solid authored edits in SOURCE, rebuilt only when the journal advances."
+  (let* ((journal (terrain:world-source-journal source))
+         (head (terrain:world-journal-head journal))
+         (cached (luvcraft-world-source-distant-edit-cache source)))
+    (when (and cached (eql (car cached) head))
+      (return-from luvcraft-distant-edit-sectors (cdr cached)))
+    (let* ((edits (terrain:world-source-edits source))
+           (vocab (terrain:world-source-material-vocabulary source))
+           (columns (make-hash-table :test #'equal))
+           (sectors (make-hash-table :test #'equal)))
+      ;; Keep the highest solid authored block per Luft (LX, LY) column.
+      (maphash (lambda (site value)
+                 (when value
+                   (let* ((placement (terrain:world-value-placement value))
+                          (code (and placement
+                                     (1+ (domains:identity-vocabulary-offset vocab placement)))))
+                     (when code
+                       (let* ((lx (luft:site-x site))
+                              (ly (luft:site-y site))
+                              (lz (luft:site-z site))
+                              (col-key (cons lx ly))
+                              (prev (gethash col-key columns)))
+                         (when (or (null prev) (> lz (car prev)))
+                           (setf (gethash col-key columns) (cons lz code))))))))
+               edits)
+      (maphash (lambda (col-key entry)
+                 (let* ((lx (car col-key))
+                        (ly (cdr col-key))
+                        (skey (cons (ash lx -6) (ash ly -6))))
+                   (push (list lx ly (car entry) (cdr entry))
+                         (gethash skey sectors))))
+               columns)
+      (setf (luvcraft-world-source-distant-edit-cache source) (cons head sectors))
+      sectors)))
+
 (defmethod terrain:sample-world-source-surface-grid
     ((source luvcraft-world-source) origin-x origin-y stride count heights top-codes side-codes)
   (declare (type fixnum origin-x origin-y stride count)
@@ -211,20 +259,29 @@ WORLD is only read, for its chunk shape, so threads may share it."
   (let* ((offset (luvcraft-world-source-offset source))
          (height (luvcraft-world-source-height source))
          (little (luvcraft-little-world-source source))
-         (alpine-p (eq (luvcraft-world-source-relief source) :alpine))
+         (relief (luvcraft-world-source-relief source))
+         (biomes-p (eq relief :biomes))
+         (rock-cliffs-p (member relief '(:alpine :biomes)))
          (vocab (terrain:world-source-material-vocabulary source))
          (grass-code (luvcraft-block-material-code vocab luvcraft::*grass-block*))
          (dirt-code (luvcraft-block-material-code vocab luvcraft::*dirt-block*))
          (stone-code (luvcraft-block-material-code vocab luvcraft::*stone-block*))
          (sand-code (luvcraft-block-material-code vocab luvcraft::*sand-block*))
+         (sandstone-code (luvcraft-block-material-code vocab luvcraft::*sandstone-block*))
          (snow-code (luvcraft-block-material-code vocab luvcraft::*snow-block*))
          (slate-code (luvcraft-block-material-code vocab luvcraft::*slate-block*))
          (leaf-code (luvcraft-block-material-code vocab luvcraft::*leaf-block*))
+         (moss-code (luvcraft-block-material-code vocab luvcraft::*moss-block*))
+         (terracotta-code (luvcraft-block-material-code vocab luvcraft::*terracotta-block*))
+         (granite-code (luvcraft-block-material-code vocab luvcraft::*granite-block*))
+         (basalt-code (luvcraft-block-material-code vocab luvcraft::*basalt-block*))
+         (cactus-code (luvcraft-block-material-code vocab luvcraft::*cactus-block*))
          (pitch (+ count 2))
          (half (ash stride -1)))
     (declare (type fixnum offset height pitch half)
              (type (unsigned-byte 8) grass-code dirt-code stone-code
-                   sand-code snow-code slate-code leaf-code))
+                   sand-code sandstone-code snow-code slate-code leaf-code
+                   moss-code terracotta-code granite-code basalt-code cactus-code))
     ;; Pass 1: analytical surface heights including the 1-cell neighbor border.
     (dotimes (row pitch)
       (let ((lz (- (+ origin-y (* (1- row) stride) half) offset))
@@ -250,59 +307,120 @@ WORLD is only read, for its chunk shape, so threads may share it."
             for slope fixnum = (floor (+ max-diff half) stride)
             for mat = (luvcraft::little-world-surface-material
                        little lx lz h height slope)
+            for biome = (and biomes-p (luvcraft::little-world-biome-at little lx lz))
             do (cond
-                 ((eq mat luvcraft::*grass-block*)
-                  (let ((forested-p
-                          (> (luvcraft::little-world-value-noise little lx lz 48 29)
-                             -0.35d0)))
+                 ((or (eq mat luvcraft::*grass-block*)
+                      (eq mat luvcraft::*moss-block*)
+                      (eq mat luvcraft::*flowers-block*))
+                  (let* ((base-code (cond ((eq mat luvcraft::*moss-block*) moss-code)
+                                          ((eq mat luvcraft::*grass-block*) grass-code)
+                                          (t (luvcraft-block-material-code vocab mat))))
+                         (dense-forest-p (eq biome :forest))
+                         (forested-p
+                           (or dense-forest-p
+                               (> (luvcraft::little-world-value-noise little lx lz 48 29)
+                                  -0.35d0)))
+                         (side (if (> max-diff 3) stone-code dirt-code)))
                     (if forested-p
-                        (let ((hash (luvcraft::little-world-hash
-                                     little
-                                     (floor lx (max 4 stride))
-                                     (floor lz (max 4 stride)))))
+                        (let* ((hash (luvcraft::little-world-hash
+                                      little
+                                      (floor lx (max 4 stride))
+                                      (floor lz (max 4 stride))))
+                               (mod-close (if dense-forest-p 3 5))
+                               (mod-far (if dense-forest-p 2 4)))
                           (cond
-                            ((and (<= stride 4) (zerop (mod hash 5)))
+                            ((and (<= stride 4) (zerop (mod hash mod-close)))
                              (setf (aref top-codes idx) leaf-code
                                    (aref side-codes idx) leaf-code))
-                            ((and (> stride 4) (zerop (mod hash 4)))
+                            ((and (> stride 4) (zerop (mod hash mod-far)))
                              (setf (aref top-codes idx) leaf-code
-                                   (aref side-codes idx)
-                                   (if (> max-diff 3) stone-code dirt-code)))
+                                   (aref side-codes idx) side))
                             (t
-                             (setf (aref top-codes idx) grass-code
-                                   (aref side-codes idx)
-                                   (if (> max-diff 3) stone-code dirt-code)))))
-                        (setf (aref top-codes idx) grass-code
-                              (aref side-codes idx)
-                              (if (> max-diff 3) stone-code dirt-code)))))
+                             (setf (aref top-codes idx) base-code
+                                   (aref side-codes idx) side))))
+                        (setf (aref top-codes idx) base-code
+                              (aref side-codes idx) side))))
                  ((eq mat luvcraft::*snow-block*)
                   (setf (aref top-codes idx) snow-code
                         (aref side-codes idx)
-                        (if (and alpine-p (> max-diff 2)) stone-code snow-code)))
+                        (if (and rock-cliffs-p (> max-diff 2)) stone-code snow-code)))
                  ((eq mat luvcraft::*stone-block*)
                   (setf (aref top-codes idx) stone-code
                         (aref side-codes idx) stone-code))
                  ((eq mat luvcraft::*slate-block*)
                   (setf (aref top-codes idx) slate-code
                         (aref side-codes idx) stone-code))
+                 ((eq mat luvcraft::*basalt-block*)
+                  (setf (aref top-codes idx) basalt-code
+                        (aref side-codes idx) basalt-code))
+                 ((eq mat luvcraft::*terracotta-block*)
+                  (setf (aref top-codes idx) terracotta-code
+                        (aref side-codes idx)
+                        (if (> max-diff 3)
+                            (luvcraft-block-material-code
+                             vocab (luvcraft::little-world-mesa-strata-block (max 0 (- h 2))))
+                            terracotta-code)))
+                 ((eq mat luvcraft::*granite-block*)
+                  (setf (aref top-codes idx) granite-code
+                        (aref side-codes idx)
+                        (if (eq biome :mesa) terracotta-code granite-code)))
+                 ((eq mat luvcraft::*sandstone-block*)
+                  (setf (aref top-codes idx) sandstone-code
+                        (aref side-codes idx)
+                        (if (eq biome :mesa) terracotta-code sandstone-code)))
                  ((eq mat luvcraft::*sand-block*)
-                  (setf (aref top-codes idx) sand-code
-                        (aref side-codes idx) sand-code))
+                  (let ((cactus-p
+                          (and biomes-p (eq biome :desert) (<= stride 2)
+                               (zerop (mod (luvcraft::little-world-hash
+                                            little (floor lx 4) (floor lz 4))
+                                           19)))))
+                    (if cactus-p
+                        (setf (aref top-codes idx) cactus-code
+                              (aref side-codes idx) cactus-code)
+                        (setf (aref top-codes idx) sand-code
+                              (aref side-codes idx)
+                              (if (> max-diff 2) sandstone-code sand-code)))))
                  (t
                   (let ((code (luvcraft-block-material-code vocab mat)))
                     (setf (aref top-codes idx) code
                           (aref side-codes idx) code))))))
-    ;; Pass 3: raise close-LOD forested canopy tufts after slopes are settled.
+    ;; Pass 3: raise close-LOD forested canopy tufts and desert cacti.
     (when (<= stride 4)
       (loop for row fixnum from 1 to count
             for row-base fixnum = (* row pitch) do
         (loop for col fixnum from 1 to count
               for idx fixnum = (+ row-base col)
-              when (and (= (aref top-codes idx) leaf-code)
-                        (= (aref side-codes idx) leaf-code))
+              when (or (and (= (aref top-codes idx) leaf-code)
+                            (= (aref side-codes idx) leaf-code))
+                       (and (= (aref top-codes idx) cactus-code)
+                            (= (aref side-codes idx) cactus-code)))
                 do (let ((h (aref heights idx)))
                      (when (< (+ h 4) height)
-                       (setf (aref heights idx) (+ h 3))))))))
+                       (setf (aref heights idx) (+ h 3)))))))
+    ;; Pass 4: project authored landmarks (houses, towers, temples) into distant
+    ;; columns so player builds stay visible across kilometers.
+    (let ((sectors (luvcraft-distant-edit-sectors source)))
+      (when (plusp (hash-table-count sectors))
+        (let* ((tile-span (* count stride))
+               (sx0 (ash (- origin-x stride) -6))
+               (sx1 (ash (+ origin-x tile-span stride -1) -6))
+               (sy0 (ash (- origin-y stride) -6))
+               (sy1 (ash (+ origin-y tile-span stride -1) -6)))
+          (loop for sy fixnum from sy0 to sy1 do
+            (loop for sx fixnum from sx0 to sx1
+                  for entries = (gethash (cons sx sy) sectors)
+                  when entries
+                    do (dolist (entry entries)
+                         (destructuring-bind (elx ely ez ecode) entry
+                           (let ((col (1+ (floor (- elx origin-x) stride)))
+                                 (row (1+ (floor (- ely origin-y) stride))))
+                             (when (and (<= 0 col (1+ count))
+                                        (<= 0 row (1+ count)))
+                               (let ((idx (+ (* row pitch) col)))
+                                 (when (> ez (aref heights idx))
+                                   (setf (aref heights idx) ez
+                                         (aref top-codes idx) ecode
+                                         (aref side-codes idx) ecode)))))))))))))
   (values))
 
 (defun luvcraft-column-top (source x z)
@@ -323,17 +441,18 @@ WORLD is only read, for its chunk shape, so threads may share it."
   (let* ((little (luvcraft-little-world-source source))
          (height (luvcraft-world-source-height source))
          (offset (luvcraft-world-source-offset source))
-         (alpine-p (and (eq (luvcraft-world-source-relief source) :alpine)
+         (scenic-p (and (member (luvcraft-world-source-relief source) '(:alpine :biomes))
+                        (null (luvcraft-world-source-homeland source))
                         (eq (class-of little)
                             (find-class 'luvcraft:little-world-source)))))
     (multiple-value-bind (x z)
-        (if alpine-p
+        (if scenic-p
             (luvcraft::little-world-scenic-spawn little 0 0 height)
             (values 0 0))
       (values (+ x offset) (+ z offset)
               ;; Above whatever a save built there, such as the party's gazebo.
               (loop with edits = (terrain:world-source-edits source)
-                    for y from (if alpine-p
+                    for y from (if scenic-p
                                    (1+ (luvcraft::little-world-ground-height
                                         little x z height))
                                    (luvcraft-column-top source x z))
@@ -342,7 +461,7 @@ WORLD is only read, for its chunk shape, so threads may share it."
                       return y)
               ;; Luvcraft looks along (sin yaw, cos yaw) in X/Z; Luft along
               ;; (cos yaw, sin yaw) in X/Y.
-              (if alpine-p
+              (if scenic-p
                   (luvcraft-yaw-to-luft
                    (luvcraft::little-world-summit-yaw little x z height))
                   0.0)))))
@@ -376,6 +495,7 @@ are dropped and counted: the second value."
   (let* ((source (make-luvcraft-world-source
                   :seed (luvcraft:little-world-source-seed little)
                   :relief (luvcraft:little-world-source-relief little)
+                  :homeland (luvcraft::little-world-source-homeland little)
                   :little-class (class-name (class-of little))
                   :height height :offset offset))
          (journal (terrain:world-source-journal source))
