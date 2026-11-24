@@ -32,7 +32,7 @@ while SITE's chunk is resident."
        (let ((resident (world-site-resident-chunk scene site)))
          (if resident
              (multiple-value-bind (offset occupied-p)
-                 (gethash site (resident-cell-chunk-material-cells resident))
+                 (material-chunk-at (resident-cell-chunk-material-cells resident) site)
                (let* ((vocabulary (scene-material-vocabulary scene))
                       ;; A generated fixture is realized out of the table.
                       (fixture (and (not occupied-p)

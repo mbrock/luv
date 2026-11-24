@@ -229,10 +229,10 @@
       (is = 0 (luft:fibers-cell-bit fibers 70 5 1))
       (is = 1 (luft:fibers-cell-bit fibers 70 5 2))
       (is = 0 (luft:fibers-cell-bit fibers 70 6 2))
-      (is = 1 (gethash added materials))
-      (is eq nil (nth-value 1 (gethash removed materials)))
+      (is = 1 (terrain:material-chunk-at materials added))
+      (is eq nil (nth-value 1 (terrain:material-chunk-at materials removed)))
       ;; 64 x 64 columns of two cells, one removed and one added.
-      (is = (* 64 64 2) (hash-table-count materials)))))
+      (is = (* 64 64 2) (terrain:material-chunk-count materials)))))
 
 (defclass counting-preparer ()
   ((calls :initform nil :accessor preparer-calls))
@@ -492,7 +492,7 @@
                  (key (first keys))
                  (table (terrain::streaming-scene-chunk-material-table scene key)))
             (setf (gethash key (terrain::material-store-chunks (terrain:scene-material-cells scene)))
-                  (alexandria:copy-hash-table table))
+                  (terrain:copy-material-chunk table))
             (let ((after (realize)))
               (true (every #'eq (mapcar #'terrain::light-tile-field before)
                                (mapcar #'terrain::light-tile-field after))))))))))
@@ -912,3 +912,89 @@
     (terrain:install-streaming-collision scene (list near far))
     (is = 0 (terrain:scene-cell-bit scene 70 5 1))
     (is = 1 (terrain:scene-cell-bit scene 71 5 2))))
+
+(define-test chunk-materials-z-rle-edits-coalescing-and-light-parity
+  (let* ((domain (luft:make-world-domain :x-bits 7 :y-bits 7))
+         (key (luft:chunk-key-at 64 0))
+         (chunk (terrain:make-empty-chunk-materials key))
+         (reference (make-hash-table :test #'eql)))
+    (flet ((cell (lx ly z)
+             (luft:make-site domain (+ 64 lx) ly z luft:+cell-extent+ 1))
+           (apply-edit (lx ly z offset)
+             (let ((site (luft:make-site domain (+ 64 lx) ly z luft:+cell-extent+ 1)))
+               (setf chunk (terrain::chunk-materials-with-cell chunk site offset))
+               (if offset
+                   (setf (gethash site reference) offset)
+                   (remhash site reference))))
+           (check-invariants ()
+             (is = (hash-table-count reference) (terrain:material-chunk-count chunk))
+             (true (terrain:material-chunk= chunk reference))
+             (true (terrain:material-chunk= reference chunk))
+             ;; Strictly ascending site order and maximally coalesced runs.
+             (let ((previous -1))
+               (terrain:map-material-chunk
+                (lambda (site offset)
+                  (true (> site previous))
+                  (setf previous site)
+                  (is = (gethash site reference) offset))
+                chunk))
+             (let ((starts (terrain::chunk-materials-column-starts chunk))
+                   (runs (terrain::chunk-materials-runs chunk)))
+               (dotimes (col 4096)
+                 (loop for i from (aref starts col) below (1- (aref starts (1+ col)))
+                       for left = (aref runs i)
+                       for right = (aref runs (1+ i))
+                       do (true (<= (terrain::material-run-z1 left)
+                                    (terrain::material-run-z0 right)))
+                          (when (= (terrain::material-run-z1 left)
+                                   (terrain::material-run-z0 right))
+                            (true (/= (terrain::material-run-offset left)
+                                      (terrain::material-run-offset right)))))))))
+      ;; Build runs, split them, coalesce them back, test z=0 and z=254 and offset=0.
+      (loop for z from 0 to 10 do (apply-edit 3 7 z 0))
+      (apply-edit 3 7 254 2)
+      (apply-edit 3 7 253 2)
+      (apply-edit 3 7 5 nil)      ; split run [0,11) -> [0,5) and [6,11)
+      (check-invariants)
+      (apply-edit 3 7 5 0)        ; bridge gap -> coalesce back to [0,11)
+      (check-invariants)
+      (apply-edit 3 7 4 1)        ; overwrite inside run
+      (apply-edit 3 7 6 1)
+      (apply-edit 3 7 5 1)        ; coalesce three material-1 cells into one run
+      (check-invariants)
+      (apply-edit 3 7 0 nil)      ; remove z=0
+      (apply-edit 3 7 254 nil)    ; remove z=254
+      (check-invariants)
+      ;; Non-owning chunk site queries return absent.
+      (is eq nil (nth-value 1 (terrain:material-chunk-at
+                               chunk (luft:make-site domain 0 0 0 luft:+cell-extent+ 1))))
+      ;; Sky columns & interfaces agree identically with the hash-table reference.
+      (let* ((opacity (make-array 4 :element-type '(unsigned-byte 8)
+                                    :initial-contents '(15 1 15 0)))
+             (rle-sky (terrain::chunk-sky-columns chunk opacity))
+             (hash-sky (terrain::chunk-sky-columns reference opacity))
+             (rle-if (terrain::chunk-sky-interfaces chunk opacity domain))
+             (hash-if (terrain::chunk-sky-interfaces reference opacity domain)))
+        (dotimes (col 4096)
+          (true (equalp (aref rle-sky col) (aref hash-sky col))))
+        (true (equal (sort (copy-list (car rle-if)) #'<)
+                     (sort (copy-list (car hash-if)) #'<)))
+        (true (equal (sort (copy-list (cdr rle-if)) #'<)
+                     (sort (copy-list (cdr hash-if)) #'<))))
+      ;; Compact footprint: flat source chunk with 8192 solid cells compresses to 1 run/col (~32 KiB).
+      (let* ((source (make-instance 'flat-source :domain domain :material-vocabulary (make-palette)))
+             (resident (terrain:materialize-world-source-chunk source key 1))
+             (materials (terrain:resident-cell-chunk-material-cells resident)))
+        (true (terrain:chunk-materials-p materials))
+        (is = (* 64 64 2) (terrain:material-chunk-count materials))
+        (true (< (terrain:chunk-materials-byte-size materials) 65536))
+        (is string=
+            (terrain:resident-cell-chunk-hash resident)
+            (let ((table (make-hash-table :test #'eql)))
+              (terrain:map-material-chunk
+               (lambda (site offset) (setf (gethash site table) offset))
+               materials)
+              (terrain:resident-cell-chunk-hash
+               (terrain:%make-resident-cell-chunk
+                key 1 (terrain:resident-cell-chunk-fibers resident) table
+                (terrain:resident-cell-chunk-attachments resident)))))))))

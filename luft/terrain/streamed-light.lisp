@@ -68,19 +68,32 @@ NIL when nothing in reach emits, which is most of any world."
 (defun chunk-emitter-sources (table vocabulary)
   "TABLE's emitting cells as packed voxel-light sources, memoized by TABLE.
 
-Material tables are replaced, never mutated, so their identity names their
+Material chunks are replaced, never mutated, so their identity names their
 emitters; a worker may warm this memo when it materializes a chunk."
   (or (gethash table *chunk-emitter-sources*)
       (setf (gethash table *chunk-emitter-sources*)
             (let ((emissions (placement-emissions vocabulary))
                   (sources nil))
               (when (some #'plusp emissions)
-                (maphash (lambda (cell offset)
-                           (let ((emission (aref emissions offset)))
-                             (unless (zerop emission)
-                               (push (luft:make-voxel-light-source cell emission)
-                                     sources))))
-                         table))
+                (etypecase table
+                  (chunk-materials
+                   (let ((key (chunk-materials-key table)))
+                     (map-chunk-material-runs
+                      (lambda (col z0 z1 offset)
+                        (let ((emission (aref emissions offset)))
+                          (unless (zerop emission)
+                            (loop for z from z0 below z1 do
+                              (push (luft:make-voxel-light-source
+                                     (material-column-site key col z) emission)
+                                    sources)))))
+                      table)))
+                  (hash-table
+                   (maphash (lambda (cell offset)
+                              (let ((emission (aref emissions offset)))
+                                (unless (zerop emission)
+                                  (push (luft:make-voxel-light-source cell emission)
+                                        sources))))
+                            table))))
               (coerce (sort sources #'<)
                       '(simple-array (unsigned-byte 64) (*)))))))
 
@@ -170,17 +183,42 @@ face's tangents by U and V, and the canonical half-cell wick off it."
           (setf (gethash pair memo)
                 (let ((x0 most-positive-fixnum) (y0 most-positive-fixnum)
                       (x1 0) (y1 0))
-                  (labels ((changed (cell)
-                             (setf x0 (min x0 (luft:site-x cell))
-                                   y0 (min y0 (luft:site-y cell))
-                                   x1 (max x1 (1+ (luft:site-x cell)))
-                                   y1 (max y1 (1+ (luft:site-y cell))))))
-                    (maphash (lambda (cell value)
-                               (multiple-value-bind (other found) (gethash cell new)
-                                 (unless (and found (= value other)) (changed cell)))) old)
-                    (maphash (lambda (cell value)
-                               (declare (ignore value))
-                               (unless (nth-value 1 (gethash cell old)) (changed cell))) new))
+                  (labels ((changed-xy (cx cy)
+                             (setf x0 (min x0 cx)
+                                   y0 (min y0 cy)
+                                   x1 (max x1 (1+ cx))
+                                   y1 (max y1 (1+ cy))))
+                           (changed (cell)
+                             (changed-xy (luft:site-x cell) (luft:site-y cell))))
+                    (if (and (typep old 'chunk-materials)
+                             (typep new 'chunk-materials)
+                             (= (chunk-materials-key old) (chunk-materials-key new)))
+                        (let ((old-starts (chunk-materials-column-starts old))
+                              (old-runs (chunk-materials-runs old))
+                              (new-starts (chunk-materials-column-starts new))
+                              (new-runs (chunk-materials-runs new))
+                              (chunk-x (luft:chunk-origin-x (chunk-materials-key old)))
+                              (chunk-y (luft:chunk-origin-y (chunk-materials-key old))))
+                          (dotimes (col +material-chunk-column-count+)
+                            (let ((os (aref old-starts col)) (oe (aref old-starts (1+ col)))
+                                  (ns (aref new-starts col)) (ne (aref new-starts (1+ col))))
+                              (unless (and (= (- oe os) (- ne ns))
+                                           (loop for i from os below oe
+                                                 for j from ns below ne
+                                                 always (= (aref old-runs i) (aref new-runs j))))
+                                (changed-xy (+ chunk-x (logand col 63))
+                                            (+ chunk-y (ash col -6)))))))
+                        (progn
+                          (map-material-chunk
+                           (lambda (cell value)
+                             (multiple-value-bind (other found) (material-chunk-at new cell)
+                               (unless (and found (= value other)) (changed cell))))
+                           old)
+                          (map-material-chunk
+                           (lambda (cell value)
+                             (declare (ignore value))
+                             (unless (nth-value 1 (material-chunk-at old cell)) (changed cell)))
+                           new))))
                   (when (< x0 x1) (list x0 y0 x1 y1))))))))
 
 (defun light-edit-region (domain key old new memo)
@@ -240,30 +278,72 @@ step as well. Unknown residency is handled by the tile, never as open sky."
   (or (gethash table *chunk-sky-columns*)
       (setf (gethash table *chunk-sky-columns*)
             (let ((columns (make-array 4096 :initial-element nil)))
-              (maphash
-               (lambda (cell material)
-                 (when (plusp (aref opacity material))
-                   (let* ((index (+ (logand (luft:site-x cell) 63)
-                                    (* 64 (logand (luft:site-y cell) 63))))
-                          (column (or (aref columns index)
-                                      (setf (aref columns index)
-                                            (make-array luft:+top-z+
-                                             :element-type '(unsigned-byte 8)
-                                             :initial-element 0)))))
-                     (setf (aref column (luft:site-z cell))
-                           (aref opacity material)))))
-               table)
-              (dotimes (index 4096)
-                (let* ((column (aref columns index))
-                       (top (and column (position-if #'plusp column :from-end t))))
-                  (when top
-                    (let ((direct (make-array (1+ top)
-                                   :element-type '(unsigned-byte 8)))
-                          (level 15))
-                      (loop for z from top downto 0 do
-                        (setf level (max 0 (- level (aref column z)))
-                              (aref direct z) level))
-                      (setf (aref columns index) direct)))))
+              (etypecase table
+                (chunk-materials
+                 (let ((starts (chunk-materials-column-starts table))
+                       (runs (chunk-materials-runs table)))
+                   (dotimes (col 4096)
+                     (let* ((start (aref starts col))
+                            (end (aref starts (1+ col)))
+                            (top-run
+                              (loop for i from (1- end) downto start
+                                    when (plusp (aref opacity
+                                                      (material-run-offset (aref runs i))))
+                                      return i)))
+                       (when top-run
+                         (let* ((top (1- (material-run-z1 (aref runs top-run))))
+                                (direct (make-array (1+ top)
+                                                    :element-type '(unsigned-byte 8)
+                                                    :initial-element 0))
+                                (level 15)
+                                (z top))
+                           (loop for i from top-run downto start
+                                 while (plusp level)
+                                 for run = (aref runs i)
+                                 for z0 = (material-run-z0 run)
+                                 for z1 = (material-run-z1 run)
+                                 for loss = (aref opacity (material-run-offset run))
+                                 do (loop while (>= z z1) do
+                                      (setf (aref direct z) level)
+                                      (decf z))
+                                    (if (zerop loss)
+                                        (loop while (>= z z0) do
+                                          (setf (aref direct z) level)
+                                          (decf z))
+                                        (loop while (and (>= z z0) (plusp level)) do
+                                          (setf level (max 0 (- level loss))
+                                                (aref direct z) level)
+                                          (decf z))))
+                           (when (plusp level)
+                             (loop while (>= z 0) do
+                               (setf (aref direct z) level)
+                               (decf z)))
+                           (setf (aref columns col) direct)))))))
+                (hash-table
+                 (maphash
+                  (lambda (cell material)
+                    (when (plusp (aref opacity material))
+                      (let* ((index (+ (logand (luft:site-x cell) 63)
+                                       (* 64 (logand (luft:site-y cell) 63))))
+                             (column (or (aref columns index)
+                                         (setf (aref columns index)
+                                               (make-array luft:+top-z+
+                                                           :element-type '(unsigned-byte 8)
+                                                           :initial-element 0)))))
+                        (setf (aref column (luft:site-z cell))
+                              (aref opacity material)))))
+                  table)
+                 (dotimes (index 4096)
+                   (let* ((column (aref columns index))
+                          (top (and column (position-if #'plusp column :from-end t))))
+                     (when top
+                       (let ((direct (make-array (1+ top)
+                                                 :element-type '(unsigned-byte 8)))
+                             (level 15))
+                         (loop for z from top downto 0 do
+                           (setf level (max 0 (- level (aref column z)))
+                                 (aref direct z) level))
+                         (setf (aref columns index) direct)))))))
               columns))))
 
 (defvar *chunk-sky-interfaces*
@@ -277,36 +357,76 @@ seam frontier must read the regional guard on the mesh worker."
   (or (gethash table *chunk-sky-interfaces*)
       (setf (gethash table *chunk-sky-interfaces*)
             (let* ((columns (chunk-sky-columns table opacity))
-                   (first (loop for cell being the hash-keys of table return cell))
-                   (x0 (if first (luft:chunk-origin-x (luft:site-chunk-key first)) 0))
-                   (y0 (if first (luft:chunk-origin-y (luft:site-chunk-key first)) 0))
                    (sources nil) (fringe nil))
               (labels ((direct (x y z)
                          (if (and (<= 0 x 63) (<= 0 y 63) (<= 0 z) (< z luft:+top-z+))
                              (let ((column (aref columns (+ x (* 64 y)))))
                                (if (or (null column) (>= z (length column)))
                                    15 (aref column z)))
-                             0)))
-                (dotimes (y 64)
-                  (dotimes (x 64)
-                    (let ((column (aref columns (+ x (* 64 y)))))
-                      (when column
-                        (dotimes (z (length column))
-                          (let* ((cell (luft:make-site domain (+ x0 x) (+ y0 y) z luft:+cell-extent+ 1))
-                                 (level (aref column z))
-                                 (loss (1+ (multiple-value-bind (index present-p) (gethash cell table)
-                                             (if present-p (aref opacity index) 0)))))
-                            (when (and (< loss 15) (< level 14))
-                              (when (or (= x 0) (= y 0) (= x 63) (= y 63))
-                                (push cell fringe))
-                              (let ((candidate
-                                      (luft:voxel-light-transfer
-                                       (max (direct (1- x) y z) (direct (1+ x) y z)
-                                            (direct x (1- y) z) (direct x (1+ y) z)
-                                            (direct x y (1- z)) (direct x y (1+ z)))
-                                       (1- loss))))
-                                (when (> candidate level)
-                                  (push (luft:make-voxel-light-source cell candidate) sources)))))))))))
+                             0))
+                       (check-cell (x y z cell level loss)
+                         (when (and (< loss 15) (< level 14))
+                           (when (or (= x 0) (= y 0) (= x 63) (= y 63))
+                             (push cell fringe))
+                           (let ((candidate
+                                   (luft:voxel-light-transfer
+                                    (max (direct (1- x) y z) (direct (1+ x) y z)
+                                         (direct x (1- y) z) (direct x (1+ y) z)
+                                         (direct x y (1- z)) (direct x y (1+ z)))
+                                    (1- loss))))
+                             (when (> candidate level)
+                               (push (luft:make-voxel-light-source cell candidate) sources))))))
+                (etypecase table
+                  (chunk-materials
+                   (let ((key (chunk-materials-key table))
+                         (starts (chunk-materials-column-starts table))
+                         (runs (chunk-materials-runs table)))
+                     (dotimes (y 64)
+                       (dotimes (x 64)
+                         (let* ((col (+ x (* 64 y)))
+                                (column (aref columns col)))
+                           (when column
+                             (let ((len (length column))
+                                   (start (aref starts col))
+                                   (end (aref starts (1+ col)))
+                                   (cursor 0))
+                               (loop for i from start below end
+                                     for run = (aref runs i)
+                                     for z0 = (material-run-z0 run)
+                                     for z1 = (material-run-z1 run)
+                                     for mat = (material-run-offset run)
+                                     do (loop for z from cursor below (min z0 len) do
+                                          (check-cell x y z (material-column-site key col z)
+                                                      (aref column z) 1))
+                                        (when (>= z0 len)
+                                          (setf cursor len)
+                                          (return))
+                                        (let ((loss (1+ (aref opacity mat)))
+                                              (run-end (min z1 len)))
+                                          (when (< loss 15)
+                                            (loop for z from z0 below run-end do
+                                              (check-cell x y z (material-column-site key col z)
+                                                          (aref column z) loss)))
+                                          (setf cursor run-end)))
+                               (loop for z from cursor below len do
+                                 (check-cell x y z (material-column-site key col z)
+                                             (aref column z) 1)))))))))
+                  (hash-table
+                   (let* ((first (loop for cell being the hash-keys of table return cell))
+                          (x0 (if first (luft:chunk-origin-x (luft:site-chunk-key first)) 0))
+                          (y0 (if first (luft:chunk-origin-y (luft:site-chunk-key first)) 0)))
+                     (dotimes (y 64)
+                       (dotimes (x 64)
+                         (let ((column (aref columns (+ x (* 64 y)))))
+                           (when column
+                             (dotimes (z (length column))
+                               (let* ((cell (luft:make-site domain (+ x0 x) (+ y0 y) z
+                                                            luft:+cell-extent+ 1))
+                                      (level (aref column z))
+                                      (loss (1+ (multiple-value-bind (index present-p)
+                                                    (gethash cell table)
+                                                  (if present-p (aref opacity index) 0)))))
+                                 (check-cell x y z cell level loss)))))))))))
               (cons sources fringe)))))
 
 (zdefun (solve-sky-tile :zone :luft/solve-sky-tile :value key)

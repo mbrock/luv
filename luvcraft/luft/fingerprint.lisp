@@ -58,7 +58,8 @@ of each chunk within RADIUS of Luvcraft's origin, one fact per line."
     (multiple-value-bind (hash resident) (terrain:world-source-chunk-hash source key)
       (format stream "chunk ~D ~D cells ~D ~A~%"
               (luft:chunk-key-x key) (luft:chunk-key-y key)
-              (hash-table-count (terrain:resident-cell-chunk-material-cells resident))
+              (terrain:material-chunk-count
+               (terrain:resident-cell-chunk-material-cells resident))
               hash)))
   (finish-output stream)
   (values))

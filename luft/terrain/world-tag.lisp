@@ -92,19 +92,30 @@ peers whose vocabularies share a digest."
       (loop for value across (luft:chunk-fibers-words
                               (resident-cell-chunk-fibers resident))
             do (word value))
-      (let* ((materials (resident-cell-chunk-material-cells resident))
-             (cells (make-array (hash-table-count materials)
-                                :element-type '(unsigned-byte 64)))
-             (index 0))
-        (maphash (lambda (cell offset)
-                   (declare (ignore offset))
-                   (setf (aref cells index) cell)
-                   (incf index))
-                 materials)
-        (word (length cells))
-        (loop for cell across (sort cells #'<)
-              do (word cell)
-                 (word (gethash cell materials))))
+      (let ((materials (resident-cell-chunk-material-cells resident)))
+        (etypecase materials
+          (chunk-materials
+           (let ((key (chunk-materials-key materials)))
+             (word (chunk-materials-cell-count materials))
+             (map-chunk-material-runs
+              (lambda (col z0 z1 offset)
+                (loop for z from z0 below z1 do
+                  (word (material-column-site key col z))
+                  (word offset)))
+              materials)))
+          (hash-table
+           (let ((cells (make-array (hash-table-count materials)
+                                    :element-type '(unsigned-byte 64)))
+                 (index 0))
+             (maphash (lambda (cell offset)
+                        (declare (ignore offset))
+                        (setf (aref cells index) cell)
+                        (incf index))
+                      materials)
+             (word (length cells))
+             (loop for cell across (sort cells #'<)
+                   do (word cell)
+                      (word (gethash cell materials)))))))
       ;; A live edit appends its attachment; a fresh materialization sorts
       ;; them by face.  Both describe one set.
       (let ((attachments (sort (copy-list (resident-cell-chunk-attachments resident))

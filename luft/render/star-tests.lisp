@@ -537,9 +537,7 @@
          "one emitted band or junction reduces both material samples")))))
 
 (defun same-material-cell-table-p (left right)
-  (and (= (hash-table-count left) (hash-table-count right))
-       (loop for cell being the hash-keys of left using (hash-value offset)
-             always (eql offset (gethash cell right)))))
+  (render::material-chunk= left right))
 
 (define-test authored-world-source-is-deterministic-and-seam-independent
   (let* ((domain (luft:make-world-domain :x-bits 8 :y-bits 8))
@@ -567,10 +565,9 @@
           do (true (= 1 (luft:fibers-cell-bit
                          (render::resident-cell-chunk-fibers resident)
                          x y z)))
-             (true (= 2 (gethash
-                         cell
-                         (render::resident-cell-chunk-material-cells
-                          resident)))
+             (true (= 2 (render::material-chunk-at
+                         (render::resident-cell-chunk-material-cells resident)
+                         cell))
                    "the cross-seam road is authored limestone"))
     (true (<= (abs
                (- (render::large-world-river-centre-x 255)
@@ -599,10 +596,9 @@
                     (render::resident-cell-chunk-fibers resident) x y z))
             "an explicit-air edit overrides regenerated road content")
       (true (not (nth-value
-                  1 (gethash
-                     cell
-                     (render::resident-cell-chunk-material-cells
-                      resident))))))))
+                  1 (render::material-chunk-at
+                     (render::resident-cell-chunk-material-cells resident)
+                     cell)))))))
 
 (define-test authored-world-demand-rejects-stale-incarnations
   (let* ((scene (world:make-authored-world-streaming-scene

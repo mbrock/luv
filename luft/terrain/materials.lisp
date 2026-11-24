@@ -236,50 +236,426 @@ NIL when none is."
     (and (find t table) table)))
 
 (defun material-chunk-translucent-cells (table material-chunk)
-  "The (CELL) of every translucent cell in MATERIAL-CHUNK, a cell table.
-The one-element lists match the (CELL . ENTRY) shape of body cells."
+  "The (CELL) of every translucent cell in MATERIAL-CHUNK."
   (let ((cells nil))
     (when (and table material-chunk)
-      (maphash (lambda (cell offset)
-                 (when (and (< offset (length table)) (aref table offset))
-                   (push (list cell) cells)))
-               material-chunk))
+      (etypecase material-chunk
+        (chunk-materials
+         (let ((key (chunk-materials-key material-chunk))
+               (limit (length table)))
+           (map-chunk-material-runs
+            (lambda (col z0 z1 offset)
+              (when (and (< offset limit) (aref table offset))
+                (loop for z from z0 below z1 do
+                  (push (list (material-column-site key col z)) cells))))
+            material-chunk)))
+        (hash-table
+         (maphash (lambda (cell offset)
+                    (when (and (< offset (length table)) (aref table offset))
+                      (push (list cell) cells)))
+                  material-chunk))))
     cells))
 
-;;; Published material fields share immutable per-chunk tables. Construction
-;;; may fill a local table; an edit copies only that table and the chunk index.
+;;; Compact immutable Z-run-length-encoded per-chunk material storage.
+;;;
+;;; Columns are indexed by COL = LX + 64 * LY, which matches ascending
+;;; canonical site order (Z in bits 4..11, LX in bits 12..17, LY in bits
+;;; 18..23).  Within each column, solid runs are non-overlapping, sorted by
+;;; ascending Z0, and maximally coalesced.
+
+(defconstant +material-chunk-column-count+
+  (* luft:+chunk-size+ luft:+chunk-size+))
+(defconstant +material-air-sentinel+ #xffff)
+
+(declaim (inline pack-material-run material-run-z0 material-run-z1
+                 material-run-offset material-column-index
+                 material-column-site))
+
+(defun pack-material-run (z0 z1 offset)
+  (declare (type (unsigned-byte 8) z0 z1)
+           (type (unsigned-byte 16) offset)
+           (optimize (speed 3) (safety 1)))
+  (the (unsigned-byte 32)
+       (logior z0 (ash z1 8) (ash offset 16))))
+
+(defun material-run-z0 (run)
+  (declare (type (unsigned-byte 32) run) (optimize (speed 3) (safety 1)))
+  (logand run #xff))
+
+(defun material-run-z1 (run)
+  (declare (type (unsigned-byte 32) run) (optimize (speed 3) (safety 1)))
+  (logand (ash run -8) #xff))
+
+(defun material-run-offset (run)
+  (declare (type (unsigned-byte 32) run) (optimize (speed 3) (safety 1)))
+  (ash run -16))
+
+(defun material-column-index (lx ly)
+  (declare (type (integer 0 63) lx ly) (optimize (speed 3) (safety 1)))
+  (logior lx (ash ly 6)))
+
+(defun material-column-site (key col z)
+  (declare (type luft:chunk-key key)
+           (type (integer 0 4095) col)
+           (type (integer 0 254) z)
+           (optimize (speed 3) (safety 1)))
+  (logior luft:+cell-extent+
+          (ash z luft:+z-shift+)
+          (ash col luft:+x-local-shift+)
+          (ash key luft:+chunk-morton-shift+)))
+
+(defstruct (chunk-materials
+             (:constructor %make-chunk-materials (key cell-count column-starts runs))
+             (:copier nil))
+  "Immutable Z-RLE material offsets for one 64x64x255 chunk."
+  (key 0 :type luft:chunk-key :read-only t)
+  (cell-count 0 :type fixnum :read-only t)
+  (column-starts #.(make-array 4097 :element-type '(unsigned-byte 32) :initial-element 0)
+                 :type (simple-array (unsigned-byte 32) (4097))
+                 :read-only t)
+  (runs #.(make-array 0 :element-type '(unsigned-byte 32))
+        :type (simple-array (unsigned-byte 32) (*))
+        :read-only t))
+
+(defmethod print-object ((chunk chunk-materials) stream)
+  (print-unreadable-object (chunk stream :type t)
+    (format stream "chunk ~D (~D ~D) ~D cells ~D runs"
+            (chunk-materials-key chunk)
+            (luft:chunk-key-x (chunk-materials-key chunk))
+            (luft:chunk-key-y (chunk-materials-key chunk))
+            (chunk-materials-cell-count chunk)
+            (length (chunk-materials-runs chunk)))))
+
+(defun make-empty-chunk-materials (key)
+  "An immutable empty CHUNK-MATERIALS for KEY."
+  (%make-chunk-materials
+   key 0
+   (make-array (1+ +material-chunk-column-count+)
+               :element-type '(unsigned-byte 32) :initial-element 0)
+   (make-array 0 :element-type '(unsigned-byte 32))))
+
+(defun chunk-materials-byte-size (chunk)
+  "Byte payload of CHUNK's column index and packed run arrays."
+  (+ (* 4 (length (chunk-materials-column-starts chunk)))
+     (* 4 (length (chunk-materials-runs chunk)))))
+
+(defun copy-chunk-materials (chunk)
+  "A fresh CHUNK-MATERIALS with identical content and distinct EQ identity."
+  (let* ((old-starts (chunk-materials-column-starts chunk))
+         (old-runs (chunk-materials-runs chunk))
+         (starts (make-array (length old-starts) :element-type '(unsigned-byte 32)))
+         (runs (make-array (length old-runs) :element-type '(unsigned-byte 32))))
+    (replace starts old-starts)
+    (replace runs old-runs)
+    (%make-chunk-materials (chunk-materials-key chunk)
+                           (chunk-materials-cell-count chunk)
+                           starts runs)))
+
+(declaim (inline chunk-materials-at-local))
+(defun chunk-materials-at-local (chunk lx ly z)
+  "Look up local coordinates (LX, LY, Z) inside CHUNK."
+  (declare (type chunk-materials chunk)
+           (type (integer 0 63) lx ly)
+           (type fixnum z)
+           (optimize (speed 3) (safety 1)))
+  (let* ((col (material-column-index lx ly))
+         (starts (chunk-materials-column-starts chunk))
+         (runs (chunk-materials-runs chunk))
+         (start (aref starts col))
+         (end (aref starts (1+ col))))
+    (declare (type (unsigned-byte 32) start end))
+    (loop for i of-type (unsigned-byte 32) from start below end
+          for run of-type (unsigned-byte 32) = (aref runs i)
+          for z0 of-type fixnum = (material-run-z0 run)
+          for z1 of-type fixnum = (material-run-z1 run)
+          do (cond ((< z z0) (return (values nil nil)))
+                   ((< z z1) (return (values (material-run-offset run) t))))
+          finally (return (values nil nil)))))
+
+(defun chunk-materials-at (chunk cell)
+  "Look up canonical site CELL in CHUNK."
+  (declare (type chunk-materials chunk)
+           (type luft:site cell)
+           (optimize (speed 3) (safety 1)))
+  (if (= (luft:site-chunk-key cell) (chunk-materials-key chunk))
+      (chunk-materials-at-local
+       chunk
+       (ldb (byte luft:+chunk-bits+ luft:+x-local-shift+) cell)
+       (ldb (byte luft:+chunk-bits+ luft:+y-local-shift+) cell)
+       (ldb (byte luft:+vertical-coordinate-bits+ luft:+z-shift+) cell))
+      (values nil nil)))
+
+(defun map-chunk-material-runs (function chunk)
+  "Call FUNCTION with (COL Z0 Z1 OFFSET) for each solid run in ascending site order."
+  (declare (type function function)
+           (type chunk-materials chunk)
+           (optimize (speed 3) (safety 1)))
+  (let ((starts (chunk-materials-column-starts chunk))
+        (runs (chunk-materials-runs chunk)))
+    (dotimes (col +material-chunk-column-count+)
+      (let ((start (aref starts col))
+            (end (aref starts (1+ col))))
+        (declare (type (unsigned-byte 32) start end))
+        (loop for i of-type (unsigned-byte 32) from start below end
+              for run of-type (unsigned-byte 32) = (aref runs i)
+              do (funcall function col
+                          (material-run-z0 run)
+                          (material-run-z1 run)
+                          (material-run-offset run))))))
+  nil)
+
+(defun map-chunk-materials (function chunk)
+  "Call FUNCTION with (CELL OFFSET) for every solid cell in ascending site order."
+  (declare (type function function)
+           (type chunk-materials chunk)
+           (optimize (speed 3) (safety 1)))
+  (let ((key (chunk-materials-key chunk)))
+    (map-chunk-material-runs
+     (lambda (col z0 z1 offset)
+       (declare (type (integer 0 4095) col)
+                (type (unsigned-byte 8) z0 z1)
+                (type (unsigned-byte 16) offset))
+       (loop for z fixnum from z0 below z1 do
+         (funcall function (material-column-site key col z) offset)))
+     chunk)))
+
+(defun chunk-materials= (left right)
+  "Whether LEFT and RIGHT store identical material cells."
+  (and (= (chunk-materials-key left) (chunk-materials-key right))
+       (= (chunk-materials-cell-count left) (chunk-materials-cell-count right))
+       (= (length (chunk-materials-runs left)) (length (chunk-materials-runs right)))
+       (equalp (chunk-materials-column-starts left)
+               (chunk-materials-column-starts right))
+       (equalp (chunk-materials-runs left)
+               (chunk-materials-runs right))))
+
+(defun chunk-materials-with-cell (chunk cell offset)
+  "Return a new CHUNK-MATERIALS with CELL set to OFFSET, or removed for NIL."
+  (declare (type chunk-materials chunk)
+           (type luft:site cell)
+           (optimize (speed 3) (safety 1)))
+  (when offset
+    (check-type offset (integer 0 #xfffe)))
+  (let* ((col (ldb (byte (* 2 luft:+chunk-bits+) luft:+x-local-shift+) cell))
+         (z (ldb (byte luft:+vertical-coordinate-bits+ luft:+z-shift+) cell))
+         (old-starts (chunk-materials-column-starts chunk))
+         (old-runs (chunk-materials-runs chunk))
+         (start (aref old-starts col))
+         (end (aref old-starts (1+ col)))
+         (col-runs (make-array (+ 2 (- end start)) :element-type '(unsigned-byte 32)))
+         (out-count 0)
+         (old-present-p nil)
+         (inserted-p nil))
+    (declare (type (integer 0 4095) col)
+             (type (integer 0 254) z)
+             (type (unsigned-byte 32) start end)
+             (type fixnum out-count))
+    (flet ((emit (z0 z1 mat)
+             (declare (type fixnum z0 z1 mat))
+             (when (< z0 z1)
+               (if (and (plusp out-count)
+                        (= z0 (material-run-z1 (aref col-runs (1- out-count))))
+                        (= mat (material-run-offset (aref col-runs (1- out-count)))))
+                   (setf (aref col-runs (1- out-count))
+                         (pack-material-run
+                          (material-run-z0 (aref col-runs (1- out-count)))
+                          z1 mat))
+                   (progn
+                     (setf (aref col-runs out-count) (pack-material-run z0 z1 mat))
+                     (incf out-count))))))
+      (loop for i of-type (unsigned-byte 32) from start below end
+            for run of-type (unsigned-byte 32) = (aref old-runs i)
+            for z0 of-type fixnum = (material-run-z0 run)
+            for z1 of-type fixnum = (material-run-z1 run)
+            for mat of-type fixnum = (material-run-offset run)
+            do (cond
+                 ((<= z1 z)
+                  (emit z0 z1 mat))
+                 ((<= z0 z)
+                  (setf old-present-p t
+                        inserted-p t)
+                  (emit z0 z mat)
+                  (when offset (emit z (1+ z) offset))
+                  (emit (1+ z) z1 mat))
+                 (t
+                  (unless inserted-p
+                    (setf inserted-p t)
+                    (when offset (emit z (1+ z) offset)))
+                  (emit z0 z1 mat))))
+      (unless inserted-p
+        (when offset (emit z (1+ z) offset))))
+    (let* ((old-col-count (- end start))
+           (delta (- out-count old-col-count))
+           (new-total (+ (length old-runs) delta))
+           (new-starts (make-array (1+ +material-chunk-column-count+)
+                                   :element-type '(unsigned-byte 32)))
+           (new-runs (make-array new-total :element-type '(unsigned-byte 32)))
+           (new-cell-count (+ (chunk-materials-cell-count chunk)
+                              (if offset 1 0)
+                              (if old-present-p -1 0))))
+      (declare (type fixnum old-col-count delta new-total new-cell-count))
+      (replace new-starts old-starts :end1 (1+ col) :end2 (1+ col))
+      (loop for c fixnum from (1+ col) to +material-chunk-column-count+ do
+        (setf (aref new-starts c) (the (unsigned-byte 32) (+ (aref old-starts c) delta))))
+      (replace new-runs old-runs :end1 start :end2 start)
+      (replace new-runs col-runs :start1 start :end1 (+ start out-count) :end2 out-count)
+      (replace new-runs old-runs :start1 (+ start out-count) :start2 end)
+      (%make-chunk-materials (chunk-materials-key chunk) new-cell-count new-starts new-runs))))
+
+(defun chunk-materials-from-grid (key grid &optional (max-z (1- luft:+top-z+)))
+  "Compress flat 64x64x256 u16 GRID (indexed Z + 256*COL) into CHUNK-MATERIALS."
+  (declare (type luft:chunk-key key)
+           (type (simple-array (unsigned-byte 16) (*)) grid)
+           (type fixnum max-z)
+           (optimize (speed 3) (safety 1)))
+  (let ((starts (make-array (1+ +material-chunk-column-count+)
+                            :element-type '(unsigned-byte 32)
+                            :initial-element 0))
+        (runs (make-array 4096 :element-type '(unsigned-byte 32)
+                               :adjustable t :fill-pointer 0))
+        (cell-count 0)
+        (z-limit (min luft:+top-z+ (1+ max-z))))
+    (declare (type fixnum cell-count z-limit))
+    (dotimes (col +material-chunk-column-count+)
+      (setf (aref starts col) (fill-pointer runs))
+      (when (plusp z-limit)
+        (let ((base (ash col 8))
+              (z 0))
+          (declare (type fixnum base z))
+          (loop while (< z z-limit)
+                for mat of-type (unsigned-byte 16) = (aref grid (+ base z))
+                do (if (= mat +material-air-sentinel+)
+                       (incf z)
+                       (let ((z0 z))
+                         (incf z)
+                         (loop while (and (< z z-limit)
+                                          (= (aref grid (+ base z)) mat))
+                               do (incf z))
+                         (incf cell-count (- z z0))
+                         (vector-push-extend (pack-material-run z0 z mat) runs)))))))
+    (setf (aref starts +material-chunk-column-count+) (fill-pointer runs))
+    (let ((packed (make-array (fill-pointer runs) :element-type '(unsigned-byte 32))))
+      (replace packed runs)
+      (%make-chunk-materials key cell-count starts packed))))
+
+(defun chunk-materials-from-table (key table)
+  "Convert a per-chunk CELL->OFFSET hash table into compact CHUNK-MATERIALS."
+  (if (zerop (hash-table-count table))
+      (make-empty-chunk-materials key)
+      (let ((columns (make-array +material-chunk-column-count+ :initial-element nil)))
+        (maphash (lambda (cell offset)
+                   (check-type offset (integer 0 #xfffe))
+                   (let ((col (ldb (byte (* 2 luft:+chunk-bits+) luft:+x-local-shift+) cell))
+                         (z (ldb (byte luft:+vertical-coordinate-bits+ luft:+z-shift+) cell)))
+                     (push (cons z offset) (aref columns col))))
+                 table)
+        (let ((starts (make-array (1+ +material-chunk-column-count+)
+                                  :element-type '(unsigned-byte 32)
+                                  :initial-element 0))
+              (runs (make-array 256 :element-type '(unsigned-byte 32)
+                                    :adjustable t :fill-pointer 0))
+              (cell-count 0))
+          (dotimes (col +material-chunk-column-count+)
+            (setf (aref starts col) (fill-pointer runs))
+            (let ((entries (aref columns col)))
+              (when entries
+                (setf entries (sort entries #'< :key #'car))
+                (let* ((first (pop entries))
+                       (run-z0 (car first))
+                       (run-z1 (1+ run-z0))
+                       (run-mat (cdr first)))
+                  (incf cell-count)
+                  (dolist (entry entries)
+                    (incf cell-count)
+                    (let ((z (car entry)) (mat (cdr entry)))
+                      (if (and (= z run-z1) (= mat run-mat))
+                          (incf run-z1)
+                          (progn
+                            (vector-push-extend (pack-material-run run-z0 run-z1 run-mat) runs)
+                            (setf run-z0 z run-z1 (1+ z) run-mat mat)))))
+                  (vector-push-extend (pack-material-run run-z0 run-z1 run-mat) runs)))))
+          (setf (aref starts +material-chunk-column-count+) (fill-pointer runs))
+          (let ((packed (make-array (fill-pointer runs) :element-type '(unsigned-byte 32))))
+            (replace packed runs)
+            (%make-chunk-materials key cell-count starts packed))))))
+
+;;; Polymorphic chunk accessors supporting compact CHUNK-MATERIALS and
+;;; legacy hash-table chunks used in isolated test fixtures.
+
+(defun material-chunk-at (chunk cell)
+  (etypecase chunk
+    (chunk-materials (chunk-materials-at chunk cell))
+    (hash-table (gethash cell chunk))))
+
+(defun material-chunk-count (chunk)
+  (etypecase chunk
+    (chunk-materials (chunk-materials-cell-count chunk))
+    (hash-table (hash-table-count chunk))))
+
+(defun map-material-chunk (function chunk)
+  (etypecase chunk
+    (chunk-materials (map-chunk-materials function chunk))
+    (hash-table (maphash function chunk))))
+
+(defun copy-material-chunk (chunk)
+  (etypecase chunk
+    (chunk-materials (copy-chunk-materials chunk))
+    (hash-table (alexandria:copy-hash-table chunk))))
+
+(defun material-chunk= (left right)
+  (cond ((and (typep left 'chunk-materials) (typep right 'chunk-materials))
+         (chunk-materials= left right))
+        ((= (material-chunk-count left) (material-chunk-count right))
+         (let ((equal-p t))
+           (map-material-chunk
+            (lambda (cell offset)
+              (unless (eql offset (material-chunk-at right cell))
+                (setf equal-p nil)))
+            left)
+           equal-p))
+        (t nil)))
+
+;;; Published material fields share immutable per-chunk CHUNK-MATERIALS.
+;;; An edit copies only the changed chunk and the small chunk index.
 (defstruct (material-store (:constructor make-material-store ()))
   (chunks (make-hash-table :test #'eql) :type hash-table :read-only t))
 
 (defun material-cell-at (field cell)
   "Return the placement offset and presence of CELL in FIELD."
   (etypecase field
+    (chunk-materials (chunk-materials-at field cell))
     (hash-table (gethash cell field))
     (function (funcall field cell))
     (material-store
      (let ((chunk (gethash (luft:site-chunk-key cell)
                            (material-store-chunks field))))
-       (if chunk (gethash cell chunk) (values nil nil))))))
+       (if chunk (material-chunk-at chunk cell) (values nil nil))))))
 
 (defun map-material-cells (function field)
   (etypecase field
+    (chunk-materials (map-chunk-materials function field))
     (hash-table (maphash function field))
     (material-store
      (maphash (lambda (key chunk)
                 (declare (ignore key))
-                (maphash function chunk))
+                (map-material-chunk function chunk))
               (material-store-chunks field)))))
 
 (defun material-store-from-table (table)
-  (let ((store (make-material-store)))
+  (let ((store (make-material-store))
+        (grouped (make-hash-table :test #'eql)))
     (maphash
      (lambda (cell offset)
        (let* ((key (luft:site-chunk-key cell))
-              (chunk (or (gethash key (material-store-chunks store))
-                         (setf (gethash key (material-store-chunks store))
+              (chunk (or (gethash key grouped)
+                         (setf (gethash key grouped)
                                (make-hash-table :test #'eql)))))
          (setf (gethash cell chunk) offset)))
      table)
+    (maphash (lambda (key chunk)
+               (setf (gethash key (material-store-chunks store))
+                     (chunk-materials-from-table key chunk)))
+             grouped)
     store))
 
 (defun material-store-with-cell (store cell offset)
@@ -287,12 +663,14 @@ The one-element lists match the (CELL . ENTRY) shape of body cells."
   (let* ((copy (make-material-store))
          (key (luft:site-chunk-key cell))
          (old (gethash key (material-store-chunks store)))
-         (chunk (if old (alexandria:copy-hash-table old)
-                    (make-hash-table :test #'eql))))
-    (maphash (lambda (key value)
-               (setf (gethash key (material-store-chunks copy)) value))
+         (base (etypecase old
+                 (null (make-empty-chunk-materials key))
+                 (chunk-materials old)
+                 (hash-table (chunk-materials-from-table key old))))
+         (chunk (chunk-materials-with-cell base cell offset)))
+    (maphash (lambda (chunk-key value)
+               (setf (gethash chunk-key (material-store-chunks copy)) value))
              (material-store-chunks store))
-    (if offset (setf (gethash cell chunk) offset) (remhash cell chunk))
     (setf (gethash key (material-store-chunks copy)) chunk)
     copy))
 
@@ -301,12 +679,13 @@ The one-element lists match the (CELL . ENTRY) shape of body cells."
   (declare (optimize (speed 3) (safety 1)))
   (etypecase field
     (function field)
+    (chunk-materials (lambda (cell) (chunk-materials-at field cell)))
     (hash-table (lambda (cell) (gethash cell field)))
     (material-store
      (let ((chunks (material-store-chunks field)))
        (lambda (cell)
          (let ((chunk (gethash (luft:site-chunk-key cell) chunks)))
-           (if chunk (gethash cell chunk) (values nil nil))))))))
+           (if chunk (material-chunk-at chunk cell) (values nil nil))))))))
 
 (defun compile-surface-mesh-appearance (mesh material-cells descriptors)
   "Compile one eight-u8 material record per active star in MESH.
@@ -319,22 +698,46 @@ remain byte-identical under repainting."
          (sites (luft:surface-mesh-star-site-words mesh))
          (codes (make-array (* 2 (length sites))
                             :element-type '(unsigned-byte 8)
-                            :initial-element 0)))
+                            :initial-element 0))
+         (store-chunks (and (typep material-cells 'material-store)
+                            (material-store-chunks material-cells)))
+         (cached-key -1)
+         (cached-chunk nil))
+    (declare (type (simple-array (unsigned-byte 32) (*)) sites)
+             (type (simple-array (unsigned-byte 8) (*)) codes)
+             (type fixnum cached-key))
     (loop for site-offset fixnum from 0 below (length sites) by 4
           for appearance-offset fixnum from 0 by 8
-          for x = (aref sites site-offset)
-          for y = (aref sites (+ site-offset 1))
-          for z = (aref sites (+ site-offset 2))
-          for star = (aref sites (+ site-offset 3))
+          for x fixnum = (aref sites site-offset)
+          for y fixnum = (aref sites (+ site-offset 1))
+          for z fixnum = (aref sites (+ site-offset 2))
+          for star fixnum = (aref sites (+ site-offset 3))
           do (dotimes (sample 8)
                (when (logbitp sample star)
-                 (let* ((cell-x (- x (if (logbitp 0 sample) 0 1)))
-                        (cell-y (- y (if (logbitp 1 sample) 0 1)))
-                        (cell-z (- z (if (logbitp 2 sample) 0 1)))
-                        (cell (luft:make-site domain cell-x cell-y cell-z
-                                              luft:+cell-extent+ 1)))
+                 (let ((cell-x (- x (if (logbitp 0 sample) 0 1)))
+                       (cell-y (- y (if (logbitp 1 sample) 0 1)))
+                       (cell-z (- z (if (logbitp 2 sample) 0 1))))
+                   (declare (type fixnum cell-x cell-y cell-z))
                    (multiple-value-bind (offset present-p)
-                       (material-cell-at material-cells cell)
+                       (if store-chunks
+                           (let ((key (luft:chunk-key-at cell-x cell-y)))
+                             (unless (= key cached-key)
+                               (setf cached-key key
+                                     cached-chunk (gethash key store-chunks)))
+                             (cond
+                               ((typep cached-chunk 'chunk-materials)
+                                (chunk-materials-at-local
+                                 cached-chunk
+                                 (logand cell-x 63) (logand cell-y 63) cell-z))
+                               (cached-chunk
+                                (gethash (luft:make-site domain cell-x cell-y cell-z
+                                                         luft:+cell-extent+ 1)
+                                         cached-chunk))
+                               (t (values nil nil))))
+                           (material-cell-at
+                            material-cells
+                            (luft:make-site domain cell-x cell-y cell-z
+                                            luft:+cell-extent+ 1)))
                      (unless present-p
                        (error "Occupied star sample ~D at (~D ~D ~D) has no material."
                               sample x y z))

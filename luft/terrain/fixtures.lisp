@@ -30,13 +30,25 @@
     (and any table)))
 
 (defun material-chunk-body-cells (table material-chunk)
-  "The (CELL . ENTRY) of every body cell in MATERIAL-CHUNK, a cell table."
+  "The (CELL . ENTRY) of every body cell in MATERIAL-CHUNK."
   (let ((cells nil))
     (when (and table material-chunk)
-      (maphash (lambda (cell offset)
-                 (let ((entry (and (< offset (length table)) (aref table offset))))
-                   (when entry (push (cons cell entry) cells))))
-               material-chunk))
+      (etypecase material-chunk
+        (chunk-materials
+         (let ((key (chunk-materials-key material-chunk))
+               (limit (length table)))
+           (map-chunk-material-runs
+            (lambda (col z0 z1 offset)
+              (let ((entry (and (< offset limit) (aref table offset))))
+                (when entry
+                  (loop for z from z0 below z1 do
+                    (push (cons (material-column-site key col z) entry) cells)))))
+            material-chunk)))
+        (hash-table
+         (maphash (lambda (cell offset)
+                    (let ((entry (and (< offset (length table)) (aref table offset))))
+                      (when entry (push (cons cell entry) cells))))
+                  material-chunk))))
     cells))
 
 (defun fibers-without-cells (fibers cells)

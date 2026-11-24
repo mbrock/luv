@@ -182,6 +182,18 @@ this package draws; the renderer and the ateliers use it.")
            #:make-world-source-streaming-scene
            #:material-cell-at
            #:material-cell-reader
+           #:chunk-materials
+           #:chunk-materials-p
+           #:chunk-materials-key
+           #:chunk-materials-cell-count
+           #:chunk-materials-byte-size
+           #:make-empty-chunk-materials
+           #:material-chunk-at
+           #:material-chunk-count
+           #:material-chunk=
+           #:copy-material-chunk
+           #:map-material-chunk
+           #:map-chunk-material-runs
            #:material-kind
            #:material-kind-attachment-form
            #:material-kind-base-tone

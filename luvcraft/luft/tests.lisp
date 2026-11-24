@@ -94,7 +94,7 @@
                      (block (luvcraft::world-block-at world x y z))
                      (site (luft:make-site domain (+ x offset) (+ z offset) y
                                            luft:+cell-extent+ 1))
-                     (offset-code (gethash site materials))
+                     (offset-code (terrain:material-chunk-at materials site))
                      (placement
                        (and offset-code
                             (luv.domains:identity-vocabulary-member
@@ -105,7 +105,7 @@
                                 (luft:fibers-cell-bit
                                  fibers (+ x offset) (+ z offset) y)))
                   (incf differences))))))))
-    (values differences solid (hash-table-count materials))))
+    (values differences solid (terrain:material-chunk-count materials))))
 
 (define-test alpine-chunks-match-luvcraft-cell-for-cell
   ;; Two Luft chunks: one at Luvcraft's origin, one in rough ground.
@@ -204,10 +204,11 @@
           (true (eq :lantern (terrain:material-kind-attachment-form
                               (terrain:surface-attachment-material attachment))))
           (is = (cell -20 13 -30) (terrain::surface-attachment-support-cell attachment))
-          (true (null (gethash (terrain:surface-attachment-clearance-cell attachment)
-                               materials))))
-        (true (gethash (cell -20 13 -30) materials))
-        (true (gethash (cell -24 14 -30) materials))))))
+          (true (null (terrain:material-chunk-at
+                       materials
+                       (terrain:surface-attachment-clearance-cell attachment)))))
+        (true (terrain:material-chunk-at materials (cell -20 13 -30)))
+        (true (terrain:material-chunk-at materials (cell -24 14 -30)))))))
 
 (defun write-save (world pathname &key resume)
   (luvcraft::write-luvcraft-save-description
@@ -594,12 +595,14 @@ Unlike SXHASH this freezes a portable, independently captured baseline."
         ;; So does one whose material table filled in another order.
         (let* ((resident (gethash key (terrain:streaming-scene-store scene)))
                (materials (terrain:resident-cell-chunk-material-cells resident))
+               (cells nil)
                (reversed (make-hash-table :test #'eql)))
           (is = 1 (length (terrain:resident-cell-chunk-attachments resident)))
-          (dolist (cell (sort (loop for cell being the hash-keys of materials
-                                    collect cell)
-                              #'>))
-            (setf (gethash cell reversed) (gethash cell materials)))
+          (terrain:map-material-chunk
+           (lambda (cell offset) (push (cons cell offset) cells))
+           materials)
+          (dolist (entry (sort cells #'> :key #'car))
+            (setf (gethash (car entry) reversed) (cdr entry)))
           (is string= live
               (terrain:resident-cell-chunk-hash
                (terrain:%make-resident-cell-chunk
