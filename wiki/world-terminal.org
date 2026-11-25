@@ -529,3 +529,28 @@ world unfocus gesture.  The focused PTY and luvcraft suites exercise prompt
 output, text and special-key input, terminal replies, resize, exit, dirty
 notification, and release.  Rich composed text input remains later device-side
 work rather than a condition on this first playable Bash crossing.
+
+* DONE Flood terminal walls with packed sites and compare their occupied cells
+:PROPERTIES:
+:ID: BD7LI1
+:END:
+
+When Tab picks a terminal, [[lisp:find-terminal-surface]] visits exposed cells
+in the face plane. It keeps packed sites in an =eql= table and extends the
+queue by its tail. Each admitted site needs one queue link. Those links also
+hold the finished surface's XYZ triples in their existing order. The limit
+still selects the same breadth-first prefix.
+
+Two picks on one wall can encounter its cells in different orders.
+[[lisp:same-terminal-surface-p]] marks each set in a scratch bitmap for
+rectangles of up to 4,096 cells. SBCL on arm64 honored =dynamic-extent= for
+a simple vector of fixnum words. The specialized bit vectors in the first
+attempt went on the heap. Larger footprints use a hash table sized by
+membership. Holes and the side of the wall remain part of its identity.
+
+A 64 by 32 solid terminal wall crossed the x = 64 chunk boundary. Across
+160 warm calls per build on M2 Pro SBCL, discovery fell from 1.61 MB and
+6.36 ms of CPU to 0.40 MB and 0.67 ms per pick. Comparing surfaces from
+opposite horizontal ends fell from 25.39 ms to 0.12 ms with zero measured
+heap allocation in both builds. The separate per-frame check that a wall
+still stands also measured zero bytes.

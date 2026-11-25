@@ -66,6 +66,13 @@
       (true (= 7 (render::terminal-surface-width surface)))
       (true (= 4 (render::terminal-surface-height surface)))
       (true (render::terminal-surface-standing-p scene surface))
+      (true (render::same-terminal-surface-p
+             surface (render::find-terminal-surface scene 16 20 7 '(0 -1 0))))
+      (true (equal '((13 20 6) (12 20 5) (14 20 5) (13 20 5))
+                   (render::terminal-surface-cells
+                    (render::find-terminal-surface scene 13 20 5 '(0 -1 0) :limit 4)))
+            "a cap keeps exactly the original breadth-first prefix")
+      (true (null (render::find-terminal-surface scene 13 20 5 '(0 -1 0) :limit 0)))
       (true (null (render::find-terminal-surface scene 13 20 5 '(0 0 1)))
             "tops do not open shells")
       (true (null (render::find-terminal-surface scene 13 20 5 '(0 0 -1)))
@@ -76,6 +83,22 @@
         (true (null (render::find-terminal-surface covered 13 20 5 '(0 -1 0))))
         (true (render::terminal-surface-standing-p scene surface)
               "a successor scene does not mutate the original terminal wall")))))
+
+(define-test terminal-surface-identity-includes-holes-plane-and-facing
+  ;; Both the bounded bitmap and the sparse fallback compare exact cell sets.
+  (dolist (far-x '(12 4106))
+    (let* ((cells (list '(10 20 4) '(11 20 4) (list far-x 20 5)))
+           (normal '(0 -1 0))
+           (surface (render::make-terminal-surface-from-cells cells normal)))
+      (flet ((matches (other-cells other-normal)
+               (render::same-terminal-surface-p
+                surface (render::make-terminal-surface-from-cells other-cells other-normal))))
+        (true (matches (reverse cells) normal))
+        (true (matches (cons (second cells) cells) normal))
+        (parachute:false (matches (list (first cells) '(11 20 5) (third cells)) normal))
+        (parachute:false (matches (list (first cells) (third cells)) normal))
+        (parachute:false (matches (loop for (x y z) in cells collect (list x (1+ y) z)) normal))
+        (parachute:false (matches cells '(0 1 0)))))))
 
 (define-test single-terminal-cells-have-a-usable-grid-on-every-wall-side
   (let ((builder (render::make-world-scene-builder :horizontal-bits 6)))

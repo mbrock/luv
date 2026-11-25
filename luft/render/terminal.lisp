@@ -79,13 +79,14 @@
   width           ; cells along RIGHT
   height)         ; cells along UP
 
+(defun terminal-material-p (scene site)
+  (let ((placement (scene-material-placement-at scene site)))
+    (and placement (eq :terminal (material-placement-name placement)))))
+
 (defun terminal-cell-p (scene x y z)
   "Whether X,Y,Z is a solid terminal cell of SCENE."
   (and (= 1 (inspection-cell-bit (inspection-source-solid scene) x y z))
-       (let ((placement (scene-material-placement-at
-                         scene (luft:make-site (scene-domain scene) x y z
-                                               luft:+cell-extent+ 1))))
-         (and placement (eq :terminal (material-placement-name placement))))))
+       (terminal-material-p scene (luft:make-site (scene-domain scene) x y z luft:+cell-extent+))))
 
 (defun terminal-face-exposed-p (scene x y z normal)
   (destructuring-bind (dx dy dz) normal
@@ -99,32 +100,46 @@ Only walls carry screens: NORMAL must be horizontal.  The component is every
 terminal cell reachable through in-plane neighbours whose NORMAL face is open
 to air; its bounding rectangle becomes the screen."
   (destructuring-bind (dx dy dz) normal
-    (unless (and (zerop dz) (= 1 (+ (abs dx) (abs dy))))
+    (unless (and (plusp limit) (zerop dz) (= 1 (+ (abs dx) (abs dy))))
       (return-from find-terminal-surface nil))
     (unless (and (terminal-cell-p scene x y z)
                  (terminal-face-exposed-p scene x y z normal))
       (return-from find-terminal-surface nil))
-    (let ((seen (make-hash-table :test #'equal))
-          (queue (list (list x y z)))
-          (cells nil)
-          ;; In-plane steps: along the wall horizontally, and vertically.
-          (steps (if (zerop dx)
-                     '((1 0 0) (-1 0 0) (0 0 1) (0 0 -1))
-                     '((0 1 0) (0 -1 0) (0 0 1) (0 0 -1)))))
-      (setf (gethash (list x y z) seen) t)
-      (loop while (and queue (< (length cells) limit))
-            do (let ((cell (pop queue)))
-                 (push cell cells)
-                 (dolist (step steps)
-                   (let ((next (mapcar #'+ cell step)))
-                     (unless (gethash next seen)
-                       (setf (gethash next seen) t)
-                       (when (and (apply #'terminal-cell-p scene next)
-                                  (terminal-face-exposed-p
-                                   scene (first next) (second next) (third next)
-                                   normal))
-                         (setf queue (append queue (list next)))))))))
-      (make-terminal-surface-from-cells cells normal))))
+    (let* ((domain (scene-domain scene))
+           (solid (inspection-source-solid scene))
+           (x-limit (luft:world-domain-x-limit domain))
+           (y-limit (luft:world-domain-y-limit domain))
+           (start (luft:make-site domain x y z luft:+cell-extent+))
+           (seen (make-hash-table :test #'eql))
+           (queue (list start))
+           (tail queue)
+           (count 1))
+      (setf (gethash start seen) t)
+      (flet ((visit (x y z)
+               (when (and (< count limit) (< -1 x x-limit) (< -1 y y-limit)
+                          (< -1 z luft:+top-z+))
+                 (let ((site (luft:make-site domain x y z luft:+cell-extent+)))
+                   (unless (gethash site seen)
+                     (setf (gethash site seen) t)
+                     (when (and (= 1 (inspection-cell-bit solid x y z))
+                                (terminal-material-p scene site)
+                                (= 0 (inspection-cell-bit solid (+ x dx) (+ y dy) z)))
+                       (setf (cdr tail) (list site)
+                             tail (cdr tail))
+                       (incf count)))))))
+        ;; Walk the growing FIFO in discovery order. Its spine becomes the
+        ;; published list, so each accepted cell needs only one queue link.
+        (loop for cursor = queue then (cdr cursor) while (and cursor (< count limit)) do
+          (multiple-value-bind (cx cy cz) (luft:site-anchor (car cursor))
+            (if (zerop dx)
+                (progn (visit (1+ cx) cy cz) (visit (1- cx) cy cz))
+                (progn (visit cx (1+ cy) cz) (visit cx (1- cy) cz)))
+            (visit cx cy (1+ cz))
+            (visit cx cy (1- cz)))))
+      ;; Existing surfaces expose reverse discovery order and XYZ triples.
+      (loop for link on queue do
+        (setf (car link) (multiple-value-list (luft:site-anchor (car link)))))
+      (make-terminal-surface-from-cells (nreverse queue) normal))))
 
 (defun make-terminal-surface-from-cells (cells normal)
   "The screen rectangle bounding CELLS on their NORMAL side."
@@ -151,11 +166,10 @@ to air; its bounding rectangle becomes the screen."
                          (if (plusp sign) 1 0)
                          (* sign *terminal-surface-offset*)))
                (origin
-                 (let ((point (list 0.0 0.0 (float z-min))))
-                   (setf (nth axis point) (float plane))
-                   ;; A right coordinate T lies at axis coordinate SIGN * T.
-                   (setf (nth right-axis point) (float (* right-sign r-min)))
-                   (apply #'make-vec3 point))))
+                 (let ((horizontal (float (* right-sign r-min))))
+                   (if (zerop dx)
+                       (make-vec3 horizontal (float plane) (float z-min))
+                       (make-vec3 (float plane) horizontal (float z-min))))))
           (%make-terminal-surface
            :cells cells :normal normal :origin origin
            :right right :up up
@@ -529,9 +543,51 @@ and as many columns as that cell height affords across the wall."
    *viewer-terminals*))
 
 (defun same-terminal-surface-p (a b)
-  (and (equal (terminal-surface-normal a) (terminal-surface-normal b))
-       (null (set-exclusive-or (terminal-surface-cells a)
-                               (terminal-surface-cells b) :test #'equal))))
+  (declare (optimize (speed 3)))
+  (unless (equal (terminal-surface-normal a) (terminal-surface-normal b))
+    (return-from same-terminal-surface-p nil))
+  (let* ((left (terminal-surface-cells a))
+         (right (terminal-surface-cells b))
+         (width (terminal-surface-width a))
+         (height (terminal-surface-height a)))
+    (when (equal left right) (return-from same-terminal-surface-p t))
+    (unless (and (= width (terminal-surface-width b)) (= height (terminal-surface-height b)))
+      (return-from same-terminal-surface-p nil))
+    ;; Use fixnum words in simple vectors. This SBCL can stack-allocate
+    ;; these vectors, including on arm64 where a simple-bit-vector conses.
+    (when (<= (* width height) 4096)
+      (let* ((along-x (zerop (first (terminal-surface-normal a))))
+             (h0 (reduce #'min left :key (if along-x #'first #'second)))
+             (z0 (reduce #'min left :key #'third))
+             (plane (if along-x (second (first left)) (first (first left))))
+             (left-bits (make-array 128 :initial-element 0))
+             (right-bits (make-array 128 :initial-element 0)))
+        (declare (dynamic-extent left-bits right-bits))
+        (flet ((mark-cells (cells bits)
+                 (loop for (x y z) in cells
+                       for u = (- (if along-x x y) h0) for v = (- z z0)
+                       unless (and (= plane (if along-x y x))
+                                   (< -1 u width) (< -1 v height))
+                         return nil
+                       do (multiple-value-bind (word bit) (floor (+ u (* v width)) 32)
+                            (setf (svref bits word)
+                                  (logior (the fixnum (svref bits word)) (ash 1 bit))))
+                       finally (return t))))
+          (when (mark-cells left left-bits)
+            (return-from same-terminal-surface-p
+              (and (mark-cells right right-bits) (equalp left-bits right-bits)))))))
+    ;; A thin connected wall can have an arbitrarily large bounding box.
+    ;; Size the fallback by its cells. Also accept older hand-built surfaces.
+    (let ((members (make-hash-table :test #'equal :size (length left)))
+          (remaining 0))
+      (dolist (cell left)
+        (unless (gethash cell members)
+          (setf (gethash cell members) :unseen)
+          (incf remaining)))
+      (dolist (cell right (zerop remaining))
+        (case (gethash cell members)
+          (:unseen (setf (gethash cell members) :seen) (decf remaining))
+          ((nil) (return nil)))))))
 
 (defparameter *terminal-focus-reach* 16.0
   "How far away, in cells, a terminal wall can be taken with Tab.  A screen
