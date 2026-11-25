@@ -1089,6 +1089,7 @@
 (define-test stride-four-parent-and-native-overlay
   (let* ((domain (luft:make-world-domain :horizontal-bits 8))
          (source (make-instance 'flat-source :domain domain :material-vocabulary (make-palette)))
+         (scratch (terrain:make-coarse-tile-scratch domain))
          (children (make-array '(2 2)))
          ;; A detached luminous block in the far quadrant, above the first 64 child layers.
          (x0 100) (y0 76) (z0 172)
@@ -1105,9 +1106,18 @@
     (dotimes (dx 2)
       (dotimes (dy 2)
         (setf (aref children dx dy)
-              (terrain:build-world-source-coarse-tile source dx dy :cull-interior-caves-p nil))))
-    (let ((exact (terrain:reduce-stride-two-children 0 0 children))
+              (terrain:build-world-source-coarse-tile source dx dy :scratch scratch
+                                                    :cull-interior-caves-p nil))))
+    (let ((exact (terrain:reduce-stride-two-children 0 0 children :scratch scratch))
           (native (terrain:build-native-stride-four-tile source 0 0)))
+      ;; Reusing the children's fine grids for the parent and the next culled
+      ;; tiles must preserve every published child, including its sparse light.
+      (dotimes (dx 2)
+        (dotimes (dy 2)
+          (let ((fresh (terrain:build-world-source-coarse-tile source dx dy :cull-interior-caves-p nil)))
+            (true (equalp fresh (aref children dx dy))))
+          (true (equalp (terrain:build-world-source-coarse-tile source dx dy)
+                        (terrain:build-world-source-coarse-tile source dx dy :scratch scratch)))))
       (dolist (tile (list exact native))
         (is = 2 (aref (terrain:coarse-voxel-tile-materials tile) index))
         (true (logbitp (floor z0 4) (aref (terrain:coarse-voxel-tile-words tile) (floor index 64))))

@@ -47,13 +47,8 @@
    (last-threshold :initform *voxel-lod-occupancy-threshold* :accessor voxel-lod-last-threshold)
    (last-cull-caves-p :initform *voxel-lod-cull-caves-p* :accessor voxel-lod-last-cull-caves-p)
    (last-journal-head :initform -1 :accessor voxel-lod-last-journal-head)
-   (grid-scratch :initform (make-array (* 64 64 256) :element-type '(unsigned-byte 8)
-                                                      :initial-element 0)
-                 :reader voxel-lod-grid-scratch)
-   (emission-scratch :initform (make-array (* 64 64 256) :element-type '(unsigned-byte 16)
-                                                          :initial-element 0)
-                     :reader voxel-lod-emission-scratch)
-   (fibers-scratch :initform nil :accessor voxel-lod-fibers-scratch)))
+   (stride-two-scratch :initform nil :accessor voxel-lod-stride-two-scratch)
+   (stride-four-scratch :initform nil :accessor voxel-lod-stride-four-scratch)))
 
 (defun make-voxel-lod-state (renderer)
   (make-instance 'voxel-lod-state :renderer renderer))
@@ -85,7 +80,7 @@
     (clear-voxel-lod-gpu-tiles state)
     (clrhash (voxel-lod-coarse-cache state))
     (setf (voxel-lod-last-journal-head state) -1 (voxel-lod-edits state) nil)
-    (setf (voxel-lod-fibers-scratch state) nil)))
+    (setf (voxel-lod-stride-two-scratch state) nil (voxel-lod-stride-four-scratch state) nil)))
 
 (defmethod destroy ((state voxel-lod-state))
   (clear-voxel-lod state)
@@ -204,12 +199,10 @@
          (cull-p *voxel-lod-cull-caves-p*)
          (cache (voxel-lod-coarse-cache state)) (key (%voxel-lod-tile-key tx ty))
          (cached (gethash key cache)) (neighbors (make-array '(3 3)))
-         (grid (when use-scratch-p (voxel-lod-grid-scratch state)))
-         (emissions (when use-scratch-p (voxel-lod-emission-scratch state)))
-         (fibers (when use-scratch-p
-                   (or (voxel-lod-fibers-scratch state)
-                       (setf (voxel-lod-fibers-scratch state)
-                             (luft:make-chunk-fibers (world-source-domain source) (luft:chunk-key-at 0 0)))))))
+         (scratch (when (and use-scratch-p (null cached))
+                    (or (voxel-lod-stride-two-scratch state)
+                        (setf (voxel-lod-stride-two-scratch state)
+                              (make-coarse-tile-scratch (world-source-domain source)))))))
     (dotimes (i 3)
       (dotimes (j 3)
         (setf (aref neighbors i j) (gethash (%voxel-lod-tile-key (+ tx i -1) (+ ty j -1)) cache))))
@@ -219,7 +212,7 @@
        (let ((tile (or cached
                        (build-world-source-coarse-tile
                         source tx ty :threshold threshold :cull-interior-caves-p cull-p
-                        :grid-scratch grid :fibers-scratch fibers :emission-scratch emissions
+                        :scratch scratch
                         :edits edits :head head))))
          (multiple-value-bind (sites appearances lights stars)
              (mesh-coarse-voxel-tile

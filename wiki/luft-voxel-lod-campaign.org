@@ -294,7 +294,8 @@ Extend the validated Phase 1 primitive into a full 2.5+ km 3D horizon:
 
 The one-tile test (#QDEDGB) led to the live ring flight (#Q6UGN3).
 The 552-cell crossing (#5XL96O) moved stride-2 production off the canvas.
-Measure the remaining long frames during near-chunk publication before stride 8.
+The allocation pass (#WQFOT0) cuts heap traffic during that crossing.
+Trace the remaining long collections and near-mesh allocations before stride 8.
 
 ** DONE One stride-4 tile through the alpine ridge
 :PROPERTIES:
@@ -467,6 +468,81 @@ Reproduce the automatic-only crossing with =RING_FLIGHT_AUTO_ONLY=1= and
 =RING_FLIGHT_NO_IMAGES=1= when running =scripts/stride-four-flight.lisp=.
 The 482 paired per-frame samples are in
 =wiki/measurements/stride-four-flight/streaming-crossing.csv.gz=.
+
+** DONE Allocation per ridge tile and across a moving frame
+:PROPERTIES:
+:ID: WQFOT0
+:END:
+
+The workers in #5XL96O share SBCL's heap with the canvas. A small allocation
+per coarse cell multiplied across a ridge tile: the material vote allocated
+four eight-element vectors for every occupied cell. One 32-byte vote table
+per tile now covers all cells. Its live prefixes retain the original tie
+order and preference for exposed materials. In Luvcraft's biome generator,
+inlining the double-float smoothstep also lets SBCL carry intermediate values
+through interpolation without boxing at each call.
+
+| Fixed work, mean fresh heap bytes per call |    Before |     After |
+|--------------------------------------------+-----------+-----------|
+| 4,096 biome surface heights                |   967,979 |    69,931 |
+| Capture one 16×16 chunk request            |    13,304 |     2,292 |
+| Generate its payload                       |   193,535 |   117,213 |
+| Reduce one populated 64×64 chunk           | 4,034,928 |   242,715 |
+| Generate and reduce one cave-culled tile   | 8,165,813 | 2,412,016 |
+
+The fixed-work probe warms each operation, collects once, and then counts
+bytes including the returned payload. The culled build reuses its fine
+grids in both revisions. The new workspace also retains the flood queue
+and reachable bits. The four ridge checksums matched for coarse occupancy,
+coarse materials, fine materials and fine emission. A terrain test reuses
+one workspace across four different children, their parent, and subsequent
+culled builds, and compares the results with fresh builds.
+
+Each streaming producer owns its workspace. The exact stride-4 producer can
+reuse the same grid for all four children and their parent because published
+child volumes own their arrays. The stride-2 worker has independent storage.
+On the canvas, the visibility and material passes now share one list of
+visible residents. Bounding-box culling intersects six-bit plane masks
+across corners and stops when the common mask is empty. On 4,096 fixed boxes,
+the old culler allocated 1.18 MB per pass. The new one registered zero heap
+bytes per pass for both the camera and sun transforms. Both implementations
+agreed on all 8,192 decisions.
+
+| 552-cell Metal crossing, 241 poses      | Before 1 | After 1 | Before 2 | After 2 |
+|-----------------------------------------+----------+---------+----------+---------|
+| Process allocation, MiB                 |     2311 |    1499 |     2273 |    1556 |
+| Total GC during timed frames, ms        |    89.91 |   19.45 |    89.88 |   86.64 |
+| Most GC in one frame, ms                |    67.00 |    7.42 |    70.26 |   67.07 |
+| Whole frame p95, ms                     |    27.75 |   26.68 |    27.20 |   24.76 |
+| Longest frame, ms                       |    84.11 |   34.33 |    91.03 |   86.73 |
+| Frames over 16.67 ms                    |      105 |      82 |      101 |      85 |
+| Stride-2 tiles awaiting detail at end   |       62 |      71 |       63 |      62 |
+| Time to full stride-2 detail at rest, s |     2.21 |    2.56 |     2.35 |    2.13 |
+
+Each fresh process ran the automatic route with the same stage timers and
+PNG readback disabled on the M2 Pro. Allocation is the difference between
+the process counters at the ends of frames 0 and 240. The timings cover all
+241 frames. Every frame had terrain coverage and each run settled to 365,087
+stride-4 stars. The workers can publish different amounts of detail during
+motion. Both pairs allocated about a third less, while a 67 ms collection
+still occurred in the second optimized crossing.
+
+#+begin_src sh
+./env sbcl --script scripts/stride-two-allocation.lisp --check
+RING_FLIGHT_AUTO_ONLY=1 RING_FLIGHT_NO_IMAGES=1 ./env sbcl --script scripts/stride-four-flight.lisp
+#+end_src
+
+The optional =--check= enforces byte budgets on the fixed workload. For a
+separate all-thread SB-SPROF sample, set =RING_FLIGHT_ALLOC_PROFILE=1= on
+the flight. The four timed crossings are in
+=wiki/measurements/stride-four-flight/allocation-crossings.csv.gz=.
+
+The subsequent allocation profile collected 19,635 samples. Vector growth
+in =SB-VM::PREPARE-VECTOR-PUSH-EXTEND= accounted for 9.2% of self samples and
+=MESH-STREAMING-SNAPSHOT= for 6.1%. Two unresolved functions account for
+34.8% together. Measure bytes per near mesh and capture the callers that
+grow vectors before choosing the next scratch buffer. The flat report is in
+=wiki/measurements/stride-four-flight/allocation-after.txt=.
 
 * TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
 :PROPERTIES:

@@ -2,7 +2,9 @@
 ;;;; ./env sbcl --script scripts/stride-four-flight.lisp
 ;;;; RING_FLIGHT_AUTO_ONLY=1 selects the cold automatic flight.
 ;;;; RING_FLIGHT_NO_IMAGES=1 suppresses capture and its allocations.
+;;;; RING_FLIGHT_ALLOC_PROFILE=1 samples all threads during the automatic crossing.
 (require :asdf)
+(require :sb-sprof)
 (pushnew (truename "./") asdf:*central-registry* :test #'equal)
 (asdf:load-system "luvcraft/luft/game")
 (load (merge-pathnames "stride-four-ridge-fixture.lisp" *load-truename*))
@@ -166,6 +168,8 @@
         #-darwin (draw host target)))
     (setf r:*stride-four-mode* mode)
     (loop for i below 15000 do
+      (when (and (eql crossing 0) (eq mode :auto) (uiop:getenv "RING_FLIGHT_ALLOC_PROFILE"))
+        (sb-sprof:start-profiling :mode :alloc :threads :all :max-samples 30000))
       (if crossing (cross-ridge-pose camera crossing) (pose camera i))
       (let* ((ring (r::voxel-lod-stride-four state))
              (previous (if ring (r::stride-four-ring-publications ring) 0))
@@ -191,7 +195,7 @@
             (format csv ",~D,~D" (hash-table-count (r::voxel-lod-gpu-tiles state))
                     (hash-table-count (r::distant-terrain-tiles (r::renderer-distant-terrain (r:viewer-renderer host)))))
             (multiple-value-bind (waiting uncovered) (ring-coverage (r:viewer-renderer host))
-              (format csv ",~D,~D,~,4F~%" waiting uncovered gc-ms))
+              (format csv ",~D,~D,~,4F,~D~%" waiting uncovered gc-ms (sb-ext:get-bytes-consed)))
             (when (and (eq mode :auto) (eq kind :direct) pending
                        (eq slot (r::request-ring-slot pending)) (eq :exact (r::request-ring-kind pending)))
               (unless marker (setf marker i)))
@@ -209,6 +213,12 @@
             (when (and crossing (zerop (mod crossing 8)))
               (save-frame host target buffer (format nil "~(~A~)-crossing-~3,'0D.png" mode crossing)))
             (when (eql crossing 240)
+              (when (and (eq mode :auto) (uiop:getenv "RING_FLIGHT_ALLOC_PROFILE"))
+                (sb-sprof:stop-profiling)
+                (with-open-file (out (merge-pathnames "allocation.txt" *out*)
+                                     :direction :output :if-exists :supersede)
+                  (sb-sprof:report :type :flat :max 40 :stream out)
+                  (sb-sprof:report :type :graph :max 40 :stream out)))
               (settle-crossing host target buffer mode)
               (return))
             (when crossing (incf crossing))
@@ -233,7 +243,7 @@
          (with-open-file (csv (merge-pathnames "frames.csv" *out*) :direction :output :if-exists :supersede)
            (format csv "mode,frame,published,stream_ms,completion_ms,ridge,gpu_ms")
            (dolist (stage *stages*) (format csv ",~(~A~)_ms" (first stage)))
-           (format csv ",voxel_residents,distant_residents,stride2_missing,uncovered,gc_wall_ms~%")
+           (format csv ",voxel_residents,distant_residents,stride2_missing,uncovered,gc_wall_ms,process_bytes_consed~%")
            (install-stage-timers)
            (dolist (mode (if (uiop:getenv "RING_FLIGHT_AUTO_ONLY") '(:auto) '(:heightfield :direct :exact :auto)))
              (run-mode host target buffer csv mode)))

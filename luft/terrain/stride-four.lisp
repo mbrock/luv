@@ -2,11 +2,13 @@
 
 ;;; The first parent of the exact voxel pyramid (#AQCYEH).
 
-(defun reduce-stride-two-children (tx ty children &key (threshold 4))
+(defun reduce-stride-two-children (tx ty children &key (threshold 4) scratch)
   "Reduce the four stride-two CHILDREN of (TX,TY), indexed by (DX,DY).
 Use unculled children for an exact mip of the source occupancy."
-  (let ((grid (make-array (* 64 64 256) :element-type '(unsigned-byte 8) :initial-element 0))
-        (words (make-array (* 64 64 4) :element-type '(unsigned-byte 64) :initial-element 0))
+  (let ((grid (if scratch (fill (coarse-tile-scratch-grid scratch) 0)
+                  (make-array (* 64 64 256) :element-type '(unsigned-byte 8) :initial-element 0)))
+        (words (if scratch (fill (luft:chunk-fibers-words (coarse-tile-scratch-fibers scratch)) 0)
+                   (make-array (* 64 64 4) :element-type '(unsigned-byte 64) :initial-element 0)))
         (emissions nil)
         (air-count 0)
         (head (coarse-voxel-tile-journal-head (aref children 0 0))))

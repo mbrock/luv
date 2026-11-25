@@ -55,7 +55,7 @@ ground stays bit-identical to :MEADOW; outside it blends smoothly into :BIOMES."
 (deftype little-world-hash-value () '(unsigned-byte 32))
 
 (declaim (inline little-world-seed-bits %little-world-hash %little-world-hash-3d
-                 little-world-hash-unit smooth-little-world-reading
+                 little-world-hash-unit little-world-smoothstep smooth-little-world-reading
                  interpolate-little-world-reading little-world-floor
                  %little-world-value-noise %little-world-volume-plane
                  %little-world-volume-noise))

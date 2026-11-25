@@ -213,6 +213,7 @@ this package draws; the renderer and the ateliers use it.")
            #:mesh-streaming-chunk
            ;; Coarse 3D voxel LOD tiles (#INDOL7).
            #:+coarse-tile-bias+
+           #:make-coarse-tile-scratch
            #:coarse-voxel-tile
            #:coarse-voxel-tile-p
            #:coarse-voxel-tile-tx

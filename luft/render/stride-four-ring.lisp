@@ -160,6 +160,10 @@
          (descriptors (stride-four-ring-descriptors ring))
          (mask (stride-four-slot-inner-mask slot))
          (neighbors (make-array '(3 3) :initial-element nil))
+         (scratch (when (eq kind :exact)
+                    (or (voxel-lod-stride-four-scratch state)
+                        (setf (voxel-lod-stride-four-scratch state)
+                              (make-coarse-tile-scratch (world-source-domain source))))))
          (children (when (eq kind :exact) (make-array '(2 2) :initial-element nil))))
     (dotimes (i 3)
       (dotimes (j 3)
@@ -185,8 +189,8 @@
                             (setf (aref children i j)
                                   (build-world-source-coarse-tile
                                    source (+ (* tx 2) i) (+ (* ty 2) j) :threshold threshold
-                                   :cull-interior-caves-p nil :edits edits :head head)))))
-                      (reduce-stride-two-children tx ty children :threshold threshold))
+                                   :cull-interior-caves-p nil :scratch scratch :edits edits :head head)))))
+                      (reduce-stride-two-children tx ty children :threshold threshold :scratch scratch))
                      (:remesh volume))))
          (multiple-value-bind (sites apps lights stars)
              (mesh-coarse-voxel-tile tile (lambda (dx dy) (aref neighbors (1+ dx) (1+ dy))) descriptors

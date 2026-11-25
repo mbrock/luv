@@ -28,6 +28,15 @@
   (journal-head 0 :type fixnum)
   (authored-air-cells 0 :type fixnum))
 
+(defstruct (coarse-tile-scratch (:constructor make-coarse-tile-scratch (domain)) (:copier nil))
+  "Exclusive temporary storage for a sequence of coarse tile builds.
+Published volumes own their arrays. Each concurrent builder needs its own scratch."
+  (grid (make-array (* 64 64 256) :element-type '(unsigned-byte 8)) :read-only t)
+  (emissions (make-array (* 64 64 256) :element-type '(unsigned-byte 16)) :read-only t)
+  (fibers (luft:make-chunk-fibers domain (luft:chunk-key-at 0 0)) :read-only t)
+  ;; Exact parents use unculled children and never need the flood fill.
+  reachable queue)
+
 (declaim (inline %coarse-fiber-base %coarse-cell-index %coarse-occupied-p))
 
 (defun %coarse-fiber-base (cx cy size-xy word-count)
@@ -61,72 +70,45 @@
         (and (plusp fy) (zerop (aref material-grid (- idx 16384))))
         (and (< fy 63) (zerop (aref material-grid (+ idx 16384)))))))
 
-(defun %vote-2x2x2-material (material-grid lx0 ly0 lz0)
-  "Pick the dominant material code in [LX0..LX0+1]x[LY0..LY0+1]x[LZ0..LZ0+1],
-strongly preferring exposed boundary cells over occluded interior rock (#NDXUW8)."
+(defun %vote-2x2x2-material (material-grid lx0 ly0 lz0 votes)
+  "Prefer exposed materials in a 2×2×2 block (#NDXUW8).
+VOTES holds two histograms, each with eight codes followed by eight counts.
+Only entries below the current length are live. Every insertion sets its count."
   (declare (type (simple-array (unsigned-byte 8) (*)) material-grid)
+           (type (simple-array (unsigned-byte 8) (32)) votes)
            (type fixnum lx0 ly0 lz0)
            (optimize (speed 3) (safety 1)))
-  (let ((exposed-codes (make-array 8 :element-type '(unsigned-byte 8) :initial-element 0))
-        (exposed-counts (make-array 8 :element-type '(unsigned-byte 8) :initial-element 0))
-        (exposed-len 0)
-        (all-codes (make-array 8 :element-type '(unsigned-byte 8) :initial-element 0))
-        (all-counts (make-array 8 :element-type '(unsigned-byte 8) :initial-element 0))
-        (all-len 0))
-    (declare (type (simple-array (unsigned-byte 8) (8))
-                   exposed-codes exposed-counts all-codes all-counts)
-             (type fixnum exposed-len all-len))
-    (dotimes (dz 2)
-      (let ((fz (+ lz0 dz)))
-        (declare (type fixnum fz))
-        (when (< fz luft:+top-z+)
-          (dotimes (dy 2)
-            (let ((fy (+ ly0 dy)))
-              (declare (type fixnum fy))
+  (flet ((record-code (base len code)
+           (dotimes (i len)
+             (when (= (aref votes (+ base i)) code)
+               (incf (aref votes (+ base 8 i)))
+               (return-from record-code len)))
+           (setf (aref votes (+ base len)) code
+                 (aref votes (+ base 8 len)) 1)
+           (1+ len))
+         (pick-best (base len)
+           (let ((best-code 0) (best-count 0))
+             (dotimes (i len best-code)
+               (let ((count (aref votes (+ base 8 i))))
+                 ;; A tie favors the later entry in the original traversal.
+                 (when (>= count best-count)
+                   (setf best-count count best-code (aref votes (+ base i)))))))))
+    (declare (inline record-code pick-best))
+    (let ((all 0) (exposed 0))
+      (dotimes (dz 2)
+        (let ((fz (+ lz0 dz)))
+          (when (< fz luft:+top-z+)
+            (dotimes (dy 2)
               (dotimes (dx 2)
-                (let* ((fx (+ lx0 dx))
+                (let* ((fx (+ lx0 dx)) (fy (+ ly0 dy))
                        (code (aref material-grid (+ fz (ash (+ fx (ash fy 6)) 8)))))
-                  (declare (type fixnum fx)
-                           (type (unsigned-byte 8) code))
                   (when (plusp code)
-                    ;; Record in all-cells histogram.
-                    (let ((found nil))
-                      (dotimes (i all-len)
-                        (when (= (aref all-codes i) code)
-                          (incf (aref all-counts i))
-                          (setf found t)
-                          (return)))
-                      (unless found
-                        (setf (aref all-codes all-len) code
-                              (aref all-counts all-len) 1)
-                        (incf all-len)))
-                    ;; Record in exposed-boundary histogram when touching air.
+                    (setf all (record-code 0 all code))
                     (when (%fine-cell-exposed-p material-grid fx fy fz)
-                      (let ((found nil))
-                        (dotimes (i exposed-len)
-                          (when (= (aref exposed-codes i) code)
-                            (incf (aref exposed-counts i))
-                            (setf found t)
-                            (return)))
-                        (unless found
-                          (setf (aref exposed-codes exposed-len) code
-                                (aref exposed-counts exposed-len) 1)
-                          (incf exposed-len))))))))))))
-    (flet ((pick-best (codes counts len)
-             (let ((best-code 0)
-                   (best-count 0))
-               (declare (type (unsigned-byte 8) best-code best-count))
-               ;; >= favors later entries (higher LZ / surface skin on tie).
-               (dotimes (i len best-code)
-                 (let ((c (aref counts i)))
-                   (when (>= c best-count)
-                     (setf best-count c
-                           best-code (aref codes i))))))))
-      (if (plusp exposed-len)
-          (pick-best exposed-codes exposed-counts exposed-len)
-          (pick-best all-codes all-counts all-len)))))
+                      (setf exposed (record-code 16 exposed code))))))))))
+      (if (plusp exposed) (pick-best 16 exposed) (pick-best 0 all)))))
 
-(defun %cull-sealed-coarse-pockets (words materials seeded-air &optional fallback-code)
+(defun %cull-sealed-coarse-pockets (words materials seeded-air &optional fallback-code scratch)
   "Flood-fill exterior air from open sky (CZ=127) and any SEEDED-AIR indices
 (e.g., authored carved-air edits), then mark unreachable enclosed pockets solid
 for this coarse LOD so deep bedrock caves do not waste 75% of distant stars (#CLIAOO)."
@@ -135,14 +117,20 @@ for this coarse LOD so deep bedrock caves do not waste 75% of distant stars (#CL
            (type list seeded-air)
            (optimize (speed 3) (safety 1)))
   (let* ((total (* 32 32 128))
-         (reachable (make-array total :element-type 'bit :initial-element 0))
-         (queue (make-array total :element-type '(unsigned-byte 32)))
+         (reachable (or (and scratch (coarse-tile-scratch-reachable scratch))
+                        (make-array total :element-type 'bit :initial-element 0)))
+         (queue (or (and scratch (coarse-tile-scratch-queue scratch))
+                    (make-array total :element-type '(unsigned-byte 32))))
          (head 0)
          (tail 0)
          (culled 0)
          (default-code (or fallback-code 1)))
     (declare (type fixnum head tail culled)
              (type (unsigned-byte 8) default-code))
+    (when scratch
+      (setf (coarse-tile-scratch-reachable scratch) reachable
+            (coarse-tile-scratch-queue scratch) queue)
+      (fill reachable 0))
     (flet ((enqueue (idx)
              (declare (type fixnum idx))
              (when (and (zerop (aref materials idx))
@@ -299,7 +287,8 @@ Both generated terrain and sparse journal edits (including carved air) replay cl
            (type (integer 1 2) shift)
            (type (integer 1 8) threshold)
            (optimize (speed 3) (safety 1)))
-  (let* ((size-z (ash 256 (- shift)))
+  (let* ((votes (make-array 32 :element-type '(unsigned-byte 8)))
+         (size-z (ash 256 (- shift)))
          (word-count (ceiling size-z 64))
          (cwords (make-array (* 32 32 word-count) :element-type '(unsigned-byte 64) :initial-element 0))
          (cmats (make-array (* 32 32 size-z) :element-type '(unsigned-byte 8) :initial-element 0))
@@ -341,7 +330,7 @@ Both generated terrain and sparse journal edits (including carved air) replay cl
                         (when (>= cnt threshold)
                           (setf out (logior out (ash 1 pair)))
                           (let ((code (%vote-2x2x2-material
-                                       material-grid lx0 ly0 (+ lz-base b))))
+                                       material-grid lx0 ly0 (+ lz-base b) votes)))
                             (setf (aref cmats cidx) (if (plusp code) code 1))))
                         ;; Also downsample any emissive light in this 2x2x2 block
                         ;; even when fixture sits just above air-adjacent support.
@@ -376,7 +365,7 @@ Both generated terrain and sparse journal edits (including carved air) replay cl
     (fibers material-grid tx ty
      &key (threshold 4) (cull-interior-caves-p t)
           seeded-air journal-head (authored-air-cells 0)
-          emission-grid fallback-code)
+          emission-grid fallback-code scratch)
   "Downsample one 64x64x255 fine FIBERS + MATERIAL-GRID into a 32x32x128 COARSE-VOXEL-TILE.
 
 THRESHOLD (1..8) sets how many solid subcells in each 2x2x2 block make the coarse
@@ -387,12 +376,12 @@ underground stone drowning 1-cell grass/snow/masonry skins."
                                    :authored-air-cells authored-air-cells)))
     (when cull-interior-caves-p
       (%cull-sealed-coarse-pockets (coarse-voxel-tile-words tile)
-                                   (coarse-voxel-tile-materials tile) seeded-air fallback-code))
+                                   (coarse-voxel-tile-materials tile) seeded-air fallback-code scratch))
     tile))
 
 (defun build-world-source-coarse-tile
     (source tx ty &key (threshold 4) (cull-interior-caves-p t)
-                       grid-scratch fibers-scratch emission-scratch
+                       grid-scratch fibers-scratch emission-scratch scratch
                        (edits (world-source-edits source))
                        (head (world-journal-head (world-source-journal source))))
   "Generate chunk (TX, TY) from SOURCE and downsample it to a stride-2 COARSE-VOXEL-TILE."
@@ -415,12 +404,12 @@ underground stone drowning 1-cell grass/snow/masonry skins."
                                         "STONE")
                        return (1+ i))
                1))
-         (grid (or grid-scratch
+         (grid (or grid-scratch (and scratch (coarse-tile-scratch-grid scratch))
                    (make-array (* 64 64 256) :element-type '(unsigned-byte 8)
                                              :initial-element 0)))
-         (fibers (or fibers-scratch
+         (fibers (or fibers-scratch (and scratch (coarse-tile-scratch-fibers scratch))
                      (luft:make-chunk-fibers domain (luft:chunk-key-at 0 0))))
-         (egrids (or emission-scratch
+         (egrids (or emission-scratch (and scratch (coarse-tile-scratch-emissions scratch))
                      (make-array (* 64 64 256) :element-type '(unsigned-byte 16)
                                                :initial-element 0))))
     (multiple-value-bind (seeded-air head authored-air-count)
@@ -433,7 +422,7 @@ underground stone drowning 1-cell grass/snow/masonry skins."
        :journal-head head
        :authored-air-cells authored-air-count
        :emission-grid egrids
-       :fallback-code fallback-code))))
+       :fallback-code fallback-code :scratch scratch))))
 
 ;;; Meshing a coarse voxel tile directly to the 256-star GPU ABI ------------
 

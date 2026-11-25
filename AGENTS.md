@@ -172,6 +172,14 @@ measured results, failed approaches, and next experiments. Preserve the
 distinction between replay, sampled costs, isolated counters, and unprofiled
 runtime gains.
 
+For Luft terrain streaming, run the fixed ridge allocation probe in a fresh
+SBCL process with `./env sbcl --script scripts/stride-two-allocation.lisp --check`.
+It measures bytes per height batch, chunk, and tile after warmup. The ridge
+flight records process-wide allocation and GC time while the workers run.
+Give each concurrent producer its own reusable scratch and let published
+volumes own their arrays. The measurements and replay are in
+[the voxel LOD campaign](wiki/luft-voxel-lod-campaign.org).
+
 ## The wiki is part of the source
 
 `wiki/*.org` is the design memory behind the code and the source for
