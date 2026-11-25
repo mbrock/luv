@@ -174,7 +174,9 @@ runtime gains.
 
 For Luft terrain streaming, run the fixed ridge allocation probe in a fresh
 SBCL process with `./env sbcl --script scripts/stride-two-allocation.lisp --check`.
-It measures bytes per height batch, chunk, and tile after warmup. The ridge
+It measures bytes per height batch, chunk, and tile after warmup. For a
+prepared near mesh, run `scripts/near-mesh-allocation.lisp` the same way.
+Add `--stages` for a separate breakdown by function. The ridge
 flight records process-wide allocation and GC time while the workers run.
 Give each concurrent producer its own reusable scratch and let published
 volumes own their arrays. The measurements and replay are in

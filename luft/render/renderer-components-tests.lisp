@@ -792,6 +792,12 @@
       (check-shadow-rectangles
        (make-array 4 :element-type '(unsigned-byte 32)
                      :initial-contents (list 61 37 19 star))))
+    ;; Three isolated faces per site straddle the 256-rectangle output block.
+    (let ((sites (make-array (* 86 4) :element-type '(unsigned-byte 32) :initial-element 0)))
+      (dotimes (i 86)
+        (setf (aref sites (* i 4)) (* i 2)
+              (aref sites (+ (* i 4) 3)) #x80))
+      (check-shadow-rectangles sites 258))
     ;; An asymmetric box crosses an owner boundary and compresses to six
     ;; rectangles. Then punch a tunnel and add a disconnected cell.
     (let ((cells (make-hash-table :test #'equal)))

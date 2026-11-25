@@ -303,34 +303,39 @@ into the unused upper 16 bits of each site's fourth word (#K5MKUT)."
 (defun %make-star-render-population (meshes)
   "Flatten geometry and its parallel active-star appearance independently."
   (load-time-value (ensure-terrain-quantity-contract))
-  (let* ((site-words
-           (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
-                  (mapcar #'pack-site-edge-shaping meshes)))
-         (appearance-codes
-           (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
-                  (mapcar #'luft:surface-mesh-appearance-codes meshes)))
-         (descriptor-words
-           (or (loop for mesh in meshes
-                     for words =
-                       (luft:surface-mesh-appearance-descriptor-words mesh)
-                     when (plusp (length words)) return words)
-               +unpainted-terrain-descriptors+)))
-    (unless (zerop (mod (length descriptor-words) 8))
-      (error "Terrain descriptor product needs eight u32 words per material."))
-    (unless (= (* 2 (length site-words)) (length appearance-codes))
-      (error "~D site words do not have a one-for-one eight-byte appearance (~D bytes)."
-             (length site-words) (length appearance-codes)))
-    (dolist (mesh meshes)
-      (let ((words (luft:surface-mesh-appearance-descriptor-words mesh)))
-        (unless (or (zerop (length words)) (equalp words descriptor-words))
-          (error "One terrain population contains incompatible material palettes."))))
-    (%make-render-population
-     site-words (pack-terrain-appearance-codes appearance-codes)
-     descriptor-words (/ (length site-words) 4)
-     (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
-            (mapcar #'pack-mesh-light-words meshes))
-     (apply #'concatenate '(simple-array single-float (*))
-            (mapcar #'luft:surface-mesh-bodies meshes)))))
+  (flet ((packed-words (packer)
+           ;; Both packers return fresh arrays that a single-owner population can adopt.
+           (if (and meshes (null (cdr meshes)))
+               (funcall packer (first meshes))
+               (apply #'concatenate '(simple-array (unsigned-byte 32) (*))
+                      (mapcar packer meshes)))))
+    (let* ((site-words (packed-words #'pack-site-edge-shaping))
+           (appearance-codes
+             (if (and meshes (null (cdr meshes)))
+                 (luft:surface-mesh-appearance-codes (first meshes))
+                 (apply #'concatenate '(simple-array (unsigned-byte 8) (*))
+                        (mapcar #'luft:surface-mesh-appearance-codes meshes))))
+           (descriptor-words
+             (or (loop for mesh in meshes
+                       for words =
+                         (luft:surface-mesh-appearance-descriptor-words mesh)
+                       when (plusp (length words)) return words)
+                 +unpainted-terrain-descriptors+)))
+      (unless (zerop (mod (length descriptor-words) 8))
+        (error "Terrain descriptor product needs eight u32 words per material."))
+      (unless (= (* 2 (length site-words)) (length appearance-codes))
+        (error "~D site words do not have a one-for-one eight-byte appearance (~D bytes)."
+               (length site-words) (length appearance-codes)))
+      (dolist (mesh meshes)
+        (let ((words (luft:surface-mesh-appearance-descriptor-words mesh)))
+          (unless (or (zerop (length words)) (equalp words descriptor-words))
+            (error "One terrain population contains incompatible material palettes."))))
+      (%make-render-population
+       site-words (pack-terrain-appearance-codes appearance-codes)
+       descriptor-words (/ (length site-words) 4)
+       (packed-words #'pack-mesh-light-words)
+       (apply #'concatenate '(simple-array single-float (*))
+              (mapcar #'luft:surface-mesh-bodies meshes))))))
 
 
 (zdefun (make-render-population :zone :luft/build-render-population

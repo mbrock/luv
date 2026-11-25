@@ -295,7 +295,7 @@ Extend the validated Phase 1 primitive into a full 2.5+ km 3D horizon:
 The one-tile test (#QDEDGB) led to the live ring flight (#Q6UGN3).
 The 552-cell crossing (#5XL96O) moved stride-2 production off the canvas.
 The allocation pass (#WQFOT0) cuts heap traffic during that crossing.
-Trace the remaining long collections and near-mesh allocations before stride 8.
+The near-mesh experiment (#ROKN9P) follows those allocations into the worker.
 
 ** DONE One stride-4 tile through the alpine ridge
 :PROPERTIES:
@@ -543,6 +543,84 @@ in =SB-VM::PREPARE-VECTOR-PUSH-EXTEND= accounted for 9.2% of self samples and
 34.8% together. Measure bytes per near mesh and capture the callers that
 grow vectors before choosing the next scratch buffer. The flat report is in
 =wiki/measurements/stride-four-flight/allocation-after.txt=.
+
+** DONE Heap cost of one prepared near mesh
+:PROPERTIES:
+:ID: ROKN9P
+:END:
+
+The flight profile in #WQFOT0 counted allocation on every thread. To isolate
+the near worker, rebuild the chunk containing =(780,1048)= in the carved
+seed-121 ridge. Its 5×5 input neighborhood is materialized once. Its light
+tiles are warm, the geometry cache is empty, and the worker prepares both
+opaque and translucent stars, appearance, light and shadow rectangles.
+The result has 43,402 stars and 15,533 shadow rectangles.
+
+| Fresh heap per owner, decimal MB | Before | After |
+|----------------------------------+--------+-------|
+| Whole prepared near mesh         |  28.01 | 15.53 |
+| Edge classification, both sheets |   6.46 |  0.23 |
+| Merged shadow rectangles         |   7.15 |  2.74 |
+| Render population, exclusive     |   3.68 |  1.89 |
+
+The first row is the mean of twelve uninstrumented rebuilds after warmup.
+The other rows use a separate SB-PROFILE batch and exclude called profiled
+functions. Before the change, the packed star record vector grew four times
+from 4,096 to 65,536 entries. The shadow output grew eighteen times from
+zero to 131,072 floats. Together those expansions allocated about 1.54 MB
+of new backing arrays per owner (four bytes per entry). The per-star and per-face coordinate vectors for edge
+classification accounted for more heap than either output's growth.
+
+The edge classifier now reuses two three-coordinate vectors private to its
+call. The shadow merger packs 32 adjacent faces into a sparse row mask and
+emits rectangles into blocks of up to 256. It still visits planes and faces
+in the original order. On a single-owner publication the renderer can also
+adopt the freshly packed site and light arrays directly. A comparison with
+=45444634= matched all eleven semantic and prepared buffers element for
+element, including the floating-point bit patterns in the shadow rectangles.
+
+#+begin_src sh
+./env sbcl --script scripts/near-mesh-allocation.lisp --check --stages
+#+end_src
+
+On the 552-cell M2 Pro flight, pairs 1 and 2 drew each new camera pose as soon
+as the previous one completed. Pair 2 ran the new renderer first. All runs
+used separate processes, fixed rendering extents, automatic LOD, the same
+stage timers and no PNG readbacks. Heap covers the 240 counter intervals.
+The frame and GC columns cover all 241 poses. Missing counts stride-2 tiles
+still drawing the heightfield at the last pose. Catch-up is measured from
+arrival until all requested stride-2 detail is drawable.
+
+| Run                | Heap MiB | Frame p95 ms | Worst frame ms | Over 16.67 ms | Most GC ms | Missing at end | Catch-up s |
+|--------------------+----------+--------------+----------------+---------------+------------+----------------+------------|
+| Before 1           |     1413 |        23.03 |          94.05 |            76 |      63.49 |             73 |       2.75 |
+| After 1            |     1224 |        18.44 |          37.13 |            47 |       7.92 |             87 |       4.27 |
+| Before 2           |     1507 |        23.44 |          91.60 |            73 |      73.05 |             69 |       2.45 |
+| After 2            |     1279 |        17.35 |          34.64 |            28 |       6.48 |             81 |       2.97 |
+| 50 Hz before       |     1532 |        24.28 |          84.23 |           109 |      69.96 |             66 |       2.63 |
+| 50 Hz after        |     1349 |        26.14 |          38.72 |            93 |      16.57 |             68 |       3.21 |
+| 50 Hz after (busy) |      462 |        27.83 |          95.64 |           153 |      73.69 |            124 |      12.35 |
+
+The uncapped crossings allocated 13–15% less. Their shorter frames also
+advanced the camera sooner, leaving more stride-2 work at arrival. To
+control travel speed, set =RING_FLIGHT_CROSSING_HZ=50= together with
+=RING_FLIGHT_AUTO_ONLY=1= and =RING_FLIGHT_NO_IMAGES=1=. This schedules
+poses against absolute deadlines. Frame timing excludes the deliberate sleep.
+
+The baseline and confirmation traveled the route in 4.835 and 4.802 s
+(target 4.800 s). Allocation and the worst frame improved. Frame p95 rose
+from 24.28 to 26.14 ms, and full detail took another 0.58 s to arrive.
+The first optimized paced run overlapped the test suite. It took 4.957 s
+and still had 124 tiles awaiting detail. Host compilation also competed for
+CPU during the paced experiments. Its low allocation
+coincided with substantially less completed work. Every frame in all seven
+runs retained terrain coverage, and all settled to 365,087 stride-4 stars.
+
+The 1,687 per-frame records are in
+=wiki/measurements/stride-four-flight/near-mesh-crossings.csv.gz=. The next
+streaming measurement is elapsed time from a tile request to its first
+drawable detail, with queue wait, worker execution and canvas publication
+timed separately on the paced route.
 
 * TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
 :PROPERTIES:

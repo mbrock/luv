@@ -2,6 +2,7 @@
 ;;;; ./env sbcl --script scripts/stride-four-flight.lisp
 ;;;; RING_FLIGHT_AUTO_ONLY=1 selects the cold automatic flight.
 ;;;; RING_FLIGHT_NO_IMAGES=1 suppresses capture and its allocations.
+;;;; RING_FLIGHT_CROSSING_HZ=50 schedules crossing poses 20 ms apart.
 ;;;; RING_FLIGHT_ALLOC_PROFILE=1 samples all threads during the automatic crossing.
 (require :asdf)
 (require :sb-sprof)
@@ -156,6 +157,9 @@
          (key (r::distant-tile-key 1 6 8))
          (camera (r::viewer-camera host))
          (reader (luv:queue-gpu-time-reader (luv:device-queue (r:viewer-device host))))
+         (pace (uiop:getenv "RING_FLIGHT_CROSSING_HZ"))
+         (interval (when pace (/ 1000d0 (the (integer 1 *) (parse-integer pace)))))
+         (crossing-start nil)
          (marker nil) (settled 0) (crossing nil))
     (setf r:*stride-four-mode* :heightfield)
     (pose camera 0)
@@ -170,6 +174,10 @@
     (loop for i below 15000 do
       (when (and (eql crossing 0) (eq mode :auto) (uiop:getenv "RING_FLIGHT_ALLOC_PROFILE"))
         (sb-sprof:start-profiling :mode :alloc :threads :all :max-samples 30000))
+      (when (and interval crossing)
+        (unless crossing-start (setf crossing-start (milliseconds)))
+        (let ((remaining (- (+ crossing-start (* crossing interval)) (milliseconds))))
+          (when (plusp remaining) (sleep (/ remaining 1000d0)))))
       (if crossing (cross-ridge-pose camera crossing) (pose camera i))
       (let* ((ring (r::voxel-lod-stride-four state))
              (previous (if ring (r::stride-four-ring-publications ring) 0))
@@ -213,6 +221,9 @@
             (when (and crossing (zerop (mod crossing 8)))
               (save-frame host target buffer (format nil "~(~A~)-crossing-~3,'0D.png" mode crossing)))
             (when (eql crossing 240)
+              (when crossing-start
+                (format t "~&PACED ~S first to last pose start ~,1F ms (target ~,1F ms)~%"
+                        mode (- start crossing-start) (* crossing interval)))
               (when (and (eq mode :auto) (uiop:getenv "RING_FLIGHT_ALLOC_PROFILE"))
                 (sb-sprof:stop-profiling)
                 (with-open-file (out (merge-pathnames "allocation.txt" *out*)

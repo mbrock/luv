@@ -281,6 +281,22 @@ included, outside its own caster, so nothing shades itself.
           (luft:star-atlas-owned-triangles star)
           (luft:star-atlas-flat-owned-triangles star))))
 
+(defconstant +shadow-rectangle-block-floats+ 2048
+  "Room for 256 eight-float rectangles before starting the next output block.")
+
+(declaim (inline shadow-face-present-p))
+
+(defun shadow-face-present-p (rows cell)
+  (logbitp (logand cell 31) (gethash (logandc2 cell 31) rows 0)))
+
+(defun clear-shadow-row-span (rows cell width)
+  (loop while (plusp width)
+        for bit = (logand cell 31)
+        for count = (min width (- 32 bit))
+        do (setf (ldb (byte count bit) (gethash (logandc2 cell 31) rows)) 0)
+           (incf cell count)
+           (decf width count)))
+
 (defun merge-terrain-shadow-faces (sites)
   "Compress the plain inward shadow surface into coplanar rectangles.
 
@@ -290,12 +306,15 @@ one-tick inward shift as STAR-SHADOW-TRIANGLES. Only faces on the same
 oriented plane merge; holes and full lateral extents remain unchanged.
 This is a depth-only draw product, not a replacement semantic mesh. #5UH08L"
   (declare (type (simple-array (unsigned-byte 32) (*)) sites))
-  (let ((planes (make-hash-table :test #'eql))
-        (rectangles (make-array 0 :element-type 'single-float
-                                 :adjustable t :fill-pointer 0)))
+  (let* ((planes (make-hash-table :test #'eql))
+         ;; Each site can own at most three eight-float rectangles.
+         (block-size (max 8 (min +shadow-rectangle-block-floats+ (* 6 (length sites)))))
+         (blocks nil)
+         (used block-size)
+         (total 0))
     ;; A site owns the three faces incident to its all-positive sample.
-    ;; Pack sparse (U,V) cell coordinates instead of allocating per-corner
-    ;; lists or a dense array spanning an entire world-height plane.
+    ;; Within an oriented plane, one sparse entry represents a 32-face
+    ;; segment of a U row. The low five coordinate bits select its face.
     (loop for offset from 0 below (length sites) by 4
           for star = (logand #xff (aref sites (+ offset 3)))
           for occupied = (logbitp 7 star)
@@ -303,50 +322,56 @@ This is a depth-only draw product, not a replacement semantic mesh. #5UH08L"
                (unless (eq occupied (logbitp (- 7 (ash 1 axis)) star))
                  (let* ((plane (logior (ash (aref sites (+ offset axis)) 3)
                                        (ash axis 1) (if occupied 0 1)))
-                        (cells (or (gethash plane planes)
-                                   (setf (gethash plane planes)
-                                         (make-hash-table :test #'eql))))
+                        (rows (or (gethash plane planes)
+                                  (setf (gethash plane planes)
+                                        (make-hash-table :test #'eql))))
                         (u (aref sites (+ offset (mod (1+ axis) 3))))
-                        (v (aref sites (+ offset (mod (+ 2 axis) 3)))))
-                   (setf (gethash (logior u (ash v 32)) cells) t)))))
+                        (v (aref sites (+ offset (mod (+ 2 axis) 3))))
+                        (row (logior (logandc2 u 31) (ash v 32))))
+                   (setf (gethash row rows)
+                         (logior (gethash row rows 0) (ash 1 (logand u 31))))))))
     (dolist (plane (sort (loop for key being the hash-keys of planes collect key) #'<))
-      (let* ((cells (gethash plane planes))
+      (let* ((rows (gethash plane planes))
              (axis (ldb (byte 2 1) plane))
              (sign (if (logbitp 0 plane) 1 -1))
              (u-axis (mod (1+ axis) 3))
              (v-axis (mod (+ 2 axis) 3)))
-        (dolist (cell (sort (loop for key being the hash-keys of cells collect key) #'<))
-          (when (gethash cell cells)
-            (let* ((u (ldb (byte 32 0) cell))
+        (dolist (row (sort (loop for key being the hash-keys of rows collect key) #'<))
+          ;; Lowest remaining U first preserves the original V/U greedy order.
+          (loop for bits = (gethash row rows) while (plusp bits) do
+            (let* ((cell (+ row (1- (integer-length (logand bits (- bits))))))
+                   (u (ldb (byte 32 0) cell))
                    (v (ash cell -32))
                    (width (loop for du from 1
-                                while (gethash (+ cell du) cells)
+                                while (shadow-face-present-p rows (+ cell du))
                                 finally (return du)))
                    (height
                      (loop for dv from 1
                            while (loop for du below width
-                                       always (gethash (+ cell du (ash dv 32)) cells))
+                                       always (shadow-face-present-p rows (+ cell du (ash dv 32))))
                            finally (return dv))))
               (dotimes (dv height)
-                (dotimes (du width)
-                  (remhash (+ cell du (ash dv 32)) cells)))
-              (dotimes (coordinate 3)
-                (vector-push-extend
-                 (coerce (cond ((= coordinate axis) (- (ash plane -3) (/ sign 8)))
-                               ((= coordinate u-axis) u)
-                               (t v))
-                         'single-float)
-                 rectangles))
-              (vector-push-extend (float (* sign (1+ axis))) rectangles)
-              (dotimes (coordinate 3)
-                (vector-push-extend
-                 (float (cond ((= coordinate u-axis) width)
-                              ((= coordinate v-axis) height)
-                              (t 0)))
-                 rectangles))
-              (vector-push-extend 0.0 rectangles))))))
-    (make-array (length rectangles) :element-type 'single-float
-                                   :initial-contents rectangles)))
+                (clear-shadow-row-span rows (+ cell (ash dv 32)) width))
+              (when (= used block-size)
+                (push (make-array block-size :element-type 'single-float) blocks)
+                (setf used 0))
+              (let ((block (first blocks)))
+                (declare (type (simple-array single-float (*)) block))
+                ;; The signed one-eighth inset is exact in eighth-cell units.
+                (setf (aref block (+ used axis)) (* 0.125 (float (- (* 8 (ash plane -3)) sign)))
+                      (aref block (+ used u-axis)) (float u)
+                      (aref block (+ used v-axis)) (float v)
+                      (aref block (+ used 3)) (float (* sign (1+ axis)))
+                      (aref block (+ used 4 axis)) 0.0
+                      (aref block (+ used 4 u-axis)) (float width)
+                      (aref block (+ used 4 v-axis)) (float height)
+                      (aref block (+ used 7)) 0.0))
+              (incf used 8)
+              (incf total 8))))))
+    (let ((rectangles (make-array total :element-type 'single-float)))
+      (loop for block in (nreverse blocks) for start from 0 by block-size
+            do (replace rectangles block :start1 start))
+      rectangles)))
 
 (defun star-patch-tables (bevels-p)
   "Index each star's owned triangles into shared scene and shadow tables.
