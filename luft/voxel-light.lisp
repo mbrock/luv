@@ -411,7 +411,7 @@ baseline can improve a neighbour; only improvements over it enter the queue."
        (priority :priority ((value light))))
   (multiple-value-bind (pages direct-p x-pages y-pages)
       (%make-voxel-light-page-storage domain hashed-p)
-    (let ((buckets (make-array 16))
+    (let ((buckets (make-array 16 :initial-element nil))
           (region-x0 (if region (first region) 0))
           (region-y0 (if region (second region) 0))
           (region-x1 (if region (third region) most-positive-fixnum))
@@ -426,10 +426,9 @@ baseline can improve a neighbour; only improvements over it enter the queue."
           (current-priority 0)
           (x-limit (world-domain-x-limit domain))
           (y-limit (world-domain-y-limit domain)))
-      (dotimes (level 16)
-        (setf (aref buckets level)
-              (make-array 64 :element-type '(unsigned-byte 64)
-                             :adjustable t :fill-pointer 0)))
+      ;; Only the 16-slot directory is bounded and local to this solve.
+      ;; Each occupied priority owns a growable frontier on the heap.
+      (declare (dynamic-extent buckets))
       (labels ((page-at (x y z)
                  ;; Frontier neighbours overwhelmingly share a page. This
                  ;; solve-local cache includes misses and never escapes.
@@ -484,7 +483,10 @@ baseline can improve a neighbour; only improvements over it enter the queue."
                      (let ((priority (priority joined)))
                        (vector-push-extend
                         (logior cell (ash joined 48))
-                        (aref buckets priority))
+                        (or (aref buckets priority)
+                            (setf (aref buckets priority)
+                                  (make-array 64 :element-type '(unsigned-byte 64)
+                                                 :adjustable t :fill-pointer 0))))
                        (setf current-priority
                              (max current-priority priority)))
                      (incf queued)
@@ -529,7 +531,7 @@ baseline can improve a neighbour; only improvements over it enter the queue."
         ;; That may re-admit a value to a bucket brighter than the source being
         ;; drained, so CURRENT-PRIORITY is dynamic rather than a one-way scan.
         (loop while (plusp queued) do
-          (loop while (zerop (fill-pointer (aref buckets current-priority)))
+          (loop while (zerop (length (aref buckets current-priority)))
                 do (decf current-priority))
           (let* ((entry (vector-pop (aref buckets current-priority)))
                  (cell (%voxel-light-source-cell entry))

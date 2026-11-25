@@ -650,6 +650,32 @@ ray through a resident meadow chunk allocated 4,411 bytes with a lantern and
 now writes coordinates and attributes directly into the output buffer. That
 reduced allocation from 158,967 to 27,421 bytes with identical float rows.
 
+** DONE Allocate voxel-light priority queues when propagation reaches them
+:PROPERTIES:
+:ID: XLM59J
+:END:
+
+[[lisp:solve-voxel-light]] has sixteen brightness priorities. An empty solve
+used to allocate sixteen growable 64-entry buffers. Each priority now gets a
+buffer on its first push. The directory is a fixed sixteen-slot simple vector
+with =dynamic-extent=. The growable buffers belong to the individual solve,
+so simultaneous workers share no scratch storage.
+
+On M2 Pro SBCL, 12,000 calls per variant gave the following mean heap bytes
+per solve. The middle column isolates the effect of allocating queues on
+demand. The field used hashed pages and a single red source at (63, 64, 25)
+for the strength-one case.
+
+| Source strength | Original | On demand, heap directory | On demand, stack directory |
+|-----------------+----------+---------------------------+----------------------------|
+| No source       |    9,938 |                       419 |                        277 |
+| One             |   11,156 |                     2,238 |                      2,111 |
+
+Field pages, visit counts, pushes and stale pops agreed with the original at
+strengths 0, 1, 4 and 15. The streaming RGB tile path already skips its solve
+when no emitters reach the tile. These are per-solve measurements. #BD7LI1
+uses bounded stack storage on the foreground terminal interaction path.
+
 * TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
 :PROPERTIES:
 :ID: 44LFVG
