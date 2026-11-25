@@ -25,6 +25,9 @@
 (defparameter *distant-terrain-frame-budget* 16
   "Maximum distant terrain tiles built and uploaded per interactive frame.")
 
+(defparameter *distant-terrain-frame-ms* 1.5
+  "Soft wall-time budget for interactive heightfield builds. Finish at least one tile when work is due.")
+
 (declaim (inline distant-level-stride distant-level-tile-size distant-tile-key))
 
 (defun distant-tile-key (level tx ty)
@@ -233,6 +236,8 @@ filled with 4*QUAD-COUNT words and BOUNDS is a 6-float AABB or NIL if empty."
    (source :initform nil :accessor distant-terrain-source)
    (quad-arena :initform nil :accessor distant-terrain-quad-arena)
    (tiles :initform (make-hash-table :test #'eql) :reader distant-terrain-tiles)
+   (journal-head :initform nil :accessor distant-terrain-journal-head)
+   (dirty :initform (make-hash-table :test #'eql) :reader distant-terrain-dirty)
    (ring-bounds :initform (make-array +distant-level-count+ :initial-element nil)
                 :reader distant-terrain-ring-bounds)
    (horizon-distance :initform 0.0f0 :accessor distant-terrain-horizon-distance)
@@ -308,6 +313,8 @@ filled with 4*QUAD-COUNT words and BOUNDS is a 6-float AABB or NIL if empty."
                                             :ready-after submitted)))
                  tiles))
       (clrhash tiles)
+      (clrhash (distant-terrain-dirty state))
+      (setf (distant-terrain-journal-head state) nil)
       (dotimes (level +distant-level-count+)
         (setf (aref (distant-terrain-ring-bounds state) level) nil))
       (setf (distant-terrain-horizon-distance state) 0.0f0)))
@@ -321,8 +328,39 @@ filled with 4*QUAD-COUNT words and BOUNDS is a 6-float AABB or NIL if empty."
         (distant-terrain-horizon-distance state)
         0.0f0)))
 
+(defun invalidate-distant-edit-footprints (state source)
+  ;; A prefetched tile may sit behind another ring while the player builds.
+  ;; Include the sampling halo and leave the old drawable in place until upload.
+  (let* ((journal (world-source-journal source)) (head (world-journal-head journal))
+         (previous (distant-terrain-journal-head state))
+         (watermark (world-journal-watermark journal))
+         (tiles (distant-terrain-tiles state)) (dirty (distant-terrain-dirty state)))
+    (when (and previous (/= previous head))
+      (if (<= watermark previous head)
+          (loop for i from (- previous watermark) below (- head watermark)
+                for site = (world-event-site (aref (world-journal-events journal) i))
+                for x = (luft:site-x site) for y = (luft:site-y site)
+                do (dotimes (level +distant-level-count+)
+                     (let ((stride (distant-level-stride level)) (size (distant-level-tile-size level)))
+                       (loop for tx from (floor (- x stride) size) to (floor (+ x stride) size) do
+                         (loop for ty from (floor (- y stride) size) to (floor (+ y stride) size)
+                               for key = (distant-tile-key level tx ty)
+                               when (gethash key tiles) do (setf (gethash key dirty) t))))))
+          (loop for key being the hash-keys of tiles do (setf (gethash key dirty) t))))
+    (setf (distant-terrain-journal-head state) head)))
+
+(defun distant-prefetch-margin (level)
+  ;; One snapped camera step moves the three inner rings by two tiles.
+  (if (= level (1- +distant-level-count+)) 1 2))
+
+(defun distant-inner-interior-p (tx ty inner)
+  ;; A one-parent-tile strip inside the inner ring can become visible on the
+  ;; next snap. Only the deeper interior can safely be omitted from prefetch.
+  (and inner (< (ash (aref inner 0) -1) tx (ash (aref inner 1) -1))
+       (< (ash (aref inner 2) -1) ty (ash (aref inner 3) -1))))
+
 (defun update-renderer-distant-terrain
-    (renderer source camera-x camera-y &key (budget *distant-terrain-frame-budget*))
+    (renderer source camera-x camera-y &key (budget *distant-terrain-frame-budget*) time-budget-ms)
   "Maintain concentric distant-terrain rings around (CAMERA-X, CAMERA-Y).
 
 Evicts tiles outside the outer hysteresis margin and builds up to BUDGET
@@ -342,6 +380,7 @@ material-descriptors buffer carries SOURCE's vocabulary."
       (let* ((vocab (world-source-material-vocabulary source))
              (descriptors (compile-terrain-material-descriptors vocab)))
         (terrain-arenas-ensure-descriptors (renderer-terrain-arenas renderer) descriptors)))
+    (invalidate-distant-edit-footprints state source)
     (reclaim-distant-terrain-arena state)
     (let ((ring-bounds (distant-terrain-ring-bounds state))
           (tiles (distant-terrain-tiles state))
@@ -352,15 +391,16 @@ material-descriptors buffer carries SOURCE's vocabulary."
         (multiple-value-bind (min-x max-x min-y max-y)
             (distant-ring-bounds level camera-x camera-y)
           (setf (aref ring-bounds level) (vector min-x max-x min-y max-y))))
-      ;; Evict tiles outside a 1-tile hysteresis margin around their ring.
+      ;; Retain one snap of lookahead when interactive production is time-sliced.
       (let ((evicted nil))
         (maphash (lambda (key tile)
                    (let* ((level (distant-tile-level tile))
                           (tx (distant-tile-tx tile))
                           (ty (distant-tile-ty tile))
-                          (b (aref ring-bounds level)))
-                     (when (or (< tx (1- (aref b 0))) (> tx (1+ (aref b 1)))
-                               (< ty (1- (aref b 2))) (> ty (1+ (aref b 3))))
+                          (b (aref ring-bounds level))
+                          (margin (if time-budget-ms (distant-prefetch-margin level) 1)))
+                     (unless (and (<= (- (aref b 0) margin) tx (+ (aref b 1) margin))
+                                  (<= (- (aref b 2) margin) ty (+ (aref b 3) margin)))
                        (push (cons key tile) evicted))))
                  tiles)
         (when evicted
@@ -368,37 +408,45 @@ material-descriptors buffer carries SOURCE's vocabulary."
             (declare (ignore completed))
             (dolist (entry evicted)
               (remhash (car entry) tiles)
+              (remhash (car entry) (distant-terrain-dirty state))
               (let ((slice (distant-tile-slice (cdr entry))))
                 (when slice
                   (gpu-buffer-arena-free arena slice :ready-after submitted)))))))
-      ;; Gather missing tiles across all active rings, skipping tiles covered by
-      ;; inner rings or currently resident near chunks.
-      (let ((missing nil))
+      ;; Prepare current demand first. Spare time goes to the next snap's
+      ;; edges and to the heightfield underneath near chunks that may depart.
+      (let ((missing nil) (prefetch nil))
         (dotimes (level +distant-level-count+)
           (let* ((b (aref ring-bounds level))
                  (inner (and (> level 0) (aref ring-bounds (1- level))))
+                 (margin (if time-budget-ms (distant-prefetch-margin level) 0))
                  (tile-size (distant-level-tile-size level))
                  (half (* 0.5f0 tile-size)))
-            (loop for ty from (aref b 2) to (aref b 3) do
-              (loop for tx from (aref b 0) to (aref b 1)
+            (loop for ty from (- (aref b 2) margin) to (+ (aref b 3) margin) do
+              (loop for tx from (- (aref b 0) margin) to (+ (aref b 1) margin)
                     for key = (distant-tile-key level tx ty)
-                    unless (or (gethash key tiles)
-                               (if (zerop level)
-                                   (distant-level0-covered-by-near-p tx ty mesh-slots)
-                                   (distant-tile-covered-by-inner-ring-p level tx ty inner)))
+                    unless (or (and (gethash key tiles) (not (gethash key (distant-terrain-dirty state))))
+                               (distant-inner-interior-p tx ty inner))
                       do (let* ((dx (- (+ (* tx tile-size) half) camera-x))
                                 (dy (- (+ (* ty tile-size) half) camera-y))
-                                (dist2 (+ (* dx dx) (* dy dy))))
-                           (push (list dist2 level tx ty key) missing))))))
-        ;; Build closest tiles first so near rings fill immediately.
-        (setf missing (sort missing #'< :key #'first))
+                                (item (list (+ (* dx dx) (* dy dy)) level tx ty key)))
+                           (cond
+                             ((and (<= (aref b 0) tx (aref b 1)) (<= (aref b 2) ty (aref b 3))
+                                   (not (if inner (distant-tile-covered-by-inner-ring-p level tx ty inner)
+                                            (distant-level0-covered-by-near-p tx ty mesh-slots))))
+                              (push item missing))
+                             (time-budget-ms (push item prefetch))))))))
+        (setf missing (nconc (sort missing #'< :key #'first) (sort prefetch #'< :key #'first)))
         (let ((built 0)
+              (deadline (when time-budget-ms
+                          (+ (get-internal-real-time)
+                             (ceiling (* time-budget-ms internal-time-units-per-second) 1000))))
               (heights (distant-terrain-heights-scratch state))
               (top-codes (distant-terrain-top-codes-scratch state))
               (side-codes (distant-terrain-side-codes-scratch state))
               (scratch (distant-terrain-quad-scratch state)))
           (dolist (item missing)
-            (when (>= built budget)
+            (when (or (>= built budget)
+                      (and deadline (plusp built) (>= (get-internal-real-time) deadline)))
               (return))
             (destructuring-bind (dist2 level tx ty key) item
               (declare (ignore dist2))
@@ -407,14 +455,22 @@ material-descriptors buffer carries SOURCE's vocabulary."
                    source level tx ty
                    :heights heights :top-codes top-codes :side-codes side-codes
                    :out scratch)
-                (let ((slice (when (plusp quad-count)
+                (let ((old (gethash key tiles))
+                      (slice (when (plusp quad-count)
                                (let ((s (gpu-buffer-arena-allocate arena quad-count)))
-                                 (gpu-buffer-arena-write arena s words)
-                                 s))))
+                                 (handler-case
+                                     (progn (gpu-buffer-arena-write arena s words) s)
+                                   (error (condition)
+                                     (gpu-buffer-arena-free arena s)
+                                     (error condition)))))))
                   (setf (gethash key tiles)
                         (make-distant-tile :level level :tx tx :ty ty
                                            :slice slice :quad-count quad-count
-                                           :bounds bounds)))
+                                           :bounds bounds))
+                  (remhash key (distant-terrain-dirty state))
+                  (when (and old (distant-tile-slice old))
+                    (gpu-buffer-arena-free arena (distant-tile-slice old)
+                                           :ready-after (%distant-terrain-progress state))))
                 (incf built))))
           ;; Outer ring guarantees >= 2560 cells in every cardinal direction.
           (setf (distant-terrain-horizon-distance state) 2500.0f0)

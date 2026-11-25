@@ -1145,3 +1145,63 @@
       (render::publish-stride-four-result result ring state nil)
       (true (not (gethash key slots)))
       (true (= 147 (hash-table-count slots))))))
+
+(defclass empty-streaming-test-source (test-analytical-world-source) ())
+
+(defmethod terrain:generate-world-source-chunk ((source empty-streaming-test-source) key place)
+  (declare (ignore key place)))
+
+(define-test stride-two-worker-rejects-edits-and-retargets-before-upload
+  (let* ((source (make-instance 'empty-streaming-test-source :domain (luft:make-world-domain :horizontal-bits 6)))
+         (renderer (render:make-renderer (make-instance 'gpu-test-device) :bgra8-unorm '(640 480)))
+         (state (render::renderer-voxel-lod renderer))
+         (site (luft:make-site (terrain:world-source-domain source) 2 2 4 luft:+cell-extent+ 1))
+         (render:*voxel-lod-p* t) (render:*stride-four-mode* :heightfield))
+    (flet ((advance (x) (render:update-renderer-voxel-lod renderer source x 32 :background-p t))
+           (await-result ()
+             (loop with worker = (render::voxel-lod-worker state) repeat 5000
+                   when (and (plusp (luv.production:production-system-completed-count worker))
+                             (= 1 (luv.production:production-system-pending-count worker))) return t
+                   do (sleep 0.001) finally (error "Stride-two producer did not finish."))))
+      (unwind-protect
+           (progn
+             (advance 32)
+             (await-result)
+             (terrain:record-world-events (terrain:world-source-journal source) (list (list site nil nil)))
+             (true (zerop (advance 32)))
+             (true (not (render::voxel-lod-tile-present-p renderer 0 0)))
+             (await-result)
+             (true (zerop (advance 4000)))
+             (true (not (render::voxel-lod-tile-present-p renderer 0 0)))
+             (advance 32)
+             (await-result)
+             (true (= 1 (advance 32)))
+             ;; Empty geometry is a successful replacement and masks the heightfield.
+             (true (render::voxel-lod-tile-present-p renderer 0 0))
+             (true (= 1 (terrain:coarse-voxel-tile-journal-head
+                         (gethash (render::%voxel-lod-tile-key 0 0) (render::voxel-lod-coarse-cache state))))))
+        (render:destroy-renderer renderer)))))
+
+(define-test distant-streaming-deadline-and-edit-halo
+  (let* ((source (make-instance 'test-analytical-world-source :elevation-fn (constantly 12)))
+         (renderer (render:make-renderer (make-instance 'gpu-test-device) :bgra8-unorm '(640 480)))
+         (state (render::renderer-distant-terrain renderer))
+         (tiles (render::distant-terrain-tiles state))
+         (dirty (render::distant-terrain-dirty state)))
+    (unwind-protect
+         (progn
+           (true (= 1 (render::update-renderer-distant-terrain renderer source 32 32 :time-budget-ms 0)))
+           ;; The two adjacent tiles sample the same edited column through their halos.
+           (render::update-renderer-distant-terrain renderer source 32 32 :budget 12)
+           (let* ((key (render::distant-tile-key 0 0 0)) (old (gethash key tiles))
+                  (site (luft:make-site (terrain:world-source-domain source) 63 32 50 luft:+cell-extent+ 1)))
+             (terrain:record-world-events (terrain:world-source-journal source) (list (list site nil nil)))
+             (render::update-renderer-distant-terrain renderer source 32 32 :budget 0)
+             (true (eq old (gethash key tiles)))
+             (true (gethash key dirty))
+             (true (gethash (render::distant-tile-key 0 1 0) dirty))
+             (true (not (gethash (render::distant-tile-key 0 0 1) dirty)))
+             (render::update-renderer-distant-terrain renderer source 32 32 :budget 1)
+             (true (not (eq old (gethash key tiles))))
+             (true (not (gethash key dirty)))))
+      (render:destroy-renderer renderer))))

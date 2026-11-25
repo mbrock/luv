@@ -104,7 +104,7 @@
         (setf (stride-four-ring-bounds ring) snap
               (stride-four-ring-pending ring) nil)))))
 
-(defun snapshot-stride-four-edits (ring source)
+(defun snapshot-stride-four-edits (ring source &optional edits)
   ;; Workers only read immutable generator parameters and this owner-captured edit table.
   (let* ((journal (world-source-journal source))
          (head (world-journal-head journal))
@@ -119,7 +119,7 @@
                                                         (floor (luft:site-y site) 128)) slots)
                   when slot do (setf (stride-four-slot-dirty slot) t))
             (loop for slot being the hash-values of slots do (setf (stride-four-slot-dirty slot) t))))
-      (setf (stride-four-ring-edits ring) (alexandria:copy-hash-table (world-source-edits source))
+      (setf (stride-four-ring-edits ring) (or edits (alexandria:copy-hash-table (world-source-edits source)))
             (stride-four-ring-head ring) head
             (stride-four-ring-pending ring) nil))))
 
@@ -236,7 +236,7 @@
          (setf (stride-four-ring-descriptors ring)
                (compile-terrain-material-descriptors (world-source-material-vocabulary source))))
        (retarget-stride-four-ring ring state x y)
-       (snapshot-stride-four-edits ring source)
+       (snapshot-stride-four-edits ring source (voxel-lod-edits state))
        (let ((result (production:receive-production-result-no-hang worker)))
          (when result (publish-stride-four-result result ring state renderer)))
        (unless (or (stride-four-ring-pending ring) (plusp (production:production-system-pending-count worker)))

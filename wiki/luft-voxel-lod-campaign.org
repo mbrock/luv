@@ -293,8 +293,8 @@ Extend the validated Phase 1 primitive into a full 2.5+ km 3D horizon:
    and design compact mip-cache persistence alongside format-2 saves.
 
 The one-tile test (#QDEDGB) led to the live ring flight (#Q6UGN3).
-Next, break down the owner-thread streaming spikes during the 552-cell
-ridge crossing and reduce them before adding a stride-8 ring.
+The 552-cell crossing (#5XL96O) moved stride-2 production off the canvas.
+Measure the remaining long frames during near-chunk publication before stride 8.
 
 ** DONE One stride-4 tile through the alpine ridge
 :PROPERTIES:
@@ -387,9 +387,86 @@ with shared inner-ring caches, and the separate interactive game was running.
 The crossed terrain and camera poses match, but the later passes revisit warm
 chunks.  The crossing times establish a pacing issue across modes.  They
 cannot rank their cold-flight costs.  In the automatic crossing 66/241
-frames exceeded 16.67 ms.  The next measurement should split streaming time
-among near publication, stride-2 generation and meshing, and distant tile
-uploads.  Frame samples are in =wiki/measurements/stride-four-flight/frames.csv.gz=.
+frames exceeded 16.67 ms.  The follow-up (#5XL96O) measures near publication,
+stride-2 generation and meshing, and distant tile uploads.  Frame samples are in =wiki/measurements/stride-four-flight/frames.csv.gz=.
+
+** DONE Streaming the ridge without blocking on stride-2 mesh generation
+:PROPERTIES:
+:ID: 5XL96O
+:END:
+
+During the flight in #Q6UGN3 the near scene already had a CPU worker for
+chunk generation, regional lighting, and mesh preparation. The outer voxel
+ring had a second worker for direct sampling and exact refinement. The
+stride-2 ring could generate and reduce two complete fine chunks, or
+rebuild neighboring meshes, within a single canvas callback. The heightfield
+could build another sixteen tiles before the frame reached the GPU.
+
+Stride 2 now has a single producer with room for one outstanding job.
+The canvas captures the edit revision, neighboring volumes, and edge flags.
+The worker builds the volume, meshes it, and sorts its stars. The canvas
+checks the result against current demand, uploads it to the terrain arenas,
+and retires the old allocation behind the submission fence. An edit, source
+change, or abandoned camera location cannot publish an obsolete result.
+Missing volumes take precedence over refreshing an already drawable seam.
+Startup preroll retains synchronous filling before the first visible frame.
+
+Heightfield work stays on the canvas in small batches. The 1.5 ms budget is
+checked between tiles. Spare time fills the strips that one ring shift can
+expose, including the inside edge of a ring and ground under near chunks.
+A journal edit invalidates affected cached tiles and their sampling halos.
+This trades additional resident quads for continuous coverage during motion.
+
+[[file:images/luft-streaming-ridge-pacing.png]]
+
+| M2 Pro, Metal 4, automatic mode | Before | After |
+|---------------------------------+--------+-------|
+| Canvas streaming p95, ms        |  85.10 |  3.56 |
+| Voxel rings on canvas p95, ms   |  79.63 |  0.38 |
+| Heightfield on canvas p95, ms   |  18.67 |  3.03 |
+| GPU completion feedback p95, ms |  21.68 | 15.48 |
+| Whole frame p95, ms             | 108.31 | 25.54 |
+| Frames over 16.67 ms, of 241    |    198 |    85 |
+| Frames with any uncovered tile |     19 |     0 |
+| Stride-2 catch-up at rest, s    |   6.97 |  3.21 |
+| Heightfield arena capacity, MiB |     32 |    64 |
+
+Each run started in a fresh process, warmed its own starting orbit, and
+crossed the ridge once. The confirmation pair ran the change first, then
+the =f0244f58= renderer. Output was 960×540, internal resolution 720×405,
+with MetalFX and a queue completion wait per pose. PNG readbacks were off
+and the interactive game stayed open. Stage timings are inclusive. GPU
+timing varied between passes. In a separate pair that saved pictures,
+streaming p95 was 83.90 ms before and 3.59 ms after. The initially reported
+39.85 ms whole-frame result in #Q6UGN3 revisited terrain warmed by three
+earlier crossings. Here every crossing first encounters that terrain.
+
+The original canvas spent 62.75 ms at p95 generating stride-2 volumes and
+27.61 ms meshing. Both timers read zero on the canvas after the move.
+At the final pose, 73 stride-2 tiles were still using their heightfield
+coverage. Both runs eventually settled to the same 365,087 stride-4 stars.
+The lookahead increased the settled heightfield from 678 to 1,111 tiles.
+
+The remaining tail has two distinct sources. Frame 132 took 78.85 ms,
+including 62.69 ms of SBCL garbage collection across the shared heap. Its
+streaming callback took 2.25 ms. On frame 192 the near scene spent 8.49 ms
+installing mesh slots, including 6.21 ms sorting stars. Test worker-side
+preparation of near star runs and reduce transient allocations before
+widening the voxel horizon.
+
+A separate SB-SPROF allocation run started at crossing frame zero with
+=:mode :alloc :threads :all :max-samples 30000= and stopped after frame 240.
+The sample cap was reached. The largest named self counts were Luvcraft
+chunk content generation (15.4%), stride-2 downsampling (13.2%), and biome
+surface height (9.5%). These are samples of allocation regions across the
+process. They identify where to reduce allocation, without assigning any
+one GC pause to a particular worker. The flat report is in
+=wiki/measurements/stride-four-flight/streaming-allocation.txt=.
+
+Reproduce the automatic-only crossing with =RING_FLIGHT_AUTO_ONLY=1= and
+=RING_FLIGHT_NO_IMAGES=1= when running =scripts/stride-four-flight.lisp=.
+The 482 paired per-frame samples are in
+=wiki/measurements/stride-four-flight/streaming-crossing.csv.gz=.
 
 * TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
 :PROPERTIES:

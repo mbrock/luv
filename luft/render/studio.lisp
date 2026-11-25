@@ -1168,9 +1168,9 @@ input frame per tick."
         (when (and renderer world-source (world-source-distant-terrain-p world-source))
           (let ((position (viewer-streaming-focus-position viewer)))
             (update-renderer-voxel-lod
-             renderer world-source (vec3-x position) (vec3-y position))
+             renderer world-source (vec3-x position) (vec3-y position) :background-p t)
             (update-renderer-distant-terrain
-             renderer world-source (vec3-x position) (vec3-y position))))))))
+             renderer world-source (vec3-x position) (vec3-y position) :time-budget-ms *distant-terrain-frame-ms*)))))))
 
 (defun viewer-streaming-focus-position (viewer)
   "The world position around which VIEWER demands streamed and distant terrain."

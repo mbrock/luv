@@ -1,0 +1,31 @@
+Number of samples:     30000
+Unique traces:         1968
+Alloc interval:        1 regions (approximately 64 kB)
+Total sampling amount: 30000 regions (approximately 1920000 kB)
+Graph cycles:        0
+
+           Self        Total        Cumul
+  Nr  Count     %  Count     %  Count     %    Calls  Function
+------------------------------------------------------------------------
+   2   4631  15.4   4632  15.4   4631  15.4        -  LUVCRAFT.LUFT::LUVCRAFT-CHUNK-CONTENT
+   4   3959  13.2   3959  13.2   8590  28.6        -  TER:DOWNSAMPLE-CHUNK-TO-COARSE-TILE
+   6   2854   9.5   2854   9.5  11444  38.1        -  LUVCRAFT::LITTLE-WORLD-BIOMES-SURFACE-HEIGHT
+   8   1922   6.4   1933   6.4  13366  44.6        -  Unknown fn 90886
+  10   1724   5.7   1749   5.8  15090  50.3        -  SB-VM::PREPARE-VECTOR-PUSH-EXTEND
+  12   1369   4.6   1371   4.6  16459  54.9        -  TER::MESH-STREAMING-SNAPSHOT
+  14   1157   3.9   1159   3.9  17616  58.7        -  (LAMBDA (&REST ARGS) :IN INSTALL-STAGE-TIMERS)
+  16   1143   3.8   1143   3.8  18759  62.5        -  R::ENCODE-RENDERER-TERRAIN-VISIBILITY
+  18    673   2.2    687   2.3  19432  64.8        -  (SB-PCL::FAST-METHOD TER:SAMPLE-STRIDE-FOUR-MATERIALS (LUVCRAFT.LUFT:LUVCRAFT-WORLD-SOURCE T T T))
+  20    626   2.1    626   2.1  20058  66.9        -  SB-IMPL::PUTHASH/EQL-HASH
+  22    605   2.0    609   2.0  20663  68.9        -  LUVCRAFT::LITTLE-WORLD-SURFACE-SLOPE
+  24    601   2.0    601   2.0  21264  70.9        -  (SB-PCL::FAST-METHOD LUV.PRODUCTION:PERFORM-PRODUCTION-REQUEST (LUVCRAFT::LITTLE-WORLD-LOAD-REQUEST))
+  26    591   2.0    592   2.0  21855  72.9        -  (SB-PCL::FAST-METHOD TER:SAMPLE-WORLD-SOURCE-SURFACE-GRID (LUVCRAFT.LUFT:LUVCRAFT-WORLD-SOURCE T T T T T T T))
+  28    570   1.9    570   1.9  22425  74.8        -  LUVCRAFT::LITTLE-WORLD-CHUNK-INDICES
+  30    519   1.7    519   1.7  22944  76.5        -  R::RENDERER-VOXEL-LOD-VISIBLE-RESIDENTS
+  32    460   1.5    460   1.5  23404  78.0        -  (LAMBDA NIL :IN R::MAKE-STRIDE-FOUR-JOB)
+  34    435   1.4    441   1.5  23839  79.5        -  TER:MATERIALIZE-WORLD-SOURCE-CHUNK
+  36    406   1.4    408   1.4  24245  80.8        -  R::%UPLOAD-RENDER-POPULATION
+  38    398   1.3    398   1.3  24643  82.1        -  (LAMBDA NIL :IN R::MAKE-STRIDE-TWO-REQUEST)
+  40    390   1.3    390   1.3  25033  83.4        -  R::ENCODE-RENDERER-SCENE-DRAWINGS
+------------------------------------------------------------------------
+          0   0.0                                     elsewhere

@@ -1,5 +1,7 @@
 ;;;; Replay the alpine flight in a separate game host. From the checkout:
 ;;;; ./env sbcl --script scripts/stride-four-flight.lisp
+;;;; RING_FLIGHT_AUTO_ONLY=1 selects the cold automatic flight.
+;;;; RING_FLIGHT_NO_IMAGES=1 suppresses capture and its allocations.
 (require :asdf)
 (pushnew (truename "./") asdf:*central-registry* :test #'equal)
 (asdf:load-system "luvcraft/luft/game")
@@ -12,9 +14,34 @@
 (in-package #:stride-four-flight)
 
 (defvar *out* (uiop:ensure-directory-pathname (or (uiop:getenv "RING_FLIGHT_DIR") "build/stride-four-flight/")))
+(defvar *capture-p* (null (uiop:getenv "RING_FLIGHT_NO_IMAGES")))
 (defconstant +width+ 960)
 (defconstant +height+ 540)
 (defun milliseconds () (* (get-internal-real-time) (/ 1000d0 internal-time-units-per-second)))
+
+;; Instrument only the canvas thread during timed frames. The voxel and distant
+;; totals include their named children. Worker time never enters these columns.
+(defparameter *stages*
+  '((near r::drain-streaming-scene-production) (near-slots r::%make-renderer-mesh-slot)
+    (sort-stars r::sort-sites-by-star) (bounds r::site-bounds) (arena-write r::gpu-buffer-arena-write)
+    (near-prepare r::prepare-renderer-mesh-candidates) (near-validate r::validate-renderer-scene-generation-cohort)
+    (edits r::apply-queued-world-events)
+    (retarget r::retarget-viewer-streaming) (voxel r::update-renderer-voxel-lod)
+    (stride4 r::update-stride-four-ring) (volume ter:build-world-source-coarse-tile)
+    (mesh ter:mesh-coarse-voxel-tile) (upload r::%upload-prepared-coarse-population)
+    (distant r::update-renderer-distant-terrain) (quads r::build-distant-tile-quads)))
+(defvar *stage-times* nil)
+
+(defun install-stage-timers ()
+  (loop for stage in *stages* for function = (second stage) for i from 0 do
+    (let ((index i) (original (symbol-function function)))
+      (setf (symbol-function function)
+        (lambda (&rest args)
+          (if *stage-times*
+              (let ((start (get-internal-real-time)))
+                (multiple-value-prog1 (apply original args)
+                  (incf (aref *stage-times* index) (- (get-internal-real-time) start))))
+              (apply original args)))))))
 
 (defun pose (camera frame)
   (let* ((angle (* 2 pi (/ (mod frame 120) 120)))
@@ -48,6 +75,7 @@
       (luv:destroy encoder))))
 
 (defun save-frame (host target buffer name)
+  (unless *capture-p* (return-from save-frame))
   (let* ((device (r:viewer-device host))
          (encoder (luv:create device (luv:make-command-encoder-descriptor)))
          (commands nil))
@@ -67,6 +95,59 @@
           when seconds return (* 1000d0 seconds)
           do (sleep 0.001)
           finally (error "Missing GPU feedback for ~D" submission))))
+
+(defun ring-coverage (renderer)
+  "Demanded tiles lacking their target detail, and tiles lacking any drawable representation."
+  (let* ((distant (r::renderer-distant-terrain renderer))
+         (boxes (r::distant-terrain-ring-bounds distant))
+         (tiles (r::distant-terrain-tiles distant))
+         (bounds (r::voxel-lod-active-bounds (r::renderer-voxel-lod renderer)))
+         (mesh-slots (r::renderer-mesh-slots renderer))
+         (waiting 0) (uncovered 0))
+    (dotimes (level r::+distant-level-count+)
+      (let ((box (aref boxes level)) (inner (when (plusp level) (aref boxes (1- level)))))
+        (loop for tx from (aref box 0) to (aref box 1) do
+          (loop for ty from (aref box 2) to (aref box 3)
+                unless (if inner (r::distant-tile-covered-by-inner-ring-p level tx ty inner)
+                           (r::distant-level0-covered-by-near-p tx ty mesh-slots))
+                  do (let ((voxel (case level
+                                    (0 (r::voxel-lod-tile-present-p renderer tx ty))
+                                    (1 (r::stride-four-tile-present-p renderer tx ty)))))
+                       (when (and (zerop level) (not voxel) bounds
+                                  (<= (aref bounds 0) tx (aref bounds 1))
+                                  (<= (aref bounds 2) ty (aref bounds 3)))
+                         (incf waiting))
+                       (unless (or voxel (gethash (r::distant-tile-key level tx ty) tiles))
+                         (incf uncovered)))))))
+    (values waiting uncovered)))
+
+(defun settle-crossing (host target buffer mode)
+  ;; Hold the final pose. A worker can preserve frame times by trailing the
+  ;; camera indefinitely, so verify that all demanded geometry catches up.
+  (let* ((renderer (r:viewer-renderer host)) (state (r::renderer-voxel-lod renderer))
+         (start (milliseconds)) (coverage-time nil) (detail-time nil))
+    (loop for frame below 4000 do
+      (r::advance-viewer-streaming host)
+      #+darwin (luv.objective-c:with-autorelease-pool () (draw host target))
+      #-darwin (draw host target)
+      (multiple-value-bind (waiting uncovered) (ring-coverage renderer)
+        (when (zerop uncovered)
+          (unless coverage-time (setf coverage-time (- (milliseconds) start))))
+        (when (and (zerop waiting) (zerop uncovered) (null detail-time))
+          (setf detail-time (- (milliseconds) start)))
+        (let ((ring (r::voxel-lod-stride-four state))
+              (position (r:camera-position (r::viewer-camera host))))
+          (when (and detail-time (zerop waiting) (zerop uncovered)
+                     (or (eq mode :heightfield)
+                         (and (null (r::stride-four-ring-pending ring))
+                              (null (r::next-stride-four-job ring
+                                     (r::voxel-lod-source state) (v:vec3-x position) (v:vec3-y position))))))
+            (format t "~&SETTLED ~S frame ~D, first full coverage ~,1F ms, stride-two coverage ~,1F ms, final ~S~%"
+                    mode frame coverage-time detail-time (r::stride-four-ring-stats state))
+            (format t "~&HEIGHTFIELD ~S~%" (r::distant-terrain-stats renderer))
+            (save-frame host target buffer (format nil "~(~A~)-settled.png" mode))
+            (return))))
+      finally (error "Terrain failed to catch up after the crossing in ~S" mode))))
 
 (defun run-mode (host target buffer csv mode)
   (let* ((state (r::renderer-voxel-lod (r:viewer-renderer host)))
@@ -88,21 +169,29 @@
       (if crossing (cross-ridge-pose camera crossing) (pose camera i))
       (let* ((ring (r::voxel-lod-stride-four state))
              (previous (if ring (r::stride-four-ring-publications ring) 0))
-             (start (milliseconds)))
+             (*stage-times* (make-array (length *stages*) :initial-element 0))
+             (gc-start sb-ext:*gc-real-time*) (start (milliseconds)))
         (r::advance-viewer-streaming host)
         (let* ((stream (- (milliseconds) start))
                (submission #+darwin (luv.objective-c:with-autorelease-pool () (draw host target))
                            #-darwin (draw host target)))
           (let* ((wall (- (milliseconds) start))
+                 (gc-ms (* (- sb-ext:*gc-real-time* gc-start) (/ 1000d0 internal-time-units-per-second)))
                  (gpu (gpu-ms reader submission))
                  (ring (r::voxel-lod-stride-four state))
                  (slot (and ring (gethash key (r::stride-four-ring-slots ring))))
                  (kind (and slot (r::stride-four-slot-provenance slot)))
                  (pending (and ring (r::stride-four-ring-pending ring)))
                  (published (and ring (> (r::stride-four-ring-publications ring) previous))))
-            (format csv "~(~A~),~D,~A,~,4F,~,4F,~(~A~),~A~%" (if crossing (format nil "~A-crossing" mode) mode)
+            (format csv "~(~A~),~D,~A,~,4F,~,4F,~(~A~),~A" (if crossing (format nil "~A-crossing" mode) mode)
                     (or crossing i) (if published 1 0) stream wall kind
                     (if gpu (format nil "~,4F" gpu) ""))
+            (loop for ticks across *stage-times* do
+              (format csv ",~,4F" (* ticks (/ 1000d0 internal-time-units-per-second))))
+            (format csv ",~D,~D" (hash-table-count (r::voxel-lod-gpu-tiles state))
+                    (hash-table-count (r::distant-terrain-tiles (r::renderer-distant-terrain (r:viewer-renderer host)))))
+            (multiple-value-bind (waiting uncovered) (ring-coverage (r:viewer-renderer host))
+              (format csv ",~D,~D,~,4F~%" waiting uncovered gc-ms))
             (when (and (eq mode :auto) (eq kind :direct) pending
                        (eq slot (r::request-ring-slot pending)) (eq :exact (r::request-ring-kind pending)))
               (unless marker (setf marker i)))
@@ -119,7 +208,9 @@
               (finish-output) (finish-output csv))
             (when (and crossing (zerop (mod crossing 8)))
               (save-frame host target buffer (format nil "~(~A~)-crossing-~3,'0D.png" mode crossing)))
-            (when (eql crossing 240) (return))
+            (when (eql crossing 240)
+              (settle-crossing host target buffer mode)
+              (return))
             (when crossing (incf crossing))
             (if (and (null crossing) (> i 120) (or (eq mode :heightfield) (and kind (null pending))))
                 (incf settled) (setf settled 0))
@@ -140,8 +231,12 @@
                                                                   :usage '(:copy-dst)))))
     (unwind-protect
          (with-open-file (csv (merge-pathnames "frames.csv" *out*) :direction :output :if-exists :supersede)
-           (format csv "mode,frame,published,stream_ms,completion_ms,ridge,gpu_ms~%")
-           (dolist (mode '(:heightfield :direct :exact :auto)) (run-mode host target buffer csv mode)))
+           (format csv "mode,frame,published,stream_ms,completion_ms,ridge,gpu_ms")
+           (dolist (stage *stages*) (format csv ",~(~A~)_ms" (first stage)))
+           (format csv ",voxel_residents,distant_residents,stride2_missing,uncovered,gc_wall_ms~%")
+           (install-stage-timers)
+           (dolist (mode (if (uiop:getenv "RING_FLIGHT_AUTO_ONLY") '(:auto) '(:heightfield :direct :exact :auto)))
+             (run-mode host target buffer csv mode)))
       (r::release-viewer-surface-view host target)
       (luv:destroy owner))))
 
