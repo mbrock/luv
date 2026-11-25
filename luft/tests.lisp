@@ -7,10 +7,10 @@
      (incf *luft-test-count*)
      (unless ,form (error "LUFT check failed: ~S" ',form))))
 
-(defun %one-cell-chain ()
+(defun %one-cell-chain (&optional (z 4))
   (let* ((domain (make-world-domain :horizontal-bits 4))
          (builder (make-chain-builder domain)))
-    (chain-builder-add-site builder (make-site domain 4 4 4 +cell-extent+ 1))
+    (chain-builder-add-site builder (make-site domain 4 4 z +cell-extent+ 1))
     (finish-chain-builder builder)))
 
 (defun %test-disjoint-chain-concatenation ()
@@ -90,13 +90,15 @@
             (%check (= #x51 (top ma 63)))
             (%check (= #x58 (top ma 64)))
             (%check (= (top ma 64) (top mb 64))))))))
-  (let* ((mesh (mesh-star-chunk (%one-cell-chain) 0 :outside-domain-policy :air))
-         (words (surface-mesh-star-site-words mesh)))
-    (loop for i from 0 below (length words) by 4 for star = (aref words (+ i 3)) do
-      (dotimes (axis 3)
-        (unless (eq (logbitp 7 star) (logbitp (- 7 (ash 1 axis)) star))
-          (%check (= #x55 (ldb (byte 8 (* axis 8))
-                               (aref (surface-mesh-edge-shaping mesh) (/ i 4))))))))))
+  ;; Check both ends of the fiber and crossings between its 64-bit words.
+  (dolist (z '(0 4 63 127 191 254))
+    (let* ((mesh (mesh-star-chunk (%one-cell-chain z) 0 :outside-domain-policy :air))
+           (words (surface-mesh-star-site-words mesh)))
+      (loop for i from 0 below (length words) by 4 for star = (aref words (+ i 3)) do
+        (dotimes (axis 3)
+          (unless (eq (logbitp 7 star) (logbitp (- 7 (ash 1 axis)) star))
+            (%check (= #x55 (ldb (byte 8 (* axis 8))
+                                 (aref (surface-mesh-edge-shaping mesh) (/ i 4)))))))))))
 
 (defun %test-word-parallel-star-selection ()
   "Compare dense selection with the small atlas-oriented occupancy oracle."

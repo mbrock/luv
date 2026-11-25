@@ -77,7 +77,7 @@
                              (and (= (second a) (second b))
                                   (< (car a) (car b)))))))
          (data (make-array (* +fixture-body-scalar-count+ (length sorted))
-                           :element-type 'single-float)))
+                           :element-type 'single-float :initial-element 0.0)))
     (loop for (cell code side top) in sorted
           for offset from 0 by +fixture-body-scalar-count+
           for x = (luft:site-x cell)
@@ -88,11 +88,13 @@
                       (:barrel (* seed (/ (* 2 pi) 16)))
                       ((:screen :reel) 0.0)
                       (otherwise (* (floor (* seed 4)) (/ pi 2))))
-          do (replace data
-                      (mapcar (lambda (value) (coerce value 'single-float))
-                              (list x y z code
-                                    (first side) (second side) (third side) yaw
-                                    (first top) (second top) (third top) seed
-                                    0 0 0 0))
-                      :start1 offset))
+          do (setf (aref data offset) (float x 1.0f0)
+                   (aref data (+ offset 1)) (float y 1.0f0)
+                   (aref data (+ offset 2)) (float z 1.0f0)
+                   (aref data (+ offset 3)) (float code 1.0f0)
+                   (aref data (+ offset 7)) (float yaw 1.0f0)
+                   (aref data (+ offset 11)) seed)
+             (loop for i below 3 do
+               (setf (aref data (+ offset 4 i)) (float (nth i side) 1.0f0)
+                     (aref data (+ offset 8 i)) (float (nth i top) 1.0f0))))
     data))

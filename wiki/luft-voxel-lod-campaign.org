@@ -296,6 +296,7 @@ The one-tile test (#QDEDGB) led to the live ring flight (#Q6UGN3).
 The 552-cell crossing (#5XL96O) moved stride-2 production off the canvas.
 The allocation pass (#WQFOT0) cuts heap traffic during that crossing.
 The near-mesh experiment (#ROKN9P) follows those allocations into the worker.
+The coordinate audit (#3MH87Z) removes the temporary XYZ representation from edge shaping.
 
 ** DONE One stride-4 tile through the alpine ridge
 :PROPERTIES:
@@ -621,6 +622,33 @@ The 1,687 per-frame records are in
 streaming measurement is elapsed time from a tile request to its first
 drawable detail, with queue wait, worker execution and canvas publication
 timed separately on the paced route.
+
+** DONE Read near bevel edges from the star and its occupancy fibers
+:PROPERTIES:
+:ID: 3MH87Z
+:END:
+
+The two scratch XYZ vectors in #ROKN9P eliminated per-face allocation, but
+each edge still needed coordinate writes, two lookups, then coordinate
+restoration. The eight occupancy bits in a star already answer the two
+queries on a face's negative tangent. For the positive tangent, locate the
+star's column once and step to the adjacent columns or heights. Heights
+outside the captured fiber read as air. The classifier writes twelve two-bit
+edge classes in the existing order, one output word per star.
+
+On the 43,402-star ridge owner, four alternating batches of 32 rebuilds
+of the two captured sheets took 6.42–6.52 ms of CPU per owner with scratch
+vectors and 2.25–2.29 ms with scalar addressing. Both produced identical
+edge arrays. Another 10,240 reference comparisons covered all 256 input
+masks, four halo patterns and ten heights at vertical limits and word seams.
+The whole prepared owner still allocated about 15.6 MB in both builds.
+
+Two other paths had the same pattern. Ray picking now keeps fixture clearance
+sites packed and compares against the ray's scalar cell coordinates. A downward
+ray through a resident meadow chunk allocated 4,411 bytes with a lantern and
+149 bytes after the change, with the same hit. Packing 256 fixture bodies
+now writes coordinates and attributes directly into the output buffer. That
+reduced allocation from 158,967 to 27,421 bytes with identical float rows.
 
 * TODO Phase 3 & 4: radial visibility-dither transitions, profiling, and heightfield retirement
 :PROPERTIES:

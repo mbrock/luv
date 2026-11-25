@@ -178,6 +178,9 @@ It measures bytes per height batch, chunk, and tile after warmup. For a
 prepared near mesh, run `scripts/near-mesh-allocation.lisp` the same way.
 Add `--stages` for a separate breakdown by function. The ridge
 flight records process-wide allocation and GC time while the workers run.
+Keep cell identities as packed Luft sites. For a neighborhood calculation,
+use scalar coordinates, fiber offsets, or occupancy bits already in the star.
+Write packed results straight into their destination arrays (#3MH87Z).
 Give each concurrent producer its own reusable scratch and let published
 volumes own their arrays. The measurements and replay are in
 [the voxel LOD campaign](wiki/luft-voxel-lod-campaign.org).

@@ -43,10 +43,12 @@ pointer aiming at one expects; bodies and the ground still pass them."
                 (loop for attachment across (scene-attachments source)
                       for cell = (surface-attachment-clearance-cell attachment)
                       when (fixture-attachment-p attachment)
-                        collect (list (luft:site-x cell) (luft:site-y cell)
-                                      (luft:site-z cell)))))
+                        collect cell)))
          (occupancy (lambda (x y z)
-                      (if (member (list x y z) fixture-cells :test #'equal)
+                      (if (loop for cell in fixture-cells
+                                thereis (and (= z (luft:site-z cell))
+                                             (= x (luft:site-x cell))
+                                             (= y (luft:site-y cell))))
                           1
                           (inspection-cell-bit solid x y z))))
          (direction (vec3-normalize direction))
